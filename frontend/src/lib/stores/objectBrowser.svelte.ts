@@ -133,7 +133,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 	async function loadContainerMeta() {
 		try {
 			containerMeta = await api.get<SwiftContainer>(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}`,
 				opts.token(), opts.projectId()
 			);
 		} catch { containerMeta = null; }
@@ -146,7 +146,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			const qs = new URLSearchParams({ delimiter: '/' });
 			if (prefix) qs.set('prefix', prefix);
 			objects = await api.get<SwiftObject[]>(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
 				opts.token(), opts.projectId()
 			);
 		} catch { if (!o.silent) objects = []; }
@@ -160,7 +160,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			const qs = new URLSearchParams({ delimiter: '/' });
 			if (p) qs.set('prefix', p);
 			const items = await api.get<SwiftObject[]>(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
 				opts.token(), opts.projectId()
 			);
 			dirCache.set(p, items);
@@ -175,7 +175,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		try {
 			const qs = new URLSearchParams({ delimiter: '' });
 			const items = await api.get<SwiftObject[]>(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
 				opts.token(), opts.projectId()
 			);
 			allObjectsCache = items;
@@ -414,7 +414,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		bulkDeleting = true;
 		try {
 			await api.post(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/bulk-delete`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/bulk-delete`,
 				{ objects: [...selected], recursive: true },
 				opts.token(), opts.projectId()
 			);
@@ -431,7 +431,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		try {
 			if (opts.mode() === 'user') {
 				const { url } = await api.post<{ url: string; expires_in: number }>(
-					`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/download-token`,
+					`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/download-token`,
 					{}, opts.token(), opts.projectId()
 				);
 				const absoluteUrl = url.startsWith('http') ? url : `${getBaseUrl()}${url}`;
@@ -440,7 +440,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 				document.body.appendChild(a); a.click(); a.remove();
 			} else {
 				const { blob, filename } = await api.downloadBlob(
-					`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/download`,
+					`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/download`,
 					opts.token(), opts.projectId()
 				);
 				downloadBlobAs(blob, filename);
@@ -455,7 +455,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		deleting = name;
 		try {
 			await api.delete(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}`,
 				opts.token(), opts.projectId()
 			);
 			await doRefresh();
@@ -468,7 +468,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		showPreview = false; loadingMeta = true; selectedMeta = null;
 		try {
 			selectedMeta = await api.get<SwiftObjectMeta>(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/metadata`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/metadata`,
 				opts.token(), opts.projectId()
 			);
 		} catch { /* ignore */ }
@@ -484,7 +484,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		const tok = opts.token(); const pid = opts.projectId();
 		if (tok) headers['Authorization'] = `Bearer ${tok}`;
 		if (pid) headers['X-Project-Id'] = pid;
-		const encodedPath = `/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(obj.name)}/preview`;
+		const encodedPath = `/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(obj.name)}/preview`;
 		try {
 			if (obj.content_type.startsWith('image/') || obj.content_type === 'application/pdf') {
 				const res = await fetch(`${base}${encodedPath}`, { headers });
@@ -507,7 +507,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		creatingDir = true; dirError = '';
 		try {
 			await api.post(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/directory`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/directory`,
 				{ path: prefix + newDirName.trim().replace(/\/$/, '') + '/' },
 				opts.token(), opts.projectId()
 			);
@@ -532,7 +532,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			let newFullName = prefix + renameNew.trim();
 			if (renameIsDir) newFullName = newFullName.replace(/\/$/, '') + '/';
 			await api.post(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/rename`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/rename`,
 				{ source: renameTarget, new_name: newFullName }, opts.token(), opts.projectId()
 			);
 			showRename = false;
@@ -544,7 +544,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 
 	async function loadMoveContainers() {
 		try {
-			moveContainers = await api.get<SwiftContainer[]>('/api/object-storage', opts.token(), opts.projectId());
+			moveContainers = await api.get<SwiftContainer[]>('/api/v1/object-storage', opts.token(), opts.projectId());
 		} catch { moveContainers = []; }
 	}
 
@@ -552,7 +552,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		moveLoadingDirs = true;
 		try {
 			const all = await api.get<SwiftObject[]>(
-				`/api/object-storage/${encodeURIComponent(targetContainer)}/objects?delimiter=/`,
+				`/api/v1/object-storage/${encodeURIComponent(targetContainer)}/objects?delimiter=/`,
 				opts.token(), opts.projectId()
 			);
 			moveDirectories = ['/ (루트)', ...all
@@ -586,7 +586,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		moving = true; moveError = '';
 		try {
 			await api.post(
-				`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/move`,
+				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/move`,
 				{ source: moveTarget, destination: moveDest.trim(), dest_container: moveDestContainer || null },
 				opts.token(), opts.projectId()
 			);
@@ -618,7 +618,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 					dest = moveDest ? moveDest.replace(/\/$/, '') + '/' + filename : filename;
 				}
 				await api.post(
-					`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/move`,
+					`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/move`,
 					{ source: name, destination: dest, dest_container: moveDestContainer || null },
 					opts.token(), opts.projectId()
 				);

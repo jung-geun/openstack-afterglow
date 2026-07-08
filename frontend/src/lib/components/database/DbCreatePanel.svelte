@@ -5,6 +5,7 @@
 	import DbCreateStep3Access from './wizard/DbCreateStep3Access.svelte';
 	import DbCreateStep4Init from './wizard/DbCreateStep4Init.svelte';
 	import DbCreateStep5Advanced from './wizard/DbCreateStep5Advanced.svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
 
 	let {
 		open = $bindable(false),
@@ -18,6 +19,7 @@
 		open: () => open,
 		setOpen: (v) => { open = v; },
 		onCreated: () => onCreated(),
+		databaseBackupsEnabled: () => $betaFeatures.databaseBackups,
 	});
 	provideDbCreate(s);
 </script>

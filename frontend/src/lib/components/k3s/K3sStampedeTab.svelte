@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
+	import type { StampedeStatus } from '$lib/types/k3s';
 	import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
 
 	const s = useK3sClusterDetailController();
@@ -18,22 +20,24 @@
 	}
 
 	let events = $state<StampedeEvent[]>([]);
+	let status = $state<StampedeStatus | null>(null);
 	let loading = $state(false);
 	let error = $state('');
 
 	$effect(() => {
-		if (clusterId) void load();
+		if (clusterId) untrack(() => void load());
 	});
 
 	async function load() {
 		loading = true;
 		error = '';
 		try {
-			events = await api.get<StampedeEvent[]>(
-				`/api/k3s/clusters/${clusterId}/stampede/events?limit=100`,
-				token,
-				projectId,
-			);
+			const [nextStatus, nextEvents] = await Promise.all([
+				api.get<StampedeStatus>(`/api/v1/k3s/clusters/${clusterId}/stampede`, token, projectId),
+				api.get<StampedeEvent[]>(`/api/v1/k3s/clusters/${clusterId}/stampede/events?limit=100`, token, projectId),
+			]);
+			status = nextStatus;
+			events = nextEvents;
 		} catch {
 			error = '이벤트 이력을 불러올 수 없습니다.';
 			events = [];
@@ -42,14 +46,23 @@
 		}
 	}
 
+	function formatResource(value: unknown, kind: 'cpu' | 'memory' | 'gpu'): string {
+		const n = Number(value ?? 0);
+		if (kind === 'cpu') return `${Math.round(n)}m`;
+		if (kind === 'memory') return `${Math.round(n / 1024 / 1024)}Mi`;
+		return `${n}`;
+	}
+
 	function actionIcon(action: string): string {
 		if (action === 'scale_up') return '▲';
 		if (action === 'scale_down') return '▼';
+		if (action === 'blocked') return '!';
 		return '●';
 	}
 
 	function actionColor(action: string, status: string): string {
 		if (status === 'failed') return 'text-red-400';
+		if (action === 'blocked') return 'text-amber-400';
 		if (action === 'scale_up') return 'text-green-400';
 		if (action === 'scale_down') return 'text-yellow-400';
 		return 'text-gray-400';
@@ -59,6 +72,7 @@
 		const statusLabel = status === 'started' ? '시작' : status === 'success' ? '완료' : '실패';
 		if (action === 'scale_up') return `노드 추가 ${statusLabel}`;
 		if (action === 'scale_down') return `노드 제거 ${statusLabel}`;
+		if (action === 'blocked') return '스케일 차단';
 		return action;
 	}
 
@@ -82,11 +96,59 @@
 			if (removed !== undefined) return `${removed}개 제거 완료`;
 			return node ?? '';
 		}
+		if (action === 'blocked') {
+			const reason = extra.reason as string | undefined;
+			const pod = extra.pod as { namespace?: string; name?: string } | undefined;
+			return `${reason ?? 'blocked'}${pod?.name ? ` — ${pod.namespace ?? 'default'}/${pod.name}` : ''}`;
+		}
 		return '';
 	}
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+	{#if status?.nodegroups?.length}
+		<div class="grid gap-2 mb-4 md:grid-cols-2">
+			{#each status.nodegroups as ng (ng.id)}
+				<div class="rounded-lg border border-gray-800 bg-gray-950/40 p-3">
+					<div class="flex items-center justify-between gap-2">
+						<div class="text-sm font-medium text-gray-200">{ng.name}</div>
+						<div class="flex items-center gap-1">
+							{#if Number((ng.capacity?.allocatable as Record<string, unknown> | undefined)?.gpu ?? 0) > 0}
+								<span class="rounded border border-emerald-700/50 bg-emerald-900/30 px-1.5 py-0.5 text-xs text-emerald-300">GPU</span>
+							{/if}
+							{#if ng.in_flight}
+								<span class="rounded border border-blue-700/50 bg-blue-900/30 px-1.5 py-0.5 text-xs text-blue-300">in-flight {ng.in_flight}</span>
+							{/if}
+						</div>
+					</div>
+					<div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+						<div class="rounded bg-gray-900 p-2">
+							<div class="text-gray-500">CPU free</div>
+							<div class="text-gray-200">{formatResource((ng.capacity?.free as Record<string, unknown> | undefined)?.cpu_m, 'cpu')}</div>
+						</div>
+						<div class="rounded bg-gray-900 p-2">
+							<div class="text-gray-500">MEM free</div>
+							<div class="text-gray-200">{formatResource((ng.capacity?.free as Record<string, unknown> | undefined)?.memory_bytes, 'memory')}</div>
+						</div>
+						<div class="rounded bg-gray-900 p-2">
+							<div class="text-gray-500">GPU free</div>
+							<div class="text-gray-200">{formatResource((ng.capacity?.free as Record<string, unknown> | undefined)?.gpu, 'gpu')}</div>
+						</div>
+					</div>
+					{#if ng.pending_assignments?.length}
+						<div class="mt-2 text-xs text-blue-300">Pending: {ng.pending_assignments.map(p => `${p.namespace ?? 'default'}/${p.name}`).join(', ')}</div>
+					{/if}
+					{#if ng.blocked_reasons?.length}
+						<div class="mt-2 text-xs text-amber-300">Blocked: {ng.blocked_reasons.map(b => `${b.reason}: ${b.namespace ?? 'default'}/${b.name}`).join(', ')}</div>
+					{/if}
+					{#if ng.last_blocked_reason}
+						<div class="mt-2 text-xs text-amber-400">Last blocked: {ng.last_blocked_reason}</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<div class="flex items-center justify-between mb-4">
 		<h3 class="text-xs text-gray-500 uppercase tracking-wide">Stampede 스케일 이벤트</h3>
 		<button onclick={load} disabled={loading}

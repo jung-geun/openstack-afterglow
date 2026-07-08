@@ -31,6 +31,8 @@ spec:
             - "-m"
             - "app.worker"
           env:
+            - name: AFTERGLOW_ENV
+              value: "production"
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
@@ -60,8 +62,8 @@ spec:
               value: "180"
           volumeMounts:
             - name: afterglow-config-volume
-              mountPath: /app/config.toml
-              subPath: config.toml
+              mountPath: /app/afterglow.conf
+              subPath: afterglow.conf
           resources:
             requests:
               memory: "128Mi"
@@ -74,5 +76,5 @@ spec:
           configMap:
             name: afterglow-config
             items:
-              - key: config.toml
-                path: config.toml
+              - key: afterglow.conf
+                path: afterglow.conf

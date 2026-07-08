@@ -1,0 +1,314 @@
+#cloud-config
+# Phase A 스모크 테스트 — stock Ubuntu 24.04 단일 VM
+#
+# 목표:
+#   1. cloud-init 으로 build-uv-python-layer.sh + layer-activate.sh 주입
+#   2. 같은 VM 에서 uv-python 레이어 직접 빌드 (NFS 불필요, /srv/layers 로컬 사용)
+#   3. squashfs 마운트 + OverlayFS 활성화 확인
+#
+# 검증 (SSH 후):
+#   ls -lh /srv/layers/images/uvpy311-latest.sqsh
+#   findmnt -t overlay
+#   /opt/layers/merged/usr/local/bin/python3.11 --version
+#   /opt/layers/merged/usr/local/bin/uv --version
+#   journalctl -u layer-activate-smoke --no-pager | tail -30
+#   cat /var/log/build-layer-uvpy311.log
+
+# ---------------------------------------------------------------------------
+# 패키지
+# ---------------------------------------------------------------------------
+package_update: true
+package_upgrade: false
+
+packages:
+  - squashfs-tools
+  - curl
+  - nfs-common
+
+# ---------------------------------------------------------------------------
+# 파일 배치
+# ---------------------------------------------------------------------------
+write_files:
+
+  # -------------------------------------------------------------------------
+  # uv-python 레이어 빌드 스크립트
+  # -------------------------------------------------------------------------
+  - path: /usr/local/bin/build-uv-python-layer.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # build-uv-python-layer.sh — uv standalone CPython squashfs 레이어 빌드
+      set -euo pipefail
+
+      if [ $# -lt 2 ]; then
+        echo "사용법: $0 <layer-name> <python-version> [pip-pkg ...]" >&2; exit 1
+      fi
+
+      _validate_name() {
+        local val="$1" kind="$2"
+        if ! [[ "$val" =~ ^[a-z0-9][a-z0-9.+\-]*$ ]]; then
+          echo "오류: 유효하지 않은 ${kind}: '${val}'" >&2; exit 1
+        fi
+      }
+      _validate_version() {
+        if ! [[ "$1" =~ ^[0-9]+\.[0-9]+$ ]]; then
+          echo "오류: 유효하지 않은 Python 버전: '$1' (예: 3.11)" >&2; exit 1
+        fi
+      }
+      _validate_pip_spec() {
+        if ! [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._\[\],\<\>=\!\~\+\*\-]*$ ]]; then
+          echo "오류: 유효하지 않은 pip 스펙: '$1'" >&2; exit 1
+        fi
+      }
+
+      LAYER_NAME="$1"; PYTHON_VERSION="$2"; shift 2
+      _validate_name "$LAYER_NAME" "layer-name"
+      _validate_version "$PYTHON_VERSION"
+      PIP_PACKAGES=("$@")
+      for _pkg in "${PIP_PACKAGES[@]}"; do _validate_pip_spec "$_pkg"; done
+
+      OUTPUT_DIR="${OUTPUT_DIR:-/srv/layers/images}"
+      UV_INSTALL_DIR="${UV_INSTALL_DIR:-/usr/local/bin}"
+      UV_PYTHON_DIR="${UV_PYTHON_DIR:-/opt/aft-uvpy}"
+      TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+      VERSION="${LAYER_NAME}-${TIMESTAMP}"
+      STAGING="$(mktemp -d /tmp/layer-staging.XXXXX)"
+      LOG_FILE="/var/log/build-layer-${LAYER_NAME}.log"
+
+      echo "=== uv-python 레이어 빌드: ${VERSION} ===" | tee "$LOG_FILE"
+      mkdir -p "$OUTPUT_DIR"
+
+      _cleanup() {
+        local rc=$?
+        [ "$rc" -ne 0 ] && echo "[cleanup] 오류 rc=${rc}" | tee -a "$LOG_FILE"
+        rm -rf "${STAGING}" 2>/dev/null || true
+      }
+      trap _cleanup EXIT
+
+      export PATH="${UV_INSTALL_DIR}:${PATH}"
+      if ! command -v uv >/dev/null 2>&1; then
+        echo "[build] uv 설치 중..." | tee -a "$LOG_FILE"
+        curl -LsSf https://astral.sh/uv/install.sh \
+          | UV_INSTALL_DIR="${UV_INSTALL_DIR}" sh 2>&1 | tee -a "$LOG_FILE"
+        export PATH="${UV_INSTALL_DIR}:${PATH}"
+      fi
+      echo "[build] $(uv --version)" | tee -a "$LOG_FILE"
+
+      echo "[build] CPython ${PYTHON_VERSION} 설치..." | tee -a "$LOG_FILE"
+      uv python install "cpython-${PYTHON_VERSION}" \
+        --install-dir "${UV_PYTHON_DIR}" 2>&1 | tee -a "$LOG_FILE"
+
+      PYDIR=""
+      for _d in "${UV_PYTHON_DIR}/cpython-${PYTHON_VERSION}"*; do
+        PYDIR="$(readlink -f "$_d")"; break
+      done
+      if [ -z "$PYDIR" ] || [ ! -d "$PYDIR" ]; then
+        echo "[ERROR] CPython ${PYTHON_VERSION} 디렉토리 미발견" >&2; exit 1
+      fi
+      PYBIN="${PYDIR}/bin/python${PYTHON_VERSION}"
+      [ ! -x "$PYBIN" ] && echo "[ERROR] ${PYBIN} 미발견" >&2 && exit 1
+
+      echo "[build] CPython: ${PYDIR}" | tee -a "$LOG_FILE"
+      echo "[build] 버전: $(${PYBIN} --version)" | tee -a "$LOG_FILE"
+
+      STAGING_USRLOCAL="${STAGING}/usr/local"
+      mkdir -p "${STAGING_USRLOCAL}"
+      cp -a "${PYDIR}/." "${STAGING_USRLOCAL}/"
+
+      UV_BIN="${UV_INSTALL_DIR}/uv"
+      if [ -x "$UV_BIN" ]; then
+        mkdir -p "${STAGING_USRLOCAL}/bin"
+        cp -a "$UV_BIN" "${STAGING_USRLOCAL}/bin/uv"
+      fi
+
+      SITE="${STAGING_USRLOCAL}/lib/python${PYTHON_VERSION}/site-packages"
+      mkdir -p "$SITE"
+
+      if [ "${#PIP_PACKAGES[@]}" -gt 0 ]; then
+        echo "[build] pip: ${PIP_PACKAGES[*]}" | tee -a "$LOG_FILE"
+        uv pip install --python "$PYBIN" --no-cache --target "$SITE" \
+          ${PIP_PACKAGES[@]} 2>&1 | tee -a "$LOG_FILE"
+      fi
+
+      OUT_SQSH="${OUTPUT_DIR}/${VERSION}.sqsh"
+      echo "[build] squashfs 생성: ${OUT_SQSH}" | tee -a "$LOG_FILE"
+      mksquashfs "${STAGING}" "${OUT_SQSH}" \
+        -comp zstd -Xcompression-level 3 -noappend -no-exports \
+        2>&1 | tee -a "$LOG_FILE"
+
+      ln -sf "${VERSION}.sqsh" "${OUTPUT_DIR}/${LAYER_NAME}-latest.sqsh"
+      echo "=== 빌드 완료: $(ls -lh ${OUT_SQSH} | awk '{print $5}') ===" | tee -a "$LOG_FILE"
+
+  # -------------------------------------------------------------------------
+  # 레이어 활성화 스크립트 (squashfs mount + OverlayFS)
+  # -------------------------------------------------------------------------
+  - path: /usr/local/bin/layer-activate.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # layer-activate.sh — squashfs 레이어 마운트 + OverlayFS 합성
+      set -euo pipefail
+
+      if [ $# -ne 1 ]; then
+        echo "사용법: $0 <profile-name>" >&2; exit 1
+      fi
+
+      _validate_name() {
+        local val="$1" kind="$2"
+        if ! [[ "$val" =~ ^[a-z0-9][a-z0-9.+\-]*$ ]]; then
+          echo "오류: 유효하지 않은 ${kind}: '${val}'" >&2; exit 1
+        fi
+      }
+
+      PROFILE="$1"
+      _validate_name "$PROFILE" "profile-name"
+
+      NFS_MOUNT="${NFS_MOUNT:-/mnt/nfs-layers}"
+      SQSH_BASE="${SQSH_BASE:-/mnt/sqsh}"
+      CACHE_DIR="${CACHE_DIR:-/var/cache/layers}"
+      LOCAL_UPPER="${LOCAL_UPPER:-/var/lib/overlay/upper}"
+      LOCAL_WORK="${LOCAL_WORK:-/var/lib/overlay/work}"
+      OVERLAY_TARGET="${OVERLAY_TARGET:-/usr}"
+
+      LOG="/var/log/layer-activate.log"
+      exec >> "$LOG" 2>&1
+      echo "[$(date)] layer-activate 시작: profile=${PROFILE} target=${OVERLAY_TARGET}"
+
+      mkdir -p "$SQSH_BASE" "$CACHE_DIR" "$LOCAL_UPPER" "$LOCAL_WORK"
+      mkdir -p "$OVERLAY_TARGET"
+
+      PROFILE_FILE="${NFS_MOUNT}/profiles/${PROFILE}.conf"
+      [ ! -f "$PROFILE_FILE" ] && echo "[ERROR] 프로필 없음: ${PROFILE_FILE}" >&2 && exit 1
+
+      LAYERS=()
+      while IFS= read -r line; do
+        line="${line%%#*}"; line="${line//[[:space:]]/}"
+        [ -z "$line" ] && continue
+        _validate_name "$line" "layer"
+        LAYERS+=("$line")
+      done < "$PROFILE_FILE"
+
+      [ "${#LAYERS[@]}" -eq 0 ] && echo "[ERROR] 레이어 없음" >&2 && exit 1
+      echo "[$(date)] 레이어: ${LAYERS[*]}"
+
+      LOWER_DIRS=""
+      for LAYER in "${LAYERS[@]}"; do
+        SQSH_NFS="${NFS_MOUNT}/images/${LAYER}.sqsh"
+        SQSH_CACHE="${CACHE_DIR}/${LAYER}.sqsh"
+        MOUNT_POINT="${SQSH_BASE}/${LAYER}"
+
+        if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+          LOWER_DIRS="${LOWER_DIRS:+${LOWER_DIRS}:}${MOUNT_POINT}"; continue
+        fi
+        mkdir -p "$MOUNT_POINT"
+
+        if [ -f "$SQSH_NFS" ]; then
+          _ns="$(stat -c%s "$SQSH_NFS" 2>/dev/null || echo 0)"
+          _cs="$(stat -c%s "$SQSH_CACHE" 2>/dev/null || echo -1)"
+          if [ ! -f "$SQSH_CACHE" ] || [ "$SQSH_NFS" -nt "$SQSH_CACHE" ] || [ "$_ns" != "$_cs" ]; then
+            cp "$SQSH_NFS" "${SQSH_CACHE}.tmp" 2>/dev/null \
+              && mv "${SQSH_CACHE}.tmp" "$SQSH_CACHE" || true
+          fi
+        fi
+
+        if [ -f "$SQSH_CACHE" ]; then
+          SQSH_SRC="$SQSH_CACHE"
+        elif [ -f "$SQSH_NFS" ]; then
+          SQSH_SRC="$SQSH_NFS"
+        else
+          echo "[ERROR] 이미지 없음: ${LAYER} (NFS=${SQSH_NFS})" >&2; exit 1
+        fi
+
+        mount -t squashfs "$SQSH_SRC" "$MOUNT_POINT" -o ro
+        echo "[$(date)] 마운트: ${LAYER} → ${MOUNT_POINT}"
+        LOWER_DIRS="${LOWER_DIRS:+${LOWER_DIRS}:}${MOUNT_POINT}"
+      done
+
+      if mountpoint -q "$OVERLAY_TARGET" 2>/dev/null; then
+        _ft="$(findmnt -n -o FSTYPE "$OVERLAY_TARGET" 2>/dev/null || true)"
+        if [ "$_ft" = "overlay" ]; then
+          echo "[$(date)] 이미 활성 — 스킵"; exit 0
+        fi
+      fi
+
+      [ -d "$LOCAL_WORK" ] && rm -rf "${LOCAL_WORK:?}/"* "${LOCAL_WORK:?}/".* 2>/dev/null || true
+
+      mount -t overlay overlay \
+        -o "lowerdir=${LOWER_DIRS}:/,upperdir=${LOCAL_UPPER},workdir=${LOCAL_WORK},metacopy=on" \
+        "$OVERLAY_TARGET"
+
+      echo "[$(date)] 완료: ${OVERLAY_TARGET} ← ${LAYERS[*]}"
+
+  # -------------------------------------------------------------------------
+  # smoke 프로필 (uv-python 레이어만 포함)
+  # -------------------------------------------------------------------------
+  - path: /srv/layers/profiles/smoke.conf
+    content: |
+      # smoke 테스트 프로필
+      uvpy311-latest
+
+  # -------------------------------------------------------------------------
+  # PATH 확장 (SSH 로그인 후 python3.11·uv 바로 사용)
+  # -------------------------------------------------------------------------
+  - path: /etc/profile.d/layer-env.sh
+    content: |
+      # squashfs 레이어 overlay 경로 추가
+      export PATH="/opt/layers/merged/usr/local/bin:$PATH"
+
+  # -------------------------------------------------------------------------
+  # systemd 서비스 — 재부팅 후 자동 활성화 (로컬 /srv/layers 사용)
+  # -------------------------------------------------------------------------
+  - path: /etc/systemd/system/layer-activate-smoke.service
+    content: |
+      [Unit]
+      Description=Activate squashfs overlay layers (smoke — local store)
+      After=local-fs.target
+      Before=multi-user.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      Environment="NFS_MOUNT=/srv/layers"
+      Environment="OVERLAY_TARGET=/opt/layers/merged"
+      ExecStart=/usr/local/bin/layer-activate.sh smoke
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+
+# ---------------------------------------------------------------------------
+# 부팅 시 실행 명령
+# ---------------------------------------------------------------------------
+runcmd:
+  # 0. 필요한 디렉토리 생성
+  - mkdir -p /srv/layers/images /srv/layers/profiles
+  - mkdir -p /mnt/sqsh /var/cache/layers /var/lib/overlay/upper /var/lib/overlay/work
+  - mkdir -p /opt/layers/merged
+
+  # 1. egress 확인 (인터넷 접근 불가 시 빌드 실패 → 조기 감지)
+  # 주의: runcmd 문자열에 ': '(콜론+공백)이 있으면 YAML이 dict로 파싱함 → list 형식 사용
+  - [bash, -c, "curl -sf --max-time 15 https://astral.sh > /dev/null && echo '[smoke] egress OK' | tee /var/log/smoke-egress.log || echo '[smoke] egress FAIL' | tee /var/log/smoke-egress.log"]
+
+  # 2. uv-python 레이어 빌드 (squashfs-tools, curl 이미 설치됨)
+  - bash -c "OUTPUT_DIR=/srv/layers/images /usr/local/bin/build-uv-python-layer.sh uvpy311 3.11"
+
+  # 3. 레이어 활성화 (/srv/layers 를 NFS_MOUNT 로 사용, overlay target = /opt/layers/merged)
+  - bash -c "NFS_MOUNT=/srv/layers OVERLAY_TARGET=/opt/layers/merged /usr/local/bin/layer-activate.sh smoke"
+
+  # 4. systemd 서비스 활성화 (재부팅 후 자동 적용)
+  - systemctl daemon-reload
+  - systemctl enable layer-activate-smoke.service
+
+final_message: |
+  ============================================================
+  squashfs + uv-python 레이어 스모크 테스트 완료.
+
+  검증 명령:
+    ls -lh /srv/layers/images/uvpy311-latest.sqsh
+    findmnt -t overlay
+    /opt/layers/merged/usr/local/bin/python3.11 --version
+    /opt/layers/merged/usr/local/bin/uv --version
+    journalctl -u layer-activate-smoke --no-pager | tail -30
+    cat /var/log/build-layer-uvpy311.log
+  ============================================================

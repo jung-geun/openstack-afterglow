@@ -1,4 +1,5 @@
 #!/bin/bash
+# 주의: /api/ 경로는 레거시 유지 - cloud-init baked VM 호환 (dual-mount 보장)
 set -e
 export PATH="/usr/local/bin:$PATH"
 CALLBACK_URL="{{ callback_url }}"

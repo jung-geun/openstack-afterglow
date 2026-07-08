@@ -29,12 +29,28 @@
 	let error = $state('');
 
 	$effect(() => {
-		void api.get<K3sFlavor[]>('/api/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
+		void api.get<K3sFlavor[]>('/api/v1/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
 	});
+
+	function flavorGpuCount(flavor: K3sFlavor): number {
+		const direct = Number(flavor.gpu_count ?? flavor.extra_specs?.gpu_count ?? 0);
+		if (Number.isFinite(direct) && direct > 0) return direct;
+		const alias = flavor.extra_specs?.['pci_passthrough:alias'] ?? '';
+		return alias.split(',').reduce((sum, entry) => {
+			const [name, count] = entry.trim().split(':');
+			if (!name || name.toLowerCase().includes('audio')) return sum;
+			const parsed = Number(count ?? 1);
+			return sum + (Number.isFinite(parsed) ? parsed : 1);
+		}, 0);
+	}
 
 	async function save() {
 		if (form.min_size > form.max_size) {
 			error = '최소 노드는 최대 노드보다 클 수 없습니다';
+			return;
+		}
+		if (form.stampede_enabled && !form.flavor_id) {
+			error = 'Stampede 노드그룹은 명시적 Flavor가 필요합니다';
 			return;
 		}
 		saving = true;
@@ -47,7 +63,7 @@
 				max_size: Number(form.max_size),
 			};
 			const ng = await api.patch<K3sNodegroup>(
-				`/api/k3s/clusters/${clusterId}/nodegroups/${nodegroup.id}`,
+				`/api/v1/k3s/clusters/${clusterId}/nodegroups/${nodegroup.id}`,
 				body,
 				token,
 				projectId,
@@ -78,14 +94,14 @@
 
 		<div class="space-y-4">
 			<label class="block text-xs text-gray-400 uppercase tracking-wide">
-				Flavor (선택)
+				Flavor {form.stampede_enabled ? '(필수)' : '(선택)'}
 				<select
 					bind:value={form.flavor_id}
 					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5"
 				>
-					<option value="">기본값 사용</option>
+					<option value="">선택 안 함</option>
 					{#each flavors as f}
-						<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB)</option>
+						<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB){flavorGpuCount(f) > 0 ? ` / GPU ${flavorGpuCount(f)}` : ''}</option>
 					{/each}
 				</select>
 			</label>

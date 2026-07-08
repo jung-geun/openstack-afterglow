@@ -13,6 +13,7 @@
 	import FlavorManagePanel from '$lib/components/admin/flavors/FlavorManagePanel.svelte';
 	import AdminFlavorsFilters from '$lib/components/admin/flavors/AdminFlavorsFilters.svelte';
 	import AdminFlavorsTable from '$lib/components/admin/flavors/AdminFlavorsTable.svelte';
+	import { buildGpuFilterOptions, matchesGpuFilter } from '$lib/components/admin/flavors/flavorGpuFilters';
 	import type { Flavor, PagedResponse } from '$lib/types/flavor';
 	import { toast } from '$lib/stores/toast';
 
@@ -35,15 +36,21 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
+	let gpuOptions = $derived(buildGpuFilterOptions(flavors));
+
 	let filteredFlavors = $derived(flavors.filter((f) => {
 		if (nameFilter && !f.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
 		if (vcpuFilter && f.vcpus !== parseInt(vcpuFilter)) return false;
 		if (ramFilter) { const r = parseInt(ramFilter); if (f.ram < r * 0.9 || f.ram > r * 1.1) return false; }
 		if (diskFilter) { const d = parseInt(diskFilter); if (f.disk < d * 0.9 || f.disk > d * 1.1) return false; }
-		if (gpuFilter === 'yes' && !f.is_gpu) return false;
-		if (gpuFilter === 'no' && f.is_gpu) return false;
-		return true;
+		return matchesGpuFilter(f, gpuFilter);
 	}));
+
+	$effect(() => {
+		if (gpuFilter && !gpuOptions.some((option) => option.value === gpuFilter)) {
+			gpuFilter = '';
+		}
+	});
 
 	async function load() {
 		if (flavors.length === 0) loading = true;
@@ -51,7 +58,7 @@
 		error = '';
 		try {
 			const res = await api.get<PagedResponse<Flavor>>(
-				'/api/admin/flavors?limit=999',
+				'/api/v1/admin/flavors?limit=999',
 				token,
 				projectId,
 			);
@@ -68,7 +75,7 @@
 	async function deleteFlavor(id: string) {
 		if (!await confirmDialog('이 Flavor를 삭제하시겠습니까?')) return;
 		try {
-			await api.delete(`/api/admin/flavors/${id}`, token, projectId);
+			await api.delete(`/api/v1/admin/flavors/${id}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('Flavor 삭제 실패: ' + (e instanceof ApiError ? e.message : '오류'));
@@ -133,6 +140,7 @@
 		bind:ramFilter
 		bind:diskFilter
 		bind:gpuFilter
+		gpuOptions={gpuOptions}
 	/>
 
 	{#if error}

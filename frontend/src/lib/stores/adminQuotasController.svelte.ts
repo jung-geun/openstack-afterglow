@@ -40,7 +40,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (projects.length === 0) loading = true;
     else refreshing = true;
     try {
-      const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', tok(), pid());
+      const res = await api.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', tok(), pid());
       projects = res || [];
     } catch { projects = []; }
     finally { loading = false; refreshing = false; }
@@ -48,7 +48,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
 
   async function loadGpuAliases() {
     try {
-      const res = await api.get<{ aliases: string[] }>('/api/admin/gpu-aliases', tok(), pid());
+      const res = await api.get<{ aliases: string[] }>('/api/v1/admin/gpu-aliases', tok(), pid());
       gpuAliases = res.aliases ?? [];
     } catch {
       gpuAliases = [];
@@ -59,7 +59,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!opts?.background) { gpuDefaultLoading = true; }
     gpuDefaultError = '';
     try {
-      gpuDefaults = await api.get<GpuDefaultQuota[]>('/api/admin/gpu-quotas/defaults', tok(), pid());
+      gpuDefaults = await api.get<GpuDefaultQuota[]>('/api/v1/admin/gpu-quotas/defaults', tok(), pid());
     } catch (e) {
       gpuDefaultError = e instanceof ApiError ? e.message : '기본 GPU quota 조회 실패';
       gpuDefaults = [];
@@ -69,7 +69,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
   async function setGpuDefault(gpuType: string, limit: number) {
     gpuDefaultError = ''; gpuDefaultSuccess = '';
     try {
-      await api.put('/api/admin/gpu-quotas/defaults', { gpu_type: gpuType, limit }, tok(), pid());
+      await api.put('/api/v1/admin/gpu-quotas/defaults', { gpu_type: gpuType, limit }, tok(), pid());
       gpuDefaultSuccess = '기본 GPU quota 저장됨';
       await loadGpuDefaults({ background: true });
       if (selectedProjectId) await loadGpuQuotas({ background: true });
@@ -82,7 +82,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!selectedProjectId) { quotas = null; return; }
     quotaLoading = true; saveError = ''; saveSuccess = '';
     try {
-      quotas = await api.get<Quotas>(`/api/admin/quotas/${selectedProjectId}`, tok(), pid());
+      quotas = await api.get<Quotas>(`/api/v1/admin/quotas/${selectedProjectId}`, tok(), pid());
     } catch { quotas = null; }
     finally { quotaLoading = false; }
     await loadGpuQuotas();
@@ -93,7 +93,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!opts?.background) { gpuQuotaLoading = true; }
     gpuQuotaError = '';
     try {
-      gpuQuotas = await api.get<GpuQuota[]>(`/api/admin/gpu-quotas/${selectedProjectId}`, tok(), pid());
+      gpuQuotas = await api.get<GpuQuota[]>(`/api/v1/admin/gpu-quotas/${selectedProjectId}`, tok(), pid());
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 조회 실패';
       gpuQuotas = [];
@@ -104,7 +104,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!selectedProjectId) return;
     gpuQuotaError = '';
     try {
-      await api.put(`/api/admin/gpu-quotas/${selectedProjectId}`, { gpu_type: gpuType, limit }, tok(), pid());
+      await api.put(`/api/v1/admin/gpu-quotas/${selectedProjectId}`, { gpu_type: gpuType, limit }, tok(), pid());
       await loadGpuQuotas({ background: true });
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 설정 실패';
@@ -114,7 +114,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
   async function deleteGpuQuota(gpuType: string) {
     if (!selectedProjectId) return;
     try {
-      await api.delete(`/api/admin/gpu-quotas/${selectedProjectId}/${encodeURIComponent(gpuType)}`, tok(), pid());
+      await api.delete(`/api/v1/admin/gpu-quotas/${selectedProjectId}/${encodeURIComponent(gpuType)}`, tok(), pid());
       await loadGpuQuotas({ background: true });
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 삭제 실패';
@@ -125,7 +125,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!selectedProjectId) return;
     saving = true; saveError = ''; saveSuccess = '';
     try {
-      await api.put(`/api/admin/quotas/${selectedProjectId}`, form, tok(), pid());
+      await api.put(`/api/v1/admin/quotas/${selectedProjectId}`, form, tok(), pid());
       saveSuccess = '저장되었습니다';
       await loadQuotas();
     } catch (e) { saveError = e instanceof ApiError ? e.message : '저장 실패'; }

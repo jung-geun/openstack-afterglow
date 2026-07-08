@@ -25,6 +25,7 @@ export interface FsWizardOptions {
 	open: () => boolean;
 	setOpen: (v: boolean) => void;
 	onCreated: () => void;
+	fileStorageShareNetworksEnabled?: () => boolean;
 }
 
 export function createFileStorageWizardStore(opts: FsWizardOptions) {
@@ -83,6 +84,8 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 	let copiedKey = $state<string | null>(null);
 	let copiedExport = $state<string | null>(null);
 
+
+	const shareNetworksOn = () => opts.fileStorageShareNetworksEnabled?.() ?? true;
 	function reset() {
 		step = 1; wizardError = ''; createdFs = null;
 		fsForm = { name: '', size_gb: 10, share_type: '', share_proto: 'CEPHFS' };
@@ -97,9 +100,12 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		reset();
 		// Promise.allSettled 로 types/networks 를 독립적으로 로드
 		// — networks 실패가 share type 목록을 날리지 않도록
+		const loadShareNetworks = shareNetworksOn();
 		const [typesResult, networksResult] = await Promise.allSettled([
-			api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
-			api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
+			api.get<ShareTypeMeta[]>('/api/v1/file-storage/types', token, projectId),
+			loadShareNetworks
+				? api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId)
+				: Promise.resolve([] as ShareNetwork[]),
 		]);
 		if (typesResult.status === 'fulfilled') {
 			shareTypes = typesResult.value;
@@ -115,7 +121,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 			shareTypes = [];
 			wizardError = 'Share type 목록을 불러오지 못했습니다. 다시 열거나 직접 입력하세요.';
 		}
-		shareNetworks = networksResult.status === 'fulfilled' ? networksResult.value : [];
+		shareNetworks = loadShareNetworks && networksResult.status === 'fulfilled' ? networksResult.value : [];
 	}
 
 	function closeWizard() {
@@ -131,14 +137,20 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 			wizardError = '이름과 크기를 입력하세요.'; return;
 		}
 		wizardError = '';
+		if (!shareNetworksOn() && dhssEnabled && fsForm.share_proto === 'NFS') {
+			wizardError = 'Share Network 기능이 베타로 꺼져 있어 이 Share Type/NFS 조합은 사용할 수 없습니다.';
+			return;
+		}
 		// DHSS=False 이거나 CephFS 이면 네트워크 단계 불필요 → 바로 생성
 		if (!dhssEnabled || fsForm.share_proto === 'CEPHFS') {
 			createFileStorage();
 			return;
 		}
-		step = 2;
+		if (shareNetworksOn() && dhssEnabled && fsForm.share_proto !== 'CEPHFS') {
+			step = 2;
+		}
 		if (neutronNetworks.length === 0) {
-			api.get<NeutronNetwork[]>('/api/networks', token, projectId)
+			api.get<NeutronNetwork[]>('/api/v1/networks', token, projectId)
 				.then((r) => (neutronNetworks = r))
 				.catch(() => (neutronNetworks = []));
 		}
@@ -152,7 +164,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		loadingSubnets = true;
 		try {
 			const detail = await api.get<{ id: string; subnet_details: Subnet[] }>(
-				`/api/networks/${inlineNetForm.neutron_net_id}`, token, projectId,
+				`/api/v1/networks/${inlineNetForm.neutron_net_id}`, token, projectId,
 			);
 			subnets = detail.subnet_details ?? [];
 		} catch { subnets = []; }
@@ -160,10 +172,11 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 	}
 
 	async function createInlineNetwork() {
+		if (!shareNetworksOn()) return;
 		if (!inlineNetForm.name.trim() || !inlineNetForm.neutron_net_id || !inlineNetForm.neutron_subnet_id) return;
 		inlineNetCreating = true; inlineNetError = '';
 		try {
-			const net = await api.post<ShareNetwork>('/api/share-networks', {
+			const net = await api.post<ShareNetwork>('/api/v1/share-networks', {
 				name: inlineNetForm.name, description: inlineNetForm.description,
 				neutron_net_id: inlineNetForm.neutron_net_id, neutron_subnet_id: inlineNetForm.neutron_subnet_id,
 			}, token, projectId);
@@ -178,7 +191,10 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 
 	async function createFileStorage() {
 		// DHSS=True 환경에서 NFS를 선택했고 share network 선택 단계를 통과한 경우만 필수 검증
-		if (dhssEnabled && fsForm.share_proto === 'NFS' && !selectedNetworkId) {
+		if (!shareNetworksOn() && dhssEnabled && fsForm.share_proto === 'NFS') {
+			wizardError = 'Share Network 기능이 베타로 꺼져 있어 이 Share Type/NFS 조합은 사용할 수 없습니다.'; return;
+		}
+		if (shareNetworksOn() && dhssEnabled && fsForm.share_proto === 'NFS' && !selectedNetworkId) {
 			wizardError = 'NFS 프로토콜은 Share Network가 필수입니다.'; return;
 		}
 		creating = true; wizardError = '';
@@ -188,7 +204,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 				share_type: fsForm.share_type, share_proto: fsForm.share_proto,
 			};
 			// DHSS=True 이고 share network 가 선택된 경우에만 전달 (DHSS=False 이면 무시)
-			if (dhssEnabled && selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
+			if (shareNetworksOn() && dhssEnabled && selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
 			const validMeta = metaEntries.filter((m) => m.key.trim());
 			if (validMeta.length > 0) {
 				const metadata: Record<string, string> = {};
@@ -196,12 +212,12 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 				body.metadata = metadata;
 			}
 			const created = await apiMut('파일 스토리지 생성',
-				() => api.post<FileStorage>('/api/file-storage', body, token, projectId),
+				() => api.post<FileStorage>('/api/v1/file-storage', body, token, projectId),
 			);
 			createdFs = created;
 			try {
 				accessRules = await api.get<AccessRule[]>(
-					`/api/file-storage/${created.id}/access-rules`, token, projectId,
+					`/api/v1/file-storage/${created.id}/access-rules`, token, projectId,
 				);
 			} catch { accessRules = []; }
 			step = 3;
@@ -216,7 +232,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		try {
 			const access_type = createdFs.share_proto === 'NFS' ? 'ip' : 'cephx';
 			const rule = await api.post<AccessRule>(
-				`/api/file-storage/${createdFs.id}/access-rules`,
+				`/api/v1/file-storage/${createdFs.id}/access-rules`,
 				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				token, projectId,
 			);
@@ -251,6 +267,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		get allowedProtos() { return allowedProtos; },
 		get currentShareType() { return currentShareType; },
 		get dhssEnabled() { return dhssEnabled; },
+		get shareNetworksEnabled() { return shareNetworksOn(); },
 
 		get shareNetworks() { return shareNetworks; },
 		get selectedNetworkId() { return selectedNetworkId; }, set selectedNetworkId(v: string) { selectedNetworkId = v; },

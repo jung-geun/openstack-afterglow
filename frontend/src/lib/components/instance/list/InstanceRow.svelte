@@ -3,6 +3,7 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import InstanceIpCell from './InstanceIpCell.svelte';
 	import InstanceRowActions from './InstanceRowActions.svelte';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
@@ -26,17 +27,15 @@
 </script>
 
 <div
-	class="grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {isSelected ? 'bg-blue-900/10' : ''}"
+	class="instance-row grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {isSelected ? 'is-selected bg-blue-900/10' : ''}"
 >
 	<!-- 체크박스 -->
 	{#if showCheckboxes}
-		<div class="flex items-center" onclick={(e) => e.stopPropagation()} role="none">
-			<input
-				type="checkbox"
+		<div class="selection-reveal flex items-center" class:is-selected={isSelected}>
+			<SelectionCheckbox
 				checked={isSelected}
 				onclick={() => onToggleSelect?.()}
-				class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
-				aria-label="인스턴스 선택"
+				ariaLabel={`${instance.name || instance.id} 선택`}
 			/>
 		</div>
 	{/if}
@@ -85,3 +84,23 @@
 	<!-- 액션 -->
 	<InstanceRowActions {instance} {onAction} />
 </div>
+
+<style>
+	.selection-reveal {
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(-4px);
+		transition:
+			opacity 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.instance-row:hover .selection-reveal,
+	.instance-row:focus-within .selection-reveal,
+	.instance-row.is-selected .selection-reveal,
+	.selection-reveal.is-selected {
+		opacity: 1;
+		pointer-events: auto;
+		transform: translateX(0);
+	}
+</style>

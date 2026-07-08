@@ -21,6 +21,9 @@ spec:
       labels:
         app: backend
     spec:
+      {{- if and (eq .Values.workerRuntime.mode "kubernetes") .Values.workerRuntime.kubernetes.serviceAccountName }}
+      serviceAccountName: {{ .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
         - name: backend
@@ -44,6 +47,8 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            - name: AFTERGLOW_ENV
+              value: "production"
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
@@ -81,8 +86,11 @@ spec:
                   key: PROMETHEUS_PASSWORD
           volumeMounts:
             - name: afterglow-config-volume
-              mountPath: /app/config.toml
-              subPath: config.toml
+              mountPath: /app/afterglow.conf
+              subPath: afterglow.conf
+            - name: afterglow-config-volume
+              mountPath: /app/config.gpu.toml
+              subPath: config.gpu.toml
             - name: builder-ssh-key
               mountPath: /etc/afterglow/ssh
               readOnly: true
@@ -118,8 +126,10 @@ spec:
           configMap:
             name: afterglow-config
             items:
-              - key: config.toml
-                path: config.toml
+              - key: afterglow.conf
+                path: afterglow.conf
+              - key: config.gpu.toml
+                path: config.gpu.toml
         - name: builder-ssh-key
           secret:
             secretName: afterglow-secrets

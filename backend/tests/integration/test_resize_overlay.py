@@ -38,7 +38,7 @@ async def test_resize_preserves_overlayfs(admin_client, integration_resources):
     try:
         # 1. VM 생성
         resp = await admin_client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-resize-overlay",
                 "image_id": integration_resources.image_id,
@@ -84,7 +84,7 @@ async def test_resize_preserves_overlayfs(admin_client, integration_resources):
 
         # 6. Resize 요청
         resp = await admin_client.post(
-            f"/api/admin/instances/{instance_id}/resize",
+            f"/api/v1/admin/instances/{instance_id}/resize",
             json={"flavor_id": integration_resources.flavor_medium},
         )
         assert resp.status_code in (200, 202), f"resize 실패: {resp.text}"
@@ -94,7 +94,7 @@ async def test_resize_preserves_overlayfs(admin_client, integration_resources):
         assert status == "VERIFY_RESIZE"
 
         # 8. Confirm resize
-        resp = await admin_client.post(f"/api/admin/instances/{instance_id}/confirm-resize")
+        resp = await admin_client.post(f"/api/v1/admin/instances/{instance_id}/confirm-resize")
         assert resp.status_code in (200, 202)
 
         # 9. ACTIVE 재진입 대기
@@ -129,7 +129,7 @@ async def test_resize_preserves_overlayfs(admin_client, integration_resources):
         health = {}
         for _ in range(12):
             await asyncio.sleep(10)
-            resp = await admin_client.get(f"/api/instances/{instance_id}/health")
+            resp = await admin_client.get(f"/api/v1/instances/{instance_id}/health")
             if resp.status_code == 200:
                 health = resp.json()
                 if health.get("mount_ok"):
@@ -137,13 +137,13 @@ async def test_resize_preserves_overlayfs(admin_client, integration_resources):
         assert health.get("mount_ok") is True, f"resize 후 health.mount_ok=False: {health}"
     finally:
         if instance_id:
-            await admin_client.delete(f"/api/instances/{instance_id}")
+            await admin_client.delete(f"/api/v1/instances/{instance_id}")
 
 
 async def _wait_for_status(client, instance_id: str, target: str, timeout: int) -> str:
     for _ in range(timeout // 10):
         await asyncio.sleep(10)
-        resp = await client.get(f"/api/instances/{instance_id}")
+        resp = await client.get(f"/api/v1/instances/{instance_id}")
         if resp.status_code == 200:
             status = resp.json().get("status", "")
             if status == target or status == "ERROR":
@@ -154,14 +154,14 @@ async def _wait_for_status(client, instance_id: str, target: str, timeout: int) 
 async def _assign_floating_ip(client, instance_id: str) -> str | None:
     """FIP 자동 생성+연결 후 IP 주소 반환. 이미 FIP가 있으면 그것을 반환."""
     # 기존 floating IP 확인
-    resp = await client.get(f"/api/instances/{instance_id}")
+    resp = await client.get(f"/api/v1/instances/{instance_id}")
     if resp.status_code == 200:
         for ip in resp.json().get("ip_addresses", []):
             if ip.get("type") == "floating" and ip.get("addr"):
                 return ip["addr"]
 
     # 신규 FIP 생성+연결
-    resp = await client.post(f"/api/instances/{instance_id}/floating-ip")
+    resp = await client.post(f"/api/v1/instances/{instance_id}/floating-ip")
     if resp.status_code in (200, 201):
         return resp.json().get("floating_ip_address")
     return None

@@ -11,7 +11,7 @@ import pytest
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volumes(client):
-    resp = await client.get("/api/volumes")
+    resp = await client.get("/api/v1/volumes")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -22,7 +22,7 @@ async def test_volume_crud(client):
     """볼륨 생성 → 상세 조회 → 삭제."""
     # 생성
     resp = await client.post(
-        "/api/volumes",
+        "/api/v1/volumes",
         json={
             "name": "union-test-vol-integration",
             "size_gb": 1,
@@ -36,19 +36,19 @@ async def test_volume_crud(client):
     # available 대기 (최대 60초)
     for _ in range(12):
         await asyncio.sleep(5)
-        detail = (await client.get(f"/api/volumes/{vol_id}")).json()
+        detail = (await client.get(f"/api/v1/volumes/{vol_id}")).json()
         if detail["status"] == "available":
             break
     else:
         pytest.fail("볼륨이 available 상태가 되지 않음")
 
     # 상세 조회
-    resp = await client.get(f"/api/volumes/{vol_id}")
+    resp = await client.get(f"/api/v1/volumes/{vol_id}")
     assert resp.status_code == 200
     assert resp.json()["id"] == vol_id
 
     # 삭제
-    resp = await client.delete(f"/api/volumes/{vol_id}")
+    resp = await client.delete(f"/api/v1/volumes/{vol_id}")
     assert resp.status_code == 204
 
 
@@ -59,7 +59,7 @@ async def test_volume_crud(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_backups(client):
-    resp = await client.get("/api/volumes/backups")
+    resp = await client.get("/api/v1/volumes/backups")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -71,7 +71,7 @@ async def test_list_volume_backups(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_snapshots(client):
-    resp = await client.get("/api/volume-snapshots")
+    resp = await client.get("/api/v1/volume-snapshots")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -85,7 +85,7 @@ async def test_list_volume_snapshots(client):
 async def test_list_file_storages(client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await client.get("/api/file-storage")
+    resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -94,7 +94,7 @@ async def test_list_file_storages(client, settings):
 async def test_file_storage_quota(client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await client.get("/api/file-storage/quota")
+    resp = await client.get("/api/v1/file-storage/quota")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, dict)
@@ -106,7 +106,7 @@ async def test_file_storage_quota(client, settings):
 async def test_list_share_types(client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await client.get("/api/file-storage/types")
+    resp = await client.get("/api/v1/file-storage/types")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -118,21 +118,21 @@ async def test_list_share_types(client, settings):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volumes_as_user(user_client):
-    resp = await user_client.get("/api/volumes")
+    resp = await user_client.get("/api/v1/volumes")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_backups_as_user(user_client):
-    resp = await user_client.get("/api/volumes/backups")
+    resp = await user_client.get("/api/v1/volumes/backups")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_snapshots_as_user(user_client):
-    resp = await user_client.get("/api/volume-snapshots")
+    resp = await user_client.get("/api/v1/volume-snapshots")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -141,6 +141,6 @@ async def test_list_volume_snapshots_as_user(user_client):
 async def test_list_file_storages_as_user(user_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await user_client.get("/api/file-storage")
+    resp = await user_client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

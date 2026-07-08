@@ -23,7 +23,7 @@
 
   async function fetchKeypairs(opts?: { refresh?: boolean }) {
     try {
-      keypairs = await api.get<Keypair[]>('/api/keypairs', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+      keypairs = await api.get<Keypair[]>('/api/v1/keypairs', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -50,7 +50,7 @@
 
   async function createKeypair(form: { name: string; public_key: string }): Promise<{ private_key?: string } | string> {
     try {
-      const result = await api.post<Keypair>('/api/keypairs', {
+      const result = await api.post<Keypair>('/api/v1/keypairs', {
         name: form.name,
         public_key: form.public_key.trim() || null,
       }, $auth.token ?? undefined, $auth.projectId ?? undefined);
@@ -65,7 +65,7 @@
     if (!await confirmDialog(`키페어 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = name;
     try {
-      await api.delete(`/api/keypairs/${name}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/keypairs/${name}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchKeypairs();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

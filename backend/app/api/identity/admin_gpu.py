@@ -148,38 +148,65 @@ def _require_db():
 
 
 async def _merged_devices() -> list[dict]:
-    """내장 기본값 + config.toml + DB overlay 병합 카탈로그 목록 (source 표시)."""
+    """내장 기본값 + config.toml + DB 병합 카탈로그 목록 (source 표시).
+
+    카탈로그는 **DB를 권위 소스로** 한다: in-process PCI_DEVICE_MAP(각 pod의 lazy
+    overlay)에 아직 반영되지 않은 DB 항목도 포함시킨다. 다중 replica 환경에서 업로드를
+    처리한 pod와 목록을 서빙하는 pod가 달라도 카탈로그 수가 DB와 일치하도록 보장한다.
+    """
     from app.database import is_db_available
     from app.services.gpu_catalog import list_db_devices
     from app.services.gpu_inventory import _DEFAULT_PCI_DEVICE_MAP
 
-    db_keys: set[tuple[str, str]] = set()
+    db_entries: dict[tuple[str, str], dict] = {}
     if is_db_available():
         try:
-            db_keys = {(e["vendor_id"], e["device_id"]) for e in await list_db_devices()}
+            db_entries = {(e["vendor_id"], e["device_id"]): e for e in await list_db_devices()}
         except Exception:
             _logger.warning("GPU 카탈로그 DB 조회 실패 — builtin/config만 표시", exc_info=True)
 
     devices = []
+    seen: set[tuple[str, str]] = set()
     for vendor_id, vendor_devices in PCI_DEVICE_MAP.items():
         for device_id, info in vendor_devices.items():
-            if (vendor_id, device_id) in db_keys:
+            key = (vendor_id, device_id)
+            seen.add(key)
+            if key in db_entries:
                 source = "db"
+                merged_info = db_entries[key]
             elif device_id in _DEFAULT_PCI_DEVICE_MAP.get(vendor_id, {}):
                 source = "builtin"
+                merged_info = info
             else:
                 source = "config"
+                merged_info = info
             devices.append(
                 {
                     "vendor_id": vendor_id,
                     "device_id": device_id,
                     "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
-                    "name": info["name"],
-                    "is_audio": info["is_audio"],
-                    "aliases": info.get("aliases", []),
+                    "name": merged_info["name"],
+                    "is_audio": merged_info["is_audio"],
+                    "aliases": merged_info.get("aliases", []),
                     "source": source,
                 }
             )
+    # DB에만 있고 이 pod의 PCI_DEVICE_MAP에 아직 overlay되지 않은 항목도 포함 (DB 권위)
+    for key, e in db_entries.items():
+        if key in seen:
+            continue
+        vendor_id, device_id = key
+        devices.append(
+            {
+                "vendor_id": vendor_id,
+                "device_id": device_id,
+                "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                "name": e["name"],
+                "is_audio": e["is_audio"],
+                "aliases": e.get("aliases", []),
+                "source": "db",
+            }
+        )
     devices.sort(key=lambda d: (d["vendor_id"], d["name"]))
     return devices
 

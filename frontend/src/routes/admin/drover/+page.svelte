@@ -47,7 +47,7 @@
 		if (clusters.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			clusters = await api.get<AdminK3sCluster[]>('/api/admin/k3s-clusters', token, projectId);
+			clusters = await api.get<AdminK3sCluster[]>('/api/v1/admin/k3s-clusters', token, projectId);
 		} catch {
 			clusters = [];
 		} finally {
@@ -94,7 +94,7 @@
 	{:else if clusters.length === 0}
 		<div class="text-gray-600 text-sm">Drover 클러스터가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

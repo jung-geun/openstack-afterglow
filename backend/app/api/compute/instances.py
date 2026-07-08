@@ -175,6 +175,12 @@ async def create_instance(
 ):
     """동기식 인스턴스 생성 (기존 방식)."""
     settings = get_settings()
+    from app.services.instance_names import ensure_unique_instance_name
+
+    try:
+        req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
     # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
@@ -199,25 +205,26 @@ async def create_instance(
         # ------------------------------------------------------------------
         file_storages_info = []  # cloud-init 에 전달할 파일 스토리지 정보 목록
 
-        if req.strategy == "prebuilt":
-            file_storages_info = await _prepare_prebuilt_file_storages(
-                conn,
-                resolved_libs,
-                req.name,
-                created_access_ids,
-                network_id=req.network_id or "",
-                project_id=conn._afterglow_project_id,
-            )
-        else:
-            file_storage_info = await _prepare_dynamic_file_storage(
-                conn,
-                req.name,
-                resolved_libs,
-                settings,
-                created_file_storage_ids,
-                created_access_ids,
-            )
-            file_storages_info = [file_storage_info]
+        if resolved_libs:
+            if req.strategy == "prebuilt":
+                file_storages_info = await _prepare_prebuilt_file_storages(
+                    conn,
+                    resolved_libs,
+                    req.name,
+                    created_access_ids,
+                    network_id=req.network_id or "",
+                    project_id=conn._afterglow_project_id,
+                )
+            else:
+                file_storage_info = await _prepare_dynamic_file_storage(
+                    conn,
+                    req.name,
+                    resolved_libs,
+                    settings,
+                    created_file_storage_ids,
+                    created_access_ids,
+                )
+                file_storages_info = [file_storage_info]
 
         data_mounts_info: list[dict] = []
         if req.data_mounts:
@@ -256,22 +263,23 @@ async def create_instance(
         # ------------------------------------------------------------------
         # 3. Cinder: upper 볼륨 — 신규 생성 또는 기존(복구된) 볼륨 재사용
         # ------------------------------------------------------------------
-        if req.existing_upper_volume_id:
-            upper_volume_id = req.existing_upper_volume_id
-            upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
-            if upper_vol.status != "available":
-                raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
-            created_upper = False
-        else:
-            upper_vol = await asyncio.to_thread(
-                cinder.create_empty_volume,
-                conn,
-                f"union-upper-{req.name}",
-                settings.upper_volume_size_gb,
-                req.availability_zone or settings.default_availability_zone,
-            )
-            upper_volume_id = upper_vol.id
-            created_upper = True
+        if resolved_libs:
+            if req.existing_upper_volume_id:
+                upper_volume_id = req.existing_upper_volume_id
+                upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
+                if upper_vol.status != "available":
+                    raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
+                created_upper = False
+            else:
+                upper_vol = await asyncio.to_thread(
+                    cinder.create_empty_volume,
+                    conn,
+                    f"union-upper-{req.name}",
+                    settings.upper_volume_size_gb,
+                    req.availability_zone or settings.default_availability_zone,
+                )
+                upper_volume_id = upper_vol.id
+                created_upper = True
 
         # ------------------------------------------------------------------
         # 4. cloud-init userdata 생성
@@ -288,22 +296,26 @@ async def create_instance(
             if not ok:
                 raise HTTPException(status_code=409, detail=msg)
 
-        # 헬스 리포트 토큰 발급 (서버 생성 전에 UUID 선발급)
+        # 헬스 리포트 토큰 발급 + userdata (libraries·GPU·data_mounts 있을 때만)
         project_id = conn._afterglow_project_id
-        _health_id, _report_url, _health_token = await instance_orch.try_issue_health_token(project_id, settings)
-
-        userdata = cloudinit.generate_userdata(
-            libraries=resolved_libs,
-            strategy=req.strategy,
-            file_storages=file_storages_info,
-            upper_device="/dev/vdb",  # Nova가 두 번째 블록으로 붙임
-            ceph_monitors=settings.ceph_monitors,
-            gpu_available=gpu_available,
-            instance_id=_health_id if _health_token else "",
-            report_url=_report_url if _health_token else "",
-            report_token=_health_token,
-            data_mounts=data_mounts_info,
-        )
+        _health_id = ""
+        _report_url = ""
+        _health_token = ""
+        userdata = None
+        if resolved_libs or gpu_available or data_mounts_info:
+            _health_id, _report_url, _health_token = await instance_orch.try_issue_health_token(project_id, settings)
+            userdata = cloudinit.generate_userdata(
+                libraries=resolved_libs,
+                strategy=req.strategy,
+                file_storages=file_storages_info,
+                upper_device="/dev/vdb",  # Nova가 두 번째 블록으로 붙임
+                ceph_monitors=settings.ceph_monitors,
+                gpu_available=gpu_available,
+                instance_id=_health_id if _health_token else "",
+                report_url=_report_url if _health_token else "",
+                report_token=_health_token,
+                data_mounts=data_mounts_info,
+            )
 
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
@@ -324,7 +336,7 @@ async def create_instance(
             upper_volume_id,
             req.scheduling,
             req.strategy or "none",
-            _health_id,
+            _health_id if resolved_libs else "",
             _health_token,
         )
         if data_mounts_info:
@@ -351,12 +363,13 @@ async def create_instance(
         )
         server_id = server.id
 
-        # upper 볼륨 attach (서버 생성 후)
-        await asyncio.to_thread(
-            conn.compute.create_volume_attachment,
-            server_id,
-            volume_id=upper_volume_id,
-        )
+        # upper 볼륨 attach (서버 생성 후, libraries 있을 때만)
+        if upper_volume_id:
+            await asyncio.to_thread(
+                conn.compute.create_volume_attachment,
+                server_id,
+                volume_id=upper_volume_id,
+            )
 
         # Floating IP 자동 생성 (tenant 네트워크 선택 시)
         if req.network_id:
@@ -445,6 +458,12 @@ async def create_instance_async(
 ):
     """SSE로 진행 상황을 스트리밍하는 비동기 인스턴스 생성."""
     settings = get_settings()
+    from app.services.instance_names import ensure_unique_instance_name
+
+    try:
+        req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
     # Default 네트워크 결정 (SSE 시작 전에 미리 처리)

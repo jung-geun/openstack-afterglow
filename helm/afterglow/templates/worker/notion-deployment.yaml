@@ -31,6 +31,8 @@ spec:
             - "-m"
             - "app.notion_worker"
           env:
+            - name: AFTERGLOW_ENV
+              value: "production"
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
@@ -58,8 +60,11 @@ spec:
                   key: DATABASE_URL
           volumeMounts:
             - name: afterglow-config-volume
-              mountPath: /app/config.toml
-              subPath: config.toml
+              mountPath: /app/afterglow.conf
+              subPath: afterglow.conf
+            - name: afterglow-config-volume
+              mountPath: /app/config.gpu.toml
+              subPath: config.gpu.toml
           resources:
             {{- toYaml .Values.resources.notionWorker | nindent 12 }}
       volumes:
@@ -67,5 +72,7 @@ spec:
           configMap:
             name: afterglow-config
             items:
-              - key: config.toml
-                path: config.toml
+              - key: afterglow.conf
+                path: afterglow.conf
+              - key: config.gpu.toml
+                path: config.gpu.toml

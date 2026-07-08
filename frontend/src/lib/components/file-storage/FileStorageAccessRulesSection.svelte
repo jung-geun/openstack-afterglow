@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { useFileStorageDetailController } from '$lib/stores/fileStorageDetailController.svelte';
 
 	const s = useFileStorageDetailController();
@@ -7,9 +8,14 @@
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">
 	<div class="flex items-center justify-between mb-3">
-		<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-			접근 규칙 {s.fileStorage!.share_proto === 'NFS' ? '(IP)' : '(CephX)'}
-		</h3>
+		<div class="flex items-center gap-2">
+			<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+				접근 규칙 {s.fileStorage!.share_proto === 'NFS' ? '(IP)' : '(CephX)'}
+			</h3>
+			{#if s.fileStorage!.access_rules_status}
+				<StatusChip status={s.fileStorage!.access_rules_status} class="text-[10px]" />
+			{/if}
+		</div>
 		<button
 			onclick={() => { s.showAddRule = !s.showAddRule; }}
 			class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -54,6 +60,10 @@
 
 	{#if s.accessLoading}
 		<p class="text-gray-500 text-sm text-center py-4">로딩 중...</p>
+	{:else if s.accessError}
+		<div class="flex items-center gap-2 py-3 px-3 bg-red-900/20 border border-red-800/50 rounded-md">
+			<span class="text-red-400 text-xs">{s.accessError}</span>
+		</div>
 	{:else if s.accessRules.length === 0}
 		<p class="text-gray-600 text-sm text-center py-4">접근 규칙이 없습니다</p>
 	{:else}
@@ -75,7 +85,9 @@
 							<td class="py-2 pr-4">
 								<span class="text-xs px-1.5 py-0.5 rounded {rule.access_level === 'rw' ? 'bg-orange-900/30 text-orange-400' : 'bg-gray-800 text-gray-400'}">{rule.access_level}</span>
 							</td>
-							<td class="py-2 pr-4 text-xs text-gray-400">{rule.state || '-'}</td>
+							<td class="py-2 pr-4">
+								<StatusChip status={rule.state || 'unknown'} class="text-[10px]" />
+							</td>
 							<td class="py-2 pr-4 text-xs font-mono">
 								{#if rule.access_key}
 									<div class="flex items-center gap-2">

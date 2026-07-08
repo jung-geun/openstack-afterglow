@@ -1,6 +1,7 @@
-# Afterglow 통합 설정 파일
-# 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.
-# 우선순위: 환경변수 > config.toml > 기본값
+# Afterglow 통합 설정 파일 (레거시 config.toml 예시)
+# 신규 설치는 afterglow.conf.example을 afterglow.conf로 복사해 사용하세요.
+# 이 파일을 config.toml로 복사해 수정해도 백엔드와 프론트엔드 전체 설정이 변경됩니다.
+# 우선순위: 환경변수 > afterglow.conf > config.toml > 기본값
 #
 # 오버라이드: 같은 디렉토리에 `config.<name>.toml` 을 두면 이 파일 위에 딥 머지된다.
 #  - 예) config.gpu.toml  ← GPU 디바이스 맵 (config.gpu.toml.example 참고)
@@ -49,7 +50,10 @@ site_name = "Afterglow"
 site_description = "OpenStack VM + OverlayFS 배포 플랫폼"
 
 # 로고 및 파비콘 경로 (frontend/static/ 기준, SvelteKit이 /로 서빙)
+# logo_path는 레거시/공통 fallback, login 로고는 배경별 variant가 우선됩니다.
 logo_path = "/logo.png"
+logo_dark_path = "/logo-white.png"   # light theme/login background용 어두운 로고
+logo_light_path = "/logo-dark.png" # dark theme/login background용 밝은 로고
 favicon_path = "/favicon.ico"
 
 # 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)
@@ -58,6 +62,10 @@ refresh_interval_ms = 5000
 
 # 초대 이메일 링크 생성에 사용할 프론트엔드 기본 URL (예: https://afterglow.example.com)
 frontend_base_url = ""
+
+# 브라우저에서 호출할 API Origin (예: https://afterglow.example.com).
+# 비워두면 frontend_base_url, 첫 CORS origin, 개발 backend_port 순서로 유도합니다.
+public_api_base = ""
 
 # 리버스 프록시 신뢰 CIDR (쉼표 구분). 이 대역에서 온 요청의 X-Forwarded-For / X-Real-IP
 # 헤더를 신뢰해 실제 클라이언트 IP 를 추출한다. 기본값은 loopback 전용.
@@ -101,10 +109,6 @@ ttl_auth_token = 60          # Keystone 토큰 검증 결과 (60초)
 # 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.
 # Keystone 토큰 만료 시간보다 짧게 설정 권장 (Keystone 기본값: 3600초)
 timeout_seconds = 3600
-# 만료 N초 전에 경고 표시
-warning_before_seconds = 300
-# 절대 세션 만료 시간 (초). 활동 여부와 무관하게 이 시간이 지나면 강제 로그아웃.
-absolute_timeout = 14400
 # JWT access/refresh 토큰 수명 (초)
 jwt_access_ttl = 900      # access 토큰 (기본 15분)
 jwt_refresh_ttl = 604800  # refresh 토큰 (기본 7일)
@@ -289,13 +293,62 @@ stampede_scale_down_window = 600                # scale-down 안정화 대기 �
 stampede_scale_up_cooldown = 120                # scale-up 쿨다운 (초)
 stampede_scale_down_cooldown = 300              # scale-down 쿨다운 (초)
 stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부하 가중치 (0~1)
-stampede_project_id = ""                        # Stampede VM 생성 프로젝트 (미설정 시 사용자 프로젝트 폴백)
+
+
+[worker_runtime]
+# Background worker runtime manager.
+# Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests.
+# docker/kubernetes modes are explicit opt-in and never auto-detected.
+mode = "static"                  # static | docker | kubernetes
+reconcile_interval = 30           # seconds; 0 disables the backend reconcile loop
+fail_closed = true                # adapter errors report unavailable and do not mutate
+
+[worker_runtime.workers.drover]
+enabled = true
+desired_replicas = 1
+max_replicas = 1                  # raise only after verifying parallel drover safety
+module = "app.worker"
+
+[worker_runtime.workers.notion_worker]
+enabled = true
+desired_replicas = 1
+max_replicas = 1
+module = "app.notion_worker"
+
+[worker_runtime.docker]
+# Docker mode requires the backend container to have an explicit Docker socket mount
+# plus host-visible bind source paths. These are intentionally empty by default so
+# opt-in Docker mode reports unavailable instead of creating broken containers.
+socket_path = ""                  # e.g. /var/run/docker.sock
+image = ""                        # required when mode = "docker"
+network = ""                      # optional Docker network name
+config_mount = "/app/afterglow.conf"
+config_host_path = ""             # host path for afterglow.conf, not backend-container path
+gpu_config_mount = "/app/config.gpu.toml"
+gpu_config_host_path = ""         # optional host path for config.gpu.toml
+logs_mount = "/app/logs"
+logs_host_path = ""               # optional host path for worker logs
+env_allowlist = "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+
+[worker_runtime.kubernetes]
+namespace = "afterglow"
+service_account_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+service_account_ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+manage_deployments = false        # v1: must remain false; managed Deployment creation is not exposed
 
 
 [builder]
 # 라이브러리 빌드 전용 영구 VM 설정 (SSH 기반 빌드 파이프라인)
 # services.manila = true 환경에서 라이브러리 레이어를 미리 빌드할 때 사용
-image_id = ""       # 빌더 VM 이미지 ID (Ubuntu 22.04+ 권장)
+image_id = ""       # 레거시 24.04 빌더 VM 이미지 ID (ubuntu_24_04_image_id 미설정 시 fallback)
+
+# Admin layer workflow canonical Ubuntu image IDs.
+# 빌더 VM과 기본 소비 VM 모두 같은 매핑을 사용합니다.
+# ubuntu_24_04_image_id가 비어 있으면 image_id → nova.server_image_id 순으로 fallback합니다.
+ubuntu_18_04_image_id = ""
+ubuntu_20_04_image_id = ""
+ubuntu_22_04_image_id = ""
+ubuntu_24_04_image_id = ""
 flavor_id = ""      # 빌더 VM 플레이버 ID
 network_id = ""     # 빌더 VM 네트워크 ID (미설정 시 nova.default_network_id 사용)
 
@@ -320,13 +373,17 @@ ssh_host = ""
 floating_network_id = ""
 # build_timeout: 빌드 SSH 명령 최대 대기 시간 (초, 기본값 3600)
 build_timeout = 3600
+# layer_share_size_gb: 레이어 빌드 시 동적 생성되는 Manila NFS share 용량 (GB, 기본값 20)
+# torch 등 대용량 패키지를 포함하는 레이어는 더 크게 설정 권장
+layer_share_size_gb = 20
 
 
 [union]
-# Union Mount 레이어 시스템 v2 — Manila share ID 설정
-# union.md 설계 문서 참조: layer-store-rw / layer-store-ro / manifest-store 3개 share 필요
-layer_store_rw_share_id = ""    # layer-store-rw Manila share ID (Builder VM 전용 RW)
-layer_store_ro_share_id = ""    # layer-store-ro Manila share ID (User VM RO)
+# Union Mount 레이어 시스템 — 레이어별 동적 Manila share 방식 (per-layer-share)
+# 빌드 시 레이어마다 NFS share를 자동 생성·봉인(RO)하므로 아래 share ID는 미설정 허용.
+# manifest-store는 여전히 사전 생성 share 사용.
+layer_store_rw_share_id = ""    # (레거시) 단일 layer-store-rw share ID (미설정 시 무시)
+layer_store_ro_share_id = ""    # (레거시) 단일 layer-store-ro share ID (미설정 시 무시)
 manifest_store_share_id = ""    # manifest-store Manila share ID
 
 
@@ -376,7 +433,7 @@ unhealthy_seconds = 15
 prometheus_base_url = "http://prometheus:9090"
 prometheus_username = ""        # basic auth 사용자명 (미사용 시 빈 문자열)
 prometheus_password = ""        # basic auth 비밀번호 (secret.yaml에서 주입)
-# Prometheus Service Discovery 인증 토큰 (/api/sd/prometheus/targets)
+# Prometheus Service Discovery 인증 토큰 (/api/v1/sd/prometheus/targets)
 sd_token = ""                   # secret.yaml에서 주입
 # Prometheus scrape 대역 CIDR (예: 10.0.0.0/8). monitoring API 사용 시 필수.
 scrape_cidr = ""
@@ -397,13 +454,13 @@ grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.examp
 # scrape_configs:
 #   - job_name: "instances-node"
 #     http_sd_configs:
-#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#       - url: "http://backend:8000/api/v1/sd/prometheus/targets"
 #         refresh_interval: 30s
 #         authorization:
 #           credentials_file: /etc/prometheus/sd-token
 #   - job_name: "instances-dcgm"
 #     http_sd_configs:
-#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#       - url: "http://backend:8000/api/v1/sd/prometheus/targets"
 #         refresh_interval: 30s
 
 [monitoring.dashboards]
@@ -440,8 +497,8 @@ token_expiry_days = 7       # 초대 링크 유효 기간 (일)
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
 # 이 값이 S3 직접 업로드(multipart) 시 RGW quarantine 버킷 CORS 의 AllowedOrigins 로도 사용됨.
 # 프로덕션 도메인을 첫 번째로, 개발 도메인을 이후에 나열.
-# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3000"
-origins = "http://localhost:3000,http://localhost"
+# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3080,http://127.0.0.1:3080"
+origins = "https://afterglow.example.com,http://localhost:3080,http://127.0.0.1:3080"
 
 [gitlab_oidc]
 # GitLab OIDC 로그인 활성화 여부

@@ -182,7 +182,7 @@ async def test_topology_endpoint_includes_load_balancers(client):
     with (
         patch("app.api.network.networks._fetch_topology_sync", return_value=empty_topo),
     ):
-        resp = await client.get("/api/networks/topology")
+        resp = await client.get("/api/v1/networks/topology")
 
     assert resp.status_code == 200
     data = resp.json()

@@ -12,6 +12,8 @@
   import SnapshotListTable from '$lib/components/file-storage/SnapshotListTable.svelte';
   import SnapshotsEmptyState from '$lib/components/file-storage/SnapshotsEmptyState.svelte';
   import { toast } from '$lib/stores/toast';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
   let snapshots = $state<ShareSnapshot[]>([]);
   let fileStorages = $state<FileStorage[]>([]);
@@ -23,10 +25,23 @@
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
+  const fileStorageSnapshotsEnabled = $derived($betaFeatures.fileStorageSnapshots);
+
+  function clearSnapshotsState() {
+    snapshots = [];
+    fileStorages = [];
+    error = '';
+  }
+
 
   async function fetchSnapshots(opts?: { refresh?: boolean }) {
+    if (!fileStorageSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     try {
-      snapshots = await api.get<ShareSnapshot[]>('/api/share-snapshots', token, projectId, opts);
+      snapshots = await api.get<ShareSnapshot[]>('/api/v1/share-snapshots', token, projectId, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -36,8 +51,9 @@
   }
 
   async function openCreateModal() {
+    if (!fileStorageSnapshotsEnabled) return;
     try {
-      fileStorages = await api.get<FileStorage[]>('/api/file-storage', token, projectId);
+      fileStorages = await api.get<FileStorage[]>('/api/v1/file-storage', token, projectId);
     } catch {
       fileStorages = [];
     }
@@ -45,8 +61,9 @@
   }
 
   async function createSnapshot(form: { share_id: string; name: string; description: string }): Promise<string | true> {
+    if (!fileStorageSnapshotsEnabled) return '파일 스토리지 스냅샷 베타 기능이 꺼져 있습니다.';
     try {
-      await api.post('/api/share-snapshots', {
+      await api.post('/api/v1/share-snapshots', {
         share_id: form.share_id,
         name: form.name,
         description: form.description || undefined,
@@ -59,10 +76,11 @@
   }
 
   async function deleteSnapshot(id: string, name: string) {
+    if (!fileStorageSnapshotsEnabled) return;
     if (!await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/share-snapshots/${id}`, token, projectId);
+      await api.delete(`/api/v1/share-snapshots/${id}`, token, projectId);
       await fetchSnapshots();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -88,12 +106,22 @@
   });
 
   $effect(() => {
+    if (!fileStorageSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchSnapshots());
   });
 </script>
 
+{#if !fileStorageSnapshotsEnabled}
+  <div class="p-4 md:p-8">
+    <BetaFeatureGate title="파일 스토리지 스냅샷은 베타 기능입니다" />
+  </div>
+{:else}
 <SnapshotCreateModal bind:open={showModal} {fileStorages} onCreate={createSnapshot} />
 
 <div class="p-4 md:p-8">
@@ -122,3 +150,4 @@
     <SnapshotListTable {snapshots} {deleting} onDelete={deleteSnapshot} />
   {/if}
 </div>
+{/if}

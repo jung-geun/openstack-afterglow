@@ -1,7 +1,10 @@
+import type { BetaFeatures } from '$lib/stores/betaFeatures';
+
 export interface NavItem {
   label: string;
   href: string;
   service: string | null;
+  beta?: keyof BetaFeatures;
 }
 
 export interface NavSection {
@@ -10,6 +13,7 @@ export interface NavSection {
   extraPrefixes?: string[];
   icon: string;
   service?: string | null;
+  beta?: keyof BetaFeatures;
   items: NavItem[];
 }
 
@@ -31,8 +35,8 @@ export const userNavSections: NavSection[] = [
     icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
     items: [
       { label: '볼륨 목록', href: '/dashboard/volumes', service: null },
-      { label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null },
-      { label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null },
+      { label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null, beta: 'volumeBackups' },
+      { label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null, beta: 'volumeSnapshots' },
     ],
   },
   {
@@ -43,20 +47,9 @@ export const userNavSections: NavSection[] = [
     service: 'manila',
     items: [
       { label: '파일 스토리지', href: '/dashboard/file-storage', service: null },
-      { label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null },
-      { label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null },
-      { label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null },
-    ],
-  },
-  {
-    label: '라이브러리',
-    prefix: '/dashboard/library',
-    extraPrefixes: ['/dashboard/file-storage/manage'],
-    icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
-    items: [
-      { label: '레이어 카탈로그', href: '/dashboard/library', service: null },
-      { label: '템플릿', href: '/dashboard/library/templates', service: null },
-      { label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
+      { label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null, beta: 'fileStorageSnapshots' },
+      { label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null, beta: 'fileStorageShareNetworks' },
+      { label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null, beta: 'fileStorageSecurityServices' },
     ],
   },
   {
@@ -79,7 +72,7 @@ export const userNavSections: NavSection[] = [
     service: 'trove',
     items: [
       { label: 'DB 인스턴스', href: '/dashboard/database/instances', service: null },
-      { label: 'DB 백업', href: '/dashboard/database/backups', service: null },
+      { label: 'DB 백업', href: '/dashboard/database/backups', service: null, beta: 'databaseBackups' },
     ],
   },
   {
@@ -90,6 +83,16 @@ export const userNavSections: NavSection[] = [
     service: 'swift',
     items: [
       { label: '버킷', href: '/dashboard/object-storage/buckets', service: null },
+    ],
+  },
+  {
+    label: 'Key Manager',
+    prefix: '/dashboard/secrets',
+    extraPrefixes: [],
+    icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+    beta: 'keyManager',
+    items: [
+      { label: '비밀 관리', href: '/dashboard/secrets', service: null },
     ],
   },
   {
@@ -147,6 +150,7 @@ export const adminNavSections: NavSection[] = [
       { label: '네트워크', href: '/admin/networks', service: null },
       { label: 'Floating IP', href: '/admin/floating-ips', service: null },
       { label: '라우터', href: '/admin/routers', service: null },
+      { label: '로드밸런서', href: '/admin/loadbalancers', service: null },
       { label: '포트', href: '/admin/ports', service: null },
     ],
   },
@@ -157,6 +161,15 @@ export const adminNavSections: NavSection[] = [
     items: [
       { label: '전체 컨테이너', href: '/admin/containers', service: 'zun' },
       { label: 'Drover', href: '/admin/drover', service: 'k3s' },
+    ],
+  },
+  {
+    label: 'Key Manager',
+    prefix: '/admin/secrets',
+    icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+    beta: 'keyManager',
+    items: [
+      { label: '프로젝트 쿼터', href: '/admin/secrets', service: null },
     ],
   },
   {
@@ -174,6 +187,7 @@ export const adminNavSections: NavSection[] = [
     items: [
       { label: '서비스 상태', href: '/admin/services', service: null },
       { label: 'Notion 연동', href: '/admin/notion', service: null },
+      { label: '기본 설정', href: '/admin/settings', service: null },
     ],
   },
   {
@@ -190,9 +204,12 @@ export const adminNavSections: NavSection[] = [
   },
 ];
 
-export function allNavItems(isAdmin: boolean): Array<NavItem & { section: string }> {
+export function allNavItems(isAdmin: boolean, betaFeatures: BetaFeatures): Array<NavItem & { section: string }> {
   const sections = isAdmin ? adminNavSections : userNavSections;
-  return sections.flatMap((s) =>
-    s.items.map((item) => ({ ...item, section: s.label }))
-  );
+  return sections.flatMap((section) => {
+    if (section.beta && !betaFeatures[section.beta]) return [];
+    return section.items
+      .filter((item) => !item.beta || betaFeatures[item.beta])
+      .map((item) => ({ ...item, section: section.label }));
+  });
 }

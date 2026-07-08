@@ -11,7 +11,7 @@ from app.main import app
 async def test_missing_token_returns_401():
     """X-Auth-Token 헤더 없으면 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters")
+        resp = await ac.get("/api/v1/k3s/clusters")
     assert resp.status_code == 401
 
 
@@ -19,7 +19,7 @@ async def test_missing_token_returns_401():
 async def test_empty_token_returns_401():
     """빈 X-Auth-Token 헤더는 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters", headers={"X-Auth-Token": ""})
+        resp = await ac.get("/api/v1/k3s/clusters", headers={"X-Auth-Token": ""})
     assert resp.status_code == 401
 
 
@@ -27,7 +27,7 @@ async def test_empty_token_returns_401():
 async def test_malformed_token_returns_401():
     """무작위 문자열 토큰은 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters", headers={"X-Auth-Token": "totally-invalid-token"})
+        resp = await ac.get("/api/v1/k3s/clusters", headers={"X-Auth-Token": "totally-invalid-token"})
     assert resp.status_code == 401
 
 
@@ -36,7 +36,7 @@ async def test_sql_injection_in_token_returns_401():
     """SQL injection 형식의 토큰은 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get(
-            "/api/k3s/clusters",
+            "/api/v1/k3s/clusters",
             headers={"X-Auth-Token": "' OR '1'='1"},
         )
     assert resp.status_code == 401
@@ -47,7 +47,7 @@ async def test_oversized_token_returns_401():
     """매우 긴 토큰은 401을 반환해야 한다 (DoS 방지 확인)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get(
-            "/api/k3s/clusters",
+            "/api/v1/k3s/clusters",
             headers={"X-Auth-Token": "A" * 10000},
         )
     assert resp.status_code == 401
@@ -57,13 +57,13 @@ async def test_oversized_token_returns_401():
 async def test_protected_endpoints_without_token():
     """주요 보호 엔드포인트들이 인증 없이 401을 반환하는지 일괄 확인."""
     protected_paths = [
-        ("GET", "/api/k3s/clusters"),
-        ("GET", "/api/instances"),
-        ("GET", "/api/volumes"),
-        ("GET", "/api/networks"),
-        ("GET", "/api/flavors"),
-        ("GET", "/api/keypairs"),
-        ("GET", "/api/images"),
+        ("GET", "/api/v1/k3s/clusters"),
+        ("GET", "/api/v1/instances"),
+        ("GET", "/api/v1/volumes"),
+        ("GET", "/api/v1/networks"),
+        ("GET", "/api/v1/flavors"),
+        ("GET", "/api/v1/keypairs"),
+        ("GET", "/api/v1/images"),
     ]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         for method, path in protected_paths:
@@ -111,7 +111,7 @@ class TestChangePasswordRequestValidation:
 @pytest.mark.asyncio
 async def test_admin_endpoint_non_admin_returns_403(client):
     """일반 사용자가 admin 엔드포인트에 접근하면 403을 반환해야 한다."""
-    resp = await client.get("/api/admin/overview")
+    resp = await client.get("/api/v1/admin/overview")
     assert resp.status_code == 403
 
 
@@ -119,7 +119,7 @@ async def test_admin_endpoint_non_admin_returns_403(client):
 async def test_change_password_oversized_payload_returns_422(client):
     """매우 큰 비밀번호 payload는 422 검증 오류를 반환해야 한다."""
     resp = await client.post(
-        "/api/profile/password",
+        "/api/v1/profile/password",
         json={"current_password": "A" * 1025, "new_password": "valid"},
     )
     assert resp.status_code == 422
@@ -129,7 +129,7 @@ async def test_change_password_oversized_payload_returns_422(client):
 async def test_change_password_empty_new_password_returns_422(client):
     """빈 new_password는 422를 반환해야 한다."""
     resp = await client.post(
-        "/api/profile/password",
+        "/api/v1/profile/password",
         json={"current_password": "correct", "new_password": ""},
     )
     assert resp.status_code == 422

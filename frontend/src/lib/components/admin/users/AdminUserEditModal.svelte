@@ -58,7 +58,7 @@
     loadingSessions = true;
     try {
       const data = await api.get<{ sessions: AdminSession[]; count: number }>(
-        `/api/admin/users/${userId}/sessions`, token, projectId,
+        `/api/v1/admin/users/${userId}/sessions`, token, projectId,
       );
       sessions = data.sessions ?? [];
     } catch {
@@ -105,7 +105,7 @@
     revokeSuccess = '';
     try {
       const res = await api.post<{ revoked_count: number }>(
-        `/api/admin/users/${user.id}/revoke-sessions`, {}, token, projectId,
+        `/api/v1/admin/users/${user.id}/revoke-sessions`, {}, token, projectId,
       );
       revokeSuccess = `세션 ${res.revoked_count}개가 폐기되었습니다.`;
     } catch (e) {

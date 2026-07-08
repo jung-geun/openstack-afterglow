@@ -37,7 +37,7 @@ async def test_usage_report_forecast_structure(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-report?range=30d")
+        resp = await client.get("/api/v1/dashboard/usage-report?range=30d")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -65,7 +65,7 @@ async def test_usage_report_forecast_vcpu_pct_matches_quota(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-report")
+        resp = await client.get("/api/v1/dashboard/usage-report")
 
     assert resp.status_code == 200
     assert resp.json()["forecast"]["vcpu_pct"] == 50.0
@@ -79,7 +79,7 @@ async def test_usage_report_forecast_zero_when_no_limit(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
         patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/usage-report")
+        resp = await client.get("/api/v1/dashboard/usage-report")
 
     assert resp.status_code == 200
     forecast = resp.json()["forecast"]
@@ -101,7 +101,7 @@ async def test_usage_report_quota_still_present(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-report")
+        resp = await client.get("/api/v1/dashboard/usage-report")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -123,7 +123,7 @@ async def test_usage_report_cache_control_header(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
         patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/usage-report")
+        resp = await client.get("/api/v1/dashboard/usage-report")
 
     assert resp.status_code == 200
     cc = resp.headers.get("cache-control", "")
@@ -140,6 +140,6 @@ async def test_usage_report_cache_control_present_on_different_ranges(client, mo
         patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
     ):
         for range_val in ("7d", "30d", "90d"):
-            resp = await client.get(f"/api/dashboard/usage-report?range={range_val}")
+            resp = await client.get(f"/api/v1/dashboard/usage-report?range={range_val}")
             assert resp.status_code == 200
             assert "max-age=60" in resp.headers.get("cache-control", ""), f"range={range_val} missing Cache-Control"

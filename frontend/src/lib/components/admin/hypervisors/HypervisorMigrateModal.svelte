@@ -36,7 +36,7 @@
 			const params = new URLSearchParams({ server_id: serverId });
 			if (type === 'cold') params.set('cpu_filter', 'false');
 			hosts = await api.get<{ name: string; cpu_model?: string | null }[]>(
-				`/api/admin/compute-hosts?${params.toString()}`,
+				`/api/v1/admin/compute-hosts?${params.toString()}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);
@@ -60,14 +60,14 @@
 		try {
 			if (type === 'live') {
 				await api.post(
-					`/api/admin/instances/${serverId}/live-migrate`,
+					`/api/v1/admin/instances/${serverId}/live-migrate`,
 					{ host: selectedHost || null, block_migration: 'auto' },
 					$auth.token ?? undefined,
 					$auth.projectId ?? undefined,
 				);
 			} else {
 				await api.post(
-					`/api/admin/instances/${serverId}/cold-migrate`,
+					`/api/v1/admin/instances/${serverId}/cold-migrate`,
 					{ host: selectedHost || null },
 					$auth.token ?? undefined,
 					$auth.projectId ?? undefined,

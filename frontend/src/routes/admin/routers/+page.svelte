@@ -24,7 +24,7 @@
 	async function load() {
 		loading = true;
 		try {
-			routers = await api.get<AdminRouter[]>('/api/admin/all-routers', token, projectId);
+			routers = await api.get<AdminRouter[]>('/api/v1/admin/all-routers', token, projectId);
 		} catch {
 			routers = [];
 		} finally {
@@ -35,7 +35,7 @@
 	async function openCreate() {
 		showCreate = true;
 		try {
-			const nets = await api.get<AdminNetwork[]>('/api/admin/all-networks', token, projectId);
+			const nets = await api.get<AdminNetwork[]>('/api/v1/admin/all-networks', token, projectId);
 			externalNets = nets.filter(n => n.is_external);
 		} catch {
 			externalNets = [];
@@ -44,7 +44,7 @@
 
 	async function createRouter(form: { name: string; external_network_id: string }): Promise<string | true> {
 		try {
-			await api.post('/api/admin/routers', { name: form.name, external_network_id: form.external_network_id || null }, token, projectId);
+			await api.post('/api/v1/admin/routers', { name: form.name, external_network_id: form.external_network_id || null }, token, projectId);
 			await load();
 			return true;
 		} catch (e) { return e instanceof ApiError ? e.message : '생성 실패'; }
@@ -52,7 +52,7 @@
 
 	async function updateRouter(id: string, form: { name: string }): Promise<string | true> {
 		try {
-			await api.put(`/api/admin/routers/${id}`, { name: form.name }, token, projectId);
+			await api.put(`/api/v1/admin/routers/${id}`, { name: form.name }, token, projectId);
 			await load();
 			return true;
 		} catch (e) { return e instanceof ApiError ? e.message : '수정 실패'; }
@@ -60,7 +60,7 @@
 
 	async function deleteRouterFn(id: string): Promise<string | true> {
 		try {
-			await api.delete(`/api/admin/routers/${id}`, token, projectId);
+			await api.delete(`/api/v1/admin/routers/${id}`, token, projectId);
 			await load();
 			return true;
 		} catch (e) { return e instanceof ApiError ? e.message : '삭제 실패'; }

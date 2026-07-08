@@ -70,7 +70,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
 
   async function fetchImages(fetchOpts?: { refresh?: boolean }) {
     try {
-      images = await api.get<ImageInfo[]>('/api/images', opts.token(), opts.projectId(), fetchOpts);
+      images = await api.get<ImageInfo[]>('/api/v1/images', opts.token(), opts.projectId(), fetchOpts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -83,7 +83,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
     if (!(await confirmDialog(`이미지 "${name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`))) return;
     deleting = id;
     try {
-      await api.delete(`/api/images/${id}`, opts.token(), opts.projectId());
+      await api.delete(`/api/v1/images/${id}`, opts.token(), opts.projectId());
       images = images.filter(img => img.id !== id);
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -96,7 +96,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
     togglingId = img.id;
     try {
       const action = img.status === 'active' ? 'deactivate' : 'reactivate';
-      await api.post(`/api/images/${img.id}/${action}`, {}, opts.token(), opts.projectId());
+      await api.post(`/api/v1/images/${img.id}/${action}`, {}, opts.token(), opts.projectId());
       await fetchImages({ refresh: true });
     } catch (e) {
       toast.error('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));

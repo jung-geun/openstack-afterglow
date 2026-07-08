@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_networks(client):
-    resp = await client.get("/api/networks")
+    resp = await client.get("/api/v1/networks")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -20,18 +20,18 @@ async def test_list_networks(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_get_network_detail(client):
-    networks = (await client.get("/api/networks")).json()
+    networks = (await client.get("/api/v1/networks")).json()
     if not networks:
         pytest.skip("네트워크 없음")
     net_id = networks[0]["id"]
-    resp = await client.get(f"/api/networks/{net_id}")
+    resp = await client.get(f"/api/v1/networks/{net_id}")
     assert resp.status_code == 200
     assert resp.json()["id"] == net_id
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_get_topology(client):
-    resp = await client.get("/api/networks/topology")
+    resp = await client.get("/api/v1/networks/topology")
     # 토폴로지 조회가 실패할 수 있음 (캐시 누락 등)
     assert resp.status_code in (200, 500)
 
@@ -43,7 +43,7 @@ async def test_get_topology(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_floating_ips(client):
-    resp = await client.get("/api/networks/floating-ips")
+    resp = await client.get("/api/v1/networks/floating-ips")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -55,7 +55,7 @@ async def test_list_floating_ips(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_routers(client):
-    resp = await client.get("/api/routers")
+    resp = await client.get("/api/v1/routers")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -63,11 +63,11 @@ async def test_list_routers(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_get_router_detail(client):
-    routers = (await client.get("/api/routers")).json()
+    routers = (await client.get("/api/v1/routers")).json()
     if not routers:
         pytest.skip("라우터 없음")
     router_id = routers[0]["id"]
-    resp = await client.get(f"/api/routers/{router_id}")
+    resp = await client.get(f"/api/v1/routers/{router_id}")
     assert resp.status_code == 200
     assert resp.json()["id"] == router_id
 
@@ -79,7 +79,7 @@ async def test_get_router_detail(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_security_groups(client):
-    resp = await client.get("/api/security-groups")
+    resp = await client.get("/api/v1/security-groups")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -90,14 +90,14 @@ async def test_list_security_groups(client):
 async def test_security_group_crud(client):
     """보안그룹 생성 → 룰 추가 → 룰 삭제 → 보안그룹 삭제."""
     # 이전 잔여물 정리
-    sgs = (await client.get("/api/security-groups")).json()
+    sgs = (await client.get("/api/v1/security-groups")).json()
     for sg in sgs:
         if sg.get("name") == "union-test-sg-integration":
-            await client.delete(f"/api/security-groups/{sg['id']}")
+            await client.delete(f"/api/v1/security-groups/{sg['id']}")
 
     # 생성
     resp = await client.post(
-        "/api/security-groups",
+        "/api/v1/security-groups",
         json={
             "name": "union-test-sg-integration",
             "description": "integration test",
@@ -109,7 +109,7 @@ async def test_security_group_crud(client):
 
     # 룰 추가 (SSH)
     resp = await client.post(
-        f"/api/security-groups/{sg_id}/rules",
+        f"/api/v1/security-groups/{sg_id}/rules",
         json={
             "direction": "ingress",
             "protocol": "tcp",
@@ -122,11 +122,11 @@ async def test_security_group_crud(client):
         rule = resp.json()
         rule_id = rule["id"]
         # 룰 삭제
-        resp = await client.delete(f"/api/security-groups/{sg_id}/rules/{rule_id}")
+        resp = await client.delete(f"/api/v1/security-groups/{sg_id}/rules/{rule_id}")
         assert resp.status_code == 204
 
     # 보안그룹 삭제 (항상 정리)
-    resp = await client.delete(f"/api/security-groups/{sg_id}")
+    resp = await client.delete(f"/api/v1/security-groups/{sg_id}")
     assert resp.status_code == 204
 
 
@@ -137,7 +137,7 @@ async def test_security_group_crud(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_loadbalancers(client):
-    resp = await client.get("/api/loadbalancers")
+    resp = await client.get("/api/v1/loadbalancers")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -149,34 +149,34 @@ async def test_list_loadbalancers(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_networks_as_user(user_client):
-    resp = await user_client.get("/api/networks")
+    resp = await user_client.get("/api/v1/networks")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_floating_ips_as_user(user_client):
-    resp = await user_client.get("/api/networks/floating-ips")
+    resp = await user_client.get("/api/v1/networks/floating-ips")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_routers_as_user(user_client):
-    resp = await user_client.get("/api/routers")
+    resp = await user_client.get("/api/v1/routers")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_security_groups_as_user(user_client):
-    resp = await user_client.get("/api/security-groups")
+    resp = await user_client.get("/api/v1/security-groups")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_loadbalancers_as_user(user_client):
-    resp = await user_client.get("/api/loadbalancers")
+    resp = await user_client.get("/api/v1/loadbalancers")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

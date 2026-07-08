@@ -12,6 +12,8 @@
 	import VolumeBackupRestoreModal from '$lib/components/volume/backups/VolumeBackupRestoreModal.svelte';
 	import VolumeBackupListTable from '$lib/components/volume/backups/VolumeBackupListTable.svelte';
 	import { toast } from '$lib/stores/toast';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
+	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
 	let backups = $state<VolumeBackup[]>([]);
 	let volumes = $state<Volume[]>([]);
@@ -23,10 +25,23 @@
 	let showModal = $state(false);
 	let showRestoreModal = $state(false);
 	let selectedBackup = $state<VolumeBackup | null>(null);
+	const volumeBackupsEnabled = $derived($betaFeatures.volumeBackups);
+
+	function clearBackupsState() {
+		backups = [];
+		volumes = [];
+		error = '';
+	}
+
 
 	async function fetchBackups() {
+		if (!volumeBackupsEnabled) {
+			clearBackupsState();
+			loading = false;
+			return;
+		}
 		try {
-			backups = await api.get<VolumeBackup[]>('/api/volumes/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			backups = await api.get<VolumeBackup[]>('/api/v1/volumes/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -36,14 +51,19 @@
 	}
 
 	async function fetchVolumes() {
+		if (!volumeBackupsEnabled) {
+			volumes = [];
+			return;
+		}
 		try {
-			volumes = await api.get<Volume[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			volumes = await api.get<Volume[]>('/api/v1/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function createBackup(form: { volume_id: string; name: string; description: string; incremental: boolean }): Promise<string | true> {
+		if (!volumeBackupsEnabled) return '볼륨 백업 베타 기능이 꺼져 있습니다.';
 		try {
-			await api.post('/api/volumes/backups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post('/api/v1/volumes/backups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 			return true;
 		} catch (e) {
@@ -52,9 +72,10 @@
 	}
 
 	async function restoreBackup(backupId: string): Promise<{ volume_id: string; volume_name: string } | string> {
+		if (!volumeBackupsEnabled) return '볼륨 백업 베타 기능이 꺼져 있습니다.';
 		try {
 			return await api.post<{ volume_id: string; volume_name: string }>(
-				`/api/volumes/backups/${backupId}/restore`,
+				`/api/v1/volumes/backups/${backupId}/restore`,
 				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
@@ -65,10 +86,11 @@
 	}
 
 	async function deleteBackup(id: string, name: string) {
+		if (!volumeBackupsEnabled) return;
 		if (!await confirmDialog(`백업 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
 		deleting = id;
 		try {
-			await api.delete(`/api/volumes/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/volumes/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -95,11 +117,21 @@
 
 	$effect(() => {
 		const pid = $auth.projectId;
+		if (!volumeBackupsEnabled) {
+			clearBackupsState();
+			loading = false;
+			return;
+		}
 		if (!pid) return;
 		untrack(() => { fetchBackups(); fetchVolumes(); });
 	});
 </script>
 
+{#if !volumeBackupsEnabled}
+	<div class="p-4 md:p-8">
+		<BetaFeatureGate title="볼륨 백업은 베타 기능입니다" />
+	</div>
+{:else}
 <VolumeBackupCreateModal
 	bind:open={showModal}
 	{volumes}
@@ -144,3 +176,4 @@
 		/>
 	{/if}
 </div>
+{/if}

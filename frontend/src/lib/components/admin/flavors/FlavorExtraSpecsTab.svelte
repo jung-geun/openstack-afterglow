@@ -59,7 +59,7 @@
 
 	async function loadGpuAliases() {
 		try {
-			const res = await api.get<{ devices: GpuCatalogDevice[] }>('/api/admin/gpu-devices', token, projectId);
+			const res = await api.get<{ devices: GpuCatalogDevice[] }>('/api/v1/admin/gpu-devices', token, projectId);
 			const seen = new Set<string>();
 			gpuAliasOptions = res.devices
 				.filter((d) => !d.is_audio && d.aliases.length > 0)
@@ -105,7 +105,7 @@
 		specError = '';
 		try {
 			await api.post(
-				`/api/admin/flavors/${flavor.id}/extra-specs`,
+				`/api/v1/admin/flavors/${flavor.id}/extra-specs`,
 				{ key: newSpecKey.trim(), value },
 				token,
 				projectId,
@@ -143,7 +143,7 @@
 		specError = '';
 		try {
 			await api.post(
-				`/api/admin/flavors/${flavor.id}/extra-specs`,
+				`/api/v1/admin/flavors/${flavor.id}/extra-specs`,
 				{ key: editingSpecKey, value: editingSpecValue.trim() },
 				token,
 				projectId,
@@ -166,7 +166,7 @@
 		specError = '';
 		try {
 			await api.delete(
-				`/api/admin/flavors/${flavor.id}/extra-specs/${encodeURIComponent(key)}`,
+				`/api/v1/admin/flavors/${flavor.id}/extra-specs/${encodeURIComponent(key)}`,
 				token,
 				projectId,
 			);

@@ -14,7 +14,8 @@
 	let { direction = 'up' }: { direction?: 'up' | 'down' } = $props();
 
 	let projects = $state<Project[]>([]);
-	let loading = $state(true);
+	let loading = $state(false);
+	let loaded = $state(false);   // 목록을 한 번이라도 fetch 했는지
 	let switching = $state(false);
 	let error = $state('');
 	let isOpen = $state(false);
@@ -25,7 +26,7 @@
 		if (!$auth.token) return;
 		loading = true;
 		try {
-			projects = await api.get<Project[]>('/api/auth/projects', $auth.token);
+			projects = await api.get<Project[]>('/api/v1/auth/projects', $auth.token);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '프로젝트 목록 조회 실패';
@@ -50,7 +51,7 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/auth/switch-project', { project_id: project.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: project.id }, $auth.token);
 
 			setAuth({
 				token: resp.token,
@@ -67,7 +68,7 @@
 			isOpen = false;
 
 			// Default 네트워크 확인/생성 (fire-and-forget)
-			api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+			api.post('/api/v1/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
 		} catch (e) {
 			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
 		} finally {
@@ -82,7 +83,7 @@
 	}
 
 	onMount(() => {
-		fetchProjects();
+		// fetchProjects 는 드롭다운 최초 오픈 시 지연 호출한다 (대시보드 초기 렌더 불필요 요청 방지).
 		document.addEventListener('click', handleClickOutside);
 		return () => document.removeEventListener('click', handleClickOutside);
 	});
@@ -90,8 +91,16 @@
 
 <div class="relative" bind:this={dropdownRef}>
 	<button
-		onclick={() => { if (!loading && !switching) isOpen = !isOpen; }}
-		disabled={loading || switching}
+		onclick={() => {
+			if (switching) return;
+			isOpen = !isOpen;
+			// 드롭다운 첫 오픈 시 목록 지연 로드
+			if (isOpen && !loaded) {
+				loaded = true;
+				fetchProjects();
+			}
+		}}
+		disabled={switching}
 		class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 rounded-lg text-sm transition-colors"
 	>
 		{#if loading || switching}

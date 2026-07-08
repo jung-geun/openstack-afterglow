@@ -10,55 +10,55 @@ import pytest
 @pytest.mark.asyncio
 async def test_admin_overview_requires_admin(non_admin_client):
     """일반 사용자는 관리자 엔드포인트에 접근 불가 (403)."""
-    resp = await non_admin_client.get("/api/admin/overview")
+    resp = await non_admin_client.get("/api/v1/admin/overview")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_all_instances_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/all-instances")
+    resp = await non_admin_client.get("/api/v1/admin/all-instances")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_all_volumes_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/all-volumes")
+    resp = await non_admin_client.get("/api/v1/admin/all-volumes")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_flavors_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/flavors")
+    resp = await non_admin_client.get("/api/v1/admin/flavors")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_users_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/users")
+    resp = await non_admin_client.get("/api/v1/admin/users")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_projects_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/projects")
+    resp = await non_admin_client.get("/api/v1/admin/projects")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_hypervisors_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/hypervisors")
+    resp = await non_admin_client.get("/api/v1/admin/hypervisors")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_quotas_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/quotas/some-project-id")
+    resp = await non_admin_client.get("/api/v1/admin/quotas/some-project-id")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_live_migrate_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/instances/inst-1/live-migrate", json={})
+    resp = await non_admin_client.post("/api/v1/admin/instances/inst-1/live-migrate", json={})
     assert resp.status_code == 403
 
 
@@ -82,7 +82,7 @@ async def test_admin_access_not_forbidden(admin_client, mock_conn):
                 "file_storage_count": 0,
             }
         )
-        resp = await admin_client.get("/api/admin/overview")
+        resp = await admin_client.get("/api/v1/admin/overview")
     assert resp.status_code != 403
 
 
@@ -90,5 +90,5 @@ async def test_admin_access_not_forbidden(admin_client, mock_conn):
 async def test_admin_hypervisors_not_forbidden(admin_client, mock_conn):
     with patch("app.api.identity.admin.cached_call") as mc:
         mc.side_effect = AsyncMock(return_value=[])
-        resp = await admin_client.get("/api/admin/hypervisors")
+        resp = await admin_client.get("/api/v1/admin/hypervisors")
     assert resp.status_code != 403

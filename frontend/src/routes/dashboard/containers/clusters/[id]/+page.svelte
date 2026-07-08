@@ -36,7 +36,7 @@
 
   async function fetchCluster() {
     try {
-      cluster = await api.get<Cluster>(`/api/clusters/${clusterId}`, token, projectId);
+      cluster = await api.get<Cluster>(`/api/v1/clusters/${clusterId}`, token, projectId);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
@@ -48,14 +48,14 @@
   async function fetchResources() {
     resourcesLoading = true;
     try {
-      resources = await api.get<StackResource[]>(`/api/clusters/${clusterId}/stack/resources`, token, projectId);
+      resources = await api.get<StackResource[]>(`/api/v1/clusters/${clusterId}/stack/resources`, token, projectId);
     } catch { resources = []; } finally { resourcesLoading = false; }
   }
 
   async function fetchEvents() {
     eventsLoading = true;
     try {
-      events = await api.get<StackEvent[]>(`/api/clusters/${clusterId}/stack/events`, token, projectId);
+      events = await api.get<StackEvent[]>(`/api/v1/clusters/${clusterId}/stack/events`, token, projectId);
     } catch { events = []; } finally { eventsLoading = false; }
   }
 
@@ -76,7 +76,7 @@
     if (!cluster) return;
     if (!await confirmDialog(`클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
     try {
-      await api.delete(`/api/clusters/${clusterId}`, token, projectId);
+      await api.delete(`/api/v1/clusters/${clusterId}`, token, projectId);
       goto('/dashboard/containers/clusters');
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

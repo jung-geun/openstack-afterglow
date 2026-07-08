@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
 	interface Props {
@@ -11,10 +12,31 @@
 	const s = useInstanceDetailController();
 
 	let resizeFlavorId = $state(preselectFlavorId);
+	let resizeConfirming = $state(false);
+
+	function formatFlavorLabel(f: { name: string; vcpus: number; ram: number }) {
+		const ramLabel = f.ram >= 1024 ? `${(f.ram / 1024).toFixed(0)} GB` : `${f.ram} MB`;
+		return `${f.name} (${f.vcpus} vCPU / ${ramLabel} RAM)`;
+	}
 
 	async function handleResize() {
-		const ok = await s.doResize(resizeFlavorId);
-		if (ok) onClose();
+		if (!resizeFlavorId || s.resizeLoading || resizeConfirming) return;
+
+		const selectedFlavor = s.resizeFlavors.find((f) => f.id === resizeFlavorId);
+		const flavorLabel = selectedFlavor ? formatFlavorLabel(selectedFlavor) : resizeFlavorId;
+
+		resizeConfirming = true;
+		try {
+			const confirmed = await confirmDialog(
+				`인스턴스를 다음 플레이버로 리사이즈하시겠습니까?\n${flavorLabel}\n\n요청 후에는 '리사이즈 확인'을 눌러 적용하거나 '되돌리기'로 취소해야 합니다.`
+			);
+			if (!confirmed) return;
+
+			const ok = await s.doResize(resizeFlavorId);
+			if (ok) onClose();
+		} finally {
+			resizeConfirming = false;
+		}
 	}
 </script>
 
@@ -40,7 +62,7 @@
 				<select bind:value={resizeFlavorId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500">
 					<option value="">플레이버 선택</option>
 					{#each s.resizeFlavors as f}
-						<option value={f.id}>{f.name} ({f.vcpus} vCPU / {f.ram >= 1024 ? (f.ram / 1024).toFixed(0) + ' GB' : f.ram + ' MB'} RAM)</option>
+						<option value={f.id}>{formatFlavorLabel(f)}</option>
 					{/each}
 				</select>
 			</div>
@@ -49,10 +71,10 @@
 			<button onclick={onClose} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 			<button
 				onclick={handleResize}
-				disabled={s.resizeLoading || !resizeFlavorId}
+				disabled={s.resizeLoading || resizeConfirming || !resizeFlavorId}
 				class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-30"
 			>
-				{s.resizeLoading ? '리사이즈 중...' : '리사이즈'}
+				{resizeConfirming ? '확인 대기 중...' : s.resizeLoading ? '리사이즈 중...' : '리사이즈'}
 			</button>
 		</div>
 	</div>

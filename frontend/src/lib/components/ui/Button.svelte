@@ -1,100 +1,197 @@
+<script module lang="ts">
+	export type ButtonVariant =
+		| 'primary'
+		| 'accent'
+		| 'secondary'
+		| 'subtle'
+		| 'ghost'
+		| 'outline'
+		| 'danger'
+		| 'danger-outline'
+		| 'link';
+	export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'icon';
+</script>
+
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+	import type { Snippet } from 'svelte';
+	interface Props {
+		variant?: ButtonVariant;
+		size?: ButtonSize;
+		type?: 'button' | 'submit' | 'reset';
+		disabled?: boolean;
+		onclick?: (e: MouseEvent) => void;
+		href?: string;
+		ariaLabel?: string;
+		title?: string;
+		class?: string;
+		children: Snippet;
+	}
 
-  type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
-  type Size = 'sm' | 'md' | 'lg';
+	let {
+		variant = 'primary',
+		size = 'md',
+		type = 'button',
+		disabled = false,
+		onclick,
+		href,
+		ariaLabel,
+		title,
+		class: className = '',
+		children,
+	}: Props = $props();
 
-  interface Props {
-    variant?: Variant;
-    size?: Size;
-    type?: 'button' | 'submit' | 'reset';
-    disabled?: boolean;
-    onclick?: (e: MouseEvent) => void;
-    href?: string;
-    class?: string;
-    children: Snippet;
-  }
-
-  let {
-    variant = 'primary',
-    size = 'md',
-    type = 'button',
-    disabled,
-    onclick,
-    href,
-    class: className = '',
-    children
-  }: Props = $props();
+	function handleAnchorClick(event: MouseEvent) {
+		if (disabled) {
+			event.preventDefault();
+			event.stopPropagation();
+			return;
+		}
+		onclick?.(event);
+	}
 </script>
 
 {#if href}
-  <a {href} class="btn btn-{variant} btn-{size} {className}">{@render children()}</a>
+	<a
+		{href}
+		aria-label={ariaLabel}
+		aria-disabled={disabled}
+		{title}
+		onclick={handleAnchorClick}
+		class="btn btn-{variant} btn-{size} {className}"
+	>
+		{@render children()}
+	</a>
 {:else}
-  <button {type} {disabled} {onclick} class="btn btn-{variant} btn-{size} {className}">
-    {@render children()}
-  </button>
+	<button {type} {disabled} aria-label={ariaLabel} {title} {onclick} class="btn btn-{variant} btn-{size} {className}">
+		{@render children()}
+	</button>
 {/if}
 
 <style>
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.15s;
-    border: 1px solid transparent;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    box-shadow: none !important;
-    filter: none !important;
-  }
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.375rem;
+		border-radius: 0.5rem;
+		font-weight: 500;
+		line-height: 1.2;
+		transition:
+			background 0.15s,
+			border-color 0.15s,
+			box-shadow 0.15s,
+			color 0.15s,
+			filter 0.15s;
+		border: 1px solid transparent;
+		cursor: pointer;
+		white-space: nowrap;
+		text-decoration: none;
+	}
 
-  /* Sizes */
-  .btn-sm { padding: 4px 10px; font-size: 12px; }
-  .btn-md { padding: 7px 14px; font-size: 13px; }
-  .btn-lg { padding: 10px 20px; font-size: 14px; }
+	.btn:focus-visible {
+		outline: none;
+		box-shadow: var(--focus-ring);
+	}
 
-  /* Variants */
-  .btn-primary {
-    background: var(--gradient-warm);
-    color: white;
-    box-shadow: var(--glow-warm);
-  }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.08);
-    box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
-  }
+	.btn:disabled,
+	.btn[aria-disabled='true'] {
+		opacity: 0.45;
+		cursor: not-allowed;
+		box-shadow: none;
+		filter: none;
+	}
 
-  .btn-secondary {
-    background: var(--color-surface-raised);
-    color: var(--color-ink-1);
-    border-color: var(--color-line);
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--color-surface-sunken);
-  }
+	.btn-xs { padding: 0.1875rem 0.5rem; font-size: 0.6875rem; }
+	.btn-sm { padding: 0.25rem 0.625rem; font-size: 0.75rem; }
+	.btn-md { padding: 0.4375rem 0.875rem; font-size: 0.8125rem; }
+	.btn-lg { padding: 0.625rem 1.25rem; font-size: 0.875rem; }
+	.btn-icon { width: 2rem; height: 2rem; padding: 0; font-size: 0.8125rem; }
 
-  .btn-ghost {
-    background: transparent;
-    color: var(--color-ink-2);
-  }
-  .btn-ghost:hover:not(:disabled) {
-    background: var(--color-surface-sunken);
-    color: var(--color-ink-0);
-  }
+	.btn-primary {
+		background: var(--gradient-warm);
+		color: var(--color-action-on-warm);
+		box-shadow: var(--glow-warm);
+	}
+	.btn-primary:hover:not(:disabled):not([aria-disabled='true']) {
+		filter: brightness(1.08);
+		box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
+	}
 
-  .btn-danger {
-    background: color-mix(in oklab, var(--color-state-danger) 15%, transparent);
-    color: var(--color-state-danger);
-    border-color: color-mix(in oklab, var(--color-state-danger) 35%, transparent);
-  }
-  .btn-danger:hover:not(:disabled) {
-    background: color-mix(in oklab, var(--color-state-danger) 25%, transparent);
-  }
+	.btn-accent {
+		background: var(--color-accent);
+		color: var(--color-action-on-accent);
+		box-shadow: var(--glow-accent);
+	}
+	.btn-accent:hover:not(:disabled):not([aria-disabled='true']) {
+		background: color-mix(in oklab, var(--color-accent) 88%, var(--color-ink-0));
+	}
+
+	.btn-secondary {
+		background: var(--color-surface-raised);
+		color: var(--color-ink-1);
+		border-color: var(--color-line);
+	}
+	.btn-secondary:hover:not(:disabled):not([aria-disabled='true']) {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+
+	.btn-subtle {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-1);
+		border-color: transparent;
+	}
+	.btn-subtle:hover:not(:disabled):not([aria-disabled='true']) {
+		color: var(--color-ink-0);
+		background: color-mix(in oklab, var(--color-surface-sunken) 78%, var(--color-ink-0));
+	}
+
+	.btn-ghost {
+		background: transparent;
+		color: var(--color-ink-2);
+	}
+	.btn-ghost:hover:not(:disabled):not([aria-disabled='true']) {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+
+	.btn-outline {
+		background: transparent;
+		color: var(--color-ink-1);
+		border-color: var(--color-line);
+	}
+	.btn-outline:hover:not(:disabled):not([aria-disabled='true']) {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+
+	.btn-danger {
+		background: var(--color-state-danger);
+		color: var(--color-surface-base);
+		border-color: color-mix(in oklab, var(--color-state-danger) 85%, var(--color-ink-0));
+	}
+	.btn-danger:hover:not(:disabled):not([aria-disabled='true']) {
+		background: color-mix(in oklab, var(--color-state-danger) 88%, var(--color-ink-0));
+	}
+
+	.btn-danger-outline {
+		background: color-mix(in oklab, var(--color-state-danger) 15%, transparent);
+		color: var(--color-state-danger);
+		border-color: color-mix(in oklab, var(--color-state-danger) 35%, transparent);
+	}
+	.btn-danger-outline:hover:not(:disabled):not([aria-disabled='true']) {
+		background: color-mix(in oklab, var(--color-state-danger) 25%, transparent);
+	}
+
+	.btn-link {
+		padding-inline: 0;
+		background: transparent;
+		color: var(--color-accent);
+		border-color: transparent;
+		box-shadow: none;
+	}
+	.btn-link:hover:not(:disabled):not([aria-disabled='true']) {
+		color: color-mix(in oklab, var(--color-accent) 75%, var(--color-ink-0));
+		text-decoration: underline;
+	}
 </style>

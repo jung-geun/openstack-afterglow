@@ -35,7 +35,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
     else refreshing = true;
     error = '';
     try {
-      const res = await api.get<Group[]>('/api/admin/groups', tok(), pid());
+      const res = await api.get<Group[]>('/api/v1/admin/groups', tok(), pid());
       groups = res;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '그룹 목록 조회 실패';
@@ -45,7 +45,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   async function loadUsers() {
     if (allUsers.length > 0) return;
     try {
-      const res = await api.get<{ items: User[] }>('/api/admin/users?limit=100', tok(), pid());
+      const res = await api.get<{ items: User[] }>('/api/v1/admin/users?limit=100', tok(), pid());
       allUsers = res.items;
     } catch {}
   }
@@ -53,7 +53,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   async function createGroup(name: string, description: string): Promise<boolean> {
     creating = true; createError = '';
     try {
-      await api.post('/api/admin/groups', { name, description: description || null }, tok(), pid());
+      await api.post('/api/v1/admin/groups', { name, description: description || null }, tok(), pid());
       await load();
       return true;
     } catch (e) { createError = e instanceof ApiError ? e.message : '생성 실패'; return false; }
@@ -64,7 +64,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
     if (!editGroup) return false;
     updating = true; editError = '';
     try {
-      await api.patch(`/api/admin/groups/${editGroup.id}`, { name: form.name, description: form.description || null }, tok(), pid());
+      await api.patch(`/api/v1/admin/groups/${editGroup.id}`, { name: form.name, description: form.description || null }, tok(), pid());
       await load();
       return true;
     } catch (e) { editError = e instanceof ApiError ? e.message : '수정 실패'; return false; }
@@ -75,7 +75,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
     if (!deleteGroup) return;
     deleting = true; deleteError = '';
     try {
-      await api.delete(`/api/admin/groups/${deleteGroup.id}`, tok(), pid());
+      await api.delete(`/api/v1/admin/groups/${deleteGroup.id}`, tok(), pid());
       deleteGroup = null;
       await load();
     } catch (e) { deleteError = e instanceof ApiError ? e.message : '삭제 실패'; }
@@ -85,7 +85,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   async function loadGroupMembers(groupId: string) {
     membersLoading = { ...membersLoading, [groupId]: true };
     try {
-      const res = await api.get<GroupMember[]>(`/api/admin/groups/${groupId}/users`, tok(), pid());
+      const res = await api.get<GroupMember[]>(`/api/v1/admin/groups/${groupId}/users`, tok(), pid());
       groupMembers = { ...groupMembers, [groupId]: res };
     } catch {
       groupMembers = { ...groupMembers, [groupId]: [] };
@@ -106,7 +106,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
     addMemberSaving = { ...addMemberSaving, [groupId]: true };
     addMemberError = { ...addMemberError, [groupId]: '' };
     try {
-      await api.put(`/api/admin/groups/${groupId}/users/${userId}`, {}, tok(), pid());
+      await api.put(`/api/v1/admin/groups/${groupId}/users/${userId}`, {}, tok(), pid());
       await loadGroupMembers(groupId);
       return true;
     } catch (e) {
@@ -119,7 +119,7 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
 
   async function removeMember(groupId: string, userId: string) {
     try {
-      await api.delete(`/api/admin/groups/${groupId}/users/${userId}`, tok(), pid());
+      await api.delete(`/api/v1/admin/groups/${groupId}/users/${userId}`, tok(), pid());
       try {
         await loadGroupMembers(groupId);
       } catch {

@@ -60,10 +60,10 @@
 		error = null;
 		try {
 			await Promise.allSettled([
-				api.get<UsageStats>(`/api/dashboard/usage-stats?range=${period}`, token, projectId)
+				api.get<UsageStats>(`/api/v1/dashboard/usage-stats?range=${period}`, token, projectId)
 					.then(v => { data = v; })
 					.catch(e => { error = e instanceof Error ? e.message : '데이터 로딩 실패'; }),
-				api.get<TrendData>(`/api/dashboard/metrics/trend?range=${trendRange}`, token, projectId)
+				api.get<TrendData>(`/api/v1/dashboard/metrics/trend?range=${trendRange}`, token, projectId)
 					.then(v => { trendData = v; })
 					.catch(() => {}),
 			]);

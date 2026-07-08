@@ -3,6 +3,7 @@
 	import FileStorageWizardStep1 from './FileStorageWizardStep1.svelte';
 	import FileStorageWizardStep2 from './FileStorageWizardStep2.svelte';
 	import FileStorageWizardStep3 from './FileStorageWizardStep3.svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
 
 	let {
 		open = $bindable(false),
@@ -16,6 +17,7 @@
 		open: () => open,
 		setOpen: (v) => { open = v; },
 		onCreated: () => onCreated(),
+		fileStorageShareNetworksEnabled: () => $betaFeatures.fileStorageShareNetworks,
 	});
 	provideFsWizard(s);
 </script>
@@ -35,13 +37,13 @@
 			role="none"
 			onkeydown={(e) => e.stopPropagation()}
 		>
-			<!-- 스텝 인디케이터: DHSS=False이면 네트워크 단계를 숨겨 2단계로 표시 -->
+			<!-- 스텝 인디케이터: DHSS=False이거나 Share Network 베타가 꺼져 있으면 네트워크 단계를 숨겨 2단계로 표시 -->
 			<div class="flex items-center gap-0 px-6 pt-6 pb-4 border-b border-gray-800">
-				{#each (s.dhssEnabled
+				{#each (s.dhssEnabled && s.shareNetworksEnabled
 					? [{ step: 1, label: '기본 정보' }, { step: 2, label: '네트워크' }, { step: 3, label: '접근 설정' }]
 					: [{ step: 1, label: '기본 정보' }, { step: 3, label: '접근 설정' }]
 				) as item, idx (item.step)}
-					{@const isLast = idx === (s.dhssEnabled ? 2 : 1)}
+					{@const isLast = idx === (s.dhssEnabled && s.shareNetworksEnabled ? 2 : 1)}
 					<div class="flex items-center {!isLast ? 'flex-1' : ''}">
 						<div class="flex flex-col items-center">
 							<div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors

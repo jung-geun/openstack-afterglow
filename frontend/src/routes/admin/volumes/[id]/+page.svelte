@@ -31,7 +31,7 @@
 	async function fetchVolume() {
 		if (!volumeId) return;
 		try {
-			volume = await api.get<AdminVolumeDetail>(`/api/admin/volumes/${volumeId}`, token, projectId);
+			volume = await api.get<AdminVolumeDetail>(`/api/v1/admin/volumes/${volumeId}`, token, projectId);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -44,7 +44,7 @@
 		if (!volume || !await confirmDialog(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/admin/volumes/${volumeId}`, token, projectId);
+			await api.delete(`/api/v1/admin/volumes/${volumeId}`, token, projectId);
 			goto('/admin/volumes');
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -55,7 +55,7 @@
 	async function resetVolumeStatus(status: string): Promise<boolean> {
 		resetting = true;
 		try {
-			await api.post(`/api/admin/volumes/${volumeId}/reset-status`, { status }, token, projectId);
+			await api.post(`/api/v1/admin/volumes/${volumeId}/reset-status`, { status }, token, projectId);
 			showReset = false;
 			await fetchVolume();
 			return true;
@@ -74,7 +74,7 @@
 		}
 		extending = true;
 		try {
-			await api.post(`/api/admin/volumes/${volumeId}/extend`, { new_size: newSize }, token, projectId);
+			await api.post(`/api/v1/admin/volumes/${volumeId}/extend`, { new_size: newSize }, token, projectId);
 			showExtend = false;
 			await fetchVolume();
 			return true;

@@ -45,7 +45,7 @@
 		loading = !data;
 		error = null;
 		try {
-			const res = await api.get<UsageReport>(`/api/dashboard/usage-report?range=${period}`, token, projectId);
+			const res = await api.get<UsageReport>(`/api/v1/dashboard/usage-report?range=${period}`, token, projectId);
 			data = res;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로딩 실패';

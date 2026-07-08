@@ -62,7 +62,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 	// Derived
 	const isOwner = $derived(image?.owner === opts.projectId());
 	const canEditMetadata = $derived(isOwner || opts.isAdmin());
-	const propertiesEndpoint = $derived(opts.isAdmin() ? '/api/admin/images' : '/api/images');
+	const propertiesEndpoint = $derived(opts.isAdmin() ? '/api/v1/admin/images' : '/api/v1/images');
 
 	// Handlers
 	async function loadImage() {
@@ -74,7 +74,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		error = '';
 		image = null;
 		try {
-			image = await api.get<ImageDetail>(`/api/images/${id}`, tok, proj);
+			image = await api.get<ImageDetail>(`/api/v1/images/${id}`, tok, proj);
 			visibilityValue = image.visibility ?? '';
 			if (image.visibility === 'shared') loadMembers();
 		} catch (e) {
@@ -91,7 +91,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		loadingMembers = true;
 		memberError = '';
 		try {
-			members = await api.get<ImageMember[]>(`/api/images/${id}/members`, tok, proj);
+			members = await api.get<ImageMember[]>(`/api/v1/images/${id}/members`, tok, proj);
 		} catch {
 			members = [];
 		} finally {
@@ -118,7 +118,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		visibilitySuccess = false;
 		try {
 			const updated = await api.patch<ImageDetail>(
-				`/api/images/${image.id}`,
+				`/api/v1/images/${image.id}`,
 				{ visibility: visibilityValue },
 				tok, proj
 			);
@@ -140,7 +140,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		addingMember = true;
 		memberError = '';
 		try {
-			await api.post(`/api/images/${image.id}/members`, { member: newMemberId.trim() }, tok, proj);
+			await api.post(`/api/v1/images/${image.id}/members`, { member: newMemberId.trim() }, tok, proj);
 			newMemberId = '';
 			await loadMembers();
 		} catch (e) {
@@ -157,7 +157,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		removingMember = memberId;
 		memberError = '';
 		try {
-			await api.delete(`/api/images/${image.id}/members/${memberId}`, tok, proj);
+			await api.delete(`/api/v1/images/${image.id}/members/${memberId}`, tok, proj);
 			await loadMembers();
 		} catch (e) {
 			memberError = e instanceof ApiError ? e.message : '멤버 삭제 실패';
@@ -259,7 +259,7 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		if (!(await confirmDialog(`이미지 "${image.name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`))) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/images/${image.id}`, tok, proj);
+			await api.delete(`/api/v1/images/${image.id}`, tok, proj);
 			opts.onDelete?.(image.id);
 			opts.onClose?.();
 		} catch (e) {

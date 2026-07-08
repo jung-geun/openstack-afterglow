@@ -20,7 +20,6 @@
   }
 </script>
 
-<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
   <div class="rounded-lg border border-gray-700 overflow-hidden overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
@@ -48,4 +47,3 @@
       </tbody>
     </table>
   </div>
-</div>

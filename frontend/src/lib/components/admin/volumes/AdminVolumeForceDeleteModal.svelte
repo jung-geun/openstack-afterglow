@@ -37,7 +37,7 @@
 		forceDeleting = true;
 		forceDeleteError = '';
 		try {
-			await api.post(`/api/admin/volumes/${volume.id}/force-delete`, {}, token, projectId);
+			await api.post(`/api/v1/admin/volumes/${volume.id}/force-delete`, {}, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

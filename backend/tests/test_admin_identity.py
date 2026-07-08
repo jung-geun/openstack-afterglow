@@ -17,26 +17,26 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_list_users_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/users")
+    resp = await non_admin_client.get("/api/v1/admin/users")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_users_allowed(admin_client, mock_conn):
     mock_conn.identity.users.return_value = iter([])
-    resp = await admin_client.get("/api/admin/users")
+    resp = await admin_client.get("/api/v1/admin/users")
     assert resp.status_code != 403
 
 
 @pytest.mark.asyncio
 async def test_create_user_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/users", json={"name": "u", "password": "pw"})
+    resp = await non_admin_client.post("/api/v1/admin/users", json={"name": "u", "password": "pw"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_user_requires_admin(non_admin_client):
-    resp = await non_admin_client.patch("/api/admin/users/user-1", json={"name": "u"})
+    resp = await non_admin_client.patch("/api/v1/admin/users/user-1", json={"name": "u"})
     assert resp.status_code == 403
 
 
@@ -47,50 +47,50 @@ async def test_update_user_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_list_project_names_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/projects/names")
+    resp = await non_admin_client.get("/api/v1/admin/projects/names")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_projects_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/projects")
+    resp = await non_admin_client.get("/api/v1/admin/projects")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_projects_allowed(admin_client, mock_conn):
     mock_conn.identity.projects.return_value = iter([])
-    resp = await admin_client.get("/api/admin/projects")
+    resp = await admin_client.get("/api/v1/admin/projects")
     assert resp.status_code != 403
 
 
 @pytest.mark.asyncio
 async def test_create_project_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/projects", json={"name": "p"})
+    resp = await non_admin_client.post("/api/v1/admin/projects", json={"name": "p"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_project_requires_admin(non_admin_client):
-    resp = await non_admin_client.patch("/api/admin/projects/proj-1", json={"name": "p"})
+    resp = await non_admin_client.patch("/api/v1/admin/projects/proj-1", json={"name": "p"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_project_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/projects/proj-1")
+    resp = await non_admin_client.delete("/api/v1/admin/projects/proj-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_project_members_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/projects/proj-1/members")
+    resp = await non_admin_client.get("/api/v1/admin/projects/proj-1/members")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_get_project_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/projects/proj-1")
+    resp = await non_admin_client.get("/api/v1/admin/projects/proj-1")
     assert resp.status_code == 403
 
 
@@ -106,7 +106,7 @@ async def test_get_project_returns_shape(admin_client, mock_conn):
     type(fake_proj).__getattr__ = lambda self, k: None  # getattr fallback
     mock_conn.identity.get_project.return_value = fake_proj
 
-    resp = await admin_client.get("/api/admin/projects/proj-abc")
+    resp = await admin_client.get("/api/v1/admin/projects/proj-abc")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -122,7 +122,7 @@ async def test_get_project_not_found(admin_client, mock_conn):
     """존재하지 않는 project_id → 404."""
     mock_conn.identity.get_project.side_effect = Exception("Not found")
 
-    resp = await admin_client.get("/api/admin/projects/nonexistent")
+    resp = await admin_client.get("/api/v1/admin/projects/nonexistent")
 
     assert resp.status_code == 404
 
@@ -134,13 +134,13 @@ async def test_get_project_not_found(admin_client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_get_quota_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/quotas/proj-1")
+    resp = await non_admin_client.get("/api/v1/admin/quotas/proj-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_quota_requires_admin(non_admin_client):
-    resp = await non_admin_client.put("/api/admin/quotas/proj-1", json={"cores": 20})
+    resp = await non_admin_client.put("/api/v1/admin/quotas/proj-1", json={"cores": 20})
     assert resp.status_code == 403
 
 
@@ -151,50 +151,50 @@ async def test_update_quota_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_list_groups_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/groups")
+    resp = await non_admin_client.get("/api/v1/admin/groups")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_groups_allowed(admin_client, mock_conn):
     mock_conn.identity.groups.return_value = iter([])
-    resp = await admin_client.get("/api/admin/groups")
+    resp = await admin_client.get("/api/v1/admin/groups")
     assert resp.status_code != 403
 
 
 @pytest.mark.asyncio
 async def test_create_group_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/groups", json={"name": "g"})
+    resp = await non_admin_client.post("/api/v1/admin/groups", json={"name": "g"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_group_requires_admin(non_admin_client):
-    resp = await non_admin_client.patch("/api/admin/groups/grp-1", json={"name": "g"})
+    resp = await non_admin_client.patch("/api/v1/admin/groups/grp-1", json={"name": "g"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_group_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/groups/grp-1")
+    resp = await non_admin_client.delete("/api/v1/admin/groups/grp-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_group_users_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/groups/grp-1/users")
+    resp = await non_admin_client.get("/api/v1/admin/groups/grp-1/users")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_add_user_to_group_requires_admin(non_admin_client):
-    resp = await non_admin_client.put("/api/admin/groups/grp-1/users/user-1")
+    resp = await non_admin_client.put("/api/v1/admin/groups/grp-1/users/user-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_remove_user_from_group_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/groups/grp-1/users/user-1")
+    resp = await non_admin_client.delete("/api/v1/admin/groups/grp-1/users/user-1")
     assert resp.status_code == 403
 
 
@@ -205,21 +205,21 @@ async def test_remove_user_from_group_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_list_roles_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/roles")
+    resp = await non_admin_client.get("/api/v1/admin/roles")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_roles_allowed(admin_client, mock_conn):
     mock_conn.identity.roles.return_value = iter([])
-    resp = await admin_client.get("/api/admin/roles")
+    resp = await admin_client.get("/api/v1/admin/roles")
     assert resp.status_code != 403
 
 
 @pytest.mark.asyncio
 async def test_assign_role_requires_admin(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/admin/roles/assign", json={"user_id": "u", "project_id": "p", "role_id": "r"}
+        "/api/v1/admin/roles/assign", json={"user_id": "u", "project_id": "p", "role_id": "r"}
     )
     assert resp.status_code == 403
 
@@ -227,7 +227,7 @@ async def test_assign_role_requires_admin(non_admin_client):
 @pytest.mark.asyncio
 async def test_revoke_role_requires_admin(non_admin_client):
     resp = await non_admin_client.delete(
-        "/api/admin/roles/assign", params={"user_id": "u", "project_id": "p", "role_id": "r"}
+        "/api/v1/admin/roles/assign", params={"user_id": "u", "project_id": "p", "role_id": "r"}
     )
     assert resp.status_code == 403
 
@@ -235,7 +235,7 @@ async def test_revoke_role_requires_admin(non_admin_client):
 @pytest.mark.asyncio
 async def test_assign_group_role_requires_admin(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/admin/roles/assign-group", json={"group_id": "g", "project_id": "p", "role_id": "r"}
+        "/api/v1/admin/roles/assign-group", json={"group_id": "g", "project_id": "p", "role_id": "r"}
     )
     assert resp.status_code == 403
 
@@ -243,7 +243,7 @@ async def test_assign_group_role_requires_admin(non_admin_client):
 @pytest.mark.asyncio
 async def test_revoke_group_role_requires_admin(non_admin_client):
     resp = await non_admin_client.delete(
-        "/api/admin/roles/assign-group", params={"group_id": "g", "project_id": "p", "role_id": "r"}
+        "/api/v1/admin/roles/assign-group", params={"group_id": "g", "project_id": "p", "role_id": "r"}
     )
     assert resp.status_code == 403
 
@@ -283,7 +283,7 @@ async def test_create_project_calls_both_monitoring_sgs(admin_client, mock_conn)
             side_effect=lambda *a, **kw: dc_called.append(a) or "dcgm_exporter",
         ),
     ):
-        resp = await admin_client.post("/api/admin/projects", json={"name": "test-proj"})
+        resp = await admin_client.post("/api/v1/admin/projects", json={"name": "test-proj"})
 
     assert resp.status_code in (200, 201)
     assert len(ne_called) == 1
@@ -320,7 +320,7 @@ async def test_assign_admin_role_revokes_sessions(admin_client, mock_conn):
         ) as mock_record,
     ):
         resp = await admin_client.post(
-            "/api/admin/roles/assign",
+            "/api/v1/admin/roles/assign",
             json={"user_id": "target-user-1", "project_id": "admin-proj", "role_id": _ADMIN_ROLE_ID},
         )
 
@@ -351,7 +351,7 @@ async def test_assign_non_admin_role_no_revoke(admin_client, mock_conn):
         ) as mock_record,
     ):
         resp = await admin_client.post(
-            "/api/admin/roles/assign",
+            "/api/v1/admin/roles/assign",
             json={"user_id": "target-user-2", "project_id": "some-proj", "role_id": _MEMBER_ROLE_ID},
         )
 
@@ -381,7 +381,7 @@ async def test_revoke_admin_role_revokes_sessions(admin_client, mock_conn):
         ) as mock_record,
     ):
         resp = await admin_client.delete(
-            f"/api/admin/roles/assign?user_id=target-user-3&project_id=admin-proj&role_id={_ADMIN_ROLE_ID}",
+            f"/api/v1/admin/roles/assign?user_id=target-user-3&project_id=admin-proj&role_id={_ADMIN_ROLE_ID}",
         )
 
     assert resp.status_code == 200
@@ -398,7 +398,7 @@ async def test_revoke_admin_role_revokes_sessions(admin_client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_security_policy_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/identity/security-policy")
+    resp = await non_admin_client.get("/api/v1/admin/identity/security-policy")
     assert resp.status_code == 403
 
 
@@ -430,7 +430,7 @@ async def test_security_policy_returns_compat_flag_and_count(admin_client):
             return_value=MagicMock(admin_legacy_project_policy=True),
         ),
     ):
-        resp = await admin_client.get("/api/admin/identity/security-policy")
+        resp = await admin_client.get("/api/v1/admin/identity/security-policy")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -446,7 +446,7 @@ async def test_security_policy_returns_compat_flag_and_count(admin_client):
 
 @pytest.mark.asyncio
 async def test_migrate_from_project_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+    resp = await non_admin_client.post("/api/v1/admin/identity/system-roles/migrate-from-project")
     assert resp.status_code == 403
 
 
@@ -487,7 +487,7 @@ async def test_migrate_from_project_grants_only_missing(admin_client):
             new=AsyncMock(),
         ) as mock_record,
     ):
-        resp = await admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+        resp = await admin_client.post("/api/v1/admin/identity/system-roles/migrate-from-project")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -508,7 +508,7 @@ async def test_migrate_from_project_grants_only_missing(admin_client):
 
 @pytest.mark.asyncio
 async def test_list_system_roles_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/identity/system-roles")
+    resp = await non_admin_client.get("/api/v1/admin/identity/system-roles")
     assert resp.status_code == 403
 
 
@@ -537,7 +537,7 @@ async def test_grant_system_role_revokes_sessions(admin_client):
         ) as mock_record,
     ):
         resp = await admin_client.post(
-            "/api/admin/identity/system-roles/grant",
+            "/api/v1/admin/identity/system-roles/grant",
             json={"user_id": "target-user-sys"},
         )
 
@@ -573,7 +573,7 @@ async def test_revoke_system_role_revokes_sessions(admin_client):
         ) as mock_record,
     ):
         resp = await admin_client.post(
-            "/api/admin/identity/system-roles/revoke",
+            "/api/v1/admin/identity/system-roles/revoke",
             json={"user_id": "target-user-sys"},
         )
 
@@ -609,7 +609,7 @@ async def test_list_system_roles_returns_enriched_fields(admin_client):
             return_value=mock_ks,
         ),
     ):
-        resp = await admin_client.get("/api/admin/identity/system-roles")
+        resp = await admin_client.get("/api/v1/admin/identity/system-roles")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -648,7 +648,7 @@ async def test_revoke_last_system_admin_blocked(admin_client):
         ),
     ):
         resp = await admin_client.post(
-            "/api/admin/identity/system-roles/revoke",
+            "/api/v1/admin/identity/system-roles/revoke",
             json={"user_id": "last-admin"},
         )
 
@@ -688,7 +688,7 @@ async def test_revoke_with_other_admins_succeeds(admin_client):
         ),
     ):
         resp = await admin_client.post(
-            "/api/admin/identity/system-roles/revoke",
+            "/api/v1/admin/identity/system-roles/revoke",
             json={"user_id": "admin-1"},
         )
 
@@ -716,7 +716,7 @@ async def test_revoke_non_admin_role_no_revoke(admin_client, mock_conn):
         ) as mock_record,
     ):
         resp = await admin_client.delete(
-            f"/api/admin/roles/assign?user_id=target-user-4&project_id=some-proj&role_id={_MEMBER_ROLE_ID}",
+            f"/api/v1/admin/roles/assign?user_id=target-user-4&project_id=some-proj&role_id={_MEMBER_ROLE_ID}",
         )
 
     assert resp.status_code == 200
@@ -738,7 +738,7 @@ async def test_sync_monitoring_sg_returns_both_sg_names(admin_client, mock_conn)
         patch("app.services.neutron.ensure_node_exporter_sg", return_value="node_exporter"),
         patch("app.services.neutron.ensure_dcgm_exporter_sg", return_value="dcgm_exporter"),
     ):
-        resp = await admin_client.post("/api/admin/projects/proj-abc/sync-monitoring-sg")
+        resp = await admin_client.post("/api/v1/admin/projects/proj-abc/sync-monitoring-sg")
 
     assert resp.status_code == 200
     data = resp.json()

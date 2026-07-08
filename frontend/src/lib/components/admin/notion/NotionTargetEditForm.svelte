@@ -57,7 +57,7 @@
 			};
 			if (form.apiKey) data.api_key = form.apiKey;
 			await api.patch(
-				`/api/admin/notion/targets/${target.id}`,
+				`/api/v1/admin/notion/targets/${target.id}`,
 				data,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined

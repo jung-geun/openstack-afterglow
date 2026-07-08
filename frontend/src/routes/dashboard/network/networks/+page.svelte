@@ -39,7 +39,7 @@
   const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
   async function fetchNetworks(opts?: { refresh?: boolean }) {
-    const path = '/api/networks';
+    const path = '/api/v1/networks';
     const cached = swrGet<Network[]>(path);
     if (cached && networks.length === 0) networks = cached;
     try {
@@ -53,7 +53,7 @@
 
   async function fetchDefaultNetwork() {
     try {
-      const record = await api.get<{ network_id: string }>('/api/networks/default', tok(), pid());
+      const record = await api.get<{ network_id: string }>('/api/v1/networks/default', tok(), pid());
       defaultNetworkId = record.network_id;
     } catch { defaultNetworkId = null; }
   }
@@ -61,7 +61,7 @@
   async function setAsDefault(networkId: string) {
     settingDefault = networkId;
     try {
-      await api.put('/api/networks/default', { network_id: networkId }, tok(), pid());
+      await api.put('/api/v1/networks/default', { network_id: networkId }, tok(), pid());
       defaultNetworkId = networkId;
     } catch (e) {
       toast.error('기본 네트워크 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -70,7 +70,7 @@
 
   async function fetchFloatingIps() {
     try {
-      floatingIps = await api.get<FloatingIp[]>('/api/networks/floating-ips', tok(), pid());
+      floatingIps = await api.get<FloatingIp[]>('/api/v1/networks/floating-ips', tok(), pid());
     } catch { /* 오류 무시 */ }
   }
 
@@ -83,7 +83,7 @@
   async function createNetwork(body: Record<string, unknown>): Promise<boolean> {
     creating = true; createError = '';
     try {
-      await apiMut('네트워크 생성', () => api.post('/api/networks', body, tok(), pid()));
+      await apiMut('네트워크 생성', () => api.post('/api/v1/networks', body, tok(), pid()));
       await fetchNetworks();
       return true;
     } catch (e) {
@@ -97,7 +97,7 @@
     if (!await confirmDialog(`네트워크 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await apiMut('네트워크 삭제', () => api.delete(`/api/networks/${id}`, tok(), pid()));
+      await apiMut('네트워크 삭제', () => api.delete(`/api/v1/networks/${id}`, tok(), pid()));
       await fetchNetworks();
     } catch { /* error toast shown by apiMut */ }
     finally { deleting = null; }
@@ -173,7 +173,7 @@
 {#if selectedNetworkId}
   <SlidePanel onClose={closeNetworkPanel} width="w-full md:w-[60vw] max-w-2xl">
     <NetworkDetailPanel
-      networkId={selectedNetworkId} apiBase="/api/networks"
+      networkId={selectedNetworkId} apiBase="/api/v1/networks"
       onClose={closeNetworkPanel} token={tok()} projectId={pid()}
     />
   </SlidePanel>

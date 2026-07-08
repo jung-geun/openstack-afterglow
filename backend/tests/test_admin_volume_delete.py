@@ -1,6 +1,6 @@
 """admin 볼륨 삭제 엔드포인트 — force-delete 폴백 분기 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from openstack.exceptions import ResourceNotFound
@@ -19,7 +19,7 @@ async def test_delete_volume_available_uses_normal_delete(admin_client, mock_con
     mock_conn.block_storage.get_volume.return_value = _make_volume("available")
 
     with patch("app.services.cinder.force_delete_volume") as mock_force:
-        resp = await admin_client.delete("/api/admin/volumes/vol-1")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-1")
 
     assert resp.status_code == 204
     mock_conn.block_storage.delete_volume.assert_called_once_with("vol-1", ignore_missing=True)
@@ -35,7 +35,7 @@ async def test_delete_volume_error_deleting_uses_reset_then_delete(admin_client,
         patch("app.services.cinder.reset_volume_status") as mock_reset,
         patch("app.services.cinder.force_delete_volume") as mock_force,
     ):
-        resp = await admin_client.delete("/api/admin/volumes/vol-2")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-2")
 
     assert resp.status_code == 204
     mock_reset.assert_called_once()
@@ -52,7 +52,7 @@ async def test_delete_volume_error_uses_reset_then_delete(admin_client, mock_con
         patch("app.services.cinder.reset_volume_status"),
         patch("app.services.cinder.force_delete_volume") as mock_force,
     ):
-        resp = await admin_client.delete("/api/admin/volumes/vol-3")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-3")
 
     assert resp.status_code == 204
     mock_conn.block_storage.delete_volume.assert_called_once()
@@ -71,7 +71,7 @@ async def test_delete_volume_delete_fails_falls_back_to_force(admin_client, mock
         patch("app.services.cinder.reset_volume_status"),
         patch("app.services.cinder.force_delete_volume") as mock_force,
     ):
-        resp = await admin_client.delete("/api/admin/volumes/vol-fb")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-fb")
 
     assert resp.status_code == 204
     mock_force.assert_called_once()
@@ -83,7 +83,7 @@ async def test_delete_volume_already_gone_returns_204(admin_client, mock_conn):
     mock_conn.block_storage.get_volume.side_effect = ResourceNotFound()
 
     with patch("app.services.cinder.force_delete_volume") as mock_force:
-        resp = await admin_client.delete("/api/admin/volumes/vol-gone")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-gone")
 
     assert resp.status_code == 204
     mock_conn.block_storage.delete_volume.assert_not_called()
@@ -99,7 +99,7 @@ async def test_delete_volume_deleting_uses_reset_then_delete(admin_client, mock_
         patch("app.services.cinder.reset_volume_status") as mock_reset,
         patch("app.services.cinder.force_delete_volume") as mock_force,
     ):
-        resp = await admin_client.delete("/api/admin/volumes/vol-stuck")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-stuck")
 
     assert resp.status_code == 204
     mock_reset.assert_called_once()
@@ -116,7 +116,7 @@ async def test_delete_volume_in_use_returns_400(admin_client, mock_conn):
     mock_conn.block_storage.delete_volume.side_effect = HttpException(http_status=400, message="Invalid volume")
 
     with patch("app.services.cinder.force_delete_volume") as mock_force:
-        resp = await admin_client.delete("/api/admin/volumes/vol-attached")
+        resp = await admin_client.delete("/api/v1/admin/volumes/vol-attached")
 
     assert resp.status_code == 400
     mock_force.assert_not_called()
@@ -134,7 +134,7 @@ async def test_force_delete_normal_status_succeeds(admin_client, mock_conn):
         patch("app.services.cinder.reset_volume_status"),
         patch("app.services.cinder.force_delete_volume") as mock_force,
     ):
-        resp = await admin_client.post("/api/admin/volumes/vol-x/force-delete")
+        resp = await admin_client.post("/api/v1/admin/volumes/vol-x/force-delete")
 
     assert resp.status_code == 204
     mock_conn.block_storage.delete_volume.assert_called_once()
@@ -146,7 +146,7 @@ async def test_force_delete_attached_returns_409(admin_client, mock_conn):
     """attached 볼륨은 강제 삭제 시 409를 반환한다."""
     mock_conn.block_storage.get_volume.return_value = _make_volume("in-use", attachments=[{"id": "a"}])
 
-    resp = await admin_client.post("/api/admin/volumes/vol-att/force-delete")
+    resp = await admin_client.post("/api/v1/admin/volumes/vol-att/force-delete")
 
     assert resp.status_code == 409
 
@@ -156,7 +156,7 @@ async def test_force_delete_already_gone_returns_204(admin_client, mock_conn):
     """이미 없는 볼륨에 force-delete 요청 시 204로 idempotent 처리된다."""
     mock_conn.block_storage.get_volume.side_effect = ResourceNotFound()
 
-    resp = await admin_client.post("/api/admin/volumes/vol-gone/force-delete")
+    resp = await admin_client.post("/api/v1/admin/volumes/vol-gone/force-delete")
 
     assert resp.status_code == 204
 
@@ -164,6 +164,93 @@ async def test_force_delete_already_gone_returns_204(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_force_delete_volume_requires_admin(non_admin_client):
     """비admin 사용자는 force-delete 엔드포인트에 접근할 수 없다."""
-    resp = await non_admin_client.post("/api/admin/volumes/vol-1/force-delete")
+    resp = await non_admin_client.post("/api/v1/admin/volumes/vol-1/force-delete")
 
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_get_delete_diagnostics(non_admin_client):
+    """비admin 사용자는 delete-diagnostics 엔드포인트에 접근할 수 없다."""
+    resp = await non_admin_client.get("/api/v1/admin/volumes/vol-1/delete-diagnostics")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_recover_delete(non_admin_client):
+    """비admin 사용자는 recover-delete 엔드포인트에 접근할 수 없다."""
+    resp = await non_admin_client.post("/api/v1/admin/volumes/vol-1/recover-delete")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_recover_delete_volume_records_activity_and_invalidates(admin_client, mock_conn):
+    """복구 성공 시 activity, 캐시 무효화, mutation count bump 를 함께 수행한다."""
+    from app.models.storage import (
+        VolumeDeleteDiagnostic,
+        VolumeDeleteRecoveryResult,
+        VolumeDeleteRecoveryStep,
+    )
+
+    diagnostic = VolumeDeleteDiagnostic(
+        volume_id="vol-1",
+        status="error_deleting",
+        project_id="proj-abc",
+        attachments=[],
+        dependencies=[],
+        messages=[],
+        root_cause_code="recoverable_error_deleting",
+        confidence="high",
+        summary="recoverable",
+        evidence=["status=error_deleting"],
+        recommended_action="recover now",
+        recovery_available=True,
+        force_delete_available=True,
+    )
+    result = VolumeDeleteRecoveryResult(
+        volume_id="vol-1",
+        status="deleted",
+        verified_deleted=True,
+        final_status=None,
+        diagnostic=diagnostic,
+        steps=[
+            VolumeDeleteRecoveryStep(action="diagnose", status="success", detail="recoverable_error_deleting"),
+            VolumeDeleteRecoveryStep(action="reset_status", status="success", detail="error/detached"),
+        ],
+    )
+
+    with (
+        patch(
+            "app.api.identity.admin.volume_delete_recovery.recover_delete_volume", return_value=result
+        ) as recover_mock,
+        patch("app.api.identity.admin.invalidate", new_callable=AsyncMock) as invalidate_mock,
+        patch(
+            "app.api.identity.admin.cache_invalidation.invalidate_mutation_count",
+            new_callable=AsyncMock,
+        ) as mutation_mock,
+        patch("app.api.identity.admin.rec", new_callable=AsyncMock) as rec_mock,
+    ):
+        resp = await admin_client.post("/api/v1/admin/volumes/vol-1/recover-delete")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deleted"
+    recover_mock.assert_called_once_with(mock_conn, "vol-1", ANY, verify_timeout_seconds=30)
+    assert invalidate_mock.await_count == 4
+    invalidate_mock.assert_any_await("afterglow:cinder:proj-abc:volumes*")
+    invalidate_mock.assert_any_await("afterglow:cinder:proj-abc:vol_attach:*")
+    invalidate_mock.assert_any_await("afterglow:admin:overview*")
+    invalidate_mock.assert_any_await("afterglow:admin:monitoring*")
+    mutation_mock.assert_awaited_once_with("cinder", "proj-abc")
+    rec_mock.assert_awaited_once()
+    rec_kwargs = rec_mock.await_args.kwargs
+    assert rec_kwargs["resource_type"] == "volume"
+    assert rec_kwargs["action"] == "volume.recover_delete"
+    assert rec_kwargs["status"] == "success"
+    assert rec_kwargs["resource_id"] == "vol-1"
+    assert rec_kwargs["error_message"] is None
+    assert rec_kwargs["extra"]["result"] == "deleted"
+    assert rec_kwargs["extra"]["verified_deleted"] is True
+    assert rec_kwargs["extra"]["root_cause"] == "recoverable_error_deleting"
+    assert rec_kwargs["extra"]["steps"][0]["action"] == "diagnose"

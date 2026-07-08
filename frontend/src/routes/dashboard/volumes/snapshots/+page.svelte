@@ -12,6 +12,8 @@
   import VolumeSnapshotsTable from '$lib/components/volume/snapshots/VolumeSnapshotsTable.svelte';
   import VolumeSnapshotsEmptyState from '$lib/components/volume/snapshots/VolumeSnapshotsEmptyState.svelte';
   import { toast } from '$lib/stores/toast';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
   let snapshots = $state<VolumeSnapshot[]>([]);
   let volumes = $state<Volume[]>([]);
@@ -20,10 +22,23 @@
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
+  const volumeSnapshotsEnabled = $derived($betaFeatures.volumeSnapshots);
+
+  function clearSnapshotsState() {
+    snapshots = [];
+    volumes = [];
+    error = '';
+  }
+
 
   async function fetchSnapshots() {
+    if (!volumeSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     try {
-      snapshots = await api.get<VolumeSnapshot[]>('/api/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      snapshots = await api.get<VolumeSnapshot[]>('/api/v1/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -33,14 +48,19 @@
   }
 
   async function fetchVolumes() {
+    if (!volumeSnapshotsEnabled) {
+      volumes = [];
+      return;
+    }
     try {
-      volumes = await api.get<Volume[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      volumes = await api.get<Volume[]>('/api/v1/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
     } catch { /* ignore */ }
   }
 
   async function createSnapshot(form: { volume_id: string; name: string; description: string; force: boolean }): Promise<string | true> {
+    if (!volumeSnapshotsEnabled) return '볼륨 스냅샷 베타 기능이 꺼져 있습니다.';
     try {
-      await api.post('/api/volume-snapshots', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/v1/volume-snapshots', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchSnapshots();
       return true;
     } catch (e) {
@@ -49,10 +69,11 @@
   }
 
   async function deleteSnapshot(id: string, name: string) {
+    if (!volumeSnapshotsEnabled) return;
     if (!await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchSnapshots();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -75,11 +96,21 @@
 
   $effect(() => {
     const pid = $auth.projectId;
+    if (!volumeSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     if (!pid) return;
     untrack(() => { fetchSnapshots(); fetchVolumes(); });
   });
 </script>
 
+{#if !volumeSnapshotsEnabled}
+  <div class="p-4 md:p-8">
+    <BetaFeatureGate title="볼륨 스냅샷은 베타 기능입니다" />
+  </div>
+{:else}
 <VolumeSnapshotCreateModal bind:open={showModal} {volumes} onCreate={createSnapshot} />
 
 <div class="p-4 md:p-8">
@@ -106,3 +137,4 @@
     <VolumeSnapshotsTable {snapshots} {deleting} onDelete={deleteSnapshot} />
   {/if}
 </div>
+{/if}

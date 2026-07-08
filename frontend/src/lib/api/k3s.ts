@@ -8,7 +8,7 @@ export async function listNodeInterfaces(
 	projectId: string | undefined
 ): Promise<K3sInterfaceInfo[]> {
 	return api.get<K3sInterfaceInfo[]>(
-		`/api/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces`,
+		`/api/v1/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces`,
 		token,
 		projectId
 	);
@@ -22,7 +22,7 @@ export async function attachNodeInterface(
 	projectId: string | undefined
 ): Promise<K3sInterfaceInfo> {
 	return api.post<K3sInterfaceInfo>(
-		`/api/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces`,
+		`/api/v1/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces`,
 		{ net_id: netId },
 		token,
 		projectId
@@ -37,7 +37,7 @@ export async function detachNodeInterface(
 	projectId: string | undefined
 ): Promise<void> {
 	return api.delete<void>(
-		`/api/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces/${portId}`,
+		`/api/v1/k3s/clusters/${clusterId}/nodes/${vmId}/interfaces/${portId}`,
 		token,
 		projectId
 	);

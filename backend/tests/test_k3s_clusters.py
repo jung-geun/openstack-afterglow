@@ -31,7 +31,7 @@ def _make_cluster_record():
 @pytest.mark.asyncio
 async def test_list_k3s_clusters_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters")
+        resp = await ac.get("/api/v1/k3s/clusters")
     assert resp.status_code == 401
 
 
@@ -39,14 +39,14 @@ async def test_list_k3s_clusters_unauthenticated():
 async def test_list_k3s_clusters_success(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.list_clusters = AsyncMock(return_value=[_make_cluster_record()])
-        resp = await client.get("/api/k3s/clusters")
+        resp = await client.get("/api/v1/k3s/clusters")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_get_k3s_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/k3s-1")
+        resp = await ac.get("/api/v1/k3s/clusters/k3s-1")
     assert resp.status_code == 401
 
 
@@ -54,7 +54,7 @@ async def test_get_k3s_cluster_unauthenticated():
 async def test_get_k3s_cluster_success(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
-        resp = await client.get("/api/k3s/clusters/k3s-1")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1")
     assert resp.status_code == 200
 
 
@@ -62,14 +62,14 @@ async def test_get_k3s_cluster_success(client):
 async def test_get_k3s_cluster_not_found(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/nonexistent")
+        resp = await client.get("/api/v1/k3s/clusters/nonexistent")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_download_kubeconfig_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await ac.get("/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 401
 
 
@@ -78,7 +78,7 @@ async def test_download_kubeconfig_not_ready(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 404
 
 
@@ -87,7 +87,7 @@ async def test_download_kubeconfig_success(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=b"apiVersion: v1\n...")
-        resp = await client.get("/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 200
 
 
@@ -97,7 +97,7 @@ async def test_head_kubeconfig_ready(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=b"apiVersion: v1\n...")
-        resp = await client.request("HEAD", "/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.request("HEAD", "/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 200
     assert resp.content == b""  # HEAD는 body 없어야 함
 
@@ -108,14 +108,14 @@ async def test_head_kubeconfig_not_ready(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=None)
-        resp = await client.request("HEAD", "/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.request("HEAD", "/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_scale_k3s_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.patch("/api/k3s/clusters/k3s-1/scale", json={"agent_count": 2})
+        resp = await ac.patch("/api/v1/k3s/clusters/k3s-1/scale", json={"agent_count": 2})
     assert resp.status_code == 401
 
 
@@ -127,14 +127,14 @@ async def test_scale_k3s_cluster_success(client):
         mock_db.update_cluster_status = AsyncMock()
         with patch("app.api.k3s.clusters.asyncio") as mock_asyncio:
             mock_asyncio.create_task = MagicMock()
-            resp = await client.patch("/api/k3s/clusters/k3s-1/scale", json={"agent_count": 0})
+            resp = await client.patch("/api/v1/k3s/clusters/k3s-1/scale", json={"agent_count": 0})
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_delete_k3s_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/k3s/clusters/k3s-1")
+        resp = await ac.delete("/api/v1/k3s/clusters/k3s-1")
     assert resp.status_code == 401
 
 
@@ -142,7 +142,7 @@ async def test_delete_k3s_cluster_unauthenticated():
 async def test_delete_k3s_cluster_not_found(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=None)
-        resp = await client.delete("/api/k3s/clusters/nonexistent")
+        resp = await client.delete("/api/v1/k3s/clusters/nonexistent")
     assert resp.status_code == 404
 
 
@@ -172,7 +172,7 @@ async def test_delete_k3s_cluster_cleans_occm_lbs(client):
                     mock_octavia.delete_load_balancer = MagicMock()
                     with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                         mock_kube.delete_k8s_nodes = AsyncMock()
-                        resp = await client.delete("/api/k3s/clusters/k3s-1")
+                        resp = await client.delete("/api/v1/k3s/clusters/k3s-1")
 
     assert resp.status_code == 204
     # 클러스터 이름 prefix에 해당하는 LB 2개만 삭제되어야 함
@@ -200,7 +200,7 @@ async def test_delete_k3s_cluster_lb_cleanup_failure_continues(client):
                     mock_octavia.list_load_balancers = MagicMock(side_effect=Exception("Octavia unavailable"))
                     with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                         mock_kube.delete_k8s_nodes = AsyncMock()
-                        resp = await client.delete("/api/k3s/clusters/k3s-1")
+                        resp = await client.delete("/api/v1/k3s/clusters/k3s-1")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -225,7 +225,7 @@ async def test_delete_k3s_cluster_no_occm_skips_lb_cleanup(client):
                     mock_octavia.list_load_balancers = MagicMock()
                     with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                         mock_kube.delete_k8s_nodes = AsyncMock()
-                        resp = await client.delete("/api/k3s/clusters/k3s-1")
+                        resp = await client.delete("/api/v1/k3s/clusters/k3s-1")
 
     assert resp.status_code == 204
     mock_octavia.list_load_balancers.assert_not_called()
@@ -254,7 +254,7 @@ async def test_delete_k3s_cluster_deletes_k8s_nodes(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/v1/k3s/clusters/k3s-1")
 
     assert resp.status_code == 204
     mock_kube.delete_k8s_nodes.assert_called_once()
@@ -281,7 +281,7 @@ async def test_delete_k3s_cluster_continues_if_k8s_node_delete_fails(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock(side_effect=Exception("K8s API unreachable"))
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/v1/k3s/clusters/k3s-1")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -307,7 +307,7 @@ async def test_delete_k3s_cluster_vm_already_deleted(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-vm-already-del")
+                    resp = await client.delete("/api/v1/k3s/clusters/k3s-vm-already-del")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -333,7 +333,7 @@ async def test_delete_k3s_cluster_vm_wait_timeout(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-vm-wait-timeout")
+                    resp = await client.delete("/api/v1/k3s/clusters/k3s-vm-wait-timeout")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -580,7 +580,7 @@ async def test_list_k3s_clusters_db_operational_error_returns_empty(client):
         patch("app.api.k3s.clusters.mark_db_unhealthy") as mock_mark,
     ):
         mock_db.list_clusters = AsyncMock(side_effect=OperationalError("lost connection", None, None))
-        resp = await client.get("/api/k3s/clusters")
+        resp = await client.get("/api/v1/k3s/clusters")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -597,7 +597,7 @@ async def test_list_k3s_clusters_db_interface_error_returns_empty(client):
         patch("app.api.k3s.clusters.mark_db_unhealthy") as mock_mark,
     ):
         mock_db.list_clusters = AsyncMock(side_effect=InterfaceError("connection reset", None, None))
-        resp = await client.get("/api/k3s/clusters")
+        resp = await client.get("/api/v1/k3s/clusters")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -627,7 +627,7 @@ async def _consume_sse(resp) -> list[dict]:
 async def test_delete_k3s_cluster_async_unauthenticated():
     """인증 없이 호출하면 401이 반환된다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/k3s/clusters/k3s-1/delete-async")
+        resp = await ac.post("/api/v1/k3s/clusters/k3s-1/delete-async")
     assert resp.status_code == 401
 
 
@@ -636,7 +636,7 @@ async def test_delete_k3s_cluster_async_not_found(client):
     """존재하지 않는 cluster_id이면 404가 반환된다 (SSE 스트림 시작 전)."""
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=None)
-        resp = await client.post("/api/k3s/clusters/nonexistent/delete-async")
+        resp = await client.post("/api/v1/k3s/clusters/nonexistent/delete-async")
     assert resp.status_code == 404
 
 
@@ -664,7 +664,7 @@ async def test_delete_k3s_cluster_async_happy_path(client):
                     with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                         mock_kube.delete_k8s_nodes = AsyncMock()
                         with patch("app.api.k3s.clusters.keystone"):
-                            async with client.stream("POST", "/api/k3s/clusters/k3s-async-1/delete-async") as resp:
+                            async with client.stream("POST", "/api/v1/k3s/clusters/k3s-async-1/delete-async") as resp:
                                 assert resp.status_code == 200
                                 msgs = await _consume_sse(resp)
 
@@ -701,7 +701,7 @@ async def test_delete_k3s_cluster_async_partial_failure_continues(client):
                         mock_kube.delete_k8s_nodes = AsyncMock()
                         with patch("app.api.k3s.clusters.keystone"):
                             async with client.stream(
-                                "POST", "/api/k3s/clusters/k3s-async-partial/delete-async"
+                                "POST", "/api/v1/k3s/clusters/k3s-async-partial/delete-async"
                             ) as resp:
                                 assert resp.status_code == 200
                                 msgs = await _consume_sse(resp)
@@ -721,7 +721,7 @@ async def test_delete_k3s_cluster_async_already_deleted(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
         mock_db.get_cluster = AsyncMock(return_value=cluster)
         mock_db.delete_cluster_record = AsyncMock()
-        async with client.stream("POST", "/api/k3s/clusters/k3s-async-already/delete-async") as resp:
+        async with client.stream("POST", "/api/v1/k3s/clusters/k3s-async-already/delete-async") as resp:
             assert resp.status_code == 200
             msgs = await _consume_sse(resp)
 
@@ -742,7 +742,7 @@ async def test_create_fcos_cluster_503_when_fcos_image_not_configured(client):
     mock_s.k3s_fcos_image_id = ""  # 미설정
     with patch("app.api.k3s.clusters.get_settings", return_value=mock_s):
         resp = await client.post(
-            "/api/k3s/clusters/async",
+            "/api/v1/k3s/clusters/async",
             json={"name": "test-fcos", "os_type": "fcos"},
         )
     # 전역 에러 핸들러가 5xx detail을 sanitize하므로 status code만 검증
@@ -758,7 +758,7 @@ async def test_fcos_503_guard_does_not_fire_for_ubuntu(client):
     mock_s.k3s_server_flavor_id = ""
     with patch("app.api.k3s.clusters.get_settings", return_value=mock_s):
         resp = await client.post(
-            "/api/k3s/clusters/async",
+            "/api/v1/k3s/clusters/async",
             json={"name": "test-ubuntu", "os_type": "ubuntu"},
         )
     # ubuntu는 다른 503(이미지/플레이버 미설정)이 발생할 수 있지만
@@ -777,7 +777,7 @@ async def test_delete_k3s_cluster_async_fatal_failure(client):
         mock_db.get_cluster = AsyncMock(return_value=cluster)
         mock_db.update_cluster_status = AsyncMock(side_effect=Exception("DB 연결 실패"))
         mock_db.delete_cluster_record = AsyncMock()
-        async with client.stream("POST", "/api/k3s/clusters/k3s-async-fatal/delete-async") as resp:
+        async with client.stream("POST", "/api/v1/k3s/clusters/k3s-async-fatal/delete-async") as resp:
             assert resp.status_code == 200
             msgs = await _consume_sse(resp)
 

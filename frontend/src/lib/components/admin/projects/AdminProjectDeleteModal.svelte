@@ -36,7 +36,7 @@
 		deleting = true;
 		deleteError = '';
 		try {
-			await api.delete(`/api/admin/projects/${project.id}`, token, projectId);
+			await api.delete(`/api/v1/admin/projects/${project.id}`, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

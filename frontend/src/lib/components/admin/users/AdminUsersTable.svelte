@@ -23,7 +23,6 @@
   } = $props();
 </script>
 
-<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
@@ -60,4 +59,3 @@
     {onPrev}
     {onNext}
   />
-</div>

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Button from './Button.svelte';
+
 	let {
 		page,
 		totalPages = null,
@@ -22,23 +24,37 @@
 	} = $props();
 </script>
 
-<div class="flex items-center justify-between mt-3 text-xs text-gray-500">
-	<button
-		disabled={!hasPrev}
-		onclick={onPrev}
-		class="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>← 이전</button>
-	<div class="flex items-center gap-2">
+<div class="pagination">
+	<Button disabled={!hasPrev} onclick={onPrev} variant="subtle" size="sm">← 이전</Button>
+	<div class="pagination-meta">
 		{#if total != null && pageSize != null}
 			<span>{total}개 중 {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)}개{note ? ' ' + note : ''}</span>
 		{:else if note}
 			<span>{note}</span>
 		{/if}
-		<span class="text-gray-400 font-medium">{totalPages != null ? `${page} / ${totalPages}` : `페이지 ${page}`}</span>
+		<span class="pagination-page">{totalPages != null ? `${page} / ${totalPages}` : `페이지 ${page}`}</span>
 	</div>
-	<button
-		disabled={!hasNext}
-		onclick={onNext}
-		class="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>다음 →</button>
+	<Button disabled={!hasNext} onclick={onNext} variant="subtle" size="sm">다음 →</Button>
 </div>
+
+<style>
+	.pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 0.75rem;
+		font-size: 0.75rem;
+		color: var(--color-ink-3);
+	}
+	.pagination-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+	.pagination-page {
+		font-weight: 500;
+		color: var(--color-ink-2);
+	}
+</style>

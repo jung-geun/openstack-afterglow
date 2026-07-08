@@ -166,6 +166,17 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
     users_db_id = config.get("users_database_id", "")
     hypervisors_db_id = config.get("hypervisors_database_id", "")
     gpu_spec_db_id = config.get("gpu_spec_database_id", "")
+    from app.database import is_db_available
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning(
+                "Notion 테스트: GPU 카탈로그 DB overlay 갱신 실패 — 기존 device map으로 진행", exc_info=True
+            )
 
     from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
 
@@ -212,54 +223,9 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         _logger.warning("Notion 테스트: 데이터 수집 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="OpenStack 데이터 수집 실패")
 
-    # 4. GPU 사용량 집계 (하이퍼바이저 기반 가용량 + 인스턴스 기반 사용량)
+    # 4. GPU 사용량 집계 (하이퍼바이저 기반 가용량 + 할당 상태 인스턴스 기반 사용량)
     alias_to_device_name = build_alias_to_device_name_map()
-    usage_by_gpu: dict[str, dict] = {}
-
-    # 4a. 하이퍼바이저별 GPU 가용량 집계
-    for h in hypervisors:
-        for g in h.get("gpu_groups", []):
-            device_name = g.get("device_name", "")
-            total = g.get("total", 0)
-            if not device_name:
-                continue
-            if device_name not in usage_by_gpu:
-                usage_by_gpu[device_name] = {
-                    "total_cpu_used": 0,
-                    "total_ram_used": 0,
-                    "total_gpu_used": 0,
-                    "instance_count": 0,
-                    "gpu_available": 0,
-                    "gpu_used": 0,
-                    "gpu_remaining": 0,
-                }
-            usage_by_gpu[device_name]["gpu_available"] += total
-
-    # 4b. 인스턴스별 GPU 사용량 집계
-    for inst in instances:
-        gpu_display = inst.get("gpu_name", "")
-        if not gpu_display or not inst.get("gpu_count"):
-            continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
-        if canonical not in usage_by_gpu:
-            usage_by_gpu[canonical] = {
-                "total_cpu_used": 0,
-                "total_ram_used": 0,
-                "total_gpu_used": 0,
-                "instance_count": 0,
-                "gpu_available": 0,
-                "gpu_used": 0,
-                "gpu_remaining": 0,
-            }
-        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
-        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
-        usage_by_gpu[canonical]["instance_count"] += 1
-        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
-
-    # 4c. 남은 GPU 계산
-    for u in usage_by_gpu.values():
-        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
+    usage_by_gpu = notion_sync.build_gpu_usage_by_gpu(hypervisors, instances, alias_to_device_name)
 
     # 5. GPU spec DB에 집계 데이터 업데이트
     if gpu_spec_db_id:
@@ -421,6 +387,18 @@ async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
     users_db_id = target.get("users_database_id", "")
     hypervisors_db_id = target.get("hypervisors_database_id", "")
     gpu_spec_db_id = target.get("gpu_spec_database_id", "")
+    from app.database import is_db_available
+    from app.services.gpu_inventory import resolve_alias_to_device_name
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning(
+                "Notion target 테스트: GPU 카탈로그 DB overlay 갱신 실패 — 기존 device map으로 진행", exc_info=True
+            )
 
     from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
 
@@ -481,7 +459,7 @@ async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
         gpu_display = inst.get("gpu_name", "")
         if not gpu_display or not inst.get("gpu_count"):
             continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
+        canonical = resolve_alias_to_device_name(gpu_display, alias_to_device_name) or gpu_display
         if canonical not in usage_by_gpu:
             usage_by_gpu[canonical] = {
                 "total_cpu_used": 0,

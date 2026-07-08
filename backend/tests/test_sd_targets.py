@@ -49,7 +49,7 @@ async def test_sd_targets_valid_token_returns_targets(client, mock_conn):
         patch("app.api.common.sd_targets.get_settings", return_value=fake_settings),
     ):
         resp = await client.get(
-            "/api/sd/prometheus/targets",
+            "/api/v1/sd/prometheus/targets",
             headers={"Authorization": "Bearer secret-token"},
         )
 
@@ -71,7 +71,7 @@ async def test_sd_targets_invalid_token_returns_401(client, mock_conn):
 
     with patch("app.api.common.sd_targets.get_settings", return_value=fake_settings):
         resp = await client.get(
-            "/api/sd/prometheus/targets",
+            "/api/v1/sd/prometheus/targets",
             headers={"Authorization": "Bearer wrong-token"},
         )
 
@@ -85,7 +85,7 @@ async def test_sd_targets_missing_token_returns_401(client, mock_conn):
     fake_settings.monitoring_sd_token = "correct-token"
 
     with patch("app.api.common.sd_targets.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/sd/prometheus/targets")
+        resp = await client.get("/api/v1/sd/prometheus/targets")
 
     assert resp.status_code == 401
 
@@ -104,7 +104,7 @@ async def test_sd_targets_gpu_instance_produces_two_entries(client, mock_conn):
         patch("app.api.common.sd_targets.get_settings", return_value=fake_settings),
     ):
         resp = await client.get(
-            "/api/sd/prometheus/targets",
+            "/api/v1/sd/prometheus/targets",
             headers={"Authorization": "Bearer tok"},
         )
 
@@ -132,7 +132,7 @@ async def test_sd_targets_uses_cached_call(client, mock_conn):
         ) as mock_cached,
     ):
         resp = await client.get(
-            "/api/sd/prometheus/targets",
+            "/api/v1/sd/prometheus/targets",
             headers={"Authorization": "Bearer tok"},
         )
 

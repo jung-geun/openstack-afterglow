@@ -55,7 +55,7 @@
 			loadAccess();
 			if (allProjects.length === 0) {
 				api
-					.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId)
+					.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', token, projectId)
 					.then((r) => (allProjects = r))
 					.catch(() => (allProjects = []));
 			}
@@ -66,7 +66,7 @@
 		accessLoading = true;
 		try {
 			accessList = await api.get<FlavorAccess[]>(
-				`/api/admin/flavors/${flavor.id}/access`,
+				`/api/v1/admin/flavors/${flavor.id}/access`,
 				token,
 				projectId,
 			);
@@ -83,7 +83,7 @@
 		addingId = pid;
 		try {
 			await api.post(
-				`/api/admin/flavors/${flavor.id}/access`,
+				`/api/v1/admin/flavors/${flavor.id}/access`,
 				{ project_id: pid },
 				token,
 				projectId,
@@ -103,7 +103,7 @@
 	async function removeAccess(pid: string) {
 		try {
 			await api.delete(
-				`/api/admin/flavors/${flavor.id}/access/${pid}`,
+				`/api/v1/admin/flavors/${flavor.id}/access/${pid}`,
 				token,
 				projectId,
 			);

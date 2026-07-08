@@ -212,4 +212,60 @@ class TestOidcNonce:
                                 result = await oidc_mod.exchange_code("auth-code", "some-state")
 
         assert result["project_id"] == "proj-1"
+        assert result["default_project_id"] == "proj-1"
         assert result["token"] == "scoped-token"
+
+    @pytest.mark.asyncio
+    async def test_exchange_code_omits_inaccessible_default_project_id(self):
+        """접근 불가능한 default project는 응답에서 제거하고 첫 접근 가능 프로젝트로 scope한다."""
+        import base64
+        import json as _json
+
+        stored_nonce = "correct-nonce-abc"
+
+        payload = {"nonce": stored_nonce, "sub": "user123"}
+        payload_b64 = base64.urlsafe_b64encode(_json.dumps(payload).encode()).decode().rstrip("=")
+        fake_id_token = f"header.{payload_b64}.signature"
+
+        mock_r = AsyncMock()
+        mock_r.get.return_value = stored_nonce.encode()
+        mock_r.delete = AsyncMock()
+
+        import app.services.gitlab_oidc as oidc_mod
+
+        fed_result = {
+            "token": "unscoped-token",
+            "user": {"id": "user-id-1"},
+        }
+        scoped_result = {
+            "token": "scoped-token",
+            "project_id": "proj-1",
+            "project_name": "My Project",
+            "user_id": "user-id-1",
+            "username": "testuser",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "roles": ["member"],
+        }
+        scope_token = AsyncMock(return_value=scoped_result)
+
+        with patch("app.services.gitlab_oidc._get_redis", return_value=mock_r):
+            with patch.object(
+                oidc_mod,
+                "_exchange_gitlab_code",
+                return_value={
+                    "access_token": "at",
+                    "id_token": fake_id_token,
+                },
+            ):
+                with patch.object(oidc_mod, "_federated_auth", return_value=fed_result):
+                    with patch.object(
+                        oidc_mod,
+                        "_list_projects_for_token",
+                        return_value=[{"id": "proj-1"}, {"id": "proj-2"}],
+                    ):
+                        with patch.object(oidc_mod, "_get_user_default_project_id", return_value="missing-proj"):
+                            with patch.object(oidc_mod, "_scope_token", scope_token):
+                                result = await oidc_mod.exchange_code("auth-code", "some-state")
+
+        scope_token.assert_awaited_once_with("unscoped-token", "proj-1")
+        assert result["default_project_id"] == ""

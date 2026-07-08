@@ -42,7 +42,7 @@
 		let marker: string | null = null;
 		try {
 			for (let i = 0; i < 5; i++) {
-				let url = '/api/admin/users?limit=100';
+				let url = '/api/v1/admin/users?limit=100';
 				if (marker) url += `&marker=${marker}`;
 				const res = await api.get<{ items: User[]; next_marker: string | null }>(url, token, projectId);
 				collected.push(...res.items);
@@ -61,7 +61,7 @@
 		granting = true;
 		grantError = '';
 		try {
-			await api.post('/api/admin/identity/system-roles/grant', { user_id: user.id }, token, projectId);
+			await api.post('/api/v1/admin/identity/system-roles/grant', { user_id: user.id }, token, projectId);
 			onGranted();
 			onClose();
 		} catch (e) {

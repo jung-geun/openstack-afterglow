@@ -64,6 +64,19 @@ def test_cephfs_includes_ceph_common_package():
     assert "ceph-common" in out
 
 
+def test_shared_builder_preinstall_packages_match_cloud_init_fallbacks():
+    from app.services.cloud_init_builder import SHARED_BUILDER_IMAGE_PACKAGES, render_user_data
+
+    nfs_out = render_user_data(_FakeRecipe("NFS"), _NFS_SPEC, _TOKEN)
+    ceph_out = render_user_data(_FakeRecipe("CEPHFS"), _CEPH_SPEC, _TOKEN)
+
+    assert set(SHARED_BUILDER_IMAGE_PACKAGES) == {"curl", "nfs-common", "ceph-common"}
+    assert "curl" in nfs_out
+    assert "nfs-common" in nfs_out
+    assert "curl" in ceph_out
+    assert "ceph-common" in ceph_out
+
+
 def test_power_state_poweroff_present():
     from app.services.cloud_init_builder import render_user_data
 
@@ -162,6 +175,14 @@ def test_step_progress_marker_in_build_script():
     script = _render_run_build_sh(cmds)
     assert ".progress_80_install_torch" in script
     assert "echo torch" in script
+
+
+def test_run_build_error_trap_persists_larger_log_tail():
+    from app.services.cloud_init_builder import _render_run_build_sh
+
+    script = _render_run_build_sh([{"step": "install_numpy", "progress_pct": 80, "script": "false"}])
+    assert "tail -n 1000 /var/log/cloud-init-output.log" in script
+    assert "tail -n 200 /var/log/cloud-init-output.log" not in script
 
 
 # ---------------------------------------------------------------------------

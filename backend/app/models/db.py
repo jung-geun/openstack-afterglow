@@ -13,7 +13,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    LargeBinary,
 )
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -286,6 +288,202 @@ class LibraryBuild(Base):
 
 
 # ---------------------------------------------------------------------------
+# squashfs NFS 레이어 빌드/소비 추적
+# ---------------------------------------------------------------------------
+
+
+class LayerBuild(Base):
+    """squashfs 레이어 빌드 작업 추적 — NFS Manila share에 .sqsh 파일 생성."""
+
+    __tablename__ = "layer_builds"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    layer_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, server_default="python")
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16))
+    profile_name: Mapped[str | None] = mapped_column(VARCHAR(64))
+    pip_packages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    apt_packages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    ubuntu_base: Mapped[str] = mapped_column(
+        VARCHAR(255),
+        nullable=False,
+        default="ubuntu-24.04-server-2026-04-15",
+        server_default="ubuntu-24.04-server-2026-04-15",
+    )
+    base_image_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_name: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True)
+    base_image_checksum: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_os_hash_algo: Mapped[str | None] = mapped_column(VARCHAR(32), nullable=True)
+    base_image_os_hash_value: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_min_disk: Mapped[int | None] = mapped_column(INT, nullable=True)
+    base_image_visibility: Mapped[str | None] = mapped_column(VARCHAR(32), nullable=True)
+    base_image_owner: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    source_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    parent_artifact_id: Mapped[int | None] = mapped_column(
+        INT,
+        ForeignKey("layer_artifacts.id", name="fk_layer_builds_parent_artifact", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+    )
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+
+    # 빌더 VM 추적
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    build_token: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, unique=True)
+    console_log_excerpt: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    # queued/booting/installing/finalizing/success/failure/indeterminate
+    cloud_init_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
+
+    # 상태: queued/creating_access/creating_vm/building/verifying/complete/error/cancelled
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
+    progress_step: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class LayerConsume(Base):
+    """squashfs 레이어 소비 인스턴스 추적 — 관리자가 생성한 레이어 소비 VM."""
+
+    __tablename__ = "layer_consumes"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
+    port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    artifact_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    server_name: Mapped[str | None] = mapped_column(VARCHAR(128))
+
+    # 상태: creating/active/error
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="creating")
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LayerArtifact(Base):
+    """squashfs 레이어 빌드 성공 시 생성되는 아티팩트 레코드.
+
+    레이어별 동적 Manila NFS share 방식(per-layer-share):
+    빌드 시 자기 share를 생성하고 RW access rule로 `.sqsh`를 기록한 뒤 RO로 봉인(is_sealed=True).
+    소비 시 프로필 레이어 체인의 N개 share를 각각 RO 마운트한다.
+
+    기존 `layer_artifacts` 테이블에 행이 있는 경우 신규 컬럼을 수동 ALTER해야 한다:
+      ALTER TABLE layer_artifacts
+        ADD COLUMN parent_id INT NULL,
+        ADD COLUMN is_sealed TINYINT(1) NOT NULL DEFAULT 0,
+        ADD CONSTRAINT fk_layer_artifacts_parent
+          FOREIGN KEY (parent_id) REFERENCES layer_artifacts(id) ON DELETE SET NULL;
+    """
+
+    __tablename__ = "layer_artifacts"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    # "uv" | "python" | 기타 사용자 정의 kind
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, index=True)
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16))
+    pip_packages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    apt_packages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    ubuntu_base: Mapped[str] = mapped_column(
+        VARCHAR(255),
+        nullable=False,
+        default="ubuntu-24.04-server-2026-04-15",
+        server_default="ubuntu-24.04-server-2026-04-15",
+    )
+    base_image_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_name: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True)
+    base_image_checksum: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_os_hash_algo: Mapped[str | None] = mapped_column(VARCHAR(32), nullable=True)
+    base_image_os_hash_value: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_min_disk: Mapped[int | None] = mapped_column(INT, nullable=True)
+    base_image_visibility: Mapped[str | None] = mapped_column(VARCHAR(32), nullable=True)
+    base_image_owner: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    source_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sqsh_filename: Mapped[str] = mapped_column(VARCHAR(256), nullable=False)
+    # 이 레이어 전용 Manila NFS share ID (동적 생성, 봉인 후 RO)
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    build_id: Mapped[int | None] = mapped_column(INT, ForeignKey("layer_builds.id", ondelete="SET NULL"))
+    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    # 단일 부모 체인: child → parent → grandparent → ... → base(parent_id=NULL)
+    parent_id: Mapped[int | None] = mapped_column(
+        INT, ForeignKey("layer_artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    # 봉인 여부: 빌드 성공 후 RW rule 회수 완료 = True (소비 가능 상태)
+    is_sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class LayerImportJob(Base):
+    """GitHub Dockerfile → squashfs layer chain import job."""
+
+    __tablename__ = "layer_import_jobs"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(
+        VARCHAR(32), nullable=False, default="github_dockerfile", server_default="github_dockerfile"
+    )
+    status: Mapped[str] = mapped_column(
+        VARCHAR(32), nullable=False, default="queued", server_default="queued", index=True
+    )
+    progress_step: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
+    error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+
+    github_url: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
+    repo_owner: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    repo_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    commit_sha: Mapped[str] = mapped_column(CHAR(40), nullable=False)
+    dockerfile_path: Mapped[str] = mapped_column(
+        VARCHAR(255), nullable=False, default="Dockerfile", server_default="Dockerfile"
+    )
+
+    layer_prefix: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    ubuntu_base: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    base_image_id: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    base_image_name: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True)
+    base_image_checksum: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_os_hash_algo: Mapped[str | None] = mapped_column(VARCHAR(32), nullable=True)
+    base_image_os_hash_value: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    base_image_min_disk: Mapped[int | None] = mapped_column(INT, nullable=True)
+
+    planned_layers: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    artifact_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    build_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LayerProfile(Base):
+    """레이어 프로필 — 여러 레이어를 순서 있는 리스트로 묶어 DB에 저장.
+
+    소비 VM cloud-init에서 이 레이어 리스트를 주입해 OverlayFS를 구성한다.
+    NFS /profiles/*.conf 파일을 대체하는 DB-based source of truth.
+    """
+
+    __tablename__ = "layer_profiles"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, unique=True, index=True)
+    # JSON 배열: ["uv-latest", "python-latest"]  순서 = OverlayFS lowerdir 위→아래
+    layers: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
 # Union Mount 레이어 시스템
 # ---------------------------------------------------------------------------
 
@@ -509,6 +707,26 @@ class LibraryCatalog(Base):
     max_concurrent_mounts: Mapped[int | None] = mapped_column(INT, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class SiteBrandingAsset(Base):
+    """DB-backed public branding asset for login-page logo variants."""
+
+    __tablename__ = "site_branding_assets"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    slot: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, unique=True, index=True)
+    filename: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(INT, nullable=False)
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    content: Mapped[bytes] = mapped_column(
+        LargeBinary(length=1_048_576).with_variant(MEDIUMBLOB, "mysql", "mariadb"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
 
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)

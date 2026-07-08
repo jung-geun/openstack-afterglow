@@ -3,7 +3,7 @@
     "image": "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}",
     "restart_policy": "unless-stopped",
     "volumes": [
-        "/etc/kolla/afterglow/config.toml:/app/config.toml:ro",
+        "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro",
         "kolla_logs:/var/log/kolla/"
     ],
     "environment": {

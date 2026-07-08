@@ -19,7 +19,7 @@ export interface K3sCluster {
 	master_count?: number;
 	stampede_enabled?: boolean;
 }
-export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; }
+export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; extra_specs?: Record<string, string>; gpu_count?: number; }
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }
 export interface K3sKeypair { name: string; }
 
@@ -48,6 +48,33 @@ export interface K3sNodegroup {
 	vms: K3sNodegroupVM[];
 	created_at: string | null;
 	updated_at: string | null;
+}
+
+export interface StampedeNodegroupStatus {
+	id: string;
+	name: string;
+	role?: string;
+	flavor_id?: string | null;
+	stampede_enabled: boolean;
+	min_size: number;
+	max_size: number;
+	node_count: number;
+	in_flight?: number;
+	capacity?: Record<string, { cpu_m?: number; memory_bytes?: number; gpu?: number } | unknown>;
+	pending_assignments?: { namespace?: string; name?: string; resources?: Record<string, number> }[];
+	blocked_reasons?: { namespace?: string; name?: string; reason?: string; message?: string }[];
+	last_decision?: string;
+	last_blocked_reason?: string;
+	flavor_summary?: Record<string, unknown>;
+	quota_state?: Record<string, unknown>;
+	stampede_state: Record<string, unknown>;
+}
+
+export interface StampedeStatus {
+	cluster_id: string;
+	stampede_enabled: boolean;
+	global_stampede_enabled: boolean;
+	nodegroups: StampedeNodegroupStatus[];
 }
 
 export interface CertificateInfo {

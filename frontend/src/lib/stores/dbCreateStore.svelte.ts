@@ -40,6 +40,7 @@ interface DbCreateOpts {
 	open: () => boolean;
 	setOpen: (v: boolean) => void;
 	onCreated: () => void;
+	databaseBackupsEnabled?: () => boolean;
 }
 
 const DB_CREATE_KEY = Symbol('db-create');
@@ -61,6 +62,8 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 
 	const token = $derived(authState.token ?? undefined);
 	const projectId = $derived(authState.projectId ?? undefined);
+
+	const databaseBackupsOn = () => opts.databaseBackupsEnabled?.() ?? true;
 
 	// 메타데이터
 	let flavors = $state<DbFlavor[]>([]);
@@ -121,6 +124,10 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 
 	const canCreate = $derived(!step1Error);
 
+	$effect(() => {
+		if (!databaseBackupsOn()) restoreBackupId = '';
+	});
+
 	// 스타일 상수 (서브 컴포넌트에서 공유)
 	const inputCls =
 		'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500';
@@ -157,8 +164,8 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 		const p = projectId;
 		try {
 			[flavors, datastores] = await Promise.all([
-				api.get<DbFlavor[]>('/api/database-instances/flavors', t, p),
-				api.get<DbDatastore[]>('/api/database-instances/datastores', t, p),
+				api.get<DbFlavor[]>('/api/v1/database-instances/flavors', t, p),
+				api.get<DbDatastore[]>('/api/v1/database-instances/datastores', t, p),
 			]);
 			if (flavors.length) flavorId = flavors[0].id;
 			if (datastores.length) {
@@ -170,29 +177,31 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 		}
 		await Promise.allSettled([
 			api
-				.get<DbNetwork[]>('/api/networks', t, p)
+				.get<DbNetwork[]>('/api/v1/networks', t, p)
 				.then((v) => (networks = v.filter((n) => !n.is_external && !n.is_shared)))
 				.catch(() => {}),
 			api
-				.get<DbAZ[]>('/api/instances/availability-zones', t, p)
+				.get<DbAZ[]>('/api/v1/instances/availability-zones', t, p)
 				.then((v) => (availabilityZones = v))
 				.catch(() => {}),
 			api
-				.get<DbVolumeType[]>('/api/database-instances/volume-types', t, p)
+				.get<DbVolumeType[]>('/api/v1/database-instances/volume-types', t, p)
 				.then((v) => (volumeTypes = v))
 				.catch(() => {}),
 			api
-				.get<DbConfiguration[]>('/api/database-instances/configurations', t, p)
+				.get<DbConfiguration[]>('/api/v1/database-instances/configurations', t, p)
 				.then((v) => (configurations = v))
 				.catch(() => {}),
 			api
-				.get<DbInstance[]>('/api/database-instances', t, p)
+				.get<DbInstance[]>('/api/v1/database-instances', t, p)
 				.then((v) => (instances = v))
 				.catch(() => {}),
-			api
-				.get<DbBackup[]>('/api/database-instances/backups', t, p)
-				.then((v) => (backups = v))
-				.catch(() => {}),
+			databaseBackupsOn()
+				? api
+					.get<DbBackup[]>('/api/v1/database-instances/backups', t, p)
+					.then((v) => (backups = v))
+					.catch(() => {})
+				: Promise.resolve().then(() => { backups = []; restoreBackupId = ''; }),
 		]);
 		loading = false;
 	}
@@ -257,12 +266,12 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 			is_public: isPublic,
 			allowed_cidrs: cidrs,
 			configuration_id: configurationId || null,
-			restore_backup_id: restoreBackupId || null,
+			restore_backup_id: databaseBackupsOn() ? restoreBackupId || null : null,
 			replica_of: replicaOf || null,
 			replica_count: replicaOf && replicaCount > 1 ? replicaCount : null,
 		};
 		try {
-			await api.post('/api/database-instances', body, t, p);
+			await api.post('/api/v1/database-instances', body, t, p);
 			opts.setOpen(false);
 			opts.onCreated();
 			if (isPublic) {
@@ -300,6 +309,7 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 		get selectedDs() { return selectedDs; },
 		get step1Error() { return step1Error; },
 		get canCreate() { return canCreate; },
+		get databaseBackupsEnabled() { return databaseBackupsOn(); },
 
 		// 스타일 상수
 		inputCls,

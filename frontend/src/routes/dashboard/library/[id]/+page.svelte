@@ -30,13 +30,13 @@
     loading = true;
     error = '';
     await Promise.allSettled([
-      api.get<LayerInfo>(`/api/union/layers/${encodedId}`, token, projectId)
+      api.get<LayerInfo>(`/api/v1/union/layers/${encodedId}`, token, projectId)
         .then(v => { layer = v; loading = false; })
         .catch(e => { error = e instanceof ApiError ? e.message : '레이어 로드 실패'; loading = false; }),
-      api.get<AncestorChain>(`/api/union/layers/${encodedId}/ancestors`, token, projectId)
+      api.get<AncestorChain>(`/api/v1/union/layers/${encodedId}/ancestors`, token, projectId)
         .then(v => { ancestors = v.layers; })
         .catch(() => {}),
-      api.get<LayerInfo[]>(`/api/union/layers/${encodedId}/dependents`, token, projectId)
+      api.get<LayerInfo[]>(`/api/v1/union/layers/${encodedId}/dependents`, token, projectId)
         .then(v => { dependents = v; })
         .catch(() => {}),
     ]);
@@ -51,7 +51,7 @@
     if (!layer || sealing) return;
     sealing = true;
     try {
-      await api.post(`/api/union/layers/${encodedId}/seal`, {}, token, projectId);
+      await api.post(`/api/v1/union/layers/${encodedId}/seal`, {}, token, projectId);
       layer = { ...layer, sealed: true };
     } catch (e) {
       error = e instanceof ApiError ? e.message : '봉인 실패';
@@ -64,7 +64,7 @@
     if (!layer || deleting) return;
     deleting = true;
     try {
-      await api.delete(`/api/union/layers/${encodedId}`, token, projectId);
+      await api.delete(`/api/v1/union/layers/${encodedId}`, token, projectId);
       goto('/dashboard/library');
     } catch (e) {
       error = e instanceof ApiError ? e.message : '삭제 실패';

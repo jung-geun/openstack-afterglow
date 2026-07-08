@@ -44,11 +44,11 @@ EXEMPT_ROUTERS: set[str] = {
     "identity/admin_images.py",
     "identity/admin_instances.py",
     "identity/admin_gpu.py",
-    "identity/admin_libraries.py",
     "identity/admin_notion.py",
     "identity/admin_orphans.py",
     "identity/admin_services.py",
     "identity/admin_dashboard.py",  # admin bulk action — manages OS infra directly, not per-project cache
+    "identity/admin_worker_runtime.py",  # admin-only worker desired state; no per-project OS resource cache
     # ------------------------------------------------------------------
     # Phase C/D TODO — cache not yet wired up in these modules.
     # Remove each entry as the corresponding phase lands.
@@ -68,6 +68,7 @@ EXEMPT_ROUTERS: set[str] = {
     "k3s/templates.py",  # TODO: Phase C/D — k3s cluster templates
     "k3s/workloads.py",  # TODO: Phase C/D — k3s workload ops
     "union/layers.py",  # TODO: Phase C/D — Union layers
+    "union/layer_ops.py",  # TODO: Phase C/D — Union layer build/seal ops (캐시 무효화 미연동)
     "network/loadbalancers.py",  # TODO: Phase C/D — listener/pool/member sub-resources
     "network/networks.py",  # TODO: Phase C/D — floating_ip / subnet sub-resources
     "network/routers.py",  # TODO: Phase C/D — interface / gateway sub-resources
@@ -104,6 +105,10 @@ EXEMPT_HANDLERS: set[str] = {
     "set_secret_acl",
     "delete_secret_acl",
     "set_container_acl",
+    # Site branding POST/DELETE mutate DB-backed public branding assets, not a
+    # per-project OpenStack resource cache tracked by mutation counts.
+    "upload_site_branding_asset",
+    "reset_site_branding_asset",
 }
 
 # ---------------------------------------------------------------------------

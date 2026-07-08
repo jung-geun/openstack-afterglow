@@ -41,7 +41,7 @@ async def collect_instance_data(
 
     from app.config import get_settings
     from app.services import notion_sync
-    from app.services.gpu_inventory import build_alias_to_device_name_map
+    from app.services.gpu_inventory import build_alias_to_device_name_map, resolve_alias_to_device_name
 
     settings = get_settings()
     alias_to_device_name = build_alias_to_device_name_map()
@@ -96,8 +96,11 @@ async def collect_instance_data(
                 ram_mb = fl.ram if fl else 0
                 extra_specs = fl.extra_specs if fl else {}
 
+                status = (s.status or "").upper()
+                resource_allocated = notion_sync.is_resource_allocated_status(status)
+
                 # GPU (alias 이름 추출)
-                gpu_alias, gpu_count = notion_sync._gpu_info_from_flavor(
+                gpu_alias, flavor_gpu_count = notion_sync._gpu_info_from_flavor(
                     fl_name or (fl.name if fl else ""),
                     extra_specs or {},
                 )
@@ -105,24 +108,25 @@ async def collect_instance_data(
                 # GPU alias → 정식 이름 변환 및 GPU map 검증
                 gpu_spec_page_id = ""
                 gpu_display_name = gpu_alias  # Notion GPU 필드에 표시할 이름
+                gpu_count = flavor_gpu_count if resource_allocated else 0
                 if gpu_alias:
-                    canonical_name = alias_to_device_name.get(gpu_alias)
+                    canonical_name = resolve_alias_to_device_name(gpu_alias, alias_to_device_name)
                     if canonical_name:
                         gpu_display_name = canonical_name
-                        gpu_spec_page_id = (gpu_name_to_page_id or {}).get(canonical_name, "")
-                        if not gpu_spec_page_id:
-                            _logger.debug(
-                                "GPU spec 페이지 미발견 (GPU=%s, alias=%s) — GPU spec DB 동기화 후 재시도 예정",
-                                canonical_name,
-                                gpu_alias,
-                            )
-                    else:
+                        if resource_allocated:
+                            gpu_spec_page_id = (gpu_name_to_page_id or {}).get(canonical_name, "")
+                            if not gpu_spec_page_id:
+                                _logger.debug(
+                                    "GPU spec 페이지 미발견 (GPU=%s, alias=%s) — GPU spec DB 동기화 후 재시도 예정",
+                                    canonical_name,
+                                    gpu_alias,
+                                )
+                    elif resource_allocated:
                         _logger.warning(
                             "GPU alias '%s'가 PCI_DEVICE_MAP에 없음 — GPU spec relation 미설정 (flavor=%s)",
                             gpu_alias,
                             fl_name,
                         )
-
                 # IP 주소
                 fixed_ips = []
                 floating_ips = []
@@ -148,10 +152,8 @@ async def collect_instance_data(
                 user_email = user_emails.get(s.user_id, "")
                 user_page_id = (email_to_page_id or {}).get(user_email.lower(), "")
 
-                # 하이퍼바이저 page_id (openstack resource relation)
-                status = (s.status or "").upper()
                 hypervisor_page_id = ""
-                if compute_host and status not in ("SHELVED_OFFLOADED", "SHELVED"):
+                if compute_host and resource_allocated:
                     hypervisor_page_id = (host_to_page_id or {}).get(compute_host, "")
 
                 result.append(

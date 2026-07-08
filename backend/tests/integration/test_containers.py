@@ -11,7 +11,7 @@ import pytest
 async def test_list_clusters(client, settings):
     if not settings.service_magnum_enabled:
         pytest.skip("Magnum 비활성화")
-    resp = await client.get("/api/clusters")
+    resp = await client.get("/api/v1/clusters")
     # Magnum 서비스가 일시적으로 불가할 수 있음
     assert resp.status_code in (200, 500, 503)
 
@@ -20,7 +20,7 @@ async def test_list_clusters(client, settings):
 async def test_list_cluster_templates(client, settings):
     if not settings.service_magnum_enabled:
         pytest.skip("Magnum 비활성화")
-    resp = await client.get("/api/clusters/templates")
+    resp = await client.get("/api/v1/clusters/templates")
     assert resp.status_code in (200, 500, 503)
 
 
@@ -33,7 +33,7 @@ async def test_list_cluster_templates(client, settings):
 async def test_list_containers(client, settings):
     if not settings.service_zun_enabled:
         pytest.skip("Zun 비활성화")
-    resp = await client.get("/api/containers")
+    resp = await client.get("/api/v1/containers")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, (list, dict))

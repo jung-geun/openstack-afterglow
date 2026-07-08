@@ -23,9 +23,12 @@ Afterglow는 OpenStack 클라우드를 위한 오픈소스 웹 대시보드입�
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml   # OpenStack 자격증명 입력
+cp afterglow.conf.example afterglow.conf   # OpenStack 자격증명 입력
+cp .env.example .env                       # 로컬 compose 전용: SECRET_KEY 교체 또는 dev-only allow 플래그 유지
 docker compose up -d                 # http://localhost:3000
 ```
+
+`afterglow.conf`가 기본 설정 파일입니다. 기존 `config.toml`은 레거시 fallback으로 계속 읽지만 신규 설치는 `afterglow.conf`를 사용하세요. `.env.example`의 `AFTERGLOW_ALLOW_INSECURE=1`은 Docker Compose 로컬 개발 전용이며 Kubernetes/production에는 넣지 않습니다.
 
 Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서를 참고하세요.
 
@@ -40,6 +43,7 @@ Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서�
 | [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 |
 | [API 레퍼런스](docs/api-reference.md) | 전체 REST API |
 | [보안 모델](docs/security.md) | 인증·인가, IDOR 가드, HKDF 암호화, audit log |
+| [국소 기능테스트](docs/testing.md) | 개발 중 빠른 국소 기능 검증 가이드 |
 
 릴리스 변경사항은 [CHANGELOG](CHANGELOG.md), 작업 기록·로드맵은 [`openspec/`](openspec/)(`openspec list`, 구 [milestone.md](milestone.md)에서 이관)를 참고하세요.
 
@@ -57,7 +61,10 @@ Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서�
 ```bash
 cd backend && uv sync && uv run uvicorn app.main:app --reload   # 백엔드 :8000
 cd frontend && npm install && npm run dev                       # 프론트엔드 :3000
-npm test                                                        # 전체 테스트
+npm run test:list                                               # 실행 가능한 국소 테스트 타깃 확인
+npm run test:target -- auth                                     # 예: 인증/세션 관련 국소 기능테스트
+npm test                                                        # 백엔드 단위 + 프론트엔드 전체
+npm run test:all                                                # 커밋/PR 전 전체 게이트
 ```
 
 ## 라이선스

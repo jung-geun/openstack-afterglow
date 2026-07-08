@@ -23,7 +23,7 @@
 		creating = true;
 		createError = '';
 		try {
-			await apiMut('볼륨 생성', () => api.post('/api/volumes', form, token, projectId));
+			await apiMut('볼륨 생성', () => api.post('/api/v1/volumes', form, token, projectId));
 			open = false;
 			form = { name: '', size_gb: 10 };
 			onCreated();

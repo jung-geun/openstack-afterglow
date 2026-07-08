@@ -16,7 +16,7 @@
     if (!s.cluster) return;
     downloadingCa = true;
     try {
-      const url = `${getBaseUrl()}/api/k3s/clusters/${s.cluster.id}/ca-certificate`;
+      const url = `${getBaseUrl()}/api/v1/k3s/clusters/${s.cluster.id}/ca-certificate`;
       const res = await fetch(url, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),

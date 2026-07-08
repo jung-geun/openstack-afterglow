@@ -413,6 +413,16 @@ class CreateK3sNodegroupRequest(BaseModel):
                     raise ValueError(f"유효하지 않은 taint 형식: {taint!r}")
         return v
 
+    @model_validator(mode="after")
+    def validate_scalable_agent_group(self) -> "CreateK3sNodegroupRequest":
+        if self.role == "server":
+            raise ValueError("커스텀 server 노드그룹은 아직 지원되지 않습니다")
+        if self.stampede_enabled and not self.flavor_id:
+            raise ValueError("Stampede 노드그룹은 flavor_id가 필요합니다")
+        if self.min_size > self.max_size:
+            raise ValueError("min_size는 max_size보다 클 수 없습니다")
+        return self
+
 
 class UpdateK3sNodegroupRequest(BaseModel):
     node_count: int | None = Field(default=None, ge=0, le=20)
@@ -460,6 +470,8 @@ class UpdateK3sNodegroupRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_stampede_sizes(self) -> "UpdateK3sNodegroupRequest":
+        if self.stampede_enabled is True and self.flavor_id == "":
+            raise ValueError("Stampede 노드그룹은 flavor_id가 필요합니다")
         if self.min_size is not None and self.max_size is not None and self.min_size > self.max_size:
             raise ValueError("min_size는 max_size보다 클 수 없습니다")
         return self

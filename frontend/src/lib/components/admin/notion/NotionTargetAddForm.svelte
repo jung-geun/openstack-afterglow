@@ -36,7 +36,7 @@
 		adding = true; addError = '';
 		try {
 			await api.post(
-				'/api/admin/notion/targets',
+				'/api/v1/admin/notion/targets',
 				{
 					label: form.label,
 					api_key: form.apiKey,

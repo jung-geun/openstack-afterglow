@@ -26,7 +26,7 @@
 		if (templates.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			templates = await api.get<K3sClusterTemplate[]>('/api/admin/k3s-cluster-templates', token, projectId);
+			templates = await api.get<K3sClusterTemplate[]>('/api/v1/admin/k3s-cluster-templates', token, projectId);
 		} catch {
 			templates = [];
 		} finally {
@@ -39,7 +39,7 @@
 		if (!deleteTarget) return;
 		deleteError = '';
 		try {
-			await api.delete(`/api/k3s/cluster-templates/${deleteTarget.id}`, token, projectId);
+			await api.delete(`/api/v1/k3s/cluster-templates/${deleteTarget.id}`, token, projectId);
 			deleteTarget = null;
 			await load();
 		} catch (e) {
@@ -79,7 +79,6 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			{#if templates.length === 0}
 				<div class="text-gray-500 text-sm py-12 text-center">등록된 클러스터 템플릿이 없습니다.</div>
 			{:else}
@@ -93,7 +92,6 @@
 					{/each}
 				</div>
 			{/if}
-		</div>
 	{/if}
 </div>
 

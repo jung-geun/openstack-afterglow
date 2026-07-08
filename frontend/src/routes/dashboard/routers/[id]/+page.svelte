@@ -22,7 +22,7 @@
 
 	async function fetchRouter() {
 		try {
-			router = await api.get<RouterDetail>(`/api/routers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			router = await api.get<RouterDetail>(`/api/v1/routers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '라우터 조회 실패';
@@ -33,7 +33,7 @@
 
 	async function fetchNetworks() {
 		try {
-			const nets = await api.get<Network[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const nets = await api.get<Network[]>('/api/v1/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
 			availableNetworks = nets.filter(n => !n.is_external);
 			externalNetworks = nets.filter(n => n.is_external);
 		} catch {
@@ -52,7 +52,7 @@
 		if (!await confirmDialog(`라우터 "${router?.name || id}"을 삭제하시겠습니까?`)) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/routers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -63,7 +63,7 @@
 	async function addInterface(subnetId: string): Promise<boolean> {
 		saving = true;
 		try {
-			await api.post(`/api/routers/${id}/interfaces`, { subnet_id: subnetId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post(`/api/v1/routers/${id}/interfaces`, { subnet_id: subnetId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchRouter();
 			return true;
 		} catch (e) {
@@ -78,7 +78,7 @@
 		if (!await confirmDialog('인터페이스를 제거하시겠습니까?')) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${id}/interfaces/${subnetId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/routers/${id}/interfaces/${subnetId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchRouter();
 		} catch (e) {
 			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -90,7 +90,7 @@
 	async function setGateway(externalNetworkId: string): Promise<boolean> {
 		saving = true;
 		try {
-			await api.post(`/api/routers/${id}/gateway`, { external_network_id: externalNetworkId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post(`/api/v1/routers/${id}/gateway`, { external_network_id: externalNetworkId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchRouter();
 			return true;
 		} catch (e) {
@@ -105,7 +105,7 @@
 		if (!await confirmDialog('외부 게이트웨이를 제거하시겠습니까?')) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${id}/gateway`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/routers/${id}/gateway`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchRouter();
 		} catch (e) {
 			toast.error('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));

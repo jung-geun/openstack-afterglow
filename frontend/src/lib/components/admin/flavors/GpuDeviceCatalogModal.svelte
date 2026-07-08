@@ -32,7 +32,7 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await api.get<{ devices: GpuCatalogDevice[] }>('/api/admin/gpu-devices', token, projectId);
+			const res = await api.get<{ devices: GpuCatalogDevice[] }>('/api/v1/admin/gpu-devices', token, projectId);
 			devices = res.devices;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'GPU 카탈로그 조회 실패';
@@ -55,7 +55,7 @@
 		notice = '';
 		try {
 			await api.post(
-				'/api/admin/gpu-devices',
+				'/api/v1/admin/gpu-devices',
 				{
 					vendor_id: form.vendor_id.trim(),
 					device_id: form.device_id.trim(),
@@ -81,7 +81,7 @@
 		error = '';
 		notice = '';
 		try {
-			await api.delete(`/api/admin/gpu-devices/${d.vendor_id}/${d.device_id}`, token, projectId);
+			await api.delete(`/api/v1/admin/gpu-devices/${d.vendor_id}/${d.device_id}`, token, projectId);
 			await load();
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '장치 삭제 실패';
@@ -93,7 +93,7 @@
 		error = '';
 		try {
 			const { blob, filename } = await api.downloadBlob(
-				`/api/admin/gpu-devices/export?format=${format}`,
+				`/api/v1/admin/gpu-devices/export?format=${format}`,
 				token,
 				projectId,
 			);
@@ -124,7 +124,7 @@
 			const fd = new FormData();
 			fd.append('file', csvFile);
 			const res = await api.upload<{ imported: number; mode: string }>(
-				`/api/admin/gpu-devices/import?mode=${csvMode}`,
+				`/api/v1/admin/gpu-devices/import?mode=${csvMode}`,
 				fd,
 				token,
 				projectId,

@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
-"""ArgoCD Helm Application 생성기.
+"""ArgoCD Helm Application 생성기 — git path + valuesObject(env+시크릿) 주입.
 
-helm/afterglow/values-<env>.yaml (git 미추적, 배포 머신 전용)을 읽어
-ArgoCD Application의 spec.source.helm.valuesObject로 인라인한
-Application 매니페스트를 생성한다.
+배포 모델
+─────────
+  ArgoCD 감지 대상 (git 추적):
+    helm/afterglow/values.yaml   — base 기본값
+    helm/afterglow/templates/    — 차트 템플릿
+    helm/afterglow/files/        — config.gpu.toml 등
+    → 변경 시 ArgoCD가 자동 감지·sync
 
-values 파일이 git에 없으므로 ArgoCD는 repo에서 values를 읽을 수 없다.
-대신 Application CR 자체에 values를 내장하여, ArgoCD가 git의 차트 변경을
-감지할 때마다 항상 이 values로 렌더링한다(기본 values로 초기화되지 않음).
+  사용자 수동 override (배포 서버 로컬, gitignore):
+    helm/afterglow/values-<env>.yaml   — 환경별 config (템플릿: deploy/values-dev-example.yaml)
+    helm/afterglow/secrets-<env>.yaml  — 시크릿 (템플릿: deploy/secrets-example.yaml)
+    → 두 파일을 deep merge해 Application CR의 valuesObject로 주입
 
-사용법 (배포 머신에서):
-    backend/.venv/bin/python argocd/generate_helm_application.py dev
-    backend/.venv/bin/python argocd/generate_helm_application.py prod
+사용법:
+  # 첫 배포 또는 env config·시크릿 변경 시
+  backend/.venv/bin/python argocd/generate_helm_application.py dev
+  kubectl apply -f deploy/k8s/argocd-application-dev.yaml   # 시크릿 포함 — git 커밋 금지
 
-    # 생성된 매니페스트 적용 (시크릿 포함 — git 커밋 금지, gitignore 처리됨)
-    kubectl apply -f deploy/k8s/argocd-application-dev.yaml
+  # 이후 values.yaml / 템플릿 변경은 git push → ArgoCD 자동 sync (재실행 불필요)
 
-주의:
-- prod Application은 targetRevision=main 이므로 helm/afterglow 차트가
-  main 브랜치에 머지된 후에만 적용할 것.
-- 이미지 digest는 ArgoCD Image Updater가 spec.source.helm.parameters에
-  기록(write-back-method: argocd)하므로, 이 매니페스트를 재적용하면
-  parameters가 초기화되고 잠시 후 Image Updater가 다시 digest를 고정한다.
+  # 또는 helm upgrade 직접 배포
+  ./deploy/helm-upgrade.sh dev
 """
 
 from __future__ import annotations
@@ -60,19 +61,40 @@ IMAGES = {
 }
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 def build_application(env: str) -> dict:
     cfg = ENVS[env]
-    values_path = REPO_ROOT / CHART_PATH / f"values-{env}.yaml"
-    if not values_path.exists():
-        sys.exit(f"values 파일이 없습니다: {values_path}")
-    values = yaml.safe_load(values_path.read_text())
+    chart_dir = REPO_ROOT / CHART_PATH
 
-    # 레포 루트의 config.gpu.toml(배포 머신 전용 GPU 디바이스 맵 오버라이드)이 있으면
-    # gpu.configToml 값으로 주입 → 차트 기본값(files/config.gpu.toml) 대신 사용된다.
-    gpu_toml_path = REPO_ROOT / "config.gpu.toml"
-    if gpu_toml_path.exists():
-        values.setdefault("gpu", {})["configToml"] = gpu_toml_path.read_text()
-        print(f"GPU 디바이스 맵 오버라이드 포함: {gpu_toml_path.name}")
+    # 환경 config (배포 서버 로컬, gitignore — values.yaml 대비 override)
+    values_path = chart_dir / f"values-{env}.yaml"
+    if values_path.exists():
+        env_values: dict = yaml.safe_load(values_path.read_text()) or {}
+    else:
+        print(f"경고: {values_path.name} 없음 — base values.yaml만 적용됩니다")
+        print(f"  템플릿: deploy/values-dev-example.yaml 참조")
+        env_values = {}
+
+    # 시크릿 (배포 서버 로컬, gitignore)
+    secrets_path = chart_dir / f"secrets-{env}.yaml"
+    if not secrets_path.exists():
+        sys.exit(
+            f"시크릿 파일이 없습니다: {secrets_path}\n"
+            f"  템플릿: deploy/secrets-example.yaml 참조"
+        )
+    secrets_doc: dict = yaml.safe_load(secrets_path.read_text()) or {}
+
+    # env config + secrets → valuesObject (ArgoCD CR에 저장)
+    values_object = _deep_merge(env_values, secrets_doc)
 
     tag = cfg["image_tag"]
     image_list = ",".join(f"{alias}={repo}:{tag}" for alias, repo in IMAGES.items())
@@ -105,7 +127,9 @@ def build_application(env: str) -> dict:
                 "targetRevision": cfg["target_revision"],
                 "path": CHART_PATH,
                 "helm": {
-                    "valuesObject": values,
+                    # valueFiles 없음 — git의 values.yaml(base)만 자동 로드
+                    # env config + secrets 는 valuesObject로 ArgoCD CR에 저장
+                    "valuesObject": values_object,
                 },
             },
             "destination": {

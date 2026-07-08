@@ -42,7 +42,7 @@
 		error = '';
 		try {
 			volume = await api.get<Volume>(
-				`/api/volumes/${id}`,
+				`/api/v1/volumes/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -54,7 +54,7 @@
 						if (!serverId) return;
 						try {
 							const inst = await api.get<Instance>(
-								`/api/instances/${serverId}`,
+								`/api/v1/instances/${serverId}`,
 								$auth.token ?? undefined,
 								$auth.projectId ?? undefined
 							);
@@ -82,7 +82,7 @@
 		if (!await confirmDialog(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/volumes/${volume.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/volumes/${volume.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

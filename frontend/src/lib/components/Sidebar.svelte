@@ -8,6 +8,9 @@
 	import { palette } from '$lib/stores/palette';
 	import RingMark from '$lib/components/ui/RingMark.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
+
+	type BetaFeatureKey = keyof BetaFeatures;
 
 	let dashboardOpen = $state(false);
 
@@ -31,8 +34,8 @@
 			open: false,
 			items: [
 				{ label: '볼륨 목록', href: '/dashboard/volumes', service: null },
-				{ label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null },
-				{ label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null },
+				{ label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null, beta: 'volumeBackups' as BetaFeatureKey },
+				{ label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null, beta: 'volumeSnapshots' as BetaFeatureKey },
 			],
 		},
 		{
@@ -44,21 +47,9 @@
 			service: 'manila' as const,
 			items: [
 				{ label: '파일 스토리지', href: '/dashboard/file-storage', service: null },
-				{ label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null },
-				{ label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null },
-				{ label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null },
-			],
-		},
-		{
-			label: '라이브러리',
-			prefix: '/dashboard/library',
-			extraPrefixes: ['/dashboard/file-storage/manage'],
-			icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
-			open: false,
-			items: [
-				{ label: '레이어 카탈로그', href: '/dashboard/library', service: null },
-				{ label: '템플릿', href: '/dashboard/library/templates', service: null },
-				{ label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
+				{ label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null, beta: 'fileStorageSnapshots' as BetaFeatureKey },
+				{ label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null, beta: 'fileStorageShareNetworks' as BetaFeatureKey },
+				{ label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null, beta: 'fileStorageSecurityServices' as BetaFeatureKey },
 			],
 		},
 		{
@@ -83,7 +74,7 @@
 			service: 'trove' as const,
 			items: [
 				{ label: 'DB 인스턴스', href: '/dashboard/database/instances', service: null },
-				{ label: 'DB 백업', href: '/dashboard/database/backups', service: null },
+				{ label: 'DB 백업', href: '/dashboard/database/backups', service: null, beta: 'databaseBackups' as BetaFeatureKey },
 			],
 		},
 		{
@@ -103,6 +94,7 @@
 			extraPrefixes: [] as string[],
 			icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
 			open: false,
+			beta: 'keyManager' as BetaFeatureKey,
 			items: [
 				{ label: '비밀 관리', href: '/dashboard/secrets', service: null },
 			],
@@ -145,7 +137,11 @@
 		sidebarOpen.close();
 	});
 
-	function isSectionVisible(section: { service?: string }): boolean {
+	function isBetaVisible(beta?: BetaFeatureKey): boolean {
+		return !beta || Boolean($betaFeatures[beta]);
+	}
+
+	function isSectionServiceVisible(section: { service?: string | null }): boolean {
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!section.service) return true;
 		if (section.service === 'manila') return svcs?.manila ?? false;
@@ -153,8 +149,15 @@
 		return svcs?.[section.service] ?? false;
 	}
 
-	function isItemVisible(item: { service?: string | null }): boolean {
-		const svcs = $siteConfig.services;
+	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+		if (!isBetaVisible(section.beta)) return false;
+		if (!isSectionServiceVisible(section)) return false;
+		return section.items.some(item => isItemVisible(item));
+	}
+
+	function isItemVisible(item: { beta?: BetaFeatureKey; service?: string | null }): boolean {
+		if (!isBetaVisible(item.beta)) return false;
+		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!item.service) return true;
 		if (item.service === 'magnum') return svcs?.magnum ?? false;
 		if (item.service === 'zun') return svcs?.zun ?? false;
@@ -197,7 +200,7 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="px-3 pb-3 pt-2 lg:pt-0">
-		<Button onclick={openWizard} class="w-full">
+		<Button onclick={() => openWizard()} class="w-full">
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
 		</Button>

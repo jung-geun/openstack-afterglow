@@ -34,7 +34,7 @@
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			containers = await api.get<AdminContainer[]>('/api/admin/all-containers', token, projectId);
+			containers = await api.get<AdminContainer[]>('/api/v1/admin/all-containers', token, projectId);
 		} catch {
 			containers = [];
 		} finally {
@@ -71,7 +71,7 @@
 	{:else if containers.length === 0}
 		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

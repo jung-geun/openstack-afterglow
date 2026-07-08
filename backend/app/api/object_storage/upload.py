@@ -31,7 +31,7 @@ from app.config import get_settings
 from app.services import s3 as s3_svc
 from app.services import swift as swift_svc
 
-router = APIRouter(prefix="/api/object-storage", tags=["object-storage-upload"])
+router = APIRouter(tags=["object-storage-upload"])
 _logger = logging.getLogger(__name__)
 
 

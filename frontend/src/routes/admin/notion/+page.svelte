@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { auth } from '$lib/stores/auth';
-	import { api, ApiError } from '$lib/api/client';
-	import { env } from '$env/dynamic/public';
+	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import NotionTargetAddForm from '$lib/components/admin/notion/NotionTargetAddForm.svelte';
 	import NotionTargetEditForm from '$lib/components/admin/notion/NotionTargetEditForm.svelte';
@@ -10,12 +9,6 @@
 	import type { NotionTarget } from '$lib/components/admin/notion/NotionTargetCard.svelte';
 	import { toast } from '$lib/stores/toast';
 
-	function getBaseUrl(): string {
-		if (typeof window !== 'undefined') {
-			return env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`;
-		}
-		return env.PUBLIC_API_BASE || 'http://backend:8000';
-	}
 
 	let targets = $state<NotionTarget[]>([]);
 	let loading = $state(true);
@@ -30,7 +23,7 @@
 		loading = true;
 		try {
 			targets = await api.get<NotionTarget[]>(
-				'/api/admin/notion/targets',
+				'/api/v1/admin/notion/targets',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -46,7 +39,7 @@
 		if (!await confirmDialog('이 연동 대상을 삭제하시겠습니까?')) return;
 		try {
 			await api.delete(
-				`/api/admin/notion/targets/${id}`,
+				`/api/v1/admin/notion/targets/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -64,7 +57,7 @@
 			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 			if ($auth.token) headers['Authorization'] = `Bearer ${$auth.token}`;
 			if ($auth.projectId) headers['X-Project-Id'] = $auth.projectId;
-			const resp = await fetch(`${getBaseUrl()}/api/admin/notion/targets/${id}/test`, {
+			const resp = await fetch(`${getBaseUrl()}/api/v1/admin/notion/targets/${id}/test`, {
 				method: 'POST',
 				headers,
 				body: '{}',

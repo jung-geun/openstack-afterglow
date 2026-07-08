@@ -1,11 +1,11 @@
 """파일 스토리지 API 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.models.storage import FileStorageInfo
-from app.services.manila import _get_manila_endpoint, _normalize_manila_url
+from app.services.manila import _get_manila_endpoint, _normalize_manila_url, _parse_file_storage
 
 
 def make_file_storage(fs_id: str = "share-1", name: str = "test-share") -> FileStorageInfo:
@@ -45,7 +45,7 @@ async def test_list_file_storages(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", return_value=[make_file_storage()]),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["id"] == "share-1"
@@ -54,7 +54,7 @@ async def test_list_file_storages(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_file_storage(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()):
-        resp = await client.get("/api/file-storage/share-1")
+        resp = await client.get("/api/v1/file-storage/share-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "share-1"
 
@@ -63,7 +63,7 @@ async def test_get_file_storage(client, mock_conn):
 async def test_create_file_storage(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage("share-new")):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-share",
                 "size_gb": 100,
@@ -79,10 +79,12 @@ async def test_delete_file_storage(client, mock_conn):
     with (
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
-        patch("app.api.storage.file_storage.invalidate"),
+        patch("app.api.storage.file_storage.invalidate", new_callable=AsyncMock) as invalidate_mock,
     ):
-        resp = await client.delete("/api/file-storage/share-1")
+        resp = await client.delete("/api/v1/file-storage/share-1")
     assert resp.status_code == 204
+    invalidate_mock.assert_any_await("afterglow:manila:test-project-123:file_storages")
+    invalidate_mock.assert_any_await("afterglow:admin:file_storages")
 
 
 @pytest.mark.asyncio
@@ -91,7 +93,7 @@ async def test_list_access_rules(client, mock_conn):
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]),
     ):
-        resp = await client.get("/api/file-storage/share-1/access-rules")
+        resp = await client.get("/api/v1/file-storage/share-1/access-rules")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -103,7 +105,7 @@ async def test_create_access_rule(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={
                 "access_to": "10.0.0.0/24",
                 "access_level": "rw",
@@ -119,7 +121,7 @@ async def test_revoke_access_rule(client, mock_conn):
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None),
     ):
-        resp = await client.delete("/api/file-storage/share-1/access-rules/rule-1")
+        resp = await client.delete("/api/v1/file-storage/share-1/access-rules/rule-1")
     assert resp.status_code == 204
 
 
@@ -421,7 +423,7 @@ async def test_list_file_storages_filters_other_project(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     ids = [s["id"] for s in resp.json()]
     assert "share-mine" in ids
@@ -449,7 +451,7 @@ async def test_list_file_storages_exposes_public_share(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert any(s["id"] == "share-other" for s in resp.json())
 
@@ -459,7 +461,7 @@ async def test_get_file_storage_cross_project_returns_404(client, mock_conn):
     """non-admin이 다른 프로젝트 share를 직접 ID로 GET 시 404."""
     other = _make_share_other_project(is_public=False)
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
-        resp = await client.get("/api/file-storage/share-other")
+        resp = await client.get("/api/v1/file-storage/share-other")
     assert resp.status_code == 404
 
 
@@ -468,7 +470,7 @@ async def test_admin_can_get_cross_project_share(admin_client, mock_conn):
     """admin은 다른 프로젝트 share도 GET 가능."""
     other = _make_share_other_project(is_public=False)
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
-        resp = await admin_client.get("/api/file-storage/share-other")
+        resp = await admin_client.get("/api/v1/file-storage/share-other")
     assert resp.status_code == 200
 
 
@@ -555,7 +557,7 @@ async def test_create_file_storage_propagates_manila_400(client, mock_conn):
     err = _make_manila_status_error(400, "Invalid share protocol provided: NFS. Available protocols: ['CEPHFS'].")
     with patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-bad",
                 "size_gb": 10,
@@ -575,7 +577,7 @@ async def test_create_file_storage_runtime_error_returns_409(client, mock_conn):
         side_effect=RuntimeError("파일 스토리지 생성 실패 (error 상태): Capabilities filter didn't succeed."),
     ):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-cap-fail",
                 "size_gb": 10,
@@ -595,7 +597,7 @@ async def test_create_file_storage_500_fallback(client, mock_conn):
         side_effect=ValueError("unexpected"),
     ):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-valueerr",
                 "size_gb": 10,
@@ -616,7 +618,7 @@ async def test_create_file_storage_nfs_uses_nfs_share_type_fallback(client, mock
         "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
     ) as mock_create:
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={"name": "nfs-no-type", "size_gb": 10, "share_proto": "NFS"},
         )
     assert resp.status_code == 201
@@ -635,7 +637,7 @@ async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client
         "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
     ) as mock_create:
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={"name": "ceph-no-type", "size_gb": 10, "share_proto": "CEPHFS"},
         )
     assert resp.status_code == 201
@@ -661,7 +663,7 @@ async def test_create_access_rule_no_metadata_passed(client, mock_conn):
         ) as mock_create,
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 201
@@ -678,7 +680,7 @@ async def test_create_access_rule_response_has_id_field(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", return_value=rule),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 201
@@ -698,8 +700,356 @@ async def test_create_access_rule_propagates_manila_400(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", side_effect=err),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 400
     assert "already exists" in resp.json()["detail"]
+
+
+# ─────────────────────────────────────────────────────────────────
+# 확장 필드 파싱 테스트 (progress, user_id, access_rules_status 등)
+# ─────────────────────────────────────────────────────────────────
+
+
+def _make_full_share_dict(share_id: str = "s-full") -> dict:
+    """Manila share 응답 dict — 확장 필드 포함."""
+    return {
+        "id": share_id,
+        "name": "full-share",
+        "status": "available",
+        "size": 10,
+        "share_proto": "NFS",
+        "export_locations": [],  # Manila 2.9+에서 인라인은 항상 빔
+        "metadata": {"union_library": "python311", "union_version": "3.11"},
+        "is_public": False,
+        "project_id": "proj-abc",
+        "created_at": "2024-06-01T12:00:00Z",
+        "progress": "100%",
+        "user_id": "user-uuid-123",
+        "access_rules_status": "active",
+        "host": "dms-controller1@cephfsnfs1#cephfs",
+        "availability_zone": "nova",
+        "share_type_name": "cephfsnfstype",
+        "share_network_id": "net-uuid-456",
+    }
+
+
+def test_parse_file_storage_extended_fields():
+    """_parse_file_storage가 확장 필드를 올바르게 파싱한다."""
+    data = _make_full_share_dict()
+    fs = _parse_file_storage(data)
+
+    assert fs.progress == "100%"
+    assert fs.user_id == "user-uuid-123"
+    assert fs.access_rules_status == "active"
+    assert fs.host == "dms-controller1@cephfsnfs1#cephfs"
+    assert fs.availability_zone == "nova"
+    assert fs.share_type_name == "cephfsnfstype"
+    assert fs.share_network_id == "net-uuid-456"
+    # user_name은 _parse_file_storage 단계에서는 None (resolve 전)
+    assert fs.user_name is None
+    # export_detail_list 없으면 export_location_details 비어야 함
+    assert fs.export_location_details == []
+
+
+def test_parse_file_storage_export_detail_list():
+    """export_detail_list 인자를 주면 export_locations·export_location_details가 채워진다."""
+    data = _make_full_share_dict()
+    export_details = [
+        {"path": "172.30.2.101:/volumes/path", "preferred": True, "share_instance_id": "inst-1"},
+        {"path": "172.30.2.102:/volumes/path", "preferred": False, "share_instance_id": "inst-2"},
+    ]
+    fs = _parse_file_storage(data, export_detail_list=export_details)
+
+    assert len(fs.export_locations) == 2
+    assert fs.export_locations[0] == "172.30.2.101:/volumes/path"
+    assert len(fs.export_location_details) == 2
+    assert fs.export_location_details[0].preferred is True
+    assert fs.export_location_details[0].share_instance_id == "inst-1"
+    assert fs.export_location_details[1].preferred is False
+
+
+def test_parse_file_storage_no_export_detail_list_inline_empty():
+    """export_detail_list 없으면 인라인 export_locations(항상 빔)를 읽어 빈 리스트 반환."""
+    data = _make_full_share_dict()
+    data["export_locations"] = []  # Manila 2.9+ 실제 동작
+    fs = _parse_file_storage(data)
+
+    assert fs.export_locations == []
+    assert fs.export_location_details == []
+
+
+def test_get_file_storage_merges_export_details():
+    """get_file_storage가 export_locations 서브리소스를 병합한다."""
+    from app.services import manila as manila_svc
+
+    share_data = _make_full_share_dict()
+    export_details = [
+        {"path": "172.30.2.101:/vol", "preferred": True, "share_instance_id": "inst-1"},
+    ]
+
+    fake_client = MagicMock()
+    fake_client.get.side_effect = lambda path: (
+        {"share": share_data}
+        if path == f"shares/{share_data['id']}"
+        else {"export_locations": [{**d, "is_admin_only": False} for d in export_details]}
+    )
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        fs = manila_svc.get_file_storage(MagicMock(), share_data["id"])
+
+    assert len(fs.export_locations) == 1
+    assert fs.export_locations[0] == "172.30.2.101:/vol"
+    assert fs.export_location_details[0].preferred is True
+
+
+def test_get_file_storage_export_failure_falls_back_to_empty():
+    """export_locations 서브리소스 조회 실패 시 빈 리스트로 fallback."""
+    from app.services import manila as manila_svc
+
+    share_data = _make_full_share_dict()
+
+    fake_client = MagicMock()
+
+    def _get(path):
+        if "export_locations" in path:
+            raise Exception("network error")
+        return {"share": share_data}
+
+    fake_client.get.side_effect = _get
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        fs = manila_svc.get_file_storage(MagicMock(), share_data["id"])
+
+    assert fs.export_locations == []
+    assert fs.export_location_details == []
+
+
+def test_get_file_storage_resolve_user_sets_user_name():
+    """resolve_user=True 시 keystone.get_user 성공 → user_name이 채워진다."""
+    from app.services import manila as manila_svc
+
+    share_data = _make_full_share_dict()
+
+    fake_client = MagicMock()
+    fake_client.get.side_effect = lambda path: (
+        {"share": share_data} if "export_locations" not in path else {"export_locations": []}
+    )
+
+    with (
+        patch("app.services.manila.get_client", return_value=fake_client),
+        patch("app.services.keystone.get_user", return_value={"id": "user-uuid-123", "name": "pie_root", "email": ""}),
+    ):
+        fs = manila_svc.get_file_storage(MagicMock(), share_data["id"], resolve_user=True)
+
+    assert fs.user_name == "pie_root"
+
+
+def test_get_file_storage_resolve_user_fallback_on_keystone_error():
+    """resolve_user=True 시 keystone.get_user 실패 → user_name=None 유지."""
+    from app.services import manila as manila_svc
+
+    share_data = _make_full_share_dict()
+
+    fake_client = MagicMock()
+    fake_client.get.side_effect = lambda path: (
+        {"share": share_data} if "export_locations" not in path else {"export_locations": []}
+    )
+
+    with (
+        patch("app.services.manila.get_client", return_value=fake_client),
+        patch("app.services.keystone.get_user", side_effect=Exception("forbidden")),
+    ):
+        fs = manila_svc.get_file_storage(MagicMock(), share_data["id"], resolve_user=True)
+
+    assert fs.user_name is None
+    assert fs.user_id == "user-uuid-123"  # user_id는 그대로 유지
+
+
+@pytest.mark.asyncio
+async def test_get_file_storage_detail_masks_host_for_non_admin(client, mock_conn):
+    """비-admin 사용자 상세 조회 시 host 필드가 None으로 마스킹된다."""
+    share_with_host = make_file_storage().model_copy(update={"host": "dms-controller1@cephfsnfs1#cephfs"})
+    with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=share_with_host):
+        resp = await client.get("/api/v1/file-storage/share-1")
+    assert resp.status_code == 200
+    assert resp.json()["host"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_file_storage_detail_exposes_host_for_admin(admin_client, mock_conn):
+    """admin 사용자 상세 조회 시 host 필드가 노출된다."""
+    share_with_host = make_file_storage().model_copy(update={"host": "dms-controller1@cephfsnfs1#cephfs"})
+    with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=share_with_host):
+        resp = await admin_client.get("/api/v1/file-storage/share-1")
+    assert resp.status_code == 200
+    assert resp.json()["host"] == "dms-controller1@cephfsnfs1#cephfs"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Manila delete diagnostics / force delete
+# ─────────────────────────────────────────────────────────────────
+
+
+def _diagnostic_client(messages: list[dict] | None = None, instances: list[dict] | None = None) -> MagicMock:
+    client = MagicMock()
+
+    def _get(path: str, params: dict | None = None):
+        if path == "messages":
+            assert params == {"resource_id": "share-1"}
+            return {"messages": messages or []}
+        if path == "shares/share-1/instances":
+            return {"share_instances": instances or []}
+        if path == "share_instances":
+            return {"share_instances": [inst for inst in (instances or []) if inst.get("share_id") == "share-1"]}
+        return {}
+
+    client.get.side_effect = _get
+    return client
+
+
+def test_diagnose_delete_issue_detects_dhss_false_share_network_mismatch():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(
+        update={
+            "share_type_name": "nfstype",
+            "share_network_id": "share-network-1",
+            "export_location_details": [],
+        }
+    )
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch(
+            "app.services.manila.list_share_types",
+            return_value=[
+                {
+                    "name": "nfstype",
+                    "extra_specs": {"driver_handles_share_servers": "False"},
+                }
+            ],
+        ),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "dhss_false_share_network_mismatch"
+    assert diagnostic.confidence == "high"
+    assert diagnostic.force_delete_available is True
+    assert "share_network_id=share-network-1" in diagnostic.evidence
+
+
+def test_diagnose_delete_issue_detects_backend_missing_message():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error_deleting"})
+    client = _diagnostic_client(messages=[{"user_message": "Driver failed: ENOENT no such file or directory"}])
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=client),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "backend_missing_after_failed_create_or_delete"
+    assert diagnostic.confidence == "high"
+    assert diagnostic.force_delete_available is True
+    assert any("ENOENT" in item for item in diagnostic.evidence)
+
+
+def test_diagnose_delete_issue_available_prefers_normal_delete():
+    from app.services import manila as manila_svc
+
+    with (
+        patch("app.services.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "normal_delete_possible"
+    assert diagnostic.force_delete_available is False
+
+
+def test_diagnose_delete_issue_error_allows_force_delete_recovery():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error"})
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "unknown"
+    assert diagnostic.confidence == "medium"
+    assert diagnostic.force_delete_available is True
+
+
+def test_diagnose_delete_issue_prefers_share_instance_api_ids():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error", "export_location_details": []})
+    client = _diagnostic_client(instances=[{"id": "inst-1", "share_id": "share-1"}])
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=client),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.share_instance_ids == ["inst-1"]
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_get_delete_diagnostics(non_admin_client, mock_conn):
+    resp = await non_admin_client.get("/api/v1/admin/file-storage/share-1/delete-diagnostics")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_force_delete_file_storage(non_admin_client, mock_conn):
+    resp = await non_admin_client.post("/api/v1/admin/file-storage/share-1/force-delete")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_force_delete_submits_and_invalidates(admin_client, mock_conn):
+    from app.models.storage import FileStorageDeleteDiagnostic
+
+    diagnostic = FileStorageDeleteDiagnostic(
+        file_storage_id="share-1",
+        status="error_deleting",
+        share_proto="NFS",
+        share_type_name="nfstype",
+        share_network_id="share-network-1",
+        share_instance_ids=["inst-1"],
+        root_cause_code="dhss_false_share_network_mismatch",
+        confidence="high",
+        summary="diagnostic summary",
+        evidence=["share_network_id=share-network-1"],
+        recommended_action="force delete",
+        force_delete_available=True,
+    )
+    with (
+        patch("app.api.identity.admin.manila.diagnose_file_storage_delete_issue", return_value=diagnostic),
+        patch(
+            "app.api.identity.admin.manila.force_delete_file_storage", return_value="force_delete_submitted"
+        ) as force_mock,
+        patch("app.api.identity.admin.invalidate", new_callable=AsyncMock) as invalidate_mock,
+        patch("app.api.identity.admin.rec", new_callable=AsyncMock) as rec_mock,
+    ):
+        resp = await admin_client.post("/api/v1/admin/file-storage/share-1/force-delete")
+
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "force_delete_submitted"
+    force_mock.assert_called_once_with(mock_conn, "share-1")
+    invalidate_mock.assert_any_await("afterglow:admin:file_storages")
+    invalidate_mock.assert_any_await("afterglow:manila:*:file_storages")
+    rec_mock.assert_awaited_once()
+    assert rec_mock.await_args.kwargs["resource_type"] == "file_storage"
+    assert rec_mock.await_args.kwargs["action"] == "file_storage.force_delete"
+    assert rec_mock.await_args.kwargs["status"] == "success"
+    assert rec_mock.await_args.kwargs["resource_id"] == "share-1"

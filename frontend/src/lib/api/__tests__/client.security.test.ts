@@ -38,7 +38,7 @@ describe('API Client — 보안 테스트', () => {
     });
 
     const { api } = await import('../client');
-    await expect(api.get('/api/test', 'bad-token', 'proj-1')).rejects.toThrow(Error);
+    await expect(api.get('/api/v1/test', 'bad-token', 'proj-1')).rejects.toThrow(Error);
   });
 
   it('204 응답 시 undefined 반환', async () => {
@@ -49,7 +49,7 @@ describe('API Client — 보안 테스트', () => {
     });
 
     const { api } = await import('../client');
-    const result = await api.delete('/api/test', 'token', 'proj');
+    const result = await api.delete('/api/v1/test', 'token', 'proj');
     expect(result).toBeUndefined();
   });
 
@@ -61,7 +61,7 @@ describe('API Client — 보안 테스트', () => {
     });
 
     const { api } = await import('../client');
-    await api.get('/api/test', 'my-secret-token', 'my-project');
+    await api.get('/api/v1/test', 'my-secret-token', 'my-project');
 
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers['Authorization']).toBe('Bearer my-secret-token');
@@ -74,7 +74,7 @@ describe('API Client — 보안 테스트', () => {
     const { api } = await import('../client');
     const onError = vi.fn();
 
-    api.postSse('/api/test', {}, 'token', 'proj', undefined, onError);
+    api.postSse('/api/v1/test', {}, 'token', 'proj', undefined, onError);
 
     // 비동기 처리 대기
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -92,7 +92,7 @@ describe('API Client — 보안 테스트', () => {
     const { api } = await import('../client');
     const onError = vi.fn();
 
-    api.postSse('/api/test', {}, 'token', 'proj', undefined, onError);
+    api.postSse('/api/v1/test', {}, 'token', 'proj', undefined, onError);
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
@@ -107,7 +107,7 @@ describe('API Client — 보안 테스트', () => {
     });
 
     const { api } = await import('../client');
-    await api.get('/api/test', 'tok', 'proj');
+    await api.get('/api/v1/test', 'tok', 'proj');
 
     expect(abortSpy).toHaveBeenCalledWith(30_000);
   });

@@ -32,6 +32,9 @@ describe('wizard store', () => {
 		expect(state.flavorId).toBeNull();
 		expect(state.libraries).toEqual([]);
 		expect(state.strategy).toBeNull();
+		expect(state.squashfsMode).toBeNull();
+		expect(state.layerProfileName).toBeNull();
+		expect(state.layerArtifactIds).toEqual([]);
 		expect(state.mountProtocol).toBe('NFS');
 		expect(state.instanceName).toBe('');
 		expect(state.bootVolumeSizeGb).toBe(20);

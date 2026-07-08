@@ -23,9 +23,12 @@ Afterglow is an open-source web dashboard for OpenStack clouds. It keeps Horizon
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml   # set your OpenStack credentials
+cp afterglow.conf.example afterglow.conf   # set your OpenStack credentials
+cp .env.example .env                       # local compose only: replace SECRET_KEY or keep dev-only allow flag
 docker compose up -d                 # http://localhost:3000
 ```
+
+`afterglow.conf` is the primary config file. Legacy `config.toml` is still read as a fallback, but new installs should use `afterglow.conf`. The `AFTERGLOW_ALLOW_INSECURE=1` flag in `.env.example` is only for local Docker Compose development; never set it in Kubernetes or production.
 
 See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment and full configuration.
 
@@ -40,6 +43,7 @@ See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment a
 | [Architecture](docs/architecture.md) _(Korean)_ | System structure, VM-creation flow, OverlayFS |
 | [API reference](docs/api-reference.md) _(Korean)_ | Complete REST API |
 | [Security model](docs/security.md) _(Korean)_ | Authn/authz, IDOR guards, HKDF crypto, audit log |
+| [Targeted testing](docs/testing.md) _(Korean)_ | Fast local feature-test target guide |
 
 Release changes: [CHANGELOG](CHANGELOG.md) · work log: [`openspec/`](openspec/) (`openspec list`, migrated from milestone.md).
 
@@ -57,7 +61,10 @@ Release changes: [CHANGELOG](CHANGELOG.md) · work log: [`openspec/`](openspec/)
 ```bash
 cd backend && uv sync && uv run uvicorn app.main:app --reload   # backend :8000
 cd frontend && npm install && npm run dev                       # frontend :3000
-npm test                                                        # all tests
+npm run test:list                                               # discover targeted local test lanes
+npm run test:target -- auth                                     # example targeted auth/session checks
+npm test                                                        # backend unit + frontend full tests
+npm run test:all                                                # full pre-commit gate
 ```
 
 ## License

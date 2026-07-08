@@ -11,6 +11,8 @@
 		autoBackupConfigs,
 		autoBackupToggling,
 		openActionMenu,
+		volumeBackupsEnabled = true,
+		volumeSnapshotsEnabled = true,
 		isSystemAdmin,
 		onOpenDetail,
 		onActionMenuOpen,
@@ -30,6 +32,8 @@
 		autoBackupConfigs: Set<string>;
 		autoBackupToggling: string | null;
 		openActionMenu: string | null;
+		volumeBackupsEnabled?: boolean;
+		volumeSnapshotsEnabled?: boolean;
 		isSystemAdmin: boolean;
 		onOpenDetail: (id: string) => void;
 		onActionMenuOpen: (id: string) => void;
@@ -43,22 +47,26 @@
 		onDelete: (id: string, name: string) => void;
 		onToggleAutoBackup: (id: string) => void;
 	} = $props();
+
+	const volumeGridClass = $derived(volumeBackupsEnabled
+		? 'grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px]'
+		: 'grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_56px]');
 </script>
 
 <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
-	<div class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+	<div class="{volumeGridClass} px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
 		<div>이름</div>
 		<div>크기</div>
 		<div class="hidden sm:block">유형</div>
 		<div class="whitespace-nowrap">상태</div>
 		<div class="hidden lg:block">연결</div>
 		<div class="hidden lg:block">부트</div>
-		<div class="hidden lg:block text-center whitespace-nowrap">자동 백업</div>
+		{#if volumeBackupsEnabled}<div class="hidden lg:block text-center whitespace-nowrap">자동 백업</div>{/if}
 		<div class="hidden lg:block"></div>
 	</div>
 	{#each volumes as vol (vol.id)}
 		<div
-			class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+			class="{volumeGridClass} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
 		>
 			<!-- 이름 -->
 			<button
@@ -107,17 +115,19 @@
 					{/if}
 				{/if}
 			</div>
-			<!-- 자동 백업 토글 -->
-			<div class="hidden lg:flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
-				<button
-					onclick={(e) => { e.stopPropagation(); onToggleAutoBackup(vol.id); }}
-					disabled={autoBackupToggling === vol.id}
-					title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
-					class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
-				>
-					<span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
-				</button>
-			</div>
+			{#if volumeBackupsEnabled}
+				<!-- 자동 백업 토글 -->
+				<div class="hidden lg:flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
+					<button
+						onclick={(e) => { e.stopPropagation(); onToggleAutoBackup(vol.id); }}
+						disabled={autoBackupToggling === vol.id}
+						title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
+						class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
+					>
+						<span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</div>
+			{/if}
 			<!-- 액션 드롭다운 -->
 			<div class="hidden lg:flex justify-end" role="none">
 				<ActionMenu
@@ -150,14 +160,16 @@
 							용량 확장
 						</button>
 					{/if}
-					<button
-						onclick={() => { onActionMenuClose(); onSnapshot(vol); }}
-						class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
-					>
-						<svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-						스냅샷 생성
-					</button>
-					{#if vol.status === 'available' || vol.status === 'in-use'}
+					{#if volumeSnapshotsEnabled}
+						<button
+							onclick={() => { onActionMenuClose(); onSnapshot(vol); }}
+							class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+						>
+							<svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+							스냅샷 생성
+						</button>
+					{/if}
+					{#if volumeBackupsEnabled && (vol.status === 'available' || vol.status === 'in-use')}
 						<button
 							onclick={() => { onActionMenuClose(); onBackup(vol); }}
 							class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"

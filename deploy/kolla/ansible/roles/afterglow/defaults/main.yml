@@ -103,7 +103,7 @@ afterglow_services:
     image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
     restart_policy: unless-stopped
     volumes:
-      - "/etc/kolla/afterglow/config.toml:/app/config.toml:ro"
+      - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
@@ -119,7 +119,7 @@ afterglow_services:
       UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
       UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -155,7 +155,7 @@ afterglow_services:
     command: ["python", "-m", "app.worker"]
     restart_policy: unless-stopped
     volumes:
-      - "/etc/kolla/afterglow/config.toml:/app/config.toml:ro"
+      - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
@@ -179,7 +179,7 @@ afterglow_services:
     command: ["python", "-m", "app.notion_worker"]
     restart_policy: unless-stopped
     volumes:
-      - "/etc/kolla/afterglow/config.toml:/app/config.toml:ro"
+      - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"

@@ -48,7 +48,7 @@
 			showTransferDropdown = false;
 			if (allProjects.length === 0) {
 				api
-					.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId)
+					.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', token, projectId)
 					.then((r) => (allProjects = r))
 					.catch(() => (allProjects = []));
 			}
@@ -61,7 +61,7 @@
 		transferError = '';
 		try {
 			await api.post(
-				`/api/admin/volumes/${volume.id}/transfer`,
+				`/api/v1/admin/volumes/${volume.id}/transfer`,
 				{ target_project_id: transferProjectId },
 				token,
 				projectId,

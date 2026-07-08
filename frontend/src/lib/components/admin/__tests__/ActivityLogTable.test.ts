@@ -32,7 +32,7 @@ describe('ActivityLogTable', () => {
 	it('empty response renders empty message', async () => {
 		mockGet.mockResolvedValue([]);
 
-		render(ActivityLogTable, { props: { endpoint: '/api/test/activity', storageKey: 'test' } });
+		render(ActivityLogTable, { props: { endpoint: '/api/v1/test/activity', storageKey: 'test' } });
 
 		const msg = await screen.findByText('활동 없음');
 		expect(msg).toBeTruthy();
@@ -58,7 +58,7 @@ describe('ActivityLogTable', () => {
 		]);
 
 		render(ActivityLogTable, {
-			props: { endpoint: '/api/test/activity', storageKey: 'test', showUser: true },
+			props: { endpoint: '/api/v1/test/activity', storageKey: 'test', showUser: true },
 		});
 
 		const cell = await screen.findByText('volume.create');
@@ -84,7 +84,7 @@ describe('ActivityLogTable', () => {
 			},
 		]);
 
-		render(ActivityLogTable, { props: { endpoint: '/api/test/activity', storageKey: 'test' } });
+		render(ActivityLogTable, { props: { endpoint: '/api/v1/test/activity', storageKey: 'test' } });
 
 		const btn = await screen.findByText('상세');
 		expect(btn).toBeTruthy();

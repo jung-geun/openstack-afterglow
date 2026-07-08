@@ -23,7 +23,7 @@ from app.main import app
 def _iter_api_routes():
     """app.routes 에서 /api/ 경로 APIRoute만 순회."""
     for route in app.routes:
-        if isinstance(route, APIRoute) and route.path.startswith("/api/"):
+        if isinstance(route, APIRoute) and route.path.startswith("/api/v1/"):
             yield route
 
 
@@ -75,27 +75,28 @@ def _has_any_auth_dep(route: APIRoute) -> bool:
 
 EXPECTED_PUBLIC = frozenset(
     {
-        ("GET", "/api/health"),
-        ("GET", "/api/health/detail"),  # 모니터링 대시보드용 Redis 상태 포함 헬스체크
-        ("GET", "/api/site-config"),
-        ("GET", "/api/dashboard/config"),  # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
-        ("GET", "/api/auth/gitlab/enabled"),
-        ("GET", "/api/auth/gitlab/authorize"),
-        ("POST", "/api/auth/gitlab/callback"),
-        ("POST", "/api/auth/login"),
+        ("GET", "/api/v1/health"),
+        ("GET", "/api/v1/health/detail"),  # 모니터링 대시보드용 Redis 상태 포함 헬스체크
+        ("GET", "/api/v1/dashboard/config"),  # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
+        ("GET", "/api/v1/site-config"),  # 사이트명·서비스 플래그 — 로그인 전 UI 초기화에 필요
+        ("GET", "/api/v1/site-config/assets/{slot}"),  # 로그인 전 브랜딩 이미지 제공용 public asset
+        ("GET", "/api/v1/auth/gitlab/enabled"),
+        ("GET", "/api/v1/auth/gitlab/authorize"),
+        ("POST", "/api/v1/auth/gitlab/callback"),
+        ("POST", "/api/v1/auth/login"),
         # k3s 활성 시에만 등록되는 라우트
-        ("POST", "/api/k3s/callback"),
+        ("POST", "/api/v1/k3s/callback"),
         # VM 내부 헬스 리포트 — Bearer report_token으로 자체 인증 (Keystone X-Auth-Token 불가)
-        ("POST", "/api/instances/{instance_id}/health/report"),
+        ("POST", "/api/v1/instances/{instance_id}/health/report"),
         # VM 내부 CephX 키 회전 — Bearer report_token으로 자체 인증
-        ("POST", "/api/instances/{instance_id}/credentials/rotate-cephx"),
+        ("POST", "/api/v1/instances/{instance_id}/credentials/rotate-cephx"),
         # 단발 다운로드 토큰(?token=) 또는 X-Auth-Token 헤더 중 하나 수용 — 내부 분기로 인증
-        ("GET", "/api/object-storage/{container_name}/objects/{object_name:path}/download"),
+        ("GET", "/api/v1/object-storage/{container_name}/objects/{object_name:path}/download"),
         # Prometheus SD — Bearer monitoring_sd_token으로 자체 인증 (Keystone X-Auth-Token 불가)
-        ("GET", "/api/sd/prometheus/targets"),
-        ("GET", "/api/sd/prometheus/libvirt-targets"),
+        ("GET", "/api/v1/sd/prometheus/targets"),
+        ("GET", "/api/v1/sd/prometheus/libvirt-targets"),
         # refresh 토큰으로 자체 인증 (만료된 access token 갱신용)
-        ("POST", "/api/auth/refresh"),
+        ("POST", "/api/v1/auth/refresh"),
     }
 )
 
@@ -106,10 +107,10 @@ EXPECTED_PUBLIC = frozenset(
 
 
 def test_admin_prefix_routes_have_require_admin():
-    """/api/admin/ 경로 라우트 전체가 require_admin 의존성을 가져야 한다."""
+    """/api/v1/admin/ 경로 라우트 전체가 require_admin 의존성을 가져야 한다."""
     violations = []
     for route in _iter_api_routes():
-        if not route.path.startswith("/api/admin/"):
+        if not route.path.startswith("/api/v1/admin/"):
             continue
         dep_callables = _get_route_dep_callables(route)
         if require_admin not in dep_callables:
@@ -153,7 +154,7 @@ def test_minimum_route_count():
 def test_admin_routes_summary(capsys):
     """현재 등록된 /api/admin/ 라우트를 열거 (정보성)."""
     routes = sorted(
-        (m, r.path) for r in _iter_api_routes() if r.path.startswith("/api/admin/") for m in (r.methods or [])
+        (m, r.path) for r in _iter_api_routes() if r.path.startswith("/api/v1/admin/") for m in (r.methods or [])
     )
     print(f"\n[admin routes total: {len(routes)}]")
     for method, path in routes:

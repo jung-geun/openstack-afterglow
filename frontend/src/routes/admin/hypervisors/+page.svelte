@@ -37,8 +37,8 @@
 		else refreshing = true;
 		// GPU 정보(gpu-hosts)는 실패해도 하이퍼바이저 목록 표시에는 영향 없음
 		const [hvResult, gpuResult] = await Promise.allSettled([
-			api.get<HypervisorRow[]>('/api/admin/hypervisors', token, projectId),
-			api.get<GpuResponse>('/api/admin/gpu-hosts', token, projectId),
+			api.get<HypervisorRow[]>('/api/v1/admin/hypervisors', token, projectId),
+			api.get<GpuResponse>('/api/v1/admin/gpu-hosts', token, projectId),
 		]);
 		hypervisors = hvResult.status === 'fulfilled' ? hvResult.value : [];
 		if (gpuResult.status === 'fulfilled') {
@@ -82,7 +82,7 @@
 		detailLoading = true;
 		selectedDetail = null;
 		try {
-			selectedDetail = await api.get<HypervisorDetail>(`/api/admin/hypervisors/${hvId}`, token, projectId);
+			selectedDetail = await api.get<HypervisorDetail>(`/api/v1/admin/hypervisors/${hvId}`, token, projectId);
 		} catch {
 			selectedDetail = null;
 		} finally {
@@ -178,7 +178,6 @@
 				{/if}
 			</div>
 		{/if}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<HypervisorTable
 				hypervisors={sortedHypervisors}
 				selectedId={selectedDetail?.id ?? null}
@@ -187,7 +186,6 @@
 				onSort={toggleSort}
 				onSelect={loadDetail}
 			/>
-		</div>
 	{/if}
 </div>
 

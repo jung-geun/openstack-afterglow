@@ -1,0 +1,30 @@
+#cloud-config
+# Layer workflow base-image preinstall payload.
+#
+# Use this when baking the Glance images referenced by config.toml [builder] image_id
+# and layer consume image IDs. Runtime cloud-init packages blocks remain as an
+# idempotent fallback for older images, but preinstalling these avoids per-build
+# apt work on correctly baked images.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  # Layer build VM + consume VM NFS mount support
+  - nfs-common
+  # Layer build VM mksquashfs and consume VM squashfs loop mounts
+  - squashfs-tools
+  # Layer build VM uv/bootstrap downloads
+  - curl
+  # Shared library builder fallback for CephFS-backed recipes
+  - ceph-common
+  # TLS roots for curl/uv package indexes on minimal Ubuntu images
+  - ca-certificates
+
+runcmd:
+  - |
+    set -euo pipefail
+    command -v mount.nfs >/dev/null
+    command -v mksquashfs >/dev/null
+    command -v curl >/dev/null
+    command -v ceph >/dev/null

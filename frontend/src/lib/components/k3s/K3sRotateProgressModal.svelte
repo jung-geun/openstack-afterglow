@@ -40,7 +40,7 @@
 		if (projectId) headers['X-Project-Id'] = projectId;
 
 		try {
-			const resp = await fetch(`${getBaseUrl()}/api/k3s/clusters/${clusterId}/rotate-certs`, {
+			const resp = await fetch(`${getBaseUrl()}/api/v1/k3s/clusters/${clusterId}/rotate-certs`, {
 				method: 'POST',
 				headers,
 			});

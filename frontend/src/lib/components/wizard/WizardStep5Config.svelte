@@ -10,15 +10,16 @@
 <!-- VM 이름 -->
 <div class="mb-4">
 	<label for="vm-name" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
-		VM 이름 <span class="text-red-400">*</span>
+		VM 이름 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
 	</label>
 	<input
 		id="vm-name"
 		bind:value={$wizard.instanceName}
 		type="text"
-		placeholder="my-vm"
+		placeholder="비워두면 자동 생성"
 		class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
 	/>
+	<p class="text-xs text-gray-500 mt-1">입력하지 않으면 같은 프로젝트 안에서 중복되지 않는 안전한 영문 이름이 자동 생성됩니다.</p>
 </div>
 
 <!-- 네트워크 + 키페어 -->
@@ -115,7 +116,11 @@
 </div>
 
 <!-- 루트 디스크 -->
-{#if $wizard.bootSource === 'image'}
+{#if $wizard.squashfsMode}
+<div class="mb-4 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
+	squashfs 라이브러리 소비 VM은 선택한 레이어의 Glance base image에서 직접 부팅합니다. 루트 디스크 크기와 삭제 옵션은 이 베타 경로에서 적용되지 않습니다.
+</div>
+{:else if $wizard.bootSource === 'image'}
 <div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 	<div>
 		<label for="boot-volume-size" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">

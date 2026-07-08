@@ -30,7 +30,7 @@
 		error = '';
 		try {
 			await api.post(
-				`/api/volumes/${volume.id}/extend`,
+				`/api/v1/volumes/${volume.id}/extend`,
 				{ new_size: newSize },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,

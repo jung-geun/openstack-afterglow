@@ -52,7 +52,7 @@
 		loading = true;
 		error = '';
 		try {
-			quota = await api.get<ProjectQuota>(`/api/admin/quotas/${projectId}`, token, authProjectId);
+			quota = await api.get<ProjectQuota>(`/api/v1/admin/quotas/${projectId}`, token, authProjectId);
 			formInstances = quota.compute.instances?.limit ?? -1;
 			formCores = quota.compute.cores?.limit ?? -1;
 			formRam = quota.compute.ram?.limit ?? -1;
@@ -71,7 +71,7 @@
 		successMsg = '';
 		try {
 			await api.put(
-				`/api/admin/quotas/${projectId}`,
+				`/api/v1/admin/quotas/${projectId}`,
 				{
 					instances: formInstances,
 					cores: formCores,

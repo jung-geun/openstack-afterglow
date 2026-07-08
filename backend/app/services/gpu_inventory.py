@@ -40,7 +40,8 @@ _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
         "220A": {"name": "RTX 3080", "is_audio": False, "aliases": ["RTX3080", "RTX_3080", "3080"]},
         "2484": {"name": "RTX 3070 Ti", "is_audio": False, "aliases": ["RTX3070Ti", "RTX_3070_Ti", "3070ti", "3070Ti"]},
         "2482": {"name": "RTX 3070", "is_audio": False, "aliases": ["RTX3070", "RTX_3070", "3070"]},
-        "2504": {"name": "RTX 3060", "is_audio": False, "aliases": ["RTX3060", "RTX_3060", "3060"]},
+        "2487": {"name": "RTX 3060", "is_audio": False, "aliases": ["RTX3060", "RTX_3060", "3060"]},
+        "2504": {"name": "RTX 3060 LHR", "is_audio": False, "aliases": ["RTX3060LHR", "RTX_3060_LHR", "3060LHR"]},
         "1AEF": {"name": "GA102 Audio", "is_audio": True, "aliases": []},
         # === Ada Lovelace Consumer ===
         "2684": {"name": "RTX 4090", "is_audio": False, "aliases": ["RTX4090", "rtx4090", "RTX_4090", "4090"]},
@@ -108,6 +109,26 @@ def _load_device_map() -> dict[str, dict[str, dict]]:
     except Exception:
         _logger.warning("config.toml gpu.devices 로드 실패 — 기본 맵 사용", exc_info=True)
     return device_map
+
+
+def _normalize_alias_value(alias: str) -> str:
+    return alias.replace("-", "").replace("_", "").replace(" ", "").lower()
+
+
+def resolve_alias_to_device_name(alias: str, alias_map: dict[str, str] | None = None) -> str | None:
+    """Resolve a Nova PCI alias to the canonical GPU device name.
+
+    Tries the raw alias first, then a normalized fallback so Nova aliases like
+    ``RTX-3060-LHR`` can still match catalog aliases such as ``RTX_3060_LHR``
+    or ``3060LHR``.
+    """
+    if not alias:
+        return None
+    mapping = alias_map if alias_map is not None else build_alias_to_device_name_map()
+    resolved = mapping.get(alias)
+    if resolved:
+        return resolved
+    return mapping.get(_normalize_alias_value(alias))
 
 
 PCI_DEVICE_MAP = _load_device_map()
@@ -336,6 +357,57 @@ def _collect_gpu_hosts(conn) -> dict:
             type_map[key]["total"] += gpu["total"]
             type_map[key]["used"] += gpu["used"]
 
+    # SHELVED/SHELVED_OFFLOADED 인스턴스의 GPU 할당이 Placement에 잔존하면 used가 total을 초과해
+    # 재고가 음수가 될 수 있다. Nova 서버 목록에서 해당 인스턴스의 GPU 수를 차감해 보정한다.
+    try:
+        # alias → "VENDOR_DEVICE" 키 역매핑
+        alias_to_key: dict[str, str] = {}
+        for _vid, _devices in PCI_DEVICE_MAP.items():
+            for _did, _info in _devices.items():
+                if _info.get("is_audio"):
+                    continue
+                for _alias in _info.get("aliases", []):
+                    if _alias:
+                        alias_to_key[_alias.lower()] = f"{_vid}_{_did}"
+
+        # flavor id → extra_specs 매핑 (list_flavors는 동기 호출)
+        from app.services import nova as _nova_svc
+
+        flavors_by_id: dict[str, object] = {f.id: f for f in _nova_svc.list_flavors(conn)}
+
+        shelved_used: dict[str, int] = {}
+        for _s in conn.compute.servers(all_projects=True, details=True):
+            if _s.status not in ("SHELVED", "SHELVED_OFFLOADED"):
+                continue
+            _flavor = _s.flavor if hasattr(_s, "flavor") else {}
+            _fid = (_flavor.get("id") if isinstance(_flavor, dict) else getattr(_s, "flavor_id", "")) or ""
+            _fl = flavors_by_id.get(_fid)
+            if not _fl:
+                continue
+            _alias_str = (_fl.extra_specs or {}).get("pci_passthrough:alias", "")
+            for _entry in _alias_str.split(","):
+                _entry = _entry.strip()
+                if not _entry or ":" not in _entry or "audio" in _entry.lower():
+                    continue
+                _alias, _, _num = _entry.rpartition(":")
+                _dkey = alias_to_key.get(_alias.strip().lower())
+                if not _dkey:
+                    continue
+                try:
+                    shelved_used[_dkey] = shelved_used.get(_dkey, 0) + int(_num)
+                except ValueError:
+                    shelved_used[_dkey] = shelved_used.get(_dkey, 0) + 1
+
+        if shelved_used:
+            _logger.info("SHELVED/SHELVED_OFFLOADED GPU Placement 보정: %s", shelved_used)
+            for _dkey, _cnt in shelved_used.items():
+                if _dkey in type_map:
+                    type_map[_dkey]["used"] = max(0, type_map[_dkey]["used"] - _cnt)
+            # 보정된 type_map 기준으로 used_gpus 재계산
+            used_gpus = sum(v["used"] for v in type_map.values())
+    except Exception:
+        _logger.warning("SHELVED GPU Placement 보정 실패 — 원본 Placement 값 사용", exc_info=True)
+
     gpu_types = sorted(type_map.values(), key=lambda x: x["total"], reverse=True)
 
     # 호스트명 기반 집계 (PCI 주소 접미사 제거 후 그룹핑)
@@ -407,6 +479,9 @@ def build_alias_to_device_name_map() -> dict[str, str]:
 
     예: "RTX3090" → "RTX 3090", "A100_80GB" → "A100 SXM4 80GB"
     GPU flavor의 pci_passthrough:alias 값을 GPU Spec Notion 페이지 이름으로 변환할 때 사용한다.
+
+    대소문자·구분자(-, _, 공백) 무관 매칭을 위해 원본 alias 외에 정규화 키도 등록한다.
+    예: "RTX3060LHR" 등록 시 "rtx3060lhr"도 함께 등록 → flavor name fallback("3060lhr") 허용.
     """
     alias_map: dict[str, str] = {}
     for devices in PCI_DEVICE_MAP.values():
@@ -417,4 +492,6 @@ def build_alias_to_device_name_map() -> dict[str, str]:
             for alias in info.get("aliases", []):
                 if alias:
                     alias_map[alias] = name
+                    # 정규화 키도 등록 (소문자, 구분자 제거) — exact match 우선 보장을 위해 setdefault
+                    alias_map.setdefault(_normalize_alias_value(alias), name)
     return alias_map

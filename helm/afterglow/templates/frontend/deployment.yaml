@@ -40,7 +40,12 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: afterglow-config
-                  key: APP_ORIGIN
+                  key: PUBLIC_API_BASE
+            - name: PUBLIC_S3_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: afterglow-config
+                  key: PUBLIC_S3_BASE
             - name: PUBLIC_GRAFANA_BASE
               valueFrom:
                 configMapKeyRef:
@@ -67,5 +72,16 @@ spec:
             periodSeconds: 5
             failureThreshold: 2
             timeoutSeconds: 3
+          volumeMounts:
+            - name: afterglow-config-volume
+              mountPath: /app/afterglow.conf
+              subPath: afterglow.conf
           resources:
             {{- toYaml .Values.resources.frontend | nindent 12 }}
+      volumes:
+        - name: afterglow-config-volume
+          configMap:
+            name: afterglow-config
+            items:
+              - key: afterglow.conf
+                path: afterglow.conf

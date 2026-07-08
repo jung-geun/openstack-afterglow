@@ -22,7 +22,7 @@
 		if (!$auth.token) return;
 		try {
 			const me = await api.get<{ is_system_admin: boolean; roles: string[] }>(
-				'/api/auth/me',
+				'/api/v1/auth/me',
 				$auth.token,
 				$auth.projectId ?? undefined,
 			);

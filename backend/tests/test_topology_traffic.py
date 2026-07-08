@@ -74,7 +74,7 @@ async def test_traffic_returns_instances_from_promql(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -104,7 +104,7 @@ async def test_traffic_aggregates_by_network(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -121,7 +121,7 @@ async def test_traffic_routers_empty_with_meta(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(return_value=[])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -135,7 +135,7 @@ async def test_traffic_handles_no_instances(client, mock_conn):
     mock_conn.network.ports.return_value = []
 
     with patch("app.api.network.networks.list_load_balancers", return_value=[]):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -159,7 +159,7 @@ async def test_traffic_prom_unavailable_falls_back(client, mock_conn):
         ),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     assert resp.json()["instances"] == {}
@@ -265,7 +265,7 @@ async def test_traffic_libvirt_fills_missing_instances(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -305,7 +305,7 @@ async def test_traffic_libvirt_primary_node_exporter_supplements(client, mock_co
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -334,7 +334,7 @@ async def test_traffic_libvirt_query_uses_openstack_info_join(client, mock_conn)
         patch("app.api.network.networks.query_instant_multi", side_effect=_capture_query),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     assert len(calls) == 4
@@ -379,7 +379,7 @@ async def test_traffic_multi_nic_demux(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[[], [], lv_rx, lv_tx])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -415,7 +415,7 @@ async def test_traffic_node_exporter_supplements_single_nic_to_networks(client, 
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -443,7 +443,7 @@ async def test_traffic_node_exporter_multi_nic_skips_networks_aggregation(client
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -468,7 +468,7 @@ async def test_traffic_new_attach_within_libvirt_scrape_window(client, mock_conn
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[[], [], [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -496,7 +496,7 @@ async def test_traffic_libvirt_promql_uses_double_group_left(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", side_effect=_capture_query),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        await client.get("/api/networks/topology/traffic")
+        await client.get("/api/v1/networks/topology/traffic")
 
     lv_calls = [
         q
@@ -516,7 +516,7 @@ async def test_traffic_libvirt_promql_uses_double_group_left(client, mock_conn):
 @pytest.mark.anyio
 async def test_traffic_all_projects_requires_admin(non_admin_client, mock_conn):
     """all_projects=true + is_system_admin=False → 403."""
-    resp = await non_admin_client.get("/api/networks/topology/traffic?all_projects=true")
+    resp = await non_admin_client.get("/api/v1/networks/topology/traffic?all_projects=true")
     assert resp.status_code == 403
 
 
@@ -529,7 +529,7 @@ async def test_traffic_all_projects_admin_unscoped_ports(admin_client, mock_conn
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(return_value=[])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]) as mock_lbs,
     ):
-        resp = await admin_client.get("/api/networks/topology/traffic?all_projects=true")
+        resp = await admin_client.get("/api/v1/networks/topology/traffic?all_projects=true")
     assert resp.status_code == 200
     assert mock_conn.network.ports.called
     _, kwargs = mock_conn.network.ports.call_args
@@ -548,7 +548,7 @@ async def test_traffic_default_scoped_to_project(client, mock_conn):
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(return_value=[])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
-        resp = await client.get("/api/networks/topology/traffic")
+        resp = await client.get("/api/v1/networks/topology/traffic")
     assert resp.status_code == 200
     assert mock_conn.network.ports.called
     _, kwargs = mock_conn.network.ports.call_args

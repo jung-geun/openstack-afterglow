@@ -691,6 +691,31 @@ async def wait_node_ready(cluster_id: str, node_name: str, *, timeout: float = 3
     return False
 
 
+async def wait_node_gpu_allocatable(
+    cluster_id: str, node_name: str, *, min_gpu: int = 1, timeout: float = 600.0
+) -> bool:
+    """노드가 Ready 이후 nvidia.com/gpu allocatable을 노출할 때까지 대기한다."""
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            async with _kube_client(cluster_id) as (client, server_url):
+                resp = await client.get(
+                    f"{server_url}/api/v1/nodes/{node_name}",
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status_code == 200:
+                    allocatable = resp.json().get("status", {}).get("allocatable", {})
+                    if int(allocatable.get("nvidia.com/gpu", 0)) >= min_gpu:
+                        return True
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 워크로드 조회/액션 헬퍼 (Phase 53o)
 # ---------------------------------------------------------------------------
@@ -1015,6 +1040,7 @@ async def list_unschedulable_pods(cluster_id: str) -> list[dict]:
                 "tolerations": spec.get("tolerations") or [],
                 "affinity": spec.get("affinity") or {},
                 "message": msg,
+                "node_name": spec.get("nodeName") or "",
             }
         )
     return result
@@ -1078,7 +1104,7 @@ async def get_pod_resource_usage(cluster_id: str) -> list[dict]:
     """전체 Running pod의 resource requests 반환 (admin kubeconfig).
 
     반환 구조:
-      {node, namespace, cpu_m, memory_bytes}
+      {node, namespace, name, cpu_m, memory_bytes, gpu, is_daemonset, is_mirror}
     """
     try:
         kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
@@ -1108,16 +1134,25 @@ async def get_pod_resource_usage(cluster_id: str) -> list[dict]:
             continue
         cpu_m = 0
         memory_bytes = 0
-        for container in spec.get("containers", []):
+        gpu = 0
+        for container in spec.get("containers", []) + spec.get("initContainers", []):
             req = container.get("resources", {}).get("requests", {})
             cpu_m += _parse_cpu_millicores(req.get("cpu", "0"))
             memory_bytes += _parse_memory_bytes(req.get("memory", "0"))
+            gpu += int(req.get("nvidia.com/gpu", 0))
+        owners = meta.get("ownerReferences") or []
+        is_daemonset = any(owner.get("kind") == "DaemonSet" for owner in owners if isinstance(owner, dict))
+        is_mirror = "kubernetes.io/config.mirror" in (meta.get("annotations") or {})
         result.append(
             {
                 "node": node_name,
                 "namespace": meta.get("namespace", "default"),
+                "name": meta.get("name", ""),
                 "cpu_m": cpu_m,
                 "memory_bytes": memory_bytes,
+                "gpu": gpu,
+                "is_daemonset": is_daemonset,
+                "is_mirror": is_mirror,
             }
         )
     return result

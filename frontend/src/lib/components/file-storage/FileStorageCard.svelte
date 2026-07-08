@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { FileStorage } from '$lib/types/fileStorage';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { formatIsoDateTime } from '$lib/utils/format';
 
 	let {
 		fs,
@@ -37,6 +38,9 @@
 				{#if fs.library_name}
 					· <span class="text-blue-400">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
 				{/if}
+				{#if fs.created_at}
+					· <span class="text-gray-600">{formatIsoDateTime(fs.created_at)}</span>
+				{/if}
 			</div>
 		</div>
 		<StatusChip status={fs.status} />
@@ -52,15 +56,14 @@
 		</div>
 	</div>
 
-	{#if fs.export_locations && fs.export_locations.length > 0}
-		<div class="mt-3.5 flex items-center gap-1.5 p-2.5 bg-[#0B1220] border border-gray-800 rounded-md">
-			<span class="text-gray-600 font-mono text-[11px] shrink-0">$</span>
-			<span class="font-mono text-[11px] text-gray-400 truncate flex-1">{fs.export_locations[0]}</span>
-			<button
-				onclick={(e) => { e.stopPropagation(); onCopyExport(fs.export_locations[0], fs.id); }}
-				class="shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[11px]"
-				title="경로 복사"
-			>{copiedExport === fs.id ? '✓' : '⎘'}</button>
+	<!-- creating 상태일 때 progress 표시 -->
+	{#if fs.status === 'creating' && fs.progress}
+		{@const pct = (() => { const m = fs.progress.match(/^(\d+(?:\.\d+)?)%$/); return m ? parseFloat(m[1]) : 0; })()}
+		<div class="mt-3 flex items-center gap-2">
+			<div class="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+				<div class="h-full rounded-full bg-yellow-500 transition-all" style="width: {pct}%"></div>
+			</div>
+			<span class="text-[10px] text-yellow-400 shrink-0">{fs.progress}</span>
 		</div>
 	{/if}
 

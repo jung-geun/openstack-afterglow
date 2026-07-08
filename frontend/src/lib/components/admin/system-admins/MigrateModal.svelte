@@ -31,7 +31,7 @@
 		result = null;
 		try {
 			result = await api.post<MigrateResult>(
-				'/api/admin/identity/system-roles/migrate-from-project',
+				'/api/v1/admin/identity/system-roles/migrate-from-project',
 				{},
 				token,
 				projectId,

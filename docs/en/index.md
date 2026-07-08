@@ -23,9 +23,11 @@ Afterglow is an open-source web dashboard for OpenStack cloud environments. It p
 |---|---|
 | [Getting started](deployment.md) | Docker Compose / Kubernetes deployment |
 | [k3s cluster](k3s.md) | k3s provisioning and node management |
+| [Drover behavior specification](drover-workflow.md) | Planned vs current Drover cluster creation behavior and provisioning workflow |
 | [Architecture](../architecture.md) _(Korean)_ | System design and data flow |
 | [API reference](../api-reference.md) _(Korean)_ | Complete REST API specification |
 | [kolla-ansible deployment](../deployment.md#kolla-ansible-배포) | Single-playbook deployment inside OpenStack |
+| [Targeted testing](../testing.md) _(Korean)_ | Guide to choosing fast local feature-test targets |
 
 ---
 

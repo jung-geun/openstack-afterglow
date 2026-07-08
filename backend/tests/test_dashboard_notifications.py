@@ -21,7 +21,7 @@ async def test_notifications_empty_when_no_errors(client, mock_conn):
     from app.services import nova as nova_svc
 
     with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[]):
-        resp = await client.get("/api/dashboard/notifications")
+        resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -37,7 +37,7 @@ async def test_notifications_error_instance_triggers_alert(client, mock_conn):
     error_server = type("S", (), {"id": "s1", "status": "ERROR", "flavor_id": None, "flavor_name": "m1.small"})()
 
     with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[error_server]):
-        resp = await client.get("/api/dashboard/notifications")
+        resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -56,7 +56,7 @@ async def test_notifications_project_scoped(client, mock_conn):
     active_server = type("S", (), {"id": "s2", "status": "ACTIVE", "flavor_id": None, "flavor_name": "m1.small"})()
 
     with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[active_server]):
-        resp = await client.get("/api/dashboard/notifications")
+        resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
     assert resp.json()["notifications"] == []

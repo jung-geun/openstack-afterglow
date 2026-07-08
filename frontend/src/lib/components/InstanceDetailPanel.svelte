@@ -16,6 +16,7 @@
 	import MigrateModal from '$lib/components/instance/MigrateModal.svelte';
 	import PasswordModal from '$lib/components/instance/PasswordModal.svelte';
 	import ResizeModal from '$lib/components/instance/ResizeModal.svelte';
+	import EvacuateModal from '$lib/components/admin/instances/EvacuateModal.svelte';
 
 	interface Props {
 		instanceId: string;
@@ -43,6 +44,7 @@
 	let showPasswordModal = $state(false);
 	let showResizeModal = $state(false);
 	let resizePreselectFlavorId = $state('');
+	let showEvacuateModal = $state(false);
 
 	// 리소스 사용량 권장 상태
 	interface FlavorSnippet { id: string; name: string; vcpus: number; ram: number; disk: number }
@@ -65,7 +67,7 @@
 				prometheus_available: boolean;
 				stats: Record<string, { min: number | null; avg: number | null; max: number | null }>;
 				recommendation: SummaryRec | null;
-			}>(`/api/instances/${iid}/metrics-summary?range=7d`, token, projectId);
+			}>(`/api/v1/instances/${iid}/metrics-summary?range=7d`, token, projectId);
 			if (resp.prometheus_available) {
 				recommendation = resp.recommendation;
 				summaryCpuAvg = resp.stats.cpu?.avg ?? null;
@@ -99,6 +101,10 @@
 		showResizeModal = true;
 		await s.loadResizeFlavors();
 	}
+
+	function openEvacuateModal() {
+		showEvacuateModal = true;
+	}
 </script>
 
 <div class="p-8">
@@ -125,7 +131,7 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
 			{s.error}
 		</div>
-	{:else if s.loading}
+	{:else if s.loading && !s.instance}
 		<LoadingSkeleton variant="card" rows={6} />
 	{:else if s.instance}
 		<InstanceHeader
@@ -133,6 +139,7 @@
 			onOpenMigrateModal={openMigrateModal}
 			onOpenPasswordModal={openPasswordModal}
 			onOpenResizeModal={openResizeModal}
+			onOpenEvacuateModal={openEvacuateModal}
 		/>
 
 		{#if recommendation?.underutilized}
@@ -178,4 +185,13 @@
 {/if}
 {#if showResizeModal}
 	<ResizeModal preselectFlavorId={resizePreselectFlavorId} onClose={() => { showResizeModal = false; }} />
+{/if}
+{#if showEvacuateModal && s.instance}
+	<EvacuateModal
+		serverId={s.instance.id}
+		serverName={s.instance.name}
+		currentHost={s.instance.host}
+		onClose={() => { showEvacuateModal = false; }}
+		onEvacuated={() => { showEvacuateModal = false; s.manualRefresh(); }}
+	/>
 {/if}

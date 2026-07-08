@@ -221,6 +221,14 @@ async def get_all_gpu_aliases() -> list[str]:
     1. Flavor extra_specs의 pci_passthrough:alias (flavor가 있는 GPU)
     2. Placement API의 실제 GPU device → PCI_DEVICE_MAP alias 매핑 (flavor 없는 GPU 포함)
     """
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning("GPU 카탈로그 DB overlay 갱신 실패 — 기존 alias map으로 계속 진행", exc_info=True)
     import asyncio
 
     from app.config import get_settings

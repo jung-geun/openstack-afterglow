@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { wizard, closeWizard } from '$lib/stores/wizard';
-	import { createVmCreateStore, provideVmCreate, TOTAL_STEPS, STEP_LABELS } from '$lib/stores/vmCreateStore.svelte';
+	import { createVmCreateStore, provideVmCreate } from '$lib/stores/vmCreateStore.svelte';
 	import SelectFlavor from '$lib/components/wizard/SelectFlavor.svelte';
 	import SelectStrategy from '$lib/components/wizard/SelectStrategy.svelte';
 	import WizardStepper from '$lib/components/wizard/WizardStepper.svelte';
@@ -39,9 +39,9 @@
 			<VmDeployProgress />
 		{:else}
 			<WizardHeader
-				step={$wizard.step}
-				totalSteps={TOTAL_STEPS}
-				stepName={STEP_LABELS[$wizard.step - 1]}
+				step={s.visibleStepIndex}
+				totalSteps={s.visibleTotalSteps}
+				stepName={s.visibleStepLabels[s.visibleStepIndex - 1]}
 				{adminMode}
 				adminProjectName={s.adminSelectedProjectName}
 				onReset={s.handleReset}
@@ -54,7 +54,7 @@
 				</div>
 			{/if}
 
-			<WizardStepper cur={$wizard.step} totalSteps={TOTAL_STEPS} stepLabels={STEP_LABELS} goTo={s.goTo} />
+			<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
 
 			<div class="mb-8">
 				{#if $wizard.step === 1}
@@ -87,9 +87,9 @@
 				imageDisplay={$wizard.imageName ?? ($wizard.bootSource === 'volume' ? ($wizard.bootVolumeName ?? null) : null)}
 				flavorDisplay={$wizard.flavorName}
 				libCount={$wizard.libraries.length}
-				step={$wizard.step}
-				totalSteps={TOTAL_STEPS}
-				canPrev={$wizard.step > 1}
+				step={s.visibleStepIndex}
+				totalSteps={s.visibleTotalSteps}
+				canPrev={s.visibleStepIndex > 1}
 				canNext={s.canNext}
 				onCancel={closeWizard}
 				onPrev={s.prevStep}

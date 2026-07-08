@@ -26,15 +26,18 @@ class _JSONFormatter(logging.Formatter):
 
 def _setup_logging() -> None:
     from app.config import get_settings
+    from app.utils.log import SensitiveDataFilter
 
     cfg = get_settings()
 
+    sensitive_filter = SensitiveDataFilter()
     formatter = _JSONFormatter()
     root = logging.getLogger()
     root.handlers.clear()
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(sensitive_filter)
     root.addHandler(stream_handler)
 
     log_path = cfg.log_file_path
@@ -56,6 +59,7 @@ def _setup_logging() -> None:
                 encoding="utf-8",
             )
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(sensitive_filter)
         root.addHandler(file_handler)
     except OSError:
         pass  # 로그 디렉터리 없으면 파일 핸들러 없이 진행
@@ -146,7 +150,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
-from app.api.identity import admin_router, auth_router
+from app.api.identity import admin_router, auth_router, gitlab_auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
@@ -154,15 +158,17 @@ from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_instances import router as admin_instances_router
-from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.admin_worker_runtime import router as admin_worker_runtime_router
 from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
+from app.api.union.layer_ops import router as admin_libraries_router
+from app.api.union.layer_public import router as squashfs_libraries_router
 
 _mark("api.identity")
 
@@ -320,34 +326,36 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 긴 prefix 를 먼저 두어 longest-prefix 매칭이 단순 순회로 동작하도록 정렬.
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
-    ("/api/volumes/backups", "volume_backup"),
-    ("/api/volume-snapshots", "volume_snapshot"),
-    ("/api/share-snapshots", "share_snapshot"),
-    ("/api/share-networks", "share_network"),
-    ("/api/security-services", "security_service"),
-    ("/api/security-groups", "security_group"),
-    ("/api/secret-containers", "secret_container"),
-    ("/api/secret-orders", "secret_order"),
-    ("/api/database-instances", "database"),
-    ("/api/admin/libraries", "library"),
-    ("/api/admin/images", "image"),
-    ("/api/admin/projects", "project"),
-    ("/api/loadbalancers", "load_balancer"),
-    ("/api/k3s/clusters", "container_cluster"),
-    ("/api/file-storage", "file_storage"),
-    ("/api/object-storage", "object_storage"),
-    ("/api/invitations", "invitation"),
-    ("/api/instances", "instance"),
-    ("/api/keypairs", "keypair"),
-    ("/api/networks", "network"),
-    ("/api/containers", "container"),
-    ("/api/libraries", "library"),
-    ("/api/volumes", "volume"),
-    ("/api/routers", "router"),
-    ("/api/secrets", "secret"),
-    ("/api/images", "image"),
-    ("/api/union", "union_layer"),
-    ("/api/clusters", "container_cluster"),
+    ("/api/v1/volumes/backups", "volume_backup"),
+    ("/api/v1/volume-snapshots", "volume_snapshot"),
+    ("/api/v1/share-snapshots", "share_snapshot"),
+    ("/api/v1/share-networks", "share_network"),
+    ("/api/v1/security-services", "security_service"),
+    ("/api/v1/security-groups", "security_group"),
+    ("/api/v1/secret-containers", "secret_container"),
+    ("/api/v1/secret-orders", "secret_order"),
+    ("/api/v1/database-instances", "database"),
+    ("/api/v1/admin/worker-runtime", "worker_runtime"),
+    ("/api/v1/admin/libraries", "union_layer"),
+    ("/api/v1/libraries/squashfs", "union_layer"),
+    ("/api/v1/admin/images", "image"),
+    ("/api/v1/admin/projects", "project"),
+    ("/api/v1/loadbalancers", "load_balancer"),
+    ("/api/v1/k3s/clusters", "container_cluster"),
+    ("/api/v1/file-storage", "file_storage"),
+    ("/api/v1/object-storage", "object_storage"),
+    ("/api/v1/invitations", "invitation"),
+    ("/api/v1/instances", "instance"),
+    ("/api/v1/keypairs", "keypair"),
+    ("/api/v1/networks", "network"),
+    ("/api/v1/containers", "container"),
+    ("/api/v1/libraries", "library"),
+    ("/api/v1/volumes", "volume"),
+    ("/api/v1/routers", "router"),
+    ("/api/v1/secrets", "secret"),
+    ("/api/v1/images", "image"),
+    ("/api/v1/union", "union_layer"),
+    ("/api/v1/clusters", "container_cluster"),
 ]
 
 
@@ -391,7 +399,7 @@ async def request_logging_middleware(request: Request, call_next):
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
     _record_request(request.method, request.url.path, response.status_code, duration_ms)
-    if not request.url.path.startswith("/api/health"):
+    if not request.url.path.startswith(("/api/v1/health", "/api/health")):
         _logger.info(
             "request",
             extra={
@@ -417,6 +425,21 @@ def _get_allowed_origins() -> set[str]:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
+    if request.method == "OPTIONS":
+        if origin not in _get_allowed_origins():
+            return JSONResponse(content="Forbidden", status_code=403)
+        return JSONResponse(
+            content="OK",
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
+                "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
+                "Access-Control-Max-Age": "600",
+                "Vary": "Origin",
+            },
+        )
+
     response = await call_next(request)
     if origin and origin in _get_allowed_origins():
         response.headers["Access-Control-Allow-Origin"] = origin
@@ -474,131 +497,121 @@ async def activity_audit_middleware(request: Request, call_next):
     return response
 
 
-@app.options("/{rest_of_path:path}")
-async def options_handler(request: Request, rest_of_path: str):
-    """OPTIONS preflight 전용 핸들러."""
-    origin = request.headers.get("origin", "")
-    allowed = _get_allowed_origins()
-    if origin not in allowed:
-        return JSONResponse(content="Forbidden", status_code=403)
-    return JSONResponse(
-        content="OK",
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
-            "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
-            "Access-Control-Max-Age": "600",
-            "Vary": "Origin",
-        },
-    )
-
-
 # Identity
-app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+# OIDC/OAuth API routes follow the project-wide /api/v1 mount rule.
+app.include_router(gitlab_auth_router, prefix="/api/v1/auth", tags=["auth-oidc"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
-app.include_router(admin_instances_router, prefix="/api/admin", tags=["admin-instances"])
-app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
-app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-services"])
-app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
-app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
-app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
-app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=["admin-libraries"])
-app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
-app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
-app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
-app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
-app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
-app.include_router(admin_orphans_router, prefix="/api/admin", tags=["admin-orphans"])
-app.include_router(admin_dashboard_router, prefix="/api/admin", tags=["admin-dashboard"])
-app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
-app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
+app.include_router(admin_instances_router, prefix="/api/v1/admin", tags=["admin-instances"])
+app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
+app.include_router(admin_services_router, prefix="/api/v1/admin", tags=["admin-services"])
+app.include_router(admin_worker_runtime_router, prefix="/api/v1/admin", tags=["admin-worker-runtime"])
+app.include_router(admin_flavors_router, prefix="/api/v1/admin", tags=["admin-flavors"])
+app.include_router(admin_identity_router, prefix="/api/v1/admin", tags=["admin-identity"])
+app.include_router(admin_gpu_router, prefix="/api/v1/admin", tags=["admin-gpu"])
+app.include_router(admin_libraries_router, prefix="/api/v1/admin/libraries", tags=["admin-libraries"])
+app.include_router(admin_notion_router, prefix="/api/v1/admin", tags=["admin-notion"])
+app.include_router(admin_images_router, prefix="/api/v1/admin", tags=["admin-images"])
+app.include_router(profile_router, prefix="/api/v1/profile", tags=["profile"])
+app.include_router(profile_activity_router, prefix="/api/v1/profile/activity", tags=["profile-activity"])
+app.include_router(admin_activity_router, prefix="/api/v1/admin", tags=["admin-activity"])
+app.include_router(admin_orphans_router, prefix="/api/v1/admin", tags=["admin-orphans"])
+app.include_router(admin_dashboard_router, prefix="/api/v1/admin", tags=["admin-dashboard"])
+app.include_router(projects_router, prefix="/api/v1/projects", tags=["projects"])
+app.include_router(invitations_router, prefix="/api/v1/invitations", tags=["invitations"])
 # Compute
-app.include_router(images_router, prefix="/api/images", tags=["images"])
-app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
+app.include_router(images_router, prefix="/api/v1/images", tags=["images"])
+app.include_router(flavors_router, prefix="/api/v1/flavors", tags=["flavors"])
 # instance_health_router을 instances_router보다 먼저 등록 (/health 경로 충돌 방지)
-app.include_router(instance_health_router, prefix="/api/instances", tags=["instance-health"])
-app.include_router(instance_metrics_router, prefix="/api/instances", tags=["instance-metrics"])
-app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
-app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
+app.include_router(instance_health_router, prefix="/api/v1/instances", tags=["instance-health"])
+# 레거시 /api/instances 유지 — cloud-init baked VM 호환 (health/report, rotate-cephx)
+app.include_router(instance_health_router, prefix="/api/instances", tags=["instance-health"], include_in_schema=False)
+app.include_router(instance_metrics_router, prefix="/api/v1/instances", tags=["instance-metrics"])
+app.include_router(instances_router, prefix="/api/v1/instances", tags=["instances"])
+app.include_router(keypairs_router, prefix="/api/v1/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
-app.include_router(volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"])
-app.include_router(volume_snapshots_router, prefix="/api/volume-snapshots", tags=["volume-snapshots"])
-app.include_router(volumes_router, prefix="/api/volumes", tags=["volumes"])
+app.include_router(volume_backups_router, prefix="/api/v1/volumes/backups", tags=["volume-backups"])
+app.include_router(volume_snapshots_router, prefix="/api/v1/volume-snapshots", tags=["volume-snapshots"])
+app.include_router(volumes_router, prefix="/api/v1/volumes", tags=["volumes"])
 # Network
-app.include_router(networks_router, prefix="/api/networks", tags=["networks"])
-app.include_router(routers_router, prefix="/api/routers", tags=["routers"])
-app.include_router(loadbalancers_router, prefix="/api/loadbalancers", tags=["loadbalancers"])
-app.include_router(security_groups_router, prefix="/api/security-groups", tags=["security-groups"])
-# Optional services — config.toml [services] 섹션에서 활성화
+app.include_router(networks_router, prefix="/api/v1/networks", tags=["networks"])
+app.include_router(routers_router, prefix="/api/v1/routers", tags=["routers"])
+app.include_router(loadbalancers_router, prefix="/api/v1/loadbalancers", tags=["loadbalancers"])
+app.include_router(security_groups_router, prefix="/api/v1/security-groups", tags=["security-groups"])
+# Optional services — afterglow.conf/config.toml [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
 _svc_cfg = _get_cfg()
 if _svc_cfg.service_manila_enabled:
-    app.include_router(file_storage_router, prefix="/api/file-storage", tags=["file-storage"])
-    app.include_router(share_snapshots_router, prefix="/api/share-snapshots", tags=["share-snapshots"])
-    app.include_router(share_networks_router, prefix="/api/share-networks", tags=["share-networks"])
+    app.include_router(file_storage_router, prefix="/api/v1/file-storage", tags=["file-storage"])
+    app.include_router(share_snapshots_router, prefix="/api/v1/share-snapshots", tags=["share-snapshots"])
+    app.include_router(share_networks_router, prefix="/api/v1/share-networks", tags=["share-networks"])
     app.include_router(
         security_services_router,
-        prefix="/api/security-services",
+        prefix="/api/v1/security-services",
         tags=["security-services"],
     )
 if _svc_cfg.service_magnum_enabled:
-    app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
+    app.include_router(clusters_router, prefix="/api/v1/clusters", tags=["clusters"])
 if _svc_cfg.service_zun_enabled:
-    app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
+    app.include_router(containers_router, prefix="/api/v1/containers", tags=["containers"])
 if _svc_cfg.service_k3s_enabled:
-    app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
-    app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
-    app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
-    app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
-    app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
-    app.include_router(k3s_pods_router, prefix="/api/k3s/clusters", tags=["k3s-pods"])
-    app.include_router(k3s_services_router, prefix="/api/k3s/clusters", tags=["k3s-services"])
-    app.include_router(k3s_workloads_router, prefix="/api/k3s/clusters", tags=["k3s-workloads"])
-    app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
-    app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
-    app.include_router(k3s_nodegroups_router, prefix="/api/k3s/clusters", tags=["k3s-nodegroups"])
-    app.include_router(k3s_certificates_router, prefix="/api/k3s/clusters", tags=["k3s-certificates"])
+    app.include_router(k3s_clusters_router, prefix="/api/v1/k3s/clusters", tags=["k3s"])
+    app.include_router(k3s_health_router, prefix="/api/v1/k3s/clusters", tags=["k3s-health"])
+    app.include_router(k3s_callback_router, prefix="/api/v1/k3s", tags=["k3s-callback"])
+    # 레거시 /api/k3s 유지 — cloud-init baked VM 호환 (k3s/callback)
+    app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"], include_in_schema=False)
+    app.include_router(k3s_configmaps_router, prefix="/api/v1/k3s/clusters", tags=["k3s-configmaps"])
+    app.include_router(k3s_secrets_router, prefix="/api/v1/k3s/clusters", tags=["k3s-secrets"])
+    app.include_router(k3s_pods_router, prefix="/api/v1/k3s/clusters", tags=["k3s-pods"])
+    app.include_router(k3s_services_router, prefix="/api/v1/k3s/clusters", tags=["k3s-services"])
+    app.include_router(k3s_workloads_router, prefix="/api/v1/k3s/clusters", tags=["k3s-workloads"])
+    app.include_router(k3s_shell_router, prefix="/api/v1/k3s/clusters", tags=["k3s-shell"])
+    app.include_router(k3s_templates_router, prefix="/api/v1/k3s/cluster-templates", tags=["k3s-templates"])
+    app.include_router(k3s_nodegroups_router, prefix="/api/v1/k3s/clusters", tags=["k3s-nodegroups"])
+    app.include_router(k3s_certificates_router, prefix="/api/v1/k3s/clusters", tags=["k3s-certificates"])
 
 # Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
 from app.api.union import router as union_router  # noqa: E402
 
-app.include_router(union_router, prefix="/api/union", tags=["union"])
+app.include_router(union_router, prefix="/api/v1/union", tags=["union"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 
-    app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
+    app.include_router(trove_router, prefix="/api/v1/database-instances", tags=["database"])
 if _svc_cfg.service_swift_enabled:
     from app.api.object_storage.containers import router as swift_router
     from app.api.object_storage.upload import router as swift_upload_router
 
-    app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
-    app.include_router(swift_upload_router)
+    app.include_router(swift_router, prefix="/api/v1/object-storage", tags=["object-storage"])
+    app.include_router(swift_upload_router, prefix="/api/v1/object-storage", tags=["object-storage-upload"])
 if _svc_cfg.service_barbican_enabled:
     from app.api.secrets import containers_router, orders_router, secrets_router
 
-    app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
-    app.include_router(containers_router, prefix="/api/secret-containers", tags=["secret-containers"])
-    app.include_router(orders_router, prefix="/api/secret-orders", tags=["secret-orders"])
-    app.include_router(admin_secrets_router, prefix="/api/admin", tags=["admin-key-manager"])
+    app.include_router(secrets_router, prefix="/api/v1/secrets", tags=["secrets"])
+    app.include_router(containers_router, prefix="/api/v1/secret-containers", tags=["secret-containers"])
+    app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
+    app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
 # Common
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
-app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
-app.include_router(sd_targets_router, prefix="/api/sd", tags=["sd-targets"])
-app.include_router(grafana_auth_router, prefix="/api/grafana", tags=["grafana-auth"])
-app.include_router(site_router, prefix="/api/site-config", tags=["site"])
-app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"])
+app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
+app.include_router(metrics_router, prefix="/api/v1/metrics", tags=["metrics"])
+app.include_router(squashfs_libraries_router, prefix="/api/v1/libraries/squashfs", tags=["squashfs-libraries"])
+app.include_router(libraries_router, prefix="/api/v1/libraries", tags=["libraries"])
+app.include_router(sd_targets_router, prefix="/api/v1/sd", tags=["sd-targets"])
+app.include_router(grafana_auth_router, prefix="/api/v1/grafana", tags=["grafana-auth"])
+app.include_router(site_router, prefix="/api/v1/site-config", tags=["site"])
+app.include_router(user_dashboard_router, prefix="/api/v1/user-dashboard", tags=["user-dashboard"])
 
 
-@app.get("/api/health")
+@app.get("/api/v1/health")
+@app.get("/api/health", include_in_schema=False)
 async def health():
     """K8s probe용. 항상 즉시 200 반환."""
     return {"status": "ok"}
 
 
-@app.get("/api/health/detail")
+@app.get("/api/v1/health/detail")
+@app.get("/api/health/detail", include_in_schema=False)
 async def health_detail(token_info: dict = Depends(get_token_info)):
     """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
     detail: dict = {"status": "ok", "redis": "unknown"}
@@ -1014,16 +1027,25 @@ async def _deferred_create_tables() -> None:
 
 
 async def _deferred_load_gpu_catalog() -> None:
-    """DB의 GPU 장치 카탈로그를 PCI_DEVICE_MAP에 overlay. 실패해도 base map으로 동작."""
+    """DB의 GPU 장치 카탈로그를 PCI_DEVICE_MAP에 overlay. 실패해도 base map으로 동작.
+
+    다중 replica 환경에서 각 pod가 startup 시 DB 카탈로그를 반드시 로드해야 한다.
+    이전 구현은 `is_db_available()`가 처음에 False면 즉시 return하고 재시도하지 않아,
+    DB 준비가 늦으면 해당 pod의 PCI_DEVICE_MAP에 DB overlay가 영구 누락되어
+    하이퍼바이저 GPU 이름이 raw로 표시되는 문제가 있었다. 짧게 재시도한다.
+    """
     from app.database import is_db_available
     from app.services.gpu_catalog import refresh_device_map_from_db
 
-    if not is_db_available():
-        return
-    try:
-        await refresh_device_map_from_db()
-    except Exception:
-        _logger.warning("GPU 장치 카탈로그 DB 로드 실패 — 내장/config 카탈로그로 동작", exc_info=True)
+    for attempt in range(8):
+        if is_db_available():
+            try:
+                await refresh_device_map_from_db()
+                return
+            except Exception:
+                _logger.warning("GPU 장치 카탈로그 DB 로드 실패 (시도 %d) — 재시도", attempt + 1, exc_info=True)
+        await asyncio.sleep(min(2**attempt, 30))
+    _logger.warning("GPU 장치 카탈로그 DB 로드 최종 실패 — 내장/config 카탈로그로 동작")
 
 
 @app.on_event("startup")
@@ -1060,6 +1082,11 @@ async def start_background_workers():
         asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
+
+    if _db_cfg.worker_runtime_mode != "static" and _db_cfg.worker_runtime_reconcile_interval > 0:
+        from app.services.worker_runtime import reconcile_loop
+
+        asyncio.create_task(reconcile_loop())
 
     from app.services.library_builder import _build_worker, reconcile_orphan_builds
 

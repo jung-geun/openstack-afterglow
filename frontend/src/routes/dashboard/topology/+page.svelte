@@ -33,7 +33,7 @@
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
-				'/api/networks/topology',
+				'/api/v1/networks/topology',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -73,7 +73,6 @@
 		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
 		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
 		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology {data} projectId={$auth.projectId} />
 		</div>
@@ -120,7 +119,6 @@
 			<span>라우터 {_projectRouters.length}개</span>
 			<span>인스턴스 {data.instances.length}개</span>
 			<span>Floating IP {_projectFips.length}개</span>
-		</div>
 		</div>
 	{/if}
 </div>

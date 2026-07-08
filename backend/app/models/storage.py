@@ -3,6 +3,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class ExportLocation(BaseModel):
+    path: str
+    preferred: bool = False
+    share_instance_id: str | None = None
+
+
 class FileStorageInfo(BaseModel):
     id: str
     name: str
@@ -19,6 +25,42 @@ class FileStorageInfo(BaseModel):
     library_name: str | None = None
     library_version: str | None = None
     built_at: str | None = None
+    # 확장 필드 (Manila 상세 정보)
+    progress: str | None = None
+    user_id: str | None = None
+    user_name: str | None = None  # Keystone 이름 해석(best-effort), 실패 시 None
+    access_rules_status: str | None = None
+    host: str | None = None  # admin 전용 — 비-admin 응답 시 None으로 마스킹
+    availability_zone: str | None = None
+    share_type_name: str | None = None
+    share_network_id: str | None = None
+    export_location_details: list[ExportLocation] = []  # path + preferred + instance
+
+
+class FileStorageDeleteDiagnostic(BaseModel):
+    file_storage_id: str
+    status: str | None = None
+    share_proto: str | None = None
+    share_type_name: str | None = None
+    share_network_id: str | None = None
+    share_instance_ids: list[str] = []
+    root_cause_code: Literal[
+        "dhss_false_share_network_mismatch",
+        "backend_missing_after_failed_create_or_delete",
+        "normal_delete_possible",
+        "unknown",
+    ]
+    confidence: Literal["high", "medium", "low"]
+    summary: str
+    evidence: list[str] = []
+    recommended_action: str
+    force_delete_available: bool
+
+
+class FileStorageForceDeleteResult(BaseModel):
+    file_storage_id: str
+    status: Literal["force_delete_submitted", "already_deleted"]
+    diagnostic: FileStorageDeleteDiagnostic | None = None
 
 
 class LibraryConfig(BaseModel):
@@ -45,6 +87,86 @@ class VolumeInfo(BaseModel):
     attachments: list[dict] = []
     bootable: bool = False
     volume_image_metadata: dict | None = None
+
+
+VolumeDeleteRootCause = Literal[
+    "already_deleted",
+    "attached_volume_delete_blocked",
+    "dependent_snapshot_or_backup",
+    "recoverable_error_deleting",
+    "recoverable_error_state",
+    "normal_delete_possible",
+    "not_recoverable_status",
+    "unknown",
+]
+
+VolumeDeleteRecoveryStatus = Literal[
+    "deleted",
+    "already_deleted",
+    "delete_submitted",
+    "blocked",
+    "failed",
+]
+
+VolumeDeleteRecoveryAction = Literal[
+    "diagnose",
+    "reset_status",
+    "delete",
+    "verify_after_delete",
+    "force_delete",
+    "verify_after_force_delete",
+]
+
+VolumeDeleteRecoveryStepStatus = Literal["success", "skipped", "failed"]
+
+
+class VolumeDeleteMessage(BaseModel):
+    id: str | None = None
+    event_id: str | None = None
+    request_id: str | None = None
+    message_level: str | None = None
+    resource_uuid: str | None = None
+    resource_type: str | None = None
+    user_message: str | None = None
+    created_at: str | None = None
+
+
+class VolumeDeleteDependency(BaseModel):
+    id: str
+    status: str | None = None
+    name: str | None = None
+    kind: Literal["snapshot", "backup"]
+
+
+class VolumeDeleteDiagnostic(BaseModel):
+    volume_id: str
+    status: str | None = None
+    project_id: str | None = None
+    attachments: list[dict] = []
+    dependencies: list[VolumeDeleteDependency] = []
+    messages: list[VolumeDeleteMessage] = []
+    root_cause_code: VolumeDeleteRootCause
+    confidence: Literal["high", "medium", "low"]
+    summary: str
+    evidence: list[str] = []
+    recommended_action: str
+    recovery_available: bool
+    force_delete_available: bool
+
+
+class VolumeDeleteRecoveryStep(BaseModel):
+    action: VolumeDeleteRecoveryAction
+    status: VolumeDeleteRecoveryStepStatus
+    detail: str | None = None
+
+
+class VolumeDeleteRecoveryResult(BaseModel):
+    volume_id: str
+    status: VolumeDeleteRecoveryStatus
+    verified_deleted: bool
+    final_status: str | None = None
+    diagnostic: VolumeDeleteDiagnostic
+    steps: list[VolumeDeleteRecoveryStep] = []
 
 
 class NetworkInfo(BaseModel):

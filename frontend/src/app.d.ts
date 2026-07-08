@@ -3,7 +3,9 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			siteConfig: import('$lib/types/siteConfig').PublicSiteConfig;
+		}
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

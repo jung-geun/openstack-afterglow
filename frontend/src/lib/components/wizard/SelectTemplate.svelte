@@ -40,11 +40,11 @@
     loading = true;
     error = '';
     try {
-      const list = await api.get<TemplateInfo[]>('/api/union/templates', token, projectId);
+      const list = await api.get<TemplateInfo[]>('/api/v1/union/templates', token, projectId);
       // resolved_stack 포함 상세 정보 로드
       const details = await Promise.all(
         list.map(t =>
-          api.get<TemplateInfo>(`/api/union/templates/${encodeURIComponent(t.name)}/${t.version}`, token, projectId)
+          api.get<TemplateInfo>(`/api/v1/union/templates/${encodeURIComponent(t.name)}/${t.version}`, token, projectId)
             .catch(() => t)
         )
       );

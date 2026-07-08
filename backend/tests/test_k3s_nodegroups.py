@@ -1,6 +1,6 @@
 """k3s 노드그룹 API 단위 테스트."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -68,6 +68,11 @@ def _cluster_access_ok():
     return patch("app.api.k3s.nodegroups.k3s_db.get_cluster", new=AsyncMock(return_value=_CLUSTER))
 
 
+def _close_created_task(coro):
+    coro.close()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 목록 조회
 # ---------------------------------------------------------------------------
@@ -79,7 +84,7 @@ async def test_list_nodegroups(client):
         _cluster_access_ok(),
         patch("app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_NG_SERVER, _NG_AGENT])),
     ):
-        resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups")
+        resp = await client.get(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -90,7 +95,7 @@ async def test_list_nodegroups(client):
 @pytest.mark.asyncio
 async def test_list_nodegroups_cluster_not_found(client):
     with patch("app.api.k3s.nodegroups.k3s_db.get_cluster", new=AsyncMock(return_value=None)):
-        resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups")
+        resp = await client.get(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups")
     assert resp.status_code == 404
 
 
@@ -102,7 +107,7 @@ async def test_list_nodegroups_cluster_not_found(client):
 @pytest.mark.asyncio
 async def test_get_nodegroup(client):
     with _cluster_access_ok(), patch("app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=_NG_AGENT)):
-        resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
+        resp = await client.get(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
     assert resp.status_code == 200
     assert resp.json()["name"] == "default-agent"
     assert resp.json()["node_count"] == 2
@@ -111,7 +116,7 @@ async def test_get_nodegroup(client):
 @pytest.mark.asyncio
 async def test_get_nodegroup_not_found(client):
     with _cluster_access_ok(), patch("app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=None)):
-        resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
+        resp = await client.get(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
     assert resp.status_code == 404
 
 
@@ -125,9 +130,11 @@ async def test_create_nodegroup_success(client):
     with (
         _cluster_access_ok(),
         patch("app.services.k3s_nodegroup.create_nodegroup", new=AsyncMock(return_value=_NG_CUSTOM)),
+        patch("app.api.k3s.nodegroups.asyncio.create_task") as mock_create_task,
     ):
+        mock_create_task.side_effect = _close_created_task
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "gpu-workers", "role": "agent", "node_count": 3, "flavor_id": "flavor-gpu"},
         )
     assert resp.status_code == 201
@@ -135,13 +142,14 @@ async def test_create_nodegroup_success(client):
     assert data["name"] == "gpu-workers"
     assert data["node_count"] == 3
     assert data["is_default"] is False
+    mock_create_task.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_create_nodegroup_invalid_name(client):
     with _cluster_access_ok():
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "bad name!", "role": "agent", "node_count": 1},
         )
     assert resp.status_code == 422
@@ -151,7 +159,7 @@ async def test_create_nodegroup_invalid_name(client):
 async def test_create_nodegroup_invalid_role(client):
     with _cluster_access_ok():
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "workers", "role": "master", "node_count": 1},
         )
     assert resp.status_code == 422
@@ -167,7 +175,7 @@ async def test_create_nodegroup_duplicate_name(client):
         ),
     ):
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "default-agent", "role": "agent", "node_count": 1},
         )
     assert resp.status_code == 422
@@ -183,7 +191,7 @@ async def test_create_nodegroup_db_unavailable(client):
         ),
     ):
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "workers", "role": "agent", "node_count": 1},
         )
     assert resp.status_code == 503
@@ -199,24 +207,79 @@ async def test_update_nodegroup_node_count(client):
     updated = {**_NG_AGENT, "node_count": 5}
     with (
         _cluster_access_ok(),
+        patch("app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=_NG_AGENT)),
         patch("app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=updated)),
+        patch("app.api.k3s.nodegroups.asyncio.create_task") as mock_create_task,
     ):
+        mock_create_task.side_effect = _close_created_task
         resp = await client.patch(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}",
             json={"node_count": 5},
         )
     assert resp.status_code == 200
     assert resp.json()["node_count"] == 5
+    mock_create_task.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_update_nodegroup_not_found(client):
     with _cluster_access_ok(), patch("app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=None)):
         resp = await client.patch(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent",
             json={"node_count": 3},
         )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_stampede_nodegroup_requires_flavor(client):
+    with _cluster_access_ok():
+        resp = await client.post(
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            json={"name": "auto-workers", "role": "agent", "node_count": 0, "stampede_enabled": True},
+        )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_default_nodegroups_adds_server_and_agent_rows():
+    from app.services.k3s_nodegroup import create_default_nodegroups
+
+    class _Scalars:
+        def all(self):
+            return []
+
+    result = MagicMock()
+    result.scalars.return_value = _Scalars()
+    session = AsyncMock()
+    session.execute.return_value = result
+    session.add = MagicMock()
+
+    await create_default_nodegroups(
+        session,
+        cluster_id=_CLUSTER_ID,
+        server_flavor_id="server-flavor",
+        agent_flavor_id="agent-flavor",
+        agent_count=2,
+    )
+
+    added = [call.args[0] for call in session.add.call_args_list]
+    assert [row.name for row in added] == ["default-server", "default-agent"]
+    assert added[0].role == "server"
+    assert added[0].node_count == 1
+    assert added[1].role == "agent"
+    assert added[1].node_count == 2
+    assert added[1].flavor_id == "agent-flavor"
+
+
+@pytest.mark.asyncio
+async def test_create_server_nodegroup_rejected(client):
+    with _cluster_access_ok():
+        resp = await client.post(
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            json={"name": "servers", "role": "server", "node_count": 1, "flavor_id": "flavor-001"},
+        )
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +290,7 @@ async def test_update_nodegroup_not_found(client):
 @pytest.mark.asyncio
 async def test_delete_custom_nodegroup(client):
     with _cluster_access_ok(), patch("app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=True)):
-        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_CUSTOM['id']}")
+        resp = await client.delete(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_CUSTOM['id']}")
     assert resp.status_code == 204
 
 
@@ -242,14 +305,14 @@ async def test_delete_default_nodegroup_rejected(client):
             ),
         ),
     ):
-        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
+        resp = await client.delete(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_delete_nodegroup_not_found(client):
     with _cluster_access_ok(), patch("app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=False)):
-        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
+        resp = await client.delete(f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
     assert resp.status_code == 404
 
 
@@ -262,7 +325,7 @@ async def test_delete_nodegroup_not_found(client):
 async def test_create_nodegroup_node_count_too_large(client):
     with _cluster_access_ok():
         resp = await client.post(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups",
             json={"name": "big-group", "role": "agent", "node_count": 99},
         )
     assert resp.status_code == 422
@@ -272,7 +335,7 @@ async def test_create_nodegroup_node_count_too_large(client):
 async def test_update_nodegroup_node_count_too_large(client):
     with _cluster_access_ok():
         resp = await client.patch(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}",
+            f"/api/v1/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}",
             json={"node_count": 99},
         )
     assert resp.status_code == 422

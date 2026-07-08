@@ -64,7 +64,7 @@
 		</DetailHeader>
 
 		<FileStorageInfoSection />
-		{#if s.fileStorage.export_locations.length > 0}<FileStorageExportLocationsSection />{/if}
+		{#if (s.fileStorage.export_location_details?.length ?? 0) > 0 || s.fileStorage.export_locations.length > 0}<FileStorageExportLocationsSection />{/if}
 		<FileStorageAccessRulesSection />
 		{#if Object.keys(s.fileStorage.metadata).length > 0}<FileStorageMetadataSection />{/if}
 	{/if}

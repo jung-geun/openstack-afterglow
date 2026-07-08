@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import openstack
 import asyncio
 import itertools
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -17,19 +15,31 @@ from starlette.requests import Request
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
-from app.utils.version import read_app_version
-
-_logger = logging.getLogger(__name__)
 from app.config import get_settings
-from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
-from app.services import instance_recovery, library_builder, manila, neutron, nova
+from app.models.storage import (
+    FileStorageDeleteDiagnostic,
+    FileStorageForceDeleteResult,
+    FileStorageInfo,
+    TopologyData,
+    TopologyInstance,
+    VolumeDeleteDiagnostic,
+    VolumeDeleteRecoveryResult,
+)
+from app.services import instance_recovery, keystone, library_builder, manila, neutron, nova, volume_delete_recovery
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
+from app.services.cache import invalidation as cache_invalidation
 from app.services.octavia import get_topology_lbs
 
 # FastAPI-free 인벤토리 유틸리티로 이동됨 — admin.py 내부 호출 + 하위 호환 재export.
 from app.services.openstack_inventory import _fetch_hypervisors_raw
+from app.utils.version import read_app_version
+
+if TYPE_CHECKING:
+    import openstack
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -123,8 +133,8 @@ async def list_active_builds():
                                 "progress_step": r.progress_step,
                                 "progress_pct": r.progress_pct,
                                 "error_message": r.error_message,
-                                "started_at": r.started_at.isoformat() if r.started_at else None,
-                                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                                "started_at": r.started_at.isoformat() + "Z" if r.started_at else None,
+                                "completed_at": r.completed_at.isoformat() + "Z" if r.completed_at else None,
                             }
                         )
         except Exception:
@@ -226,8 +236,6 @@ def _fetch_overview_servers(conn) -> dict:
         for s in _resp.json().get("servers", []):
             flavor = s.get("flavor") or {}
             fname = (flavor.get("original_name") or flavor.get("id") or "").lower()
-            if "gpu" in fname:
-                gpu_instances += 1
             instance_stats["total"] += 1
             st = (s.get("status") or "").upper()
             if st == "ACTIVE":
@@ -238,6 +246,9 @@ def _fetch_overview_servers(conn) -> dict:
                 instance_stats["error"] += 1
             else:
                 instance_stats["other"] += 1
+            # SHELVED/SHELVED_OFFLOADED는 실제 호스트 할당이 없으므로 GPU 사용량에서 제외
+            if "gpu" in fname and st in ("ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"):
+                gpu_instances += 1
     except Exception:
         _logger.warning("서버 집계 실패", exc_info=True)
     return {"gpu_instances": gpu_instances, "instance_stats": instance_stats}
@@ -801,6 +812,34 @@ async def list_all_instances(
         raise HTTPException(status_code=500, detail="전체 인스턴스 조회 실패")
 
 
+@router.get("/volumes/status-summary", dependencies=[Depends(require_admin)])
+async def get_volume_status_summary(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """전체 프로젝트의 Cinder 볼륨 상태별 개수."""
+    try:
+
+        def _collect():
+            counts: dict[str, int] = {}
+            total = 0
+            for volume in conn.block_storage.volumes(details=True, all_projects=True):
+                status = (getattr(volume, "status", None) or "unknown").lower()
+                counts[status] = counts.get(status, 0) + 1
+                total += 1
+            return {
+                "total": total,
+                "statuses": [
+                    {"status": status, "count": count}
+                    for status, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+                ],
+            }
+
+        return await asyncio.to_thread(_collect)
+    except Exception:
+        _logger.warning("볼륨 상태 요약 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 상태 요약 조회 실패")
+
+
 @router.get("/all-volumes", dependencies=[Depends(require_admin)])
 async def list_all_volumes(
     limit: int = Query(default=20, ge=1, le=100),
@@ -974,6 +1013,101 @@ async def list_all_file_storages(
         raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
 
+@router.get(
+    "/file-storage/{file_storage_id}/delete-diagnostics",
+    response_model=FileStorageDeleteDiagnostic,
+    dependencies=[Depends(require_admin)],
+)
+async def get_file_storage_delete_diagnostics(
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 Manila share 삭제 실패 진단."""
+    try:
+        return await asyncio.to_thread(manila.diagnose_file_storage_delete_issue, conn, file_storage_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
+        _logger.warning("파일 스토리지 삭제 진단 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 삭제 진단 실패")
+    except Exception:
+        _logger.warning("파일 스토리지 삭제 진단 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 삭제 진단 실패")
+
+
+@router.post(
+    "/file-storage/{file_storage_id}/force-delete",
+    response_model=FileStorageForceDeleteResult,
+    status_code=202,
+    dependencies=[Depends(require_admin)],
+)
+async def force_delete_file_storage(
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """관리자용 Manila share 강제 삭제."""
+    diagnostic: FileStorageDeleteDiagnostic | None = None
+    try:
+        diagnostic = await asyncio.to_thread(manila.diagnose_file_storage_delete_issue, conn, file_storage_id)
+    except Exception:
+        _logger.info("파일 스토리지 강제 삭제 전 진단 실패: %s", file_storage_id, exc_info=True)
+
+    try:
+        status = await asyncio.to_thread(manila.force_delete_file_storage, conn, file_storage_id)
+        await invalidate("afterglow:admin:file_storages")
+        await invalidate("afterglow:manila:*:file_storages")
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="success",
+                resource_id=file_storage_id,
+                extra={"result": status, "diagnostic": diagnostic.root_cause_code if diagnostic else None},
+            )
+        except Exception:
+            pass
+        return FileStorageForceDeleteResult(
+            file_storage_id=file_storage_id,
+            status=status,
+            diagnostic=diagnostic,
+        )
+    except httpx.HTTPStatusError as e:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="failed",
+                resource_id=file_storage_id,
+                extra={"status_code": e.response.status_code},
+            )
+        except Exception:
+            pass
+        _logger.warning("파일 스토리지 강제 삭제 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"파일 스토리지 강제 삭제 실패: {manila.format_error_message(e)}",
+        )
+    except Exception:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="failed",
+                resource_id=file_storage_id,
+            )
+        except Exception:
+            pass
+        _logger.warning("파일 스토리지 강제 삭제 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 강제 삭제 실패")
+
+
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
 async def admin_topology(
     conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
@@ -1062,6 +1196,25 @@ async def list_all_networks(
         )
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
+
+
+@router.get("/all-loadbalancers", dependencies=[Depends(require_admin)])
+async def list_all_loadbalancers(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
+    """전체 프로젝트의 로드밸런서 목록."""
+    from app.services import octavia
+
+    try:
+        return await cached_call(
+            "afterglow:admin:loadbalancers",
+            ttl_normal(),
+            lambda: octavia.list_load_balancers(conn, project_id=None),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="로드밸런서 목록 조회 실패")
 
 
 @router.get("/all-floating-ips", dependencies=[Depends(require_admin)])
@@ -1201,6 +1354,10 @@ async def admin_overview_projects(
                     headers={"OpenStack-API-Version": "compute 2.53"},
                 )
                 for s in resp.json().get("servers", []):
+                    # SHELVED/SHELVED_OFFLOADED는 실제 호스트 할당이 없으므로 제외
+                    st = (s.get("status") or "").upper()
+                    if st not in ("ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"):
+                        continue
                     pid = s.get("tenant_id") or s.get("project_id") or ""
                     fname = (s.get("flavor") or {}).get("original_name") or ""
                     if "gpu" in fname.lower():
@@ -1344,6 +1501,97 @@ async def update_volume(
 
 
 _ERROR_STATUSES = {"error", "deleting", "error_deleting", "error_extending", "error_restoring", "error_managing"}
+
+
+async def _invalidate_volume_recovery_caches(project_id: str | None) -> None:
+    if project_id:
+        await invalidate(f"afterglow:cinder:{project_id}:volumes*")
+        await invalidate(f"afterglow:cinder:{project_id}:vol_attach:*")
+        await cache_invalidation.invalidate_mutation_count("cinder", project_id)
+    else:
+        await invalidate("afterglow:cinder:*:volumes*")
+        await invalidate("afterglow:cinder:*:vol_attach:*")
+    await invalidate("afterglow:admin:overview*")
+    await invalidate("afterglow:admin:monitoring*")
+
+
+@router.get(
+    "/volumes/{volume_id}/delete-diagnostics",
+    response_model=VolumeDeleteDiagnostic,
+    dependencies=[Depends(require_admin)],
+)
+async def get_volume_delete_diagnostics(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 삭제 실패 원인을 진단한다 (관리자)."""
+    try:
+        return await asyncio.to_thread(
+            volume_delete_recovery.diagnose_volume_delete_issue,
+            conn,
+            volume_id,
+            keystone.get_admin_connection_for_project,
+        )
+    except Exception:
+        _logger.warning("볼륨 삭제 진단 실패: %s", volume_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 삭제 진단 실패")
+
+
+@router.post(
+    "/volumes/{volume_id}/recover-delete",
+    response_model=VolumeDeleteRecoveryResult,
+    dependencies=[Depends(require_admin)],
+)
+async def recover_delete_volume(
+    volume_id: str,
+    verify_timeout_seconds: int = Query(default=30, ge=0, le=120),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """error_deleting 볼륨의 삭제 복구를 진단→실행→검증한다 (관리자)."""
+    try:
+        result = await asyncio.to_thread(
+            volume_delete_recovery.recover_delete_volume,
+            conn,
+            volume_id,
+            keystone.get_admin_connection_for_project,
+            verify_timeout_seconds=verify_timeout_seconds,
+        )
+        if result.status in {"deleted", "already_deleted", "delete_submitted"}:
+            await _invalidate_volume_recovery_caches(result.diagnostic.project_id)
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="volume",
+                action="volume.recover_delete",
+                status="success" if result.status in {"deleted", "already_deleted", "delete_submitted"} else "failed",
+                resource_id=volume_id,
+                error_message=result.status if result.status in {"blocked", "failed"} else None,
+                extra={
+                    "result": result.status,
+                    "verified_deleted": result.verified_deleted,
+                    "root_cause": result.diagnostic.root_cause_code,
+                    "steps": [step.model_dump() for step in result.steps],
+                },
+            )
+        except Exception:
+            pass
+        return result
+    except Exception:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="volume",
+                action="volume.recover_delete",
+                status="failed",
+                resource_id=volume_id,
+            )
+        except Exception:
+            pass
+        _logger.warning("볼륨 삭제 복구 실패: %s", volume_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 삭제 복구 실패")
 
 
 @router.delete("/volumes/{volume_id}", dependencies=[Depends(require_admin)], status_code=204)
@@ -1490,6 +1738,11 @@ class ColdMigrateRequest(BaseModel):
     host: str | None = None
 
 
+class EvacuateRequest(BaseModel):
+    host: str | None = None
+    on_shared_storage: bool = False
+
+
 @router.get("/compute-hosts", dependencies=[Depends(require_admin)])
 async def list_compute_hosts(
     server_id: str | None = Query(None),
@@ -1542,6 +1795,24 @@ async def cold_migrate_instance(
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("콜드 마이그레이션 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
+
+
+@router.post("/instances/{server_id}/evacuate", dependencies=[Depends(require_admin)])
+async def evacuate_instance(
+    server_id: str,
+    req: EvacuateRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """호스트 장애 인스턴스 강제 이주(evacuate).
+
+    host가 지정되면 해당 호스트로, 생략하면 Nova 스케줄러가 자동 선택한다.
+    """
+    try:
+        await asyncio.to_thread(nova.evacuate_server, conn, server_id, req.host, req.on_shared_storage)
+        return {"status": "evacuating"}
+    except Exception as e:
+        _logger.warning("evacuate 실패: %s", e)
         raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 

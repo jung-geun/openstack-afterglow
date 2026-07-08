@@ -29,7 +29,7 @@
 	async function load(opts?: { refresh?: boolean }) {
 		error = '';
 		try {
-			data = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
+			data = await api.get<UserDashboardSummary>('/api/v1/user-dashboard/summary', token, projectId, opts);
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '데이터를 불러올 수 없습니다';
 		} finally {

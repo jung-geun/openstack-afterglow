@@ -127,7 +127,7 @@ async def test_upload_normal_flow(client, mock_conn, monkeypatch):
     )
 
     resp = await client.post(
-        "/api/object-storage/test/upload",
+        "/api/v1/object-storage/test/upload",
         files={"file": ("hello.txt", b"hello!\n", "text/plain")},
     )
     assert resp.status_code == 200, resp.text
@@ -152,7 +152,7 @@ async def test_upload_rejects_nonexistent_container(client, mock_conn, monkeypat
     )
 
     resp = await client.post(
-        "/api/object-storage/other-bucket/upload",
+        "/api/v1/object-storage/other-bucket/upload",
         files={"file": ("x.bin", b"x", "application/octet-stream")},
     )
     assert resp.status_code == 404
@@ -177,7 +177,7 @@ async def test_upload_scan_failure_cleans_quarantine(client, mock_conn, monkeypa
     )
 
     resp = await client.post(
-        "/api/object-storage/test/upload",
+        "/api/v1/object-storage/test/upload",
         files={"file": ("malicious.bin", b"bad", "application/octet-stream")},
     )
     assert resp.status_code == 400
@@ -204,7 +204,7 @@ async def test_upload_stream_exception_cleans_quarantine(client, mock_conn, monk
     )
 
     resp = await client.post(
-        "/api/object-storage/test/upload",
+        "/api/v1/object-storage/test/upload",
         files={"file": ("crash.bin", b"data", "application/octet-stream")},
     )
     assert resp.status_code == 500
@@ -232,7 +232,7 @@ async def test_upload_with_prefix(client, mock_conn, monkeypatch):
     )
 
     resp = await client.post(
-        "/api/object-storage/test/upload",
+        "/api/v1/object-storage/test/upload",
         files={"file": ("notes.md", b"x", "text/markdown")},
         data={"prefix": "docs/"},
     )

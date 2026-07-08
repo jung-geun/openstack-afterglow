@@ -15,7 +15,7 @@
 
 	async function loadNetworks() {
 		try {
-			networks = await api.get<Network[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			networks = await api.get<Network[]>('/api/v1/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch {
 			// ignore
 		}
@@ -28,7 +28,7 @@
 		loadingSubnets = true;
 		try {
 			const detail = await api.get<{ subnet_details: SubnetDetail[] }>(
-				`/api/networks/${form.vip_network_id}`,
+				`/api/v1/networks/${form.vip_network_id}`,
 				$auth.token ?? undefined, $auth.projectId ?? undefined
 			);
 			subnets = detail.subnet_details ?? [];
@@ -48,7 +48,7 @@
 		error = '';
 		try {
 			const lb = await api.post<{ id: string }>(
-				'/api/loadbalancers',
+				'/api/v1/loadbalancers',
 				{ name: form.name, vip_subnet_id: form.vip_subnet_id, description: form.description },
 				$auth.token ?? undefined, $auth.projectId ?? undefined
 			);

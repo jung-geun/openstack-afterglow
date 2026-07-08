@@ -27,7 +27,7 @@
     try {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(currentPage * pageSize) });
       if (nameFilter) params.set('name', nameFilter);
-      layers = await api.get<LayerInfo[]>(`/api/union/layers?${params}`, token, projectId);
+      layers = await api.get<LayerInfo[]>(`/api/v1/union/layers?${params}`, token, projectId);
       initialLoaded = true;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '레이어 로드 실패';

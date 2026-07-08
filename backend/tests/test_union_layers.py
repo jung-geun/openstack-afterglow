@@ -526,7 +526,7 @@ class TestUnionLayersAPI:
     async def test_list_layers_unauthenticated(self):
         """인증 없이 레이어 목록 조회 → 401."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            resp = await ac.get("/api/union/layers")
+            resp = await ac.get("/api/v1/union/layers")
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
@@ -544,7 +544,7 @@ class TestUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            resp = await client.get("/api/union/layers")
+            resp = await client.get("/api/v1/union/layers")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -564,7 +564,7 @@ class TestUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             resp = await client.post(
-                "/api/union/layers",
+                "/api/v1/union/layers",
                 json={
                     "name": "test",
                     "version": "1.0",
@@ -593,7 +593,7 @@ class TestUnionLayersAPI:
         try:
             with patch("app.api.union.layers.union_layers.create_layer", AsyncMock(return_value=layer_info)):
                 resp = await admin_client.post(
-                    "/api/union/layers",
+                    "/api/v1/union/layers",
                     json={
                         "name": "test",
                         "version": "1.0",
@@ -620,7 +620,7 @@ class TestUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.get_layer", AsyncMock(return_value=None)):
-                resp = await client.get(f"/api/union/layers/{_sha('x')}")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('x')}")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -637,7 +637,7 @@ class TestUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            resp = await client.post(f"/api/union/layers/{_sha('a')}/seal")
+            resp = await client.post(f"/api/v1/union/layers/{_sha('a')}/seal")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 403
@@ -664,7 +664,7 @@ class TestUnionLayersAPI:
                     AsyncMock(side_effect=KeyError("not found")),
                 ),
             ):
-                resp = await client.get(f"/api/union/layers/{_sha('x')}/ancestors")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('x')}/ancestors")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -682,7 +682,7 @@ class TestUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.list_templates", AsyncMock(return_value=[])):
-                resp = await client.get("/api/union/templates")
+                resp = await client.get("/api/v1/union/templates")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 200
@@ -701,7 +701,7 @@ class TestUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             resp = await client.post(
-                "/api/union/templates",
+                "/api/v1/union/templates",
                 json={
                     "name": "ml-pytorch",
                     "version": 1,
@@ -886,7 +886,7 @@ class TestNewUnionLayersAPI:
                     AsyncMock(return_value=_make_layer_info(_sha("a"), project_id=None)),
                 ),
             ):
-                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('a')}/dependents")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 200
@@ -908,7 +908,7 @@ class TestNewUnionLayersAPI:
                 "app.api.union.layers.union_layers.get_layer",
                 AsyncMock(return_value=None),
             ):
-                resp = await client.get(f"/api/union/layers/{_sha('x')}/dependents")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('x')}/dependents")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -934,7 +934,7 @@ class TestNewUnionLayersAPI:
                 ),
                 patch("app.api.union.layers.union_layers.get_dependents", dependents_mock),
             ):
-                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('a')}/dependents")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -967,7 +967,7 @@ class TestNewUnionLayersAPI:
                     AsyncMock(return_value=children),
                 ),
             ):
-                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+                resp = await client.get(f"/api/v1/union/layers/{_sha('a')}/dependents")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 200
@@ -988,7 +988,7 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.delete_layer", AsyncMock(return_value=None)):
-                resp = await admin_client.delete(f"/api/union/layers/{_sha('a')}")
+                resp = await admin_client.delete(f"/api/v1/union/layers/{_sha('a')}")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 204
@@ -1005,7 +1005,7 @@ class TestNewUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            resp = await client.delete(f"/api/union/layers/{_sha('a')}")
+            resp = await client.delete(f"/api/v1/union/layers/{_sha('a')}")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 403
@@ -1026,7 +1026,7 @@ class TestNewUnionLayersAPI:
                 "app.api.union.layers.union_layers.delete_layer",
                 AsyncMock(side_effect=ValueError("하위 레이어가 존재하여 삭제할 수 없습니다")),
             ):
-                resp = await admin_client.delete(f"/api/union/layers/{_sha('a')}")
+                resp = await admin_client.delete(f"/api/v1/union/layers/{_sha('a')}")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 409
@@ -1053,7 +1053,7 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.get_template", AsyncMock(return_value=expected)):
-                resp = await client.get("/api/union/templates/ml-pytorch/1")
+                resp = await client.get("/api/v1/union/templates/ml-pytorch/1")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 200
@@ -1072,7 +1072,7 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.get_template", AsyncMock(return_value=None)):
-                resp = await client.get("/api/union/templates/nonexistent/99")
+                resp = await client.get("/api/v1/union/templates/nonexistent/99")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -1090,7 +1090,7 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.delete_template", AsyncMock(return_value=True)) as m:
-                resp = await admin_client.delete("/api/union/templates/ml-pytorch/1")
+                resp = await admin_client.delete("/api/v1/union/templates/ml-pytorch/1")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 204
@@ -1109,7 +1109,7 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.delete_template", AsyncMock(return_value=False)):
-                resp = await admin_client.delete("/api/union/templates/nonexistent/99")
+                resp = await admin_client.delete("/api/v1/union/templates/nonexistent/99")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
@@ -1126,7 +1126,7 @@ class TestNewUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            resp = await client.delete("/api/union/templates/ml-pytorch/1")
+            resp = await client.delete("/api/v1/union/templates/ml-pytorch/1")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 403
@@ -1345,7 +1345,7 @@ class TestMountAPI:
                 patch("app.api.union.layers.union_layers.record_mount", AsyncMock(return_value=mount_info)),
             ):
                 resp = await client.post(
-                    "/api/union/mounts",
+                    "/api/v1/union/mounts",
                     json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
                 )
         finally:
@@ -1382,7 +1382,7 @@ class TestMountAPI:
                 patch("app.api.union.layers._resolve_mount_user_id", AsyncMock(return_value="user1")),
                 patch("app.api.union.layers.union_layers.record_unmount", AsyncMock(return_value=mount_info)),
             ):
-                resp = await client.post("/api/union/mounts/1/unmount")
+                resp = await client.post("/api/v1/union/mounts/1/unmount")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -1415,7 +1415,7 @@ class TestProjectIsolation:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.list_layers", capture_list_layers):
-                await client.get("/api/union/layers")
+                await client.get("/api/v1/union/layers")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -1441,7 +1441,7 @@ class TestProjectIsolation:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.list_layers", capture_list_layers):
-                await admin_client.get("/api/union/layers")
+                await admin_client.get("/api/v1/union/layers")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -1467,7 +1467,7 @@ class TestProjectIsolation:
         try:
             with patch("app.api.union.layers.union_layers.create_layer", capture_create_layer):
                 await admin_client.post(
-                    "/api/union/layers",
+                    "/api/v1/union/layers",
                     json={
                         "name": "test",
                         "version": "1.0",
@@ -1522,7 +1522,7 @@ class TestSealTimestamp:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch("app.api.union.layers.union_layers.seal_layer", AsyncMock(return_value=seal_resp)):
-                resp = await admin_client.post(f"/api/union/layers/{_sha('a')}/seal")
+                resp = await admin_client.post(f"/api/v1/union/layers/{_sha('a')}/seal")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -1570,7 +1570,7 @@ class TestMountBearerAuth:
             ):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     resp = await ac.post(
-                        "/api/union/mounts",
+                        "/api/v1/union/mounts",
                         json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
                         headers={"Authorization": "Bearer valid-health-token"},
                     )
@@ -1596,7 +1596,7 @@ class TestMountBearerAuth:
             ):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     resp = await ac.post(
-                        "/api/union/mounts",
+                        "/api/v1/union/mounts",
                         json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
                         headers={"Authorization": "Bearer bad-token"},
                     )
@@ -1616,7 +1616,7 @@ class TestMountBearerAuth:
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post(
-                    "/api/union/mounts",
+                    "/api/v1/union/mounts",
                     json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
                 )
         finally:
@@ -2035,7 +2035,7 @@ async def test_fork_api_returns_201(admin_client):
     try:
         with patch("app.api.union.layers.union_layers.fork_layer", new_callable=AsyncMock, return_value=forked_layer):
             resp = await admin_client.post(
-                f"/api/union/layers/{source_id}/fork",
+                f"/api/v1/union/layers/{source_id}/fork",
                 json={"content_hash": fork_hash, "version": "2.4-fork"},
             )
     finally:
@@ -2067,7 +2067,7 @@ async def test_fork_api_source_not_found_returns_404(admin_client):
             side_effect=KeyError("레이어를 찾을 수 없습니다"),
         ):
             resp = await admin_client.post(
-                f"/api/union/layers/{source_id}/fork",
+                f"/api/v1/union/layers/{source_id}/fork",
                 json={"content_hash": fork_hash, "version": "v1"},
             )
     finally:
@@ -2097,7 +2097,7 @@ async def test_fork_api_unsealed_source_returns_409(admin_client):
             side_effect=ValueError("봉인되지 않았습니다"),
         ):
             resp = await admin_client.post(
-                f"/api/union/layers/{source_id}/fork",
+                f"/api/v1/union/layers/{source_id}/fork",
                 json={"content_hash": fork_hash, "version": "v1"},
             )
     finally:

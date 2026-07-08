@@ -6,6 +6,9 @@
 	import { siteConfig } from '$lib/config/site';
 	import RingMark from '$lib/components/ui/RingMark.svelte';
 	import { palette } from '$lib/stores/palette';
+	import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
+
+	type BetaFeatureKey = keyof BetaFeatures;
 
 	const sections = $state([
 		{
@@ -51,6 +54,7 @@
 				{ label: '네트워크', href: '/admin/networks', service: null },
 				{ label: 'Floating IP', href: '/admin/floating-ips', service: null },
 				{ label: '라우터', href: '/admin/routers', service: null },
+				{ label: '로드밸런서', href: '/admin/loadbalancers', service: null },
 				{ label: '포트', href: '/admin/ports', service: null },
 			],
 		},
@@ -71,6 +75,7 @@
 			prefix: '/admin/secrets',
 			icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
 			open: false,
+			beta: 'keyManager' as BetaFeatureKey,
 			items: [
 				{ label: '프로젝트 쿼터', href: '/admin/secrets', service: null },
 			],
@@ -102,6 +107,7 @@
 				{ label: '서비스 상태', href: '/admin/services', service: null },
 				{ label: '고아 리소스', href: '/admin/orphans', service: null },
 				{ label: 'Notion 연동', href: '/admin/notion', service: null },
+				{ label: '기본 설정', href: '/admin/settings', service: null },
 			],
 		},
 		{
@@ -135,16 +141,21 @@
 		sidebarOpen.close();
 	});
 
-	function isItemVisible(item: { service?: string | null }): boolean {
+	function isBetaVisible(beta?: BetaFeatureKey): boolean {
+		return !beta || Boolean($betaFeatures[beta]);
+	}
+
+	function isItemVisible(item: { beta?: BetaFeatureKey; service?: string | null }): boolean {
+		if (!isBetaVisible(item.beta)) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!item.service) return true;
 		return svcs?.[item.service] ?? false;
 	}
 
-	function isSectionVisible(section: { service?: string | null; items: { service?: string | null }[] }): boolean {
+	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
-		if (section.service) return svcs?.[section.service] ?? false;
-		// service 없는 섹션: 하위 아이템 중 하나라도 visible이면 표시
+		if (!isBetaVisible(section.beta)) return false;
+		if (section.service && !(svcs?.[section.service] ?? false)) return false;
 		return section.items.some(item => isItemVisible(item));
 	}
 </script>

@@ -203,9 +203,9 @@ async def list_invitations(
                 "invited_by_name": inv.invited_by_name,
                 "status": inv.status,
                 "keystone_role": inv.keystone_role,
-                "expires_at": inv.expires_at.isoformat(),
-                "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
-                "created_at": inv.created_at.isoformat(),
+                "expires_at": inv.expires_at.isoformat() + "Z",
+                "accepted_at": inv.accepted_at.isoformat() + "Z" if inv.accepted_at else None,
+                "created_at": inv.created_at.isoformat() + "Z",
             }
             for inv in invitations
         ]

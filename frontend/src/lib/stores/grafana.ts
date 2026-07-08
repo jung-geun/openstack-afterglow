@@ -31,7 +31,7 @@ export async function loadGrafanaContext(
 	_inflight = (async () => {
 		try {
 			const dashData = await api.get<{ grafana_url: string; dashboards: Record<string, string> }>(
-				'/api/grafana/dashboards',
+				'/api/v1/grafana/dashboards',
 				token,
 				projectId
 			);

@@ -58,9 +58,9 @@
 				description: form.description || null,
 			};
 			if (isEdit && template) {
-				await api.patch(`/api/k3s/cluster-templates/${template.id}`, body, token, projectId);
+				await api.patch(`/api/v1/k3s/cluster-templates/${template.id}`, body, token, projectId);
 			} else {
-				await api.post('/api/k3s/cluster-templates', body, token, projectId);
+				await api.post('/api/v1/k3s/cluster-templates', body, token, projectId);
 			}
 			onSaved();
 		} catch (e) {

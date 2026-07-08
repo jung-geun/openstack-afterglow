@@ -12,6 +12,8 @@
 		extendTarget,
 		backupTarget,
 		snapshotTarget,
+		volumeBackupsEnabled = true,
+		volumeSnapshotsEnabled = true,
 		onCloseTransfer,
 		onTransferred,
 		onCloseExtend,
@@ -26,6 +28,8 @@
 		extendTarget: Volume | null;
 		backupTarget: Volume | null;
 		snapshotTarget: Volume | null;
+		volumeBackupsEnabled?: boolean;
+		volumeSnapshotsEnabled?: boolean;
 		onCloseTransfer: () => void;
 		onTransferred: () => void;
 		onCloseExtend: () => void;
@@ -51,14 +55,18 @@
 	onsuccess={onExtendSuccess}
 />
 
-<VolumeBackupModal
-	volume={backupTarget}
-	onclose={onCloseBackup}
-	onsuccess={onCloseBackup}
-/>
+{#if volumeBackupsEnabled}
+	<VolumeBackupModal
+		volume={backupTarget}
+		onclose={onCloseBackup}
+		onsuccess={onCloseBackup}
+	/>
+{/if}
 
-<VolumeSnapshotModal
-	volume={snapshotTarget}
-	onclose={onCloseSnapshot}
-	onsuccess={onSnapshotSuccess}
-/>
+{#if volumeSnapshotsEnabled}
+	<VolumeSnapshotModal
+		volume={snapshotTarget}
+		onclose={onCloseSnapshot}
+		onsuccess={onSnapshotSuccess}
+	/>
+{/if}

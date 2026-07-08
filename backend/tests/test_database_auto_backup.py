@@ -184,21 +184,21 @@ async def test_run_backup_cycle_list_failure_does_not_raise():
 @pytest.mark.asyncio
 async def test_get_auto_backup_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/database-instances/inst-1/auto-backup")
+        resp = await ac.get("/api/v1/database-instances/inst-1/auto-backup")
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_put_auto_backup_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.put("/api/database-instances/inst-1/auto-backup", json={"max_daily": 2})
+        resp = await ac.put("/api/v1/database-instances/inst-1/auto-backup", json={"max_daily": 2})
     assert resp.status_code in (401, 404, 405, 422)
 
 
 @pytest.mark.asyncio
 async def test_delete_auto_backup_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/database-instances/inst-1/auto-backup")
+        resp = await ac.delete("/api/v1/database-instances/inst-1/auto-backup")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -226,7 +226,7 @@ async def test_put_and_get_auto_backup(client, mock_conn):
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.put(
-                "/api/database-instances/inst-1/auto-backup",
+                "/api/v1/database-instances/inst-1/auto-backup",
                 json={"max_daily": 3, "max_weekly": 2, "max_monthly": 1},
                 headers={"Authorization": "Bearer test-token"},
             )
@@ -247,7 +247,7 @@ async def test_delete_auto_backup_removes_config(client, mock_conn):
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.delete(
-                "/api/database-instances/inst-1/auto-backup",
+                "/api/v1/database-instances/inst-1/auto-backup",
                 headers={"Authorization": "Bearer test-token"},
             )
         assert resp.status_code in (204, 401, 403)

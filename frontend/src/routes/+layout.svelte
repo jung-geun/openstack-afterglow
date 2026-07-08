@@ -3,11 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
-	import { auth, authReady, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
+	import { auth, authReady, isLoggedIn, isAdmin, clearAuth, logoutInProgress } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
-	import { api } from '$lib/api/client';
+	import { api, getBaseUrl } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
-	import { siteConfig, loadSiteConfig } from '$lib/config/site';
+	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths } from '$lib/config/site';
+	import type { PublicSiteConfig } from '$lib/types/siteConfig';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
@@ -15,9 +16,14 @@
 	import CmdPalette from '$lib/components/CmdPalette.svelte';
 	import { palette } from '$lib/stores/palette';
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
+	import { toast } from '$lib/stores/toast';
 	import './layout.css';
 
-	let { children } = $props();
+	let { children, data } = $props();
+
+	initSiteConfig(data.siteConfig);
+
 
 	// breadcrumb + title from URL
 	const crumb = $derived(deriveBreadcrumb($page.url.pathname));
@@ -33,7 +39,7 @@
 	const isInvitationRoute = $derived($page.url.pathname.startsWith('/invitations/'));
 
 	$effect(() => {
-		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
+		if (!$logoutInProgress && !$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
 			goto('/');
 		}
 	});
@@ -54,7 +60,7 @@
 		(async () => {
 			try {
 				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
-					'/api/auth/me', token, projectId ?? undefined,
+					'/api/v1/auth/me', token, projectId ?? undefined,
 				);
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
 				authReady.set(true);
@@ -70,7 +76,9 @@
 	});
 
 	onMount(() => {
-		loadSiteConfig();
+		api.get<Partial<PublicSiteConfig>>('/api/v1/site-config')
+			.then((config) => initSiteConfig(qualifyBackendAssetPaths(config, getBaseUrl())))
+			.catch(() => {});
 
 		// access JWT 만료 2분 전에 자동 갱신 (client.ts의 401 재시도 보완)
 		const interval = setInterval(async () => {
@@ -84,7 +92,7 @@
 						token: string;
 						refresh_token?: string;
 						expires_at?: string;
-					}>('/api/auth/refresh', { refresh_token: $auth.refreshToken });
+					}>('/api/v1/auth/refresh', { refresh_token: $auth.refreshToken });
 					auth.update((s) => ({
 						...s,
 						token: data.token,
@@ -109,14 +117,24 @@
 	});
 
 	async function logout() {
-		// best-effort 서버 토큰 폐기
-		if ($auth.token) {
-			try {
-				await api.post('/api/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
-			} catch { /* 실패해도 로컬 정리는 진행 */ }
+		if ($logoutInProgress) return;
+		logoutInProgress.set(true);
+		try {
+			const confirmed = await confirmDialog('로그아웃하시겠습니까?');
+			if (!confirmed) return;
+
+			// best-effort 서버 토큰 폐기
+			if ($auth.token) {
+				try {
+					await api.post('/api/v1/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
+				} catch { /* 실패해도 로컬 정리는 진행 */ }
+			}
+			clearAuth();
+			await goto('/', { replaceState: true });
+			toast.success('정상적으로 로그아웃 되었습니다.');
+		} finally {
+			logoutInProgress.set(false);
 		}
-		clearAuth();
-		goto('/');
 	}
 </script>
 
@@ -206,6 +224,8 @@
 			<!-- 로그아웃 -->
 			<button
 				onclick={logout}
+				disabled={$logoutInProgress}
+				aria-label="로그아웃"
 				class="p-1.5 text-gray-400 hover:text-red-400 transition-colors rounded-md hover:bg-gray-800"
 				title="로그아웃"
 			>
@@ -215,12 +235,12 @@
 	</nav>
 	<UploadDock />
 	<CmdPalette />
-	<ConfirmDialog />
 {/if}
 
 {#if $isLoggedIn}
-	<Toast />
+	<ConfirmDialog />
 {/if}
+<Toast />
 
 <!-- children은 단일 렌더 포인트에서 항상 렌더 — 분기 전환 시 컴포넌트 재마운트 방지 -->
 <main class="min-h-screen bg-gray-950 text-white">

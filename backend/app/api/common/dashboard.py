@@ -866,7 +866,7 @@ async def get_dashboard_activity(
                             "resource_name": r.resource_name,
                             "status": r.status,
                             "username": r.username,
-                            "created_at": r.created_at.isoformat(),
+                            "created_at": r.created_at.isoformat() + "Z",
                         }
                         for r in rows[:50]
                     ]

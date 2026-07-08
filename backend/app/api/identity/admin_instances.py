@@ -20,6 +20,7 @@ from app.models.compute import CreateInstanceRequest
 from app.models.progress import ProgressMessage, ProgressStep
 from app.services import cinder, cloudinit, keystone, neutron, nova
 from app.services import libraries as lib_svc
+from app.services.instance_names import ensure_unique_instance_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -123,6 +124,11 @@ async def admin_create_instance_async(
         req = req.model_copy(update={"network_id": settings.default_network_id})
 
     conn = await asyncio.to_thread(_make_admin_conn, req.project_id, token_info.get("user_id", ""))
+    try:
+        req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
+    except ValueError as exc:
+        await asyncio.to_thread(conn.close)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def progress_generator():
         import time

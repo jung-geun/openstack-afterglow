@@ -30,7 +30,7 @@ async def test_list_images(client, mock_conn):
             return fn()
 
         with patch("app.api.compute.images.cached_call", new=mock_cached_call):
-            resp = await client.get("/api/images")
+            resp = await client.get("/api/v1/images")
     assert resp.status_code == 200
     data = resp.json()
     assert data[0]["os_distro"] == "ubuntu"
@@ -42,6 +42,6 @@ async def test_update_image_metadata(client, mock_conn):
     updated = make_image()
     updated.name = "ubuntu-22.04-updated"
     with patch("app.api.compute.images.glance.update_image_metadata", return_value=updated):
-        resp = await client.patch("/api/images/img-1", json={"name": "ubuntu-22.04-updated"})
+        resp = await client.patch("/api/v1/images/img-1", json={"name": "ubuntu-22.04-updated"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "ubuntu-22.04-updated"

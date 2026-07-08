@@ -19,7 +19,7 @@ frontend afterglow_ui_front
 
 backend afterglow_api_back
     mode http
-    option httpchk GET /api/health
+    option httpchk GET /api/v1/health
     option httplog
     balance roundrobin
 {% for host in groups['afterglow'] %}

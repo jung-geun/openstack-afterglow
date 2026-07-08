@@ -14,7 +14,7 @@ def _mock_admin_conn():
 
 @pytest.mark.asyncio
 async def test_list_project_quotas_non_admin_returns_403(non_admin_client):
-    r = await non_admin_client.get("/api/admin/key-manager/project-quotas")
+    r = await non_admin_client.get("/api/v1/admin/key-manager/project-quotas")
     assert r.status_code == 403
 
 
@@ -25,13 +25,13 @@ async def test_list_project_quotas_admin_success(admin_client):
     with patch("app.api.identity.admin_secrets.asyncio") as mock_asyncio:
         # to_thread 호출 순서: (1) get_admin_project_connection, (2) list_project_quotas, (3) conn.close
         mock_asyncio.to_thread = AsyncMock(side_effect=[mock_conn, quota_result, None])
-        r = await admin_client.get("/api/admin/key-manager/project-quotas")
+        r = await admin_client.get("/api/v1/admin/key-manager/project-quotas")
     assert r.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_set_project_quota_non_admin_returns_403(non_admin_client):
-    r = await non_admin_client.put("/api/admin/key-manager/project-quotas/proj-1", json={"secrets": 50})
+    r = await non_admin_client.put("/api/v1/admin/key-manager/project-quotas/proj-1", json={"secrets": 50})
     assert r.status_code == 403
 
 
@@ -40,19 +40,19 @@ async def test_set_project_quota_admin_success(admin_client):
     mock_conn = _mock_admin_conn()
     with patch("app.api.identity.admin_secrets.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(side_effect=[mock_conn, {"project_quotas": {"secrets": 50}}, None])
-        r = await admin_client.put("/api/admin/key-manager/project-quotas/proj-1", json={"secrets": 50})
+        r = await admin_client.put("/api/v1/admin/key-manager/project-quotas/proj-1", json={"secrets": 50})
     assert r.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_set_project_quota_empty_body_returns_422(admin_client):
-    r = await admin_client.put("/api/admin/key-manager/project-quotas/proj-1", json={})
+    r = await admin_client.put("/api/v1/admin/key-manager/project-quotas/proj-1", json={})
     assert r.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_delete_project_quota_non_admin_returns_403(non_admin_client):
-    r = await non_admin_client.delete("/api/admin/key-manager/project-quotas/proj-1")
+    r = await non_admin_client.delete("/api/v1/admin/key-manager/project-quotas/proj-1")
     assert r.status_code == 403
 
 
@@ -61,5 +61,5 @@ async def test_delete_project_quota_admin_success(admin_client):
     mock_conn = _mock_admin_conn()
     with patch("app.api.identity.admin_secrets.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(side_effect=[mock_conn, None, None])
-        r = await admin_client.delete("/api/admin/key-manager/project-quotas/proj-1")
+        r = await admin_client.delete("/api/v1/admin/key-manager/project-quotas/proj-1")
     assert r.status_code == 204

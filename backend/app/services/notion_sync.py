@@ -71,6 +71,65 @@ STATUS_KO: dict[str, str] = {
     "REBOOT": "재시작 중",
 }
 
+# OpenStack statuses that still consume allocated host/GPU resources.
+# Keep this in sync with GPU quota/admin dashboard accounting.
+RESOURCE_ALLOCATED_INSTANCE_STATUSES: frozenset[str] = frozenset({"ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"})
+
+
+def is_resource_allocated_status(status: str | None) -> bool:
+    """Return whether a Nova instance status still consumes host/GPU resources."""
+    return (status or "").upper() in RESOURCE_ALLOCATED_INSTANCE_STATUSES
+
+
+def build_gpu_usage_by_gpu(
+    hypervisors: list[dict],
+    instances: list[dict],
+    alias_to_device_name: dict[str, str],
+) -> dict[str, dict]:
+    """Build GPU Spec usage buckets from hypervisor capacity and allocated instances."""
+    from app.services.gpu_inventory import resolve_alias_to_device_name
+
+    def _empty_bucket() -> dict:
+        return {
+            "total_cpu_used": 0,
+            "total_ram_used": 0,
+            "total_gpu_used": 0,
+            "instance_count": 0,
+            "gpu_available": 0,
+            "gpu_used": 0,
+            "gpu_remaining": 0,
+        }
+
+    usage_by_gpu: dict[str, dict] = {}
+
+    for hypervisor in hypervisors:
+        for gpu_group in hypervisor.get("gpu_groups", []):
+            device_name = gpu_group.get("device_name", "")
+            if not device_name:
+                continue
+            usage_by_gpu.setdefault(device_name, _empty_bucket())["gpu_available"] += gpu_group.get("total", 0)
+
+    for inst in instances:
+        if not is_resource_allocated_status(inst.get("status")):
+            continue
+        gpu_display = inst.get("gpu_name", "")
+        gpu_count = inst.get("gpu_count", 0)
+        if not gpu_display or not gpu_count:
+            continue
+        canonical = resolve_alias_to_device_name(gpu_display, alias_to_device_name) or gpu_display
+        bucket = usage_by_gpu.setdefault(canonical, _empty_bucket())
+        bucket["total_cpu_used"] += inst.get("vcpus", 0)
+        bucket["total_ram_used"] += inst.get("ram_gb", 0)
+        bucket["total_gpu_used"] += gpu_count
+        bucket["instance_count"] += 1
+        bucket["gpu_used"] += gpu_count
+
+    for usage in usage_by_gpu.values():
+        usage["gpu_remaining"] = usage["gpu_available"] - usage["gpu_used"]
+
+    return usage_by_gpu
+
+
 # ensure_db_properties에서 누락된 속성을 생성할 때의 기본 타입
 # relation 속성은 자동 생성 불가 (이미 DB에 존재해야 함)
 DEFAULT_PROPERTY_TYPES: dict[str, str] = {

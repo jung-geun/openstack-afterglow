@@ -23,7 +23,7 @@ describe('api client', () => {
     });
 
     const { api } = await import('../client');
-    await api.get('/api/health', 'my-token', 'proj-123');
+    await api.get('/api/v1/health', 'my-token', 'proj-123');
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [, options] = mockFetch.mock.calls[0];
@@ -39,7 +39,7 @@ describe('api client', () => {
     });
 
     const { api } = await import('../client');
-    const result = await api.delete('/api/volumes/vol-1');
+    const result = await api.delete('/api/v1/volumes/vol-1');
     expect(result).toBeUndefined();
   });
 
@@ -52,7 +52,7 @@ describe('api client', () => {
     });
 
     const { api, ApiError } = await import('../client');
-    await expect(api.get('/api/volumes/bad-id')).rejects.toBeInstanceOf(ApiError);
+    await expect(api.get('/api/v1/volumes/bad-id')).rejects.toBeInstanceOf(ApiError);
   });
 
   it('PATCH 메서드가 올바르게 호출된다', async () => {
@@ -63,7 +63,7 @@ describe('api client', () => {
     });
 
     const { api } = await import('../client');
-    await api.patch('/api/images/img-1', { name: 'updated' });
+    await api.patch('/api/v1/images/img-1', { name: 'updated' });
 
     const [, options] = mockFetch.mock.calls[0];
     expect(options.method).toBe('PATCH');

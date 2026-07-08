@@ -53,6 +53,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	let consoleLog = $state('');
 	let logLoading = $state(false);
 	let logFull = $state(false);
+	let consoleOpening = $state(false);
+	let consoleOpenMessage = $state('');
+	let consoleOpenError = $state('');
 
 	// Admin domain state
 	let passwordPrecheck = $state<PasswordPrecheck | null>(null);
@@ -152,15 +155,15 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		}
 		const projectId = opts.effectiveProjectId();
 		try {
-			instance = await api.get<Instance>(`/api/instances/${id}`, tok(), projectId);
+			instance = await api.get<Instance>(`/api/v1/instances/${id}`, tok(), projectId);
 			const [fips, ifaces, vols, sgData, allVols, nets, ownerData] = await Promise.all([
-				api.get<FloatingIpDetail[]>('/api/networks/floating-ips', tok(), projectId).catch(() => []),
-				api.get<PortInfo[]>(`/api/instances/${id}/interfaces`, tok(), projectId).catch(() => []),
-				api.get<VolumeAttachment[]>(`/api/instances/${id}/volumes`, tok(), projectId).catch(() => []),
-				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/instances/${id}/security-groups`, tok(), projectId).catch(() => ({ ports: [], security_groups: [] })),
-				api.get<VolumeInfo[]>('/api/volumes', tok(), projectId).catch(() => []),
-				api.get<NetworkInfo[]>('/api/networks', tok(), projectId).catch(() => []),
-				api.get<{ display: string }>(`/api/instances/${id}/owner`, tok(), projectId).catch(() => ({ display: '' })),
+				api.get<FloatingIpDetail[]>('/api/v1/networks/floating-ips', tok(), projectId).catch(() => []),
+				api.get<PortInfo[]>(`/api/v1/instances/${id}/interfaces`, tok(), projectId).catch(() => []),
+				api.get<VolumeAttachment[]>(`/api/v1/instances/${id}/volumes`, tok(), projectId).catch(() => []),
+				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/v1/instances/${id}/security-groups`, tok(), projectId).catch(() => ({ ports: [], security_groups: [] })),
+				api.get<VolumeInfo[]>('/api/v1/volumes', tok(), projectId).catch(() => []),
+				api.get<NetworkInfo[]>('/api/v1/networks', tok(), projectId).catch(() => []),
+				api.get<{ display: string }>(`/api/v1/instances/${id}/owner`, tok(), projectId).catch(() => ({ display: '' })),
 			]);
 			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
 			floatingIps = fips.filter(f => instIps.has(f.floating_ip_address));
@@ -204,7 +207,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		const length = full ? 0 : 200;
 		try {
 			const data = await api.get<{ output: string }>(
-				`/api/instances/${instance.id}/log?length=${length}`,
+				`/api/v1/instances/${instance.id}/log?length=${length}`,
 				tok(),
 				ownPid()
 			);
@@ -222,12 +225,31 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	}
 
 	async function openConsole() {
-		if (!instance) return;
+		if (!instance || consoleOpening) return;
+		const instanceId = instance.id;
+		consoleOpening = true;
+		consoleOpenError = '';
+		consoleOpenMessage = 'Nova에서 noVNC 콘솔 URL을 요청하는 중입니다...';
 		try {
-			const data = await api.get<{ url: string }>(`/api/instances/${instance.id}/console`, tok(), ownPid());
-			window.open(data.url, '_blank');
+			const data = await api.get<{ url: string }>(`/api/v1/instances/${instanceId}/console`, tok(), ownPid());
+			const url = data.url?.trim();
+			if (!url) {
+				consoleOpenError = '콘솔 URL이 비어 있습니다. 관리자에게 문의하세요.';
+				toast.error(consoleOpenError);
+				return;
+			}
+			consoleOpenMessage = '콘솔 창을 여는 중입니다...';
+			const opened = window.open(url, '_blank');
+			if (!opened) {
+				consoleOpenError = '브라우저가 콘솔 창 팝업을 차단했습니다. 팝업 허용 후 다시 시도하세요.';
+				toast.error(consoleOpenError);
+			}
 		} catch {
-			toast.error('콘솔 URL을 가져올 수 없습니다');
+			consoleOpenError = '콘솔 URL을 가져올 수 없습니다. 잠시 후 다시 시도하세요.';
+			toast.error(consoleOpenError);
+		} finally {
+			consoleOpening = false;
+			consoleOpenMessage = '';
 		}
 	}
 
@@ -237,7 +259,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog(`인스턴스를 ${labels[action]}하시겠습니까?`))) return;
 		actioning = action;
 		try {
-			await api.post(`/api/instances/${instance.id}/${action}`, {}, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/${action}`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
@@ -257,7 +279,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog(lines.join('\n')))) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/instances/${instance.id}`, tok(), ownPid());
+			await api.delete(`/api/v1/instances/${instance.id}`, tok(), ownPid());
 			opts.onDelete();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -270,7 +292,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!instance) return;
 		actioning = 'fip-assign-' + portId;
 		try {
-			await api.post(`/api/instances/${instance.id}/floating-ip?port_id=${portId}`, {}, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/floating-ip?port_id=${portId}`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -284,8 +306,8 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog('Floating IP를 해제하고 삭제하시겠습니까?'))) return;
 		actioning = 'fip-release-' + fipId;
 		try {
-			await api.post(`/api/networks/floating-ips/${fipId}/disassociate`, {}, tok(), ownPid());
-			await api.delete(`/api/networks/floating-ips/${fipId}`, tok(), ownPid());
+			await api.post(`/api/v1/networks/floating-ips/${fipId}/disassociate`, {}, tok(), ownPid());
+			await api.delete(`/api/v1/networks/floating-ips/${fipId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -298,7 +320,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!instance) return;
 		actioning = 'attach-vol';
 		try {
-			await api.post(`/api/instances/${instance.id}/volumes`, { volume_id: volumeId }, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/volumes`, { volume_id: volumeId }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -311,8 +333,8 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!instance) return;
 		actioning = 'create-vol';
 		try {
-			const vol = await api.post<VolumeInfo>('/api/volumes', { name, size_gb: sizeGb }, tok(), ownPid());
-			await api.post(`/api/instances/${instance.id}/volumes`, { volume_id: vol.id }, tok(), ownPid());
+			const vol = await api.post<VolumeInfo>('/api/v1/volumes', { name, size_gb: sizeGb }, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/volumes`, { volume_id: vol.id }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -326,7 +348,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog('볼륨을 분리하시겠습니까?'))) return;
 		actioning = 'detach-' + volumeId;
 		try {
-			await api.delete(`/api/instances/${instance.id}/volumes/${volumeId}`, tok(), ownPid());
+			await api.delete(`/api/v1/instances/${instance.id}/volumes/${volumeId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -341,7 +363,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog(`이 볼륨의 "인스턴스 삭제 시 자동 삭제" 옵션을 ${verb}하시겠습니까?`))) return;
 		actioning = 'dot-' + volumeId;
 		try {
-			await api.patch(`/api/instances/${instance.id}/volumes/${volumeId}`, { delete_on_termination: next }, tok(), ownPid());
+			await api.patch(`/api/v1/instances/${instance.id}/volumes/${volumeId}`, { delete_on_termination: next }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -354,7 +376,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!instance) return;
 		actioning = 'attach-iface';
 		try {
-			await api.post(`/api/instances/${instance.id}/interfaces`, { net_id: netId }, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/interfaces`, { net_id: netId }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -368,7 +390,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog('인터페이스를 제거하시겠습니까?'))) return;
 		actioning = 'detach-iface-' + portId;
 		try {
-			await api.delete(`/api/instances/${instance.id}/interfaces/${portId}`, tok(), ownPid());
+			await api.delete(`/api/v1/instances/${instance.id}/interfaces/${portId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -382,7 +404,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		actioning = 'sg-' + portId;
 		try {
 			await api.post(
-				`/api/instances/${instance.id}/ports/${portId}/security-groups`,
+				`/api/v1/instances/${instance.id}/ports/${portId}/security-groups`,
 				{ security_group_ids: sgIds },
 				tok(),
 				ownPid()
@@ -400,7 +422,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		resizeFlavors = [];
 		resizeError = '';
 		try {
-			resizeFlavors = await api.get<Flavor[]>('/api/flavors', tok(), ownPid());
+			resizeFlavors = await api.get<Flavor[]>('/api/v1/flavors', tok(), ownPid());
 		} catch {
 			resizeFlavors = [];
 		}
@@ -411,7 +433,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		resizeLoading = true;
 		resizeError = '';
 		try {
-			await api.post(`/api/admin/instances/${instance.id}/resize`, { flavor_id: flavorId }, tok(), ownPid());
+			await api.post(`/api/v1/admin/instances/${instance.id}/resize`, { flavor_id: flavorId }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 			return true;
 		} catch (e) {
@@ -427,7 +449,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?'))) return;
 		actioning = 'revert-resize';
 		try {
-			await api.post(`/api/admin/instances/${instance.id}/revert-resize`, {}, tok(), ownPid());
+			await api.post(`/api/v1/admin/instances/${instance.id}/revert-resize`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -441,7 +463,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		if (!(await confirmDialog('리사이즈를 확인하시겠습니까?'))) return;
 		actioning = 'confirm-resize';
 		try {
-			await api.post(`/api/admin/instances/${instance.id}/confirm-resize`, {}, tok(), ownPid());
+			await api.post(`/api/v1/admin/instances/${instance.id}/confirm-resize`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			toast.error('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -455,7 +477,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		passwordPrecheckLoading = true;
 		try {
 			passwordPrecheck = await api.get<PasswordPrecheck>(
-				`/api/instances/${serverId}/admin-password/precheck`,
+				`/api/v1/instances/${serverId}/admin-password/precheck`,
 				tok(),
 				ownPid()
 			);
@@ -470,7 +492,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	async function doSetPassword(password: string): Promise<string | null> {
 		if (!instance) return '인스턴스 없음';
 		try {
-			await api.post(`/api/instances/${instance.id}/admin-password`, { new_password: password }, tok(), ownPid());
+			await api.post(`/api/v1/instances/${instance.id}/admin-password`, { new_password: password }, tok(), ownPid());
 			return null;
 		} catch (e) {
 			return e instanceof ApiError ? e.message : '패스워드 변경 실패';
@@ -489,7 +511,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 			if (instance) params.set('server_id', instance.id);
 			if (type === 'cold') params.set('cpu_filter', 'false');
 			migrateHosts = await api.get<{ name: string; state: string; status: string; cpu_model: string | null }[]>(
-				`/api/admin/compute-hosts?${params.toString()}`,
+				`/api/v1/admin/compute-hosts?${params.toString()}`,
 				tok(),
 				ownPid()
 			);
@@ -504,9 +526,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		migrateError = '';
 		try {
 			if (type === 'live') {
-				await api.post(`/api/admin/instances/${instance.id}/live-migrate`, { host: host || null, block_migration: 'auto' }, tok(), ownPid());
+				await api.post(`/api/v1/admin/instances/${instance.id}/live-migrate`, { host: host || null, block_migration: 'auto' }, tok(), ownPid());
 			} else {
-				await api.post(`/api/admin/instances/${instance.id}/cold-migrate`, { host: host || null }, tok(), ownPid());
+				await api.post(`/api/v1/admin/instances/${instance.id}/cold-migrate`, { host: host || null }, tok(), ownPid());
 			}
 			await fetchInstance(instance.id, { silent: true });
 			return true;
@@ -525,7 +547,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		migrationStatusLoading = true;
 		try {
 			migrationStatus = await api.get<MigrationStatus>(
-				`/api/admin/instances/${id}/migration-status`,
+				`/api/v1/admin/instances/${id}/migration-status`,
 				tok(),
 				ownPid()
 			);
@@ -539,7 +561,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	async function abortMigration(): Promise<void> {
 		if (!instance) return;
 		try {
-			await api.post(`/api/admin/instances/${instance.id}/live-migrate/abort`, {}, tok(), ownPid());
+			await api.post(`/api/v1/admin/instances/${instance.id}/live-migrate/abort`, {}, tok(), ownPid());
 			toast.success('마이그레이션 중단 요청을 전송했습니다.');
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
@@ -550,7 +572,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	async function forceCompleteMigration(): Promise<void> {
 		if (!instance) return;
 		try {
-			await api.post(`/api/admin/instances/${instance.id}/live-migrate/force-complete`, {}, tok(), ownPid());
+			await api.post(`/api/v1/admin/instances/${instance.id}/live-migrate/force-complete`, {}, tok(), ownPid());
 			toast.success('마이그레이션 강제 완료 요청을 전송했습니다.');
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
@@ -575,6 +597,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		get consoleLog() { return consoleLog; },
 		get logLoading() { return logLoading; },
 		get logFull() { return logFull; },
+		get consoleOpening() { return consoleOpening; },
+		get consoleOpenMessage() { return consoleOpenMessage; },
+		get consoleOpenError() { return consoleOpenError; },
 		set logFull(v: boolean) { logFull = v; },
 		get fixedIpsList() { return fixedIpsList; },
 		get floatingIpsList() { return floatingIpsList; },

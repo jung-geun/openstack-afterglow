@@ -97,7 +97,7 @@
 			let marker: string | null = null;
 			const collected: User[] = [];
 			do {
-				let url = '/api/admin/users?limit=100';
+				let url = '/api/v1/admin/users?limit=100';
 				if (marker) url += `&marker=${marker}`;
 				const res = await api.get<{ items: User[]; next_marker: string | null }>(
 					url,
@@ -120,7 +120,7 @@
 		loadingActivity = true;
 		try {
 			const data = await api.get<ActivityEvent[]>(
-				'/api/admin/users/activity?limit=10',
+				'/api/v1/admin/users/activity?limit=10',
 				token,
 				projectId
 			);
@@ -140,7 +140,7 @@
 	}): Promise<string | true> {
 		try {
 			await api.post(
-				'/api/admin/users',
+				'/api/v1/admin/users',
 				{ name: form.name, email: form.email || null, password: form.password || null, enabled: form.enabled },
 				token,
 				projectId
@@ -158,7 +158,7 @@
 	): Promise<string | true> {
 		try {
 			await api.patch(
-				`/api/admin/users/${id}`,
+				`/api/v1/admin/users/${id}`,
 				{
 					name: form.name,
 					email: form.email || null,

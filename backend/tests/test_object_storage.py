@@ -22,7 +22,7 @@ from app.main import app
 @pytest.mark.asyncio
 async def test_get_account_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/object-storage/account")
+        resp = await ac.get("/api/v1/object-storage/account")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -30,7 +30,7 @@ async def test_get_account_unauthenticated():
 async def test_get_account_success(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.get_account = MagicMock(return_value={"container_count": 2, "object_count": 10, "bytes_used": 2048})
-        resp = await client.get("/api/object-storage/account")
+        resp = await client.get("/api/v1/object-storage/account")
     assert resp.status_code in (200, 404, 405, 500)
 
 
@@ -42,7 +42,7 @@ async def test_get_account_success(client, mock_conn):
 @pytest.mark.asyncio
 async def test_list_containers_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/object-storage/containers")
+        resp = await ac.get("/api/v1/object-storage/containers")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -50,21 +50,21 @@ async def test_list_containers_unauthenticated():
 async def test_list_containers_empty(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.list_containers = MagicMock(return_value=[])
-        resp = await client.get("/api/object-storage/containers")
+        resp = await client.get("/api/v1/object-storage/containers")
     assert resp.status_code in (200, 404, 405, 500)
 
 
 @pytest.mark.asyncio
 async def test_create_container_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/object-storage/containers", json={"name": "new-bucket"})
+        resp = await ac.post("/api/v1/object-storage/containers", json={"name": "new-bucket"})
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_delete_container_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/object-storage/containers/test-container")
+        resp = await ac.delete("/api/v1/object-storage/containers/test-container")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -77,7 +77,7 @@ async def test_delete_container_unauthenticated():
 async def test_upload_object_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/object-storage/containers/test-container/objects",
+            "/api/v1/object-storage/containers/test-container/objects",
             files={"file": ("test.txt", b"hello", "text/plain")},
         )
     assert resp.status_code in (401, 404, 405)
@@ -88,7 +88,7 @@ async def test_upload_object_success(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.upload_object = MagicMock(return_value={"name": "test.txt"})
         resp = await client.post(
-            "/api/object-storage/containers/test-container/objects",
+            "/api/v1/object-storage/containers/test-container/objects",
             files={"file": ("test.txt", b"hello world", "text/plain")},
         )
     assert resp.status_code in (201, 404, 405, 500)
@@ -102,14 +102,14 @@ async def test_upload_object_success(client, mock_conn):
 @pytest.mark.asyncio
 async def test_download_object_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/object-storage/containers/test-container/objects/test.txt/download")
+        resp = await ac.get("/api/v1/object-storage/containers/test-container/objects/test.txt/download")
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_delete_object_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/object-storage/containers/test-container/objects/test.txt")
+        resp = await ac.delete("/api/v1/object-storage/containers/test-container/objects/test.txt")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -403,7 +403,7 @@ async def test_streaming_upload_missing_content_length():
     """Content-Length 없이 PUT 요청 → 411."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.put(
-            "/api/object-storage/test-container/objects/file.bin",
+            "/api/v1/object-storage/test-container/objects/file.bin",
             content=b"data",
             headers={"Content-Type": "application/octet-stream"},
         )
@@ -415,7 +415,7 @@ async def test_streaming_upload_too_large():
     """Content-Length > 100 GiB → 413 (또는 인증 먼저 401)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.put(
-            "/api/object-storage/test-container/objects/huge.bin",
+            "/api/v1/object-storage/test-container/objects/huge.bin",
             content=b"x",
             headers={
                 "Content-Type": "application/octet-stream",
@@ -535,7 +535,7 @@ def test_content_disposition_inline():
 async def test_issue_download_token_unauthenticated():
     """미인증 요청 → 401 (또는 서비스 미활성화 시 404/405)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/object-storage/test-bucket/objects/test.txt/download-token")
+        resp = await ac.post("/api/v1/object-storage/test-bucket/objects/test.txt/download-token")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -546,7 +546,7 @@ async def test_issue_download_token_success(client, mock_conn):
     mock_redis.set = AsyncMock()
 
     with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
-        resp = await client.post("/api/object-storage/test-bucket/objects/test.txt/download-token")
+        resp = await client.post("/api/v1/object-storage/test-bucket/objects/test.txt/download-token")
     assert resp.status_code in (200, 404, 405)
     if resp.status_code == 200:
         data = resp.json()
@@ -569,7 +569,7 @@ async def test_download_with_expired_token():
     with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get(
-                "/api/object-storage/test-bucket/objects/test.txt/download",
+                "/api/v1/object-storage/test-bucket/objects/test.txt/download",
                 params={"token": "expired-or-missing-token"},
             )
     assert resp.status_code in (403, 404, 405)
@@ -592,7 +592,7 @@ async def test_download_token_mismatched_resource():
     with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get(
-                "/api/object-storage/test-bucket/objects/test.txt/download",
+                "/api/v1/object-storage/test-bucket/objects/test.txt/download",
                 params={"token": "mismatch-token"},
             )
     assert resp.status_code in (403, 404, 405)
@@ -625,7 +625,7 @@ async def test_download_with_valid_token():
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.get(
-                "/api/object-storage/test-bucket/objects/%ED%95%9C%EA%B8%80%ED%8C%8C%EC%9D%BC.zip/download",
+                "/api/v1/object-storage/test-bucket/objects/%ED%95%9C%EA%B8%80%ED%8C%8C%EC%9D%BC.zip/download",
                 params={"token": "valid-token"},
             )
     assert resp.status_code in (200, 404, 405)
@@ -642,7 +642,7 @@ async def test_download_with_valid_token():
 @pytest.mark.asyncio
 async def test_list_containers_all_projects_requires_admin(non_admin_client):
     """all_projects=true + is_system_admin=False → 403."""
-    resp = await non_admin_client.get("/api/object-storage?all_projects=true")
+    resp = await non_admin_client.get("/api/v1/object-storage?all_projects=true")
     assert resp.status_code == 403
 
 
@@ -673,7 +673,7 @@ async def test_list_containers_all_projects_fans_out(admin_client):
             side_effect=lambda conn, include_quarantine=False, include_trash=False: containers_by_conn_id[id(conn)],
         ),
     ):
-        resp = await admin_client.get("/api/object-storage?all_projects=true")
+        resp = await admin_client.get("/api/v1/object-storage?all_projects=true")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 2
@@ -685,7 +685,7 @@ async def test_list_containers_all_projects_fans_out(admin_client):
 @pytest.mark.asyncio
 async def test_list_containers_include_quarantine_requires_admin(non_admin_client):
     """include_quarantine=true + non-admin → 403."""
-    resp = await non_admin_client.get("/api/object-storage?include_quarantine=true")
+    resp = await non_admin_client.get("/api/v1/object-storage?include_quarantine=true")
     assert resp.status_code == 403
 
 
@@ -715,7 +715,7 @@ async def test_list_containers_all_projects_include_quarantine_propagates(admin_
         ),
         patch("app.services.swift.list_containers", side_effect=_list),
     ):
-        resp = await admin_client.get("/api/object-storage?all_projects=true&include_quarantine=true")
+        resp = await admin_client.get("/api/v1/object-storage?all_projects=true&include_quarantine=true")
     assert resp.status_code == 200
     assert captured["include_quarantine"] is True
     body = resp.json()
@@ -732,7 +732,7 @@ async def test_list_containers_all_projects_include_quarantine_propagates(admin_
 @pytest.mark.asyncio
 async def test_create_container_rejects_reserved_name(client, mock_conn):
     """예약어 이름 (admin) → 400 + 한국어 사유."""
-    resp = await client.post("/api/object-storage", json={"name": "admin"})
+    resp = await client.post("/api/v1/object-storage", json={"name": "admin"})
     assert resp.status_code == 400
     assert "예약" in resp.json()["detail"]
 
@@ -740,7 +740,7 @@ async def test_create_container_rejects_reserved_name(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_container_rejects_quarantine_suffix(client, mock_conn):
     """`-quarantine` 접미사 → 400."""
-    resp = await client.post("/api/object-storage", json={"name": "foo-quarantine"})
+    resp = await client.post("/api/v1/object-storage", json={"name": "foo-quarantine"})
     assert resp.status_code == 400
     assert "quarantine" in resp.json()["detail"]
 
@@ -750,7 +750,7 @@ async def test_create_container_accepts_valid_name(client, mock_conn):
     """정상 이름 통과 → 검증 후 swift.create_container 호출."""
     with patch("app.services.swift.create_container") as mock_create:
         mock_create.return_value = {"name": "my-bucket-2025"}
-        resp = await client.post("/api/object-storage", json={"name": "my-bucket-2025"})
+        resp = await client.post("/api/v1/object-storage", json={"name": "my-bucket-2025"})
     assert resp.status_code == 201
     mock_create.assert_called_once()
 
@@ -778,7 +778,7 @@ async def test_list_containers_all_projects_runs_concurrently(admin_client):
         patch("app.services.swift.list_containers", side_effect=_slow_list),
     ):
         start = time.monotonic()
-        resp = await admin_client.get("/api/object-storage?all_projects=true")
+        resp = await admin_client.get("/api/v1/object-storage?all_projects=true")
         elapsed = time.monotonic() - start
 
     assert resp.status_code == 200
@@ -817,7 +817,7 @@ async def test_list_containers_all_projects_skips_unauthorized(admin_client):
             ],
         ),
     ):
-        resp = await admin_client.get("/api/object-storage?all_projects=true")
+        resp = await admin_client.get("/api/v1/object-storage?all_projects=true")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -1008,7 +1008,7 @@ async def test_list_containers_uses_cached_call(client, mock_conn):
     with patch(
         "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_containers
     ) as mock_call:
-        resp = await client.get("/api/object-storage")
+        resp = await client.get("/api/v1/object-storage")
 
     assert resp.status_code in (200, 404, 405)
     if resp.status_code == 200:
@@ -1030,7 +1030,7 @@ async def test_get_container_metadata_uses_cached_call(client, mock_conn):
     with patch(
         "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_meta
     ) as mock_call:
-        resp = await client.get("/api/object-storage/my-bucket")
+        resp = await client.get("/api/v1/object-storage/my-bucket")
 
     assert resp.status_code in (200, 404, 405)
     if resp.status_code == 200:
@@ -1050,7 +1050,7 @@ async def test_list_objects_uses_cached_call(client, mock_conn):
     with patch(
         "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_objects
     ) as mock_call:
-        resp = await client.get("/api/object-storage/my-bucket/objects")
+        resp = await client.get("/api/v1/object-storage/my-bucket/objects")
 
     assert resp.status_code in (200, 404, 405)
     if resp.status_code == 200:
@@ -1072,8 +1072,8 @@ async def test_list_objects_different_prefix_uses_different_key(client, mock_con
         return []
 
     with patch("app.api.object_storage.containers.cache.cached_call", side_effect=_fake_cached_call):
-        await client.get("/api/object-storage/bucket/objects?prefix=folder/")
-        await client.get("/api/object-storage/bucket/objects?prefix=other/")
+        await client.get("/api/v1/object-storage/bucket/objects?prefix=folder/")
+        await client.get("/api/v1/object-storage/bucket/objects?prefix=other/")
 
     if len(captured_keys) == 2:
         assert captured_keys[0] != captured_keys[1], "다른 prefix 는 다른 캐시 키여야 한다"
@@ -1091,7 +1091,7 @@ async def test_create_container_invalidates_cache(client, mock_conn):
             "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
         ) as mock_mut,
     ):
-        resp = await client.post("/api/object-storage", json={"name": "new-bucket"})
+        resp = await client.post("/api/v1/object-storage", json={"name": "new-bucket"})
 
     assert resp.status_code in (201, 404, 405)
     if resp.status_code == 201:
@@ -1114,7 +1114,7 @@ async def test_delete_container_invalidates_cache(client, mock_conn):
             "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
         ) as mock_mut,
     ):
-        resp = await client.delete("/api/object-storage/old-bucket")
+        resp = await client.delete("/api/v1/object-storage/old-bucket")
 
     assert resp.status_code in (204, 404, 405)
     if resp.status_code == 204:
@@ -1135,7 +1135,7 @@ async def test_upload_object_invalidates_cache(client, mock_conn):
         ) as mock_mut,
     ):
         resp = await client.post(
-            "/api/object-storage/my-bucket/objects",
+            "/api/v1/object-storage/my-bucket/objects",
             files={"file": ("test.txt", b"hello", "text/plain")},
         )
 
@@ -1157,7 +1157,7 @@ async def test_delete_object_invalidates_cache(client, mock_conn):
             "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
         ) as mock_mut,
     ):
-        resp = await client.delete("/api/object-storage/my-bucket/objects/test.txt")
+        resp = await client.delete("/api/v1/object-storage/my-bucket/objects/test.txt")
 
     assert resp.status_code in (204, 404, 405)
     if resp.status_code == 204:
@@ -1177,7 +1177,7 @@ async def test_list_containers_cache_bypass(client, mock_conn):
         return []
 
     with patch("app.api.object_storage.containers.cache.cached_call", side_effect=_fake_cached_call):
-        resp = await client.get("/api/object-storage?refresh=true")
+        resp = await client.get("/api/v1/object-storage?refresh=true")
 
     if resp.status_code == 200:
         assert captured.get("refresh") is True, "refresh=true 쿼리 → cached_call 에 refresh=True 전달"
@@ -1195,7 +1195,7 @@ async def test_create_container_no_invalidation_on_failure(client, mock_conn):
             "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
         ) as mock_mut,
     ):
-        resp = await client.post("/api/object-storage", json={"name": "fail-bucket"})
+        resp = await client.post("/api/v1/object-storage", json={"name": "fail-bucket"})
 
     assert resp.status_code in (500, 404, 405)
     if resp.status_code == 500:

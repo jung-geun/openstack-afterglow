@@ -35,7 +35,7 @@
 	onMount(async () => {
 		try {
 			const data = await api.get<{ gpu_types: GpuTypeAvailability[] }>(
-				'/api/dashboard/gpu-available', token, projectId
+				'/api/v1/dashboard/gpu-available', token, projectId
 			);
 			gpuAvailability = data.gpu_types ?? [];
 		} catch (e) {
@@ -65,10 +65,10 @@
 		const norm = (s: string) => s.replace(/[\s\-_.]+/g, '').toLowerCase();
 		for (const r of parseGpuRequest(f)) {
 			const reqNorm = norm(r.model);
-			const matched = gpuAvailability.find(g => {
-				const devNorm = norm(g.device_name);
-				return devNorm.includes(reqNorm) || reqNorm.includes(devNorm);
-			});
+			// 정규화 후 정확히 일치하는 device를 찾는다.
+			// includes() 비교는 "rtx3060lhr".includes("rtx3060") = true 가 되어
+			// RTX 3060 alias가 RTX 3060 LHR device와 잘못 매칭되는 버그가 있었다.
+			const matched = gpuAvailability.find(g => norm(g.device_name) === reqNorm);
 			if (matched) {
 				map.set(matched.device_name, (map.get(matched.device_name) ?? 0) + r.count);
 			}
@@ -84,7 +84,7 @@
 
 	function hasGpu(flavor: FlavorInfo): boolean {
 		return Object.keys(flavor.extra_specs ?? {}).some(
-			(k) => k.toLowerCase().includes('gpu') || k.toLowerCase().includes('pci')
+			(k) => k.toLowerCase().includes('gpu') || k.startsWith('pci_passthrough')
 		);
 	}
 

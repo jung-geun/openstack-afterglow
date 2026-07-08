@@ -32,7 +32,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
     try {
       const qs = showDeleted ? '?include_deleted=true' : '';
       const data = await api.get<K3sCluster[]>(
-        `/api/k3s/clusters${qs}`,
+        `/api/v1/k3s/clusters${qs}`,
         opts.token(), opts.projectId(),
         { ...(fetchOpts ?? {}), signal: ctrl.signal },
       );
@@ -73,7 +73,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
         ...(form.template_id ? { template_id: form.template_id } : {}),
         ...(form.stampede_enabled ? { stampede_enabled: true } : {}),
       };
-      for await (const msg of streamK3sProgress('/api/k3s/clusters/async', {
+      for await (const msg of streamK3sProgress('/api/v1/k3s/clusters/async', {
         method: 'POST', body, token: opts.token(), projectId: opts.projectId(),
       })) {
         opts.progress.apply(msg);
@@ -102,7 +102,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
     deleting = id;
     opts.progress.begin('delete');
     try {
-      for await (const msg of streamK3sProgress(`/api/k3s/clusters/${id}/delete-async`, {
+      for await (const msg of streamK3sProgress(`/api/v1/k3s/clusters/${id}/delete-async`, {
         method: 'POST', token: opts.token(), projectId: opts.projectId(),
       })) {
         opts.progress.apply(msg);
@@ -121,7 +121,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
 
   async function downloadKubeconfig(id: string, name: string) {
     const baseUrl = getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/k3s/clusters/${id}/kubeconfig`, {
+    const res = await fetch(`${baseUrl}/api/v1/k3s/clusters/${id}/kubeconfig`, {
       headers: {
         ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()}` } : {}),
         ...(opts.projectId() ? { 'X-Project-Id': opts.projectId() } : {}),

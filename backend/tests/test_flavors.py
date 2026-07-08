@@ -12,7 +12,7 @@ from app.services.cache import ttl_static
 @pytest.mark.asyncio
 async def test_list_flavors_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/flavors")
+        resp = await ac.get("/api/v1/flavors")
     assert resp.status_code == 401
 
 
@@ -27,7 +27,7 @@ async def test_list_flavors_success(client, mock_conn):
         patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
         patch("app.services.cache.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/flavors")
+        resp = await client.get("/api/v1/flavors")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -46,7 +46,7 @@ async def test_list_flavors_uses_static_ttl(client, mock_conn):
         patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
         patch("app.services.cache.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/flavors")
+        resp = await client.get("/api/v1/flavors")
 
     assert resp.status_code == 200
     assert "flavors" in captured.get("key", "")
@@ -67,7 +67,7 @@ async def test_list_flavors_cache_bypass(client, mock_conn):
         patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
         patch("app.services.cache.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/flavors?refresh=true")
+        resp = await client.get("/api/v1/flavors?refresh=true")
 
     assert resp.status_code == 200
     assert captured.get("refresh") is True

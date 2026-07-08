@@ -37,35 +37,35 @@ def _make_network():
 @pytest.mark.asyncio
 async def test_list_networks_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/networks")
+        resp = await ac.get("/api/v1/networks")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_list_networks_success(client):
     with patch("app.api.network.networks.cached_call", new=AsyncMock(return_value=[])):
-        resp = await client.get("/api/networks")
+        resp = await client.get("/api/v1/networks")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_create_network_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks", json={"name": "net1"})
+        resp = await ac.post("/api/v1/networks", json={"name": "net1"})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_get_network_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/networks/net-1")
+        resp = await ac.get("/api/v1/networks/net-1")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_delete_network_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/networks/net-1")
+        resp = await ac.delete("/api/v1/networks/net-1")
     assert resp.status_code == 401
 
 
@@ -73,7 +73,7 @@ async def test_delete_network_unauthenticated():
 async def test_delete_network_success(client):
     with patch("app.api.network.networks.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(return_value=None)
-        resp = await client.delete("/api/networks/net-1")
+        resp = await client.delete("/api/v1/networks/net-1")
     assert resp.status_code == 204
 
 
@@ -81,7 +81,7 @@ async def test_delete_network_success(client):
 async def test_create_subnet_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/networks/net-1/subnets", json={"name": "sub1", "cidr": "10.0.0.0/24", "ip_version": 4}
+            "/api/v1/networks/net-1/subnets", json={"name": "sub1", "cidr": "10.0.0.0/24", "ip_version": 4}
         )
     assert resp.status_code == 401
 
@@ -89,14 +89,14 @@ async def test_create_subnet_unauthenticated():
 @pytest.mark.asyncio
 async def test_delete_subnet_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/networks/subnets/sub-1")
+        resp = await ac.delete("/api/v1/networks/subnets/sub-1")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_get_topology_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/networks/topology")
+        resp = await ac.get("/api/v1/networks/topology")
     assert resp.status_code == 401
 
 
@@ -120,7 +120,7 @@ async def test_get_topology_includes_instance_project_id(client, mock_conn):
         patch("app.api.network.networks.nova.list_servers", side_effect=fake_list_servers),
         patch("app.api.network.networks.cached_call", side_effect=fake_cached_call),
     ):
-        resp = await client.get("/api/networks/topology")
+        resp = await client.get("/api/v1/networks/topology")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -131,7 +131,7 @@ async def test_get_topology_includes_instance_project_id(client, mock_conn):
 @pytest.mark.asyncio
 async def test_list_floating_ips_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/networks/floating-ips")
+        resp = await ac.get("/api/v1/networks/floating-ips")
     assert resp.status_code == 401
 
 
@@ -146,7 +146,7 @@ async def test_list_floating_ips_filters_by_project(client, mock_conn):
         return [make_fip(project_id or "")]
 
     with patch("app.api.network.networks.neutron.list_floating_ips", side_effect=mock_list_fips):
-        resp = await client.get("/api/networks/floating-ips")
+        resp = await client.get("/api/v1/networks/floating-ips")
 
     assert resp.status_code == 200
     # project_id가 전달되었어야 함
@@ -156,26 +156,26 @@ async def test_list_floating_ips_filters_by_project(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks/floating-ips", json={"floating_network_id": "ext-net"})
+        resp = await ac.post("/api/v1/networks/floating-ips", json={"floating_network_id": "ext-net"})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_associate_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks/floating-ips/fip-1/associate", json={"port_id": "port-1"})
+        resp = await ac.post("/api/v1/networks/floating-ips/fip-1/associate", json={"port_id": "port-1"})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_disassociate_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks/floating-ips/fip-1/disassociate")
+        resp = await ac.post("/api/v1/networks/floating-ips/fip-1/disassociate")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_delete_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/networks/floating-ips/fip-1")
+        resp = await ac.delete("/api/v1/networks/floating-ips/fip-1")
     assert resp.status_code == 401

@@ -11,6 +11,8 @@ interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; };
 export interface VolumesControllerOpts {
   token: () => string | undefined;
   projectId: () => string | undefined;
+  volumeBackupsEnabled?: () => boolean;
+  volumeSnapshotsEnabled?: () => boolean;
 }
 
 export function createVolumesController(opts: VolumesControllerOpts) {
@@ -36,8 +38,11 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   let snapshotTargetVol = $state<Volume | null>(null);
   let quotas = $state<VolumeQuotas | null>(null);
 
+  const volumeBackupsOn = () => opts.volumeBackupsEnabled?.() ?? true;
+  const volumeSnapshotsOn = () => opts.volumeSnapshotsEnabled?.() ?? true;
+
   async function fetchVolumes(manual = false) {
-    const path = '/api/volumes';
+    const path = '/api/v1/volumes';
     const cached = swrGet<Volume[]>(path);
     if (cached && volumes.length === 0) volumes = cached;
     if (manual) refreshing = true;
@@ -54,21 +59,29 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function fetchSnapshots() {
+    if (!volumeSnapshotsOn()) {
+      snapshots = [];
+      return;
+    }
     try {
-      snapshots = await api.get<Snapshot[]>('/api/volume-snapshots', opts.token(), opts.projectId());
+      snapshots = await api.get<Snapshot[]>('/api/v1/volume-snapshots', opts.token(), opts.projectId());
     } catch { /* 오류 무시 */ }
   }
 
   async function fetchQuotas() {
     try {
-      quotas = await api.get<VolumeQuotas>('/api/dashboard/quotas', opts.token(), opts.projectId());
+      quotas = await api.get<VolumeQuotas>('/api/v1/dashboard/quotas', opts.token(), opts.projectId());
     } catch { /* 오류 무시 */ }
   }
 
   async function fetchAutoBackupConfigs() {
+    if (!volumeBackupsOn()) {
+      autoBackupConfigs = new Set();
+      return;
+    }
     try {
       const configs = await api.post<{ volume_id: string }[]>(
-        '/api/volumes/backups/auto-backup/configs', {},
+        '/api/v1/volumes/backups/auto-backup/configs', {},
         opts.token(), opts.projectId(),
       );
       autoBackupConfigs = new Set(configs.map(c => c.volume_id));
@@ -93,7 +106,7 @@ export function createVolumesController(opts: VolumesControllerOpts) {
     if (!(await confirmDialog(`볼륨 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = id;
     try {
-      await apiMut('볼륨 삭제', () => api.delete(`/api/volumes/${id}`, opts.token(), opts.projectId()));
+      await apiMut('볼륨 삭제', () => api.delete(`/api/v1/volumes/${id}`, opts.token(), opts.projectId()));
       await fetchVolumes();
     } catch {
       // error toast shown by apiMut
@@ -103,11 +116,12 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function deleteSnapshot(id: string, name: string) {
+    if (!volumeSnapshotsOn()) return;
     if (!(await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = id;
     try {
       await apiMut('스냅샷 삭제', () =>
-        api.delete(`/api/volume-snapshots/${id}`, opts.token(), opts.projectId()),
+        api.delete(`/api/v1/volume-snapshots/${id}`, opts.token(), opts.projectId()),
       );
       await fetchSnapshots();
     } catch {
@@ -127,7 +141,7 @@ export function createVolumesController(opts: VolumesControllerOpts) {
     if (!(await confirmDialog(`볼륨 "${name || id.slice(0, 8)}"을 강제 삭제하시겠습니까?\n이 작업은 오류 상태 볼륨을 강제로 제거합니다.`))) return;
     deleting = id;
     try {
-      await apiMut('볼륨 강제 삭제', () => api.post(`/api/volumes/${id}/force-delete`, {}, opts.token(), opts.projectId()));
+      await apiMut('볼륨 강제 삭제', () => api.post(`/api/v1/volumes/${id}/force-delete`, {}, opts.token(), opts.projectId()));
       await fetchVolumes();
     } catch {
       // error toast shown by apiMut
@@ -149,14 +163,15 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function toggleAutoBackup(volumeId: string) {
+    if (!volumeBackupsOn()) return;
     autoBackupToggling = volumeId;
     const enabling = !autoBackupConfigs.has(volumeId);
     try {
       if (!enabling) {
-        await apiMut('자동 백업 비활성화', () => api.delete(`/api/volumes/backups/auto-backup/${volumeId}`, opts.token(), opts.projectId()));
+        await apiMut('자동 백업 비활성화', () => api.delete(`/api/v1/volumes/backups/auto-backup/${volumeId}`, opts.token(), opts.projectId()));
         autoBackupConfigs = new Set([...autoBackupConfigs].filter(id => id !== volumeId));
       } else {
-        await apiMut('자동 백업 활성화', () => api.post(`/api/volumes/backups/auto-backup/${volumeId}`, {}, opts.token(), opts.projectId()));
+        await apiMut('자동 백업 활성화', () => api.post(`/api/v1/volumes/backups/auto-backup/${volumeId}`, {}, opts.token(), opts.projectId()));
         autoBackupConfigs = new Set([...autoBackupConfigs, volumeId]);
       }
     } catch {

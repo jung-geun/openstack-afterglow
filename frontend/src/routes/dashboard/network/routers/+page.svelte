@@ -33,7 +33,7 @@
 
   async function fetchRouters(opts?: { refresh?: boolean }) {
     try {
-      routers = await api.get<Router[]>('/api/routers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+      routers = await api.get<Router[]>('/api/v1/routers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -49,7 +49,7 @@
 
   async function fetchNetworks() {
     try {
-      const nets = await api.get<Network[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      const nets = await api.get<Network[]>('/api/v1/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
       externalNetworks = nets.filter(n => n.is_external);
     } catch { /* ignore */ }
   }
@@ -58,7 +58,7 @@
     try {
       const body: Record<string, unknown> = { name: form.name };
       if (form.external_network_id) body.external_network_id = form.external_network_id;
-      await api.post('/api/routers', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/v1/routers', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchRouters();
       return true;
     } catch (e) {

@@ -28,6 +28,7 @@ function createFileStorageDetailController(opts: Options) {
 
 	let accessRules = $state<AccessRule[]>([]);
 	let accessLoading = $state(false);
+	let accessError = $state('');
 	let showAddRule = $state(false);
 	let ruleForm = $state({ access_to: '', access_level: 'ro' });
 	let addingRule = $state(false);
@@ -36,11 +37,12 @@ function createFileStorageDetailController(opts: Options) {
 	let copiedKey = $state<string | null>(null);
 
 	async function fetchFileStorage() {
-		loading = true;
+		// 초기 로드일 때만 스켈레톤 표시 — 이미 데이터가 있으면 백그라운드 새로고침
+		if (fileStorage === null) loading = true;
 		error = '';
 		try {
 			fileStorage = await api.get<FileStorage>(
-				`/api/file-storage/${opts.fileStorageId()}`,
+				`/api/v1/file-storage/${opts.fileStorageId()}`,
 				opts.token(),
 				opts.projectId()
 			);
@@ -52,15 +54,18 @@ function createFileStorageDetailController(opts: Options) {
 	}
 
 	async function fetchAccessRules() {
-		accessLoading = true;
+		// 초기 로드일 때만 로딩 표시 — 이미 규칙이 있으면 백그라운드 새로고침
+		if (accessRules.length === 0) accessLoading = true;
+		accessError = '';
 		try {
 			accessRules = await api.get<AccessRule[]>(
-				`/api/file-storage/${opts.fileStorageId()}/access-rules`,
+				`/api/v1/file-storage/${opts.fileStorageId()}/access-rules`,
 				opts.token(),
 				opts.projectId()
 			);
-		} catch {
+		} catch (e) {
 			accessRules = [];
+			accessError = e instanceof ApiError ? `접근 규칙 로드 실패 (${e.status}): ${e.message}` : '접근 규칙을 불러오지 못했습니다';
 		} finally {
 			accessLoading = false;
 		}
@@ -77,7 +82,7 @@ function createFileStorageDetailController(opts: Options) {
 		const access_type = fileStorage.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
 			await api.post(
-				`/api/file-storage/${fileStorage.id}/access-rules`,
+				`/api/v1/file-storage/${fileStorage.id}/access-rules`,
 				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				opts.token(),
 				opts.projectId()
@@ -98,7 +103,7 @@ function createFileStorageDetailController(opts: Options) {
 		revokingId = accessId;
 		try {
 			await api.delete(
-				`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`,
+				`/api/v1/file-storage/${fileStorage.id}/access-rules/${accessId}`,
 				opts.token(),
 				opts.projectId()
 			);
@@ -127,7 +132,7 @@ function createFileStorageDetailController(opts: Options) {
 		if (!(await confirmDialog(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`))) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());
 			opts.onDeleted?.();
 			opts.onClose?.();
 		} catch (e) {
@@ -145,6 +150,7 @@ function createFileStorageDetailController(opts: Options) {
 		get copiedIndex() { return copiedIndex; },
 		get accessRules() { return accessRules; },
 		get accessLoading() { return accessLoading; },
+		get accessError() { return accessError; },
 		get showAddRule() { return showAddRule; },
 		set showAddRule(v: boolean) { showAddRule = v; },
 		get ruleForm() { return ruleForm; },

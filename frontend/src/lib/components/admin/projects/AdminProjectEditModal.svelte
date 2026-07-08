@@ -45,7 +45,7 @@
 		editError = '';
 		try {
 			await api.patch(
-				`/api/admin/projects/${project.id}`,
+				`/api/v1/admin/projects/${project.id}`,
 				{ name: editName, description: editDesc || null, enabled: editEnabled },
 				token,
 				projectId,

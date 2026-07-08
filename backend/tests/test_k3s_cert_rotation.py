@@ -143,7 +143,7 @@ async def test_rotate_certs_single_master_returns_422(client):
     with patch(
         "app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=_make_cluster(master_count=1))
     ):
-        resp = await client.post("/api/k3s/clusters/c1/rotate-certs")
+        resp = await client.post("/api/v1/k3s/clusters/c1/rotate-certs")
     assert resp.status_code == 422
 
 
@@ -151,7 +151,7 @@ async def test_rotate_certs_single_master_returns_422(client):
 async def test_rotate_certs_cluster_not_found_returns_404(client):
     """클러스터 없음 → 404."""
     with patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=None)):
-        resp = await client.post("/api/k3s/clusters/nonexistent/rotate-certs")
+        resp = await client.post("/api/v1/k3s/clusters/nonexistent/rotate-certs")
     assert resp.status_code == 404
 
 
@@ -162,7 +162,7 @@ async def test_rotate_certs_not_active_returns_409(client):
         "app.api.k3s.certificates.k3s_db.get_cluster",
         new=AsyncMock(return_value=_make_cluster(master_count=3, status="CREATING")),
     ):
-        resp = await client.post("/api/k3s/clusters/c1/rotate-certs")
+        resp = await client.post("/api/v1/k3s/clusters/c1/rotate-certs")
     assert resp.status_code == 409
 
 
@@ -173,7 +173,7 @@ async def test_rotate_certs_concurrent_lock_returns_409(client):
         patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=_make_cluster(master_count=3))),
         patch("app.api.k3s.certificates.acquire_rotation_lock", new=AsyncMock(return_value=False)),
     ):
-        resp = await client.post("/api/k3s/clusters/c1/rotate-certs")
+        resp = await client.post("/api/v1/k3s/clusters/c1/rotate-certs")
     assert resp.status_code == 409
 
 
@@ -193,7 +193,7 @@ async def test_rotate_certs_sse_stream_returns_200(client):
         patch("app.api.k3s.certificates.release_rotation_lock", new=AsyncMock()),
         patch("app.api.k3s.certificates.rotate_certificates", new=_fake_rotate),
     ):
-        resp = await client.post("/api/k3s/clusters/c1/rotate-certs")
+        resp = await client.post("/api/v1/k3s/clusters/c1/rotate-certs")
 
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers.get("content-type", "")
@@ -207,5 +207,5 @@ async def test_rotate_certs_unauthenticated():
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/k3s/clusters/c1/rotate-certs")
+        resp = await ac.post("/api/v1/k3s/clusters/c1/rotate-certs")
     assert resp.status_code == 401

@@ -11,16 +11,46 @@
   let { title, meta, right, class: className = '' }: Props = $props();
 </script>
 
-<div class="flex items-center justify-between gap-2 {className}">
-  <div class="flex items-baseline gap-2 min-w-0">
-    <span class="text-[11px] uppercase tracking-wider font-medium text-gray-500 truncate">{title}</span>
+<div class="section-header {className}">
+  <div class="section-header-copy">
+    <span class="section-header-title">{title}</span>
     {#if meta}
-      <span class="text-[11px] text-gray-600">{meta}</span>
+      <span class="section-header-meta">{meta}</span>
     {/if}
   </div>
   {#if right}
-    <div class="flex-shrink-0">
+    <div class="section-header-right">
       {@render right()}
     </div>
   {/if}
 </div>
+
+<style>
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .section-header-copy {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .section-header-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 500;
+    color: var(--color-ink-3);
+  }
+  .section-header-meta {
+    font-size: 0.6875rem;
+    color: var(--color-ink-3);
+  }
+  .section-header-right { flex-shrink: 0; }
+</style>

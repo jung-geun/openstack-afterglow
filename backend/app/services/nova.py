@@ -392,6 +392,27 @@ def resize_server(conn: openstack.connection.Connection, server_id: str, flavor_
     conn.compute.resize_server(server_id, flavor_id)
 
 
+def evacuate_server(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    host: str | None = None,
+    on_shared_storage: bool = False,
+) -> None:
+    """호스트 장애 시 인스턴스를 다른 호스트로 강제 이주(evacuate).
+
+    host를 지정하면 해당 호스트로, 생략하면 Nova 스케줄러가 자동 선택한다.
+    on_shared_storage=True이면 디스크 복사 없이 공유 스토리지 경로로 처리한다.
+    """
+    endpoint = conn.compute.get_endpoint()
+    body: dict = {"evacuate": {"onSharedStorage": on_shared_storage}}
+    if host:
+        body["evacuate"]["host"] = host
+    conn.session.post(
+        f"{endpoint}/servers/{server_id}/action",
+        json=body,
+    )
+
+
 def revert_resize_server(conn: openstack.connection.Connection, server_id: str) -> None:
     """리사이즈 취소 — VERIFY_RESIZE 상태에서 이전 플레이버로 복귀."""
     conn.compute.revert_server_resize(server_id)

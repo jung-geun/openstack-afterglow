@@ -66,7 +66,7 @@
 				const body: Record<string, unknown> = { library_ids: ids };
 				if (ubuntuVersion) body.ubuntu_version = ubuntuVersion;
 				const res = await api.post<{ compatible: boolean; messages: string[] }>(
-					'/api/libraries/validate', body, token, projectId
+					'/api/v1/libraries/validate', body, token, projectId
 				);
 				warnings = res.messages ?? [];
 			} catch {

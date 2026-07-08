@@ -26,7 +26,7 @@
     loading = true;
     error = '';
     try {
-      const res = await api.get<Profile>('/api/profile', token, projectId);
+      const res = await api.get<Profile>('/api/v1/profile', token, projectId);
       profile = res;
       editName = res.name;
       editEmail = res.email;
@@ -51,7 +51,7 @@
         error = '변경된 내용이 없습니다';
         return;
       }
-      const res = await api.patch<Profile>('/api/profile', body, token, projectId);
+      const res = await api.patch<Profile>('/api/v1/profile', body, token, projectId);
       profile = res;
       success = '프로필이 저장되었습니다';
     } catch (e) {

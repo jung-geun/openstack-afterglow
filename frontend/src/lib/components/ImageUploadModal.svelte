@@ -98,7 +98,7 @@
 		if (osDistro.trim()) extraFields.os_distro = osDistro.trim();
 
 		uploadQueue.enqueue(file, {
-			endpoint: '/api/images',
+			endpoint: '/api/v1/images',
 			extraFields,
 			kind: 'image',
 			token,

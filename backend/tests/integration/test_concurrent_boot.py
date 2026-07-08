@@ -100,14 +100,14 @@ async def test_concurrent_vm_boot_nfs_stability(admin_client, integration_resour
     finally:
         for inst_id in instance_ids:
             try:
-                await admin_client.delete(f"/api/instances/{inst_id}")
+                await admin_client.delete(f"/api/v1/instances/{inst_id}")
             except Exception:
                 pass
 
 
 async def _create_vm(client, idx: int, resources) -> str:
     resp = await client.post(
-        "/api/instances",
+        "/api/v1/instances",
         json={
             "name": f"test-concurrent-{idx}",
             "image_id": resources.image_id,
@@ -123,7 +123,7 @@ async def _create_vm(client, idx: int, resources) -> str:
 async def _wait_for_active(client, instance_id: str, timeout: int) -> str:
     for _ in range(timeout // 10):
         await asyncio.sleep(10)
-        resp = await client.get(f"/api/instances/{instance_id}")
+        resp = await client.get(f"/api/v1/instances/{instance_id}")
         if resp.status_code == 200:
             status = resp.json().get("status", "")
             if status in ("ACTIVE", "ERROR"):
@@ -133,19 +133,19 @@ async def _wait_for_active(client, instance_id: str, timeout: int) -> str:
 
 async def _assign_floating_ip(client, instance_id: str) -> str | None:
     """FIP 자동 할당 후 IP 주소 반환."""
-    resp = await client.get(f"/api/instances/{instance_id}")
+    resp = await client.get(f"/api/v1/instances/{instance_id}")
     if resp.status_code == 200:
         for ip in resp.json().get("ip_addresses", []):
             if ip.get("type") == "floating" and ip.get("addr"):
                 return ip["addr"]
-    resp = await client.post(f"/api/instances/{instance_id}/floating-ip")
+    resp = await client.post(f"/api/v1/instances/{instance_id}/floating-ip")
     if resp.status_code in (200, 201):
         return resp.json().get("floating_ip_address")
     return None
 
 
 async def _get_health(client, instance_id: str) -> dict:
-    resp = await client.get(f"/api/instances/{instance_id}/health")
+    resp = await client.get(f"/api/v1/instances/{instance_id}/health")
     if resp.status_code == 200:
         return resp.json()
     return {}

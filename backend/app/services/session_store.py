@@ -268,7 +268,7 @@ async def list_user_sessions(user_id: str) -> list[dict]:
     """사용자의 활성 세션 목록 반환 (keystone_token 등 민감 필드 제거).
 
     user-index SET + 각 세션 JSON 조회. 만료된 스테일 항목은 인덱스에서 정리.
-    셀프서비스 (/api/auth/sessions) 및 관리자 (/api/admin/users/{id}/sessions) 공용.
+    셀프서비스 (/api/v1/auth/sessions) 및 관리자 (/api/v1/admin/users/{id}/sessions) 공용.
     """
     r = await _get_redis()
     index_key = _user_index_key(user_id)

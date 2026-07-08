@@ -9,6 +9,16 @@
   let { class: className = '', children }: Props = $props();
 </script>
 
-<div class="text-[11px] uppercase tracking-wider font-medium text-gray-500 {className}">
+<div class="section-label {className}">
   {@render children()}
 </div>
+
+<style>
+  .section-label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 500;
+    color: var(--color-ink-3);
+  }
+</style>

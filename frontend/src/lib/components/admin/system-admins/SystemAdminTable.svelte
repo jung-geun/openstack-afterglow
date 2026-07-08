@@ -33,7 +33,7 @@
 		revoking = admin.user_id;
 		revokeError = '';
 		try {
-			await api.post('/api/admin/identity/system-roles/revoke', { user_id: admin.user_id }, token, projectId);
+			await api.post('/api/v1/admin/identity/system-roles/revoke', { user_id: admin.user_id }, token, projectId);
 			onRevoked();
 		} catch (e) {
 			revokeError = e instanceof ApiError ? e.message : '회수 실패';

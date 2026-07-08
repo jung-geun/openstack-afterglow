@@ -51,7 +51,7 @@ async def test_upload_image_success(client, mock_conn):
 
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files=_upload_form(),
         )
 
@@ -66,7 +66,7 @@ async def test_upload_image_invalid_disk_format(client, mock_conn):
     """지원하지 않는 disk_format → 400."""
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "bad-format-image"),
                 "disk_format": (None, "exe"),
@@ -82,7 +82,7 @@ async def test_upload_image_empty_name(client, mock_conn):
     """이름이 공백인 경우 → 400."""
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "   "),
                 "disk_format": (None, "raw"),
@@ -98,7 +98,7 @@ async def test_upload_image_public_visibility_forbidden_for_non_admin(client, mo
     """일반 사용자가 public visibility 업로드 시도 → 403."""
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "public-image"),
                 "disk_format": (None, "raw"),
@@ -117,7 +117,7 @@ async def test_upload_image_public_visibility_allowed_for_admin(admin_client, mo
 
     with patch("app.api.common.activity_recorder.rec"):
         resp = await admin_client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "public-image"),
                 "disk_format": (None, "raw"),
@@ -138,7 +138,7 @@ async def test_upload_image_oversized(client, mock_conn, monkeypatch):
 
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "big-image"),
                 "disk_format": (None, "raw"),
@@ -157,7 +157,7 @@ async def test_upload_image_qcow2_format(client, mock_conn):
 
     with patch("app.api.common.activity_recorder.rec"):
         resp = await client.post(
-            "/api/images",
+            "/api/v1/images",
             files={
                 "name": (None, "qcow2-image"),
                 "disk_format": (None, "qcow2"),

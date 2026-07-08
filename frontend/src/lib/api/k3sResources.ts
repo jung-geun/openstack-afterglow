@@ -6,7 +6,7 @@ export async function listNamespaces(
 	token: string | undefined,
 	projectId: string | undefined
 ): Promise<string[]> {
-	return api.get<string[]>(`/api/k3s/clusters/${clusterId}/namespaces`, token, projectId);
+	return api.get<string[]>(`/api/v1/k3s/clusters/${clusterId}/namespaces`, token, projectId);
 }
 
 export async function listConfigMaps(
@@ -16,7 +16,7 @@ export async function listConfigMaps(
 	projectId: string | undefined
 ): Promise<ConfigMapInfo[]> {
 	return api.get<ConfigMapInfo[]>(
-		`/api/k3s/clusters/${clusterId}/configmaps?namespace=${encodeURIComponent(namespace)}`,
+		`/api/v1/k3s/clusters/${clusterId}/configmaps?namespace=${encodeURIComponent(namespace)}`,
 		token,
 		projectId
 	);
@@ -30,7 +30,7 @@ export async function getConfigMap(
 	projectId: string | undefined
 ): Promise<ConfigMapInfo> {
 	return api.get<ConfigMapInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
 		token,
 		projectId
 	);
@@ -44,7 +44,7 @@ export async function createConfigMap(
 	projectId: string | undefined
 ): Promise<ConfigMapInfo> {
 	return api.post<ConfigMapInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps`,
 		payload,
 		token,
 		projectId
@@ -60,7 +60,7 @@ export async function updateConfigMap(
 	projectId: string | undefined
 ): Promise<ConfigMapInfo> {
 	return api.put<ConfigMapInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
 		payload,
 		token,
 		projectId
@@ -75,7 +75,7 @@ export async function deleteConfigMap(
 	projectId: string | undefined
 ): Promise<void> {
 	return api.delete<void>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/configmaps/${name}`,
 		token,
 		projectId
 	);
@@ -88,7 +88,7 @@ export async function listSecrets(
 	projectId: string | undefined
 ): Promise<SecretInfo[]> {
 	return api.get<SecretInfo[]>(
-		`/api/k3s/clusters/${clusterId}/secrets?namespace=${encodeURIComponent(namespace)}`,
+		`/api/v1/k3s/clusters/${clusterId}/secrets?namespace=${encodeURIComponent(namespace)}`,
 		token,
 		projectId
 	);
@@ -102,7 +102,7 @@ export async function getSecret(
 	projectId: string | undefined
 ): Promise<SecretInfo> {
 	return api.get<SecretInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
 		token,
 		projectId
 	);
@@ -116,7 +116,7 @@ export async function createSecret(
 	projectId: string | undefined
 ): Promise<SecretInfo> {
 	return api.post<SecretInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets`,
 		payload,
 		token,
 		projectId
@@ -132,7 +132,7 @@ export async function updateSecret(
 	projectId: string | undefined
 ): Promise<SecretInfo> {
 	return api.put<SecretInfo>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
 		payload,
 		token,
 		projectId
@@ -147,7 +147,7 @@ export async function deleteSecret(
 	projectId: string | undefined
 ): Promise<void> {
 	return api.delete<void>(
-		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
+		`/api/v1/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
 		token,
 		projectId
 	);
@@ -159,7 +159,7 @@ export async function createShellTicket(
 	projectId: string | undefined
 ): Promise<CloudShellTicket> {
 	return api.post<CloudShellTicket>(
-		`/api/k3s/clusters/${clusterId}/shell-ticket`,
+		`/api/v1/k3s/clusters/${clusterId}/shell-ticket`,
 		{},
 		token,
 		projectId

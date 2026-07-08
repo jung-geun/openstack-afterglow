@@ -52,7 +52,7 @@ async def test_ip_rule_no_metadata_passed(client):
         patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "ro", "access_type": "ip"},
         )
     assert resp.status_code == 201
@@ -71,7 +71,7 @@ async def test_ip_rule_custom_root_squash_false(client):
         patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip", "root_squash": False},
         )
     assert resp.status_code == 201
@@ -90,7 +90,7 @@ async def test_cephx_rule_no_metadata(client):
         patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "cephx-id", "access_level": "ro", "access_type": "cephx"},
         )
     assert resp.status_code == 201

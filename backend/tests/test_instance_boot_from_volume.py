@@ -117,7 +117,7 @@ async def test_boot_from_volume_skips_create_volume_from_image(client, mock_conn
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
         patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=""),
     ):
-        resp = await client.post("/api/instances", json=_BASE_PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=_BASE_PAYLOAD)
 
     assert resp.status_code == 201
     mock_create_img.assert_not_called()
@@ -142,7 +142,7 @@ async def test_boot_from_volume_forces_delete_on_termination_false(client, mock_
         patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=""),
     ):
         payload = {**_BASE_PAYLOAD, "delete_boot_volume_on_termination": True}
-        resp = await client.post("/api/instances", json=payload)
+        resp = await client.post("/api/v1/instances", json=payload)
 
     assert resp.status_code == 201
     mock_create_img.assert_not_called()
@@ -155,7 +155,7 @@ async def test_boot_from_volume_forces_delete_on_termination_false(client, mock_
 async def test_boot_from_volume_image_id_and_boot_volume_id_both_returns_400(client, mock_conn):
     """image_id 와 boot_volume_id 를 동시에 지정하면 422(validation) 를 반환한다."""
     payload = {**_BASE_PAYLOAD, "image_id": "img-1"}
-    resp = await client.post("/api/instances", json=payload)
+    resp = await client.post("/api/v1/instances", json=payload)
     assert resp.status_code == 422
 
 
@@ -163,7 +163,7 @@ async def test_boot_from_volume_image_id_and_boot_volume_id_both_returns_400(cli
 async def test_boot_from_volume_neither_returns_422(client, mock_conn):
     """image_id 도 boot_volume_id 도 없으면 422 를 반환한다."""
     payload = {"name": "test-vm", "flavor_id": "flavor-1"}
-    resp = await client.post("/api/instances", json=payload)
+    resp = await client.post("/api/v1/instances", json=payload)
     assert resp.status_code == 422
 
 
@@ -175,7 +175,7 @@ async def test_boot_from_volume_in_use_returns_400(client, mock_conn):
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
         patch("app.api.compute.instances.cinder.get_volume", return_value=_make_boot_vol(status="in-use")),
     ):
-        resp = await client.post("/api/instances", json=_BASE_PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=_BASE_PAYLOAD)
 
     assert resp.status_code == 400
     assert "available" in resp.json()["detail"]
@@ -189,7 +189,7 @@ async def test_boot_from_volume_non_bootable_returns_400(client, mock_conn):
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
         patch("app.api.compute.instances.cinder.get_volume", return_value=_make_boot_vol(bootable=False)),
     ):
-        resp = await client.post("/api/instances", json=_BASE_PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=_BASE_PAYLOAD)
 
     assert resp.status_code == 400
     assert "bootable" in resp.json()["detail"]

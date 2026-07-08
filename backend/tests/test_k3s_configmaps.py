@@ -43,7 +43,7 @@ def _make_cm_record(name: str = "myconfig", namespace: str = "default"):
 @pytest.mark.asyncio
 async def test_list_namespaces_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/k3s-1/namespaces")
+        resp = await ac.get("/api/v1/k3s/clusters/k3s-1/namespaces")
     assert resp.status_code == 401
 
 
@@ -55,7 +55,7 @@ async def test_list_namespaces_cluster_not_found(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=None)
         mock_kube.list_namespaces = AsyncMock(return_value=[])
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces")
     assert resp.status_code == 404
 
 
@@ -67,7 +67,7 @@ async def test_list_namespaces_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.list_namespaces = AsyncMock(return_value=["default", "kube-system"])
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces")
     assert resp.status_code == 200
     assert resp.json() == ["default", "kube-system"]
 
@@ -80,7 +80,7 @@ async def test_list_configmaps_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.list_configmaps = AsyncMock(return_value=[_make_cm_record("cm1"), _make_cm_record("cm2")])
-        resp = await client.get("/api/k3s/clusters/k3s-1/configmaps?namespace=default")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/configmaps?namespace=default")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -96,7 +96,7 @@ async def test_get_configmap_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.get_configmap = AsyncMock(return_value=_make_cm_record("myconfig"))
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig")
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "myconfig"
@@ -114,7 +114,7 @@ async def test_create_configmap_success(client):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.create_configmap = AsyncMock(return_value=_make_cm_record("newcm"))
         resp = await client.post(
-            "/api/k3s/clusters/k3s-1/namespaces/default/configmaps",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/configmaps",
             json={"name": "newcm", "data": {"key1": "value1"}},
         )
     assert resp.status_code == 201
@@ -133,7 +133,7 @@ async def test_update_configmap_success(client):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.update_configmap = AsyncMock(return_value=_make_cm_record("myconfig"))
         resp = await client.put(
-            "/api/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig",
             json={"data": {"key1": "newvalue"}},
         )
     assert resp.status_code == 200
@@ -151,5 +151,5 @@ async def test_delete_configmap_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.delete_configmap = AsyncMock(return_value=None)
-        resp = await client.delete("/api/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig")
+        resp = await client.delete("/api/v1/k3s/clusters/k3s-1/namespaces/default/configmaps/myconfig")
     assert resp.status_code == 204

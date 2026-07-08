@@ -80,7 +80,52 @@ def _node_matches_nodegroup(pod: dict, nodegroup: dict) -> bool:
                 return True
         return False
 
-    return all(not (isinstance(taint, dict) and not _tolerates(taint)) for taint in ng_taints)
+    if not all(not (isinstance(taint, dict) and not _tolerates(taint)) for taint in ng_taints):
+        return False
+
+    # required node affinity: at least one term must be satisfied; all expressions in a term are AND.
+    required = ((pod.get("affinity") or {}).get("nodeAffinity") or {}).get(
+        "requiredDuringSchedulingIgnoredDuringExecution", {}
+    ).get("nodeSelectorTerms") or []
+    if required:
+        term_ok = False
+        for term in required:
+            exprs = term.get("matchExpressions") or []
+            fields = term.get("matchFields") or []
+            if fields:
+                continue
+            expr_ok = True
+            for expr in exprs:
+                key = expr.get("key", "")
+                op = expr.get("operator", "In")
+                values = [str(v) for v in (expr.get("values") or [])]
+                actual = ng_labels.get(key)
+                if (
+                    (op == "In" and actual not in values)
+                    or (op == "NotIn" and actual in values)
+                    or (op == "Exists" and key not in ng_labels)
+                    or (op == "DoesNotExist" and key in ng_labels)
+                ):
+                    expr_ok = False
+                elif op == "Gt":
+                    try:
+                        expr_ok = actual is not None and int(actual) > int(values[0])
+                    except (TypeError, ValueError, IndexError):
+                        expr_ok = False
+                elif op == "Lt":
+                    try:
+                        expr_ok = actual is not None and int(actual) < int(values[0])
+                    except (TypeError, ValueError, IndexError):
+                        expr_ok = False
+                if not expr_ok:
+                    break
+            if expr_ok:
+                term_ok = True
+                break
+        if not term_ok:
+            return False
+
+    return True
 
 
 def _is_pvc_issue(pod: dict) -> bool:
@@ -177,39 +222,214 @@ def _select_flavor(
     return min(candidates, key=lambda f: (f.get("vcpus_m", 0), f.get("ram_bytes", 0)))
 
 
+def _flavor_gpu_count(extra_specs: dict) -> int:
+    raw = extra_specs.get("gpu_count")
+    if raw is not None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    alias = extra_specs.get("pci_passthrough:alias", "")
+    total = 0
+    for entry in str(alias).split(","):
+        if ":" not in entry:
+            continue
+        gpu_alias, _, count = entry.strip().rpartition(":")
+        if "audio" in gpu_alias.lower():
+            continue
+        try:
+            total += int(count)
+        except ValueError:
+            total += 1
+    return total
+
+
+def _fits_capacity(req: dict, cap: dict) -> bool:
+    return (
+        req.get("cpu_m", 0) <= cap.get("cpu_m", cap.get("vcpus_m", 0))
+        and req.get("memory_bytes", 0) <= cap.get("memory_bytes", cap.get("ram_bytes", 0))
+        and req.get("gpu", 0) <= cap.get("gpu", 0)
+    )
+
+
+def _binpack_count(pods: list[dict], flavor: dict) -> int:
+    bins: list[dict] = []
+    ordered = sorted(
+        pods,
+        key=lambda p: (
+            p.get("resource_requests", {}).get("gpu", 0),
+            p.get("resource_requests", {}).get("memory_bytes", 0),
+            p.get("resource_requests", {}).get("cpu_m", 0),
+        ),
+        reverse=True,
+    )
+    for pod in ordered:
+        req = pod.get("resource_requests", {})
+        placed = False
+        for free in bins:
+            if _fits_capacity(req, free):
+                free["cpu_m"] -= req.get("cpu_m", 0)
+                free["memory_bytes"] -= req.get("memory_bytes", 0)
+                free["gpu"] -= req.get("gpu", 0)
+                placed = True
+                break
+        if not placed:
+            bins.append(
+                {
+                    "cpu_m": flavor.get("vcpus_m", 0) - req.get("cpu_m", 0),
+                    "memory_bytes": flavor.get("ram_bytes", 0) - req.get("memory_bytes", 0),
+                    "gpu": flavor.get("gpu", 0) - req.get("gpu", 0),
+                }
+            )
+    return len(bins)
+
+
+def _nodegroup_resource_summary(nodegroup: dict, node_pods: list[dict], node_capacities: list[dict]) -> dict:
+    ng_node_names = {v["name"] for v in nodegroup.get("vms", []) if v.get("name")}
+    nodes = [n for n in node_capacities if n.get("name") in ng_node_names and n.get("ready")]
+    used_by_node: dict[str, dict] = {}
+    for pod in node_pods:
+        node = pod.get("node", "")
+        if node not in ng_node_names:
+            continue
+        used = used_by_node.setdefault(node, {"cpu_m": 0, "memory_bytes": 0, "gpu": 0})
+        used["cpu_m"] += pod.get("cpu_m", 0)
+        used["memory_bytes"] += pod.get("memory_bytes", 0)
+        used["gpu"] += pod.get("gpu", 0)
+    totals = {
+        "allocatable": {"cpu_m": 0, "memory_bytes": 0, "gpu": 0},
+        "requested": {"cpu_m": 0, "memory_bytes": 0, "gpu": 0},
+        "free": {"cpu_m": 0, "memory_bytes": 0, "gpu": 0},
+    }
+    free_nodes: list[dict] = []
+    for node in nodes:
+        alloc = node.get("allocatable", {})
+        used = used_by_node.get(node["name"], {"cpu_m": 0, "memory_bytes": 0, "gpu": 0})
+        free = {
+            "name": node["name"],
+            "cpu_m": max(0, alloc.get("cpu_m", 0) - used.get("cpu_m", 0)),
+            "memory_bytes": max(0, alloc.get("memory_bytes", 0) - used.get("memory_bytes", 0)),
+            "gpu": max(0, alloc.get("gpu", 0) - used.get("gpu", 0)),
+        }
+        free_nodes.append(free)
+        for key in ("cpu_m", "memory_bytes", "gpu"):
+            totals["allocatable"][key] += alloc.get(key, 0)
+            totals["requested"][key] += used.get(key, 0)
+            totals["free"][key] += free[key]
+    totals["nodes"] = free_nodes
+    return totals
+
+
+def _pod_fits_existing_capacity(pod: dict, free_nodes: list[dict]) -> bool:
+    req = pod.get("resource_requests", {})
+    for free in free_nodes:
+        if _fits_capacity(req, free):
+            free["cpu_m"] -= req.get("cpu_m", 0)
+            free["memory_bytes"] -= req.get("memory_bytes", 0)
+            free["gpu"] -= req.get("gpu", 0)
+            return True
+    return False
+
+
+def _assign_pending_pods(
+    pending_pods: list[dict],
+    nodegroups: list[dict],
+    flavors_by_id: dict[str, dict],
+    node_pods: list[dict],
+    node_capacities: list[dict],
+) -> tuple[dict[str, list[dict]], list[dict], dict[str, dict]]:
+    summaries = {ng["id"]: _nodegroup_resource_summary(ng, node_pods, node_capacities) for ng in nodegroups}
+    assignments: dict[str, list[dict]] = {ng["id"]: [] for ng in nodegroups}
+    blocked: list[dict] = []
+    for pod in pending_pods:
+        if _is_pvc_issue(pod):
+            blocked.append({"pod": pod, "reason": "pvc_unbound"})
+            continue
+        pinned = pod.get("node_name") or ""
+        if pinned:
+            tracked = {v.get("name") for ng in nodegroups for v in ng.get("vms", [])}
+            if pinned not in tracked:
+                blocked.append({"pod": pod, "reason": "pinned_missing_node"})
+                continue
+        candidates = []
+        for ng in nodegroups:
+            flavor = flavors_by_id.get(ng.get("flavor_id"))
+            if not flavor:
+                continue
+            if not _node_matches_nodegroup(pod, ng):
+                continue
+            if not _pod_fits_flavor(pod, flavor):
+                continue
+            candidates.append((ng, flavor))
+        if not candidates:
+            blocked.append({"pod": pod, "reason": "no_matching_nodegroup"})
+            continue
+        candidates.sort(
+            key=lambda pair: (
+                pair[1].get("gpu", 0),
+                pair[1].get("vcpus_m", 0),
+                pair[1].get("ram_bytes", 0),
+                -summaries[pair[0]["id"]]["free"].get("cpu_m", 0),
+            )
+        )
+        assignments[candidates[0][0]["id"]].append(pod)
+    return assignments, blocked, summaries
+
+
 async def _get_available_flavors(project_id: str) -> list[dict]:
     """OpenStack flavor 목록 → Stampede용 구조로 변환."""
-    from app.services import keystone
+    from app.services import keystone, nova
 
     try:
         conn = keystone.get_admin_connection_for_project(project_id)
-        flavors_raw = list(conn.compute.flavors())
+        flavors_raw = await asyncio.to_thread(nova.list_flavors, conn)
         result = []
         for f in flavors_raw:
-            vcpus = getattr(f, "vcpus", 0) or 0
-            ram_mb = getattr(f, "ram", 0) or 0
             extra_specs = getattr(f, "extra_specs", {}) or {}
-            gpu = 0
-            for k, v in extra_specs.items():
-                if "pci_passthrough:alias" in k or "alias" in k:
-                    try:
-                        # 형식: "RTX3090:1" → gpu=1
-                        gpu += int(str(v).split(":")[-1])
-                    except (ValueError, IndexError):
-                        pass
+            gpu = _flavor_gpu_count(extra_specs)
             result.append(
                 {
                     "id": f.id,
                     "name": f.name,
-                    "vcpus_m": vcpus * 1000,
-                    "ram_bytes": ram_mb * 1024 * 1024,
+                    "vcpus_m": int(f.vcpus or 0) * 1000,
+                    "ram_bytes": int(f.ram or 0) * 1024 * 1024,
                     "gpu": gpu,
+                    "extra_specs": extra_specs,
                 }
             )
         return result
     except Exception as e:
         _logger.warning("_get_available_flavors 오류 (project=%s): %s", project_id, e)
         return []
+
+
+async def _check_gpu_quota_for_nodes(project_id: str, flavor: dict, add_count: int) -> tuple[bool, str]:
+    if flavor.get("gpu", 0) <= 0:
+        return True, ""
+    from app.services import gpu_quota, keystone
+
+    try:
+        conn = keystone.get_admin_connection_for_project(project_id)
+        base_specs = dict(flavor.get("extra_specs") or {})
+        alias_counts = gpu_quota._parse_alias_counts(base_specs)
+        if not alias_counts:
+            return False, "gpu flavor is missing pci_passthrough:alias for quota accounting"
+        requested: dict[str, int] = {}
+        for alias, count in alias_counts.items():
+            canonical = gpu_quota.normalize_gpu_alias(alias)
+            requested[canonical] = requested.get(canonical, 0) + count * add_count
+        effective = await gpu_quota.get_effective_gpu_quotas(project_id)
+        usage = await gpu_quota.get_project_gpu_usage(conn, project_id)
+        for alias, count in requested.items():
+            limit = effective.get(alias, 0)
+            if limit == -1:
+                continue
+            current = usage.get(alias, 0)
+            if current + count > limit:
+                return False, f"{alias}: current={current}, requested={count}, quota={limit}"
+        return True, ""
+    except Exception as e:
+        return False, f"gpu quota check failed: {e}"
 
 
 async def _update_stampede_state(nodegroup_id: str, cluster_id: str, updates: dict) -> None:
@@ -268,93 +488,92 @@ async def _scale_up_nodegroup(
         in_flight = 0
         await _update_stampede_state(ng_id, cluster_id, {"in_flight_count": 0, "in_flight_since": 0})
 
-    # 현재 노드의 가용 capacity 계산
-    ng_node_names = {v["name"] for v in nodegroup.get("vms", []) if v.get("name")}
-    ng_nodes = [n for n in node_capacities if n["name"] in ng_node_names and n["ready"]]
-    ng_node_pod_map: dict[str, dict] = {n["name"]: n for n in ng_nodes}
-
-    # 노드별 사용 중인 리소스 계산
-    node_used: dict[str, dict] = {}
-    for p in node_pods:
-        nn = p.get("node", "")
-        if nn not in ng_node_pod_map:
-            continue
-        if nn not in node_used:
-            node_used[nn] = {"cpu_m": 0, "memory_bytes": 0}
-        node_used[nn]["cpu_m"] += p["cpu_m"]
-        node_used[nn]["memory_bytes"] += p["memory_bytes"]
-
-    # 기존 노드에 스케줄 가능한 pod는 scale-up 필요 없음
+    summary = _nodegroup_resource_summary(nodegroup, node_pods, node_capacities)
+    free_nodes = [dict(node) for node in summary["nodes"]]
     unresolvable_pods = []
     for pod in pending_pods:
-        schedulable_on_existing = False
-        for node in ng_nodes:
-            used = node_used.get(node["name"], {"cpu_m": 0, "memory_bytes": 0})
-            alloc = node["allocatable"]
-            free_cpu = alloc["cpu_m"] - used["cpu_m"]
-            free_mem = alloc["memory_bytes"] - used["memory_bytes"]
-            req = pod["resource_requests"]
-            if req["cpu_m"] <= free_cpu and req["memory_bytes"] <= free_mem:
-                schedulable_on_existing = True
-                break
-        if not schedulable_on_existing:
+        if not _pod_fits_existing_capacity(pod, free_nodes):
             unresolvable_pods.append(pod)
 
     if not unresolvable_pods:
         _logger.debug("stampede: nodegroup %s — pending pod 없음 또는 기존 노드로 해결 가능", ng_id)
+        await _update_stampede_state(ng_id, cluster_id, {"capacity": summary, "last_decision": "existing_capacity"})
         return
 
-    # max 초과 체크
-    if node_count + in_flight >= max_size:
-        _logger.warning(
-            "stampede: nodegroup %s — max_size(%d) 도달, scale-up 중단. pending pod %d개 해결 불가",
-            ng_id,
-            max_size,
-            len(unresolvable_pods),
-        )
-        return
-
-    # flavor 선택
     available_flavors = await _get_available_flavors(project_id)
-    if not available_flavors:
-        _logger.warning("stampede: nodegroup %s — flavor 목록 조회 실패, scale-up 중단", ng_id)
-        return
-
-    ng_flavor_id = nodegroup.get("flavor_id")
-    if ng_flavor_id:
-        # nodegroup에 지정된 flavor 사용
-        flavor = next((f for f in available_flavors if f["id"] == ng_flavor_id), None)
-    else:
-        # 가중치 기반 자동 선택
-        flavor = _select_flavor(
-            unresolvable_pods,
-            node_pods,
-            available_flavors,
-            nodegroup,
-            s.k3s_stampede_resource_headroom_factor,
-        )
-
+    flavors_by_id = {f["id"]: f for f in available_flavors}
+    flavor = flavors_by_id.get(nodegroup.get("flavor_id") or "")
     if not flavor:
-        _logger.warning(
-            "stampede: nodegroup %s — 적합한 flavor 없음 (pod requests 초과?). pending pod: cpu=%dm mem=%dMi",
-            ng_id,
-            max((p["resource_requests"]["cpu_m"] for p in unresolvable_pods), default=0),
-            max((p["resource_requests"]["memory_bytes"] for p in unresolvable_pods), default=0) // (1024**2),
+        await _record_stampede_event(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id=ng_id,
+            action="blocked",
+            status="skipped",
+            extra={"reason": "missing_explicit_flavor", "pod_count": len(unresolvable_pods)},
         )
+        await _update_stampede_state(ng_id, cluster_id, {"last_blocked_reason": "missing_explicit_flavor"})
+        return
+    too_large = [p for p in unresolvable_pods if not _pod_fits_flavor(p, flavor)]
+    if too_large:
+        await _record_stampede_event(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id=ng_id,
+            action="blocked",
+            status="skipped",
+            extra={"reason": "flavor_too_small", "pod_count": len(too_large), "flavor_id": flavor["id"]},
+        )
+        await _update_stampede_state(ng_id, cluster_id, {"last_blocked_reason": "flavor_too_small"})
         return
 
-    # 필요한 노드 수 계산: unresolvable_pods를 한 노드에 몇 개나 담을 수 있는지
-    max_fit = max(
-        1,
-        flavor["vcpus_m"]
-        // max(p["resource_requests"]["cpu_m"] for p in unresolvable_pods if p["resource_requests"]["cpu_m"] > 0)
-        if any(p["resource_requests"]["cpu_m"] > 0 for p in unresolvable_pods)
-        else 1,
-    )
-    add_count = min(
-        max(1, -(-len(unresolvable_pods) // max_fit)),  # ceil division
-        max_size - node_count - in_flight,
-    )
+    requested_count = _binpack_count(unresolvable_pods, flavor)
+    capacity_left = max_size - node_count - in_flight
+    if capacity_left <= 0:
+        await _record_stampede_event(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id=ng_id,
+            action="blocked",
+            status="skipped",
+            extra={"reason": "max_size_reached", "pod_count": len(unresolvable_pods), "in_flight": in_flight},
+        )
+        await _update_stampede_state(ng_id, cluster_id, {"last_blocked_reason": "max_size_reached"})
+        return
+    add_count = min(requested_count, capacity_left)
+    if add_count < requested_count:
+        await _record_stampede_event(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id=ng_id,
+            action="blocked",
+            status="skipped",
+            extra={
+                "reason": "max_size_cap",
+                "requested_nodes": requested_count,
+                "add_count": add_count,
+                "unresolved_pods": len(unresolvable_pods),
+            },
+        )
+
+    if flavor.get("gpu", 0) > 0:
+        quota_ok, quota_reason = await _check_gpu_quota_for_nodes(project_id, flavor, add_count)
+        if not quota_ok:
+            await _record_stampede_event(
+                project_id=project_id,
+                cluster_id=cluster_id,
+                nodegroup_id=ng_id,
+                action="blocked",
+                status="skipped",
+                extra={
+                    "reason": "gpu_quota",
+                    "message": quota_reason,
+                    "add_count": add_count,
+                    "flavor_id": flavor["id"],
+                },
+            )
+            await _update_stampede_state(ng_id, cluster_id, {"last_blocked_reason": "gpu_quota"})
+            return
 
     _logger.info(
         "stampede: nodegroup %s scale-up %d개 (flavor=%s, unresolvable_pods=%d, in_flight=%d)",
@@ -405,6 +624,7 @@ async def _scale_up_nodegroup(
             image_id=nodegroup.get("image_id"),
             labels=nodegroup.get("labels"),
             taints=nodegroup.get("taints"),
+            gpu_required=flavor.get("gpu", 0) > 0,
         )
     )
 
@@ -418,51 +638,84 @@ async def _provision_and_track(
     image_id: str | None,
     labels: dict | None,
     taints: list | None,
+    gpu_required: bool = False,
 ) -> None:
-    """VM 프로비저닝 후 Ready 대기, in-flight 카운터 감소."""
+    """VM 프로비저닝 후 Ready/GPU 대기, in-flight 카운터 감소."""
     from app.services import k3s_autoscale, k3s_kube, k3s_nodegroup
 
-    new_vms = await k3s_autoscale.provision_nodegroup_vms(
-        project_id=project_id,
-        cluster_id=cluster_id,
-        nodegroup_id=nodegroup_id,
-        add_count=add_count,
-        flavor_id=flavor_id,
-        image_id=image_id,
-        labels=labels,
-        taints=taints,
-    )
+    provision_error = ""
+    try:
+        new_vms = await k3s_autoscale.provision_nodegroup_vms(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id=nodegroup_id,
+            add_count=add_count,
+            flavor_id=flavor_id,
+            image_id=image_id,
+            labels=labels,
+            taints=taints,
+        )
+    except Exception:
+        _logger.exception("stampede: nodegroup %s provisioning failed", nodegroup_id)
+        new_vms = []
+        provision_error = "provision_failed"
+    missing_count = max(0, add_count - len(new_vms))
+    if missing_count:
+        _logger.warning(
+            "stampede: nodegroup %s provisioning returned %d/%d VMs",
+            nodegroup_id,
+            len(new_vms),
+            add_count,
+        )
 
-    # VM Ready 대기 (최대 40분)
     ready_nodes = []
     failed_nodes = []
     for vm in new_vms:
         node_name = vm.get("name", "")
-        if node_name:
-            ready = await k3s_kube.wait_node_ready(cluster_id, node_name, timeout=2400.0)
-            if ready:
-                await k3s_nodegroup.update_nodegroup(cluster_id, nodegroup_id, {})
-                _logger.info("stampede: node %s Ready 확인됨", node_name)
-                ready_nodes.append(node_name)
-            else:
-                _logger.warning("stampede: node %s Ready 대기 timeout (40분)", node_name)
+        if not node_name:
+            continue
+        ready = await k3s_kube.wait_node_ready(cluster_id, node_name, timeout=2400.0)
+        if not ready:
+            _logger.warning("stampede: node %s Ready 대기 timeout (40분)", node_name)
+            failed_nodes.append(node_name)
+            continue
+        if gpu_required:
+            gpu_ok = await k3s_kube.wait_node_gpu_allocatable(cluster_id, node_name, min_gpu=1, timeout=600.0)
+            if not gpu_ok:
+                _logger.warning("stampede: node %s Ready but GPU allocatable timeout", node_name)
                 failed_nodes.append(node_name)
+                continue
+        await k3s_nodegroup.update_nodegroup(cluster_id, nodegroup_id, {})
+        _logger.info("stampede: node %s Ready 확인됨", node_name)
+        ready_nodes.append(node_name)
 
-    # in-flight 감소: add_count 기준 (provision 실패 포함 정확한 보정)
     ng = await k3s_nodegroup.get_nodegroup(cluster_id, nodegroup_id)
     if ng:
         state = dict(ng.get("stampede_state") or {})
         current_in_flight = max(0, state.get("in_flight_count", 0) - add_count)
-        await _update_stampede_state(
-            nodegroup_id,
-            cluster_id,
-            {
-                "in_flight_count": current_in_flight,
-            },
-        )
+        updates = {"in_flight_count": current_in_flight}
+        failure_count = missing_count + len(failed_nodes)
+        if failure_count:
+            reason = "provision_failed"
+            if gpu_required and failed_nodes:
+                reason = "gpu_not_allocatable"
+            elif failed_nodes:
+                reason = "node_not_ready"
+            updates["last_blocked_reason"] = reason
+            tracked_count = len(ng.get("vms") or [])
+            actual_count = max(0, tracked_count - len(failed_nodes))
+            await k3s_nodegroup.set_nodegroup_count(cluster_id, nodegroup_id, actual_count)
+        await _update_stampede_state(nodegroup_id, cluster_id, updates)
 
-    # 완료 이벤트 기록
-    final_status = "success" if not failed_nodes else ("failed" if not ready_nodes else "success")
+    if missing_count:
+        reason = "provision_failed"
+    elif gpu_required and failed_nodes:
+        reason = "gpu_not_allocatable"
+    elif failed_nodes:
+        reason = "node_not_ready"
+    else:
+        reason = ""
+    final_status = "success" if not reason else ("failed" if not ready_nodes else "partial")
     await _record_stampede_event(
         project_id=project_id,
         cluster_id=cluster_id,
@@ -474,6 +727,9 @@ async def _provision_and_track(
             "flavor_id": flavor_id,
             "ready_nodes": ready_nodes,
             "failed_nodes": failed_nodes,
+            "missing_count": missing_count,
+            "provision_error": provision_error,
+            "reason": reason,
         },
     )
 
@@ -515,34 +771,34 @@ async def _scale_down_nodegroup(
     ng_node_names = {v["name"] for v in nodegroup.get("vms", []) if v.get("name")}
     ng_nodes = [n for n in node_capacities if n["name"] in ng_node_names and n["ready"]]
 
-    # 노드별 사용률 계산
+    evictable_by_node: dict[str, list[dict]] = {}
     node_used: dict[str, dict] = {}
+    ng_node_set = {n["name"] for n in ng_nodes}
     for p in node_pods:
         nn = p.get("node", "")
-        if nn not in {n["name"] for n in ng_nodes}:
+        if nn not in ng_node_set:
             continue
-        if nn not in node_used:
-            node_used[nn] = {"cpu_m": 0, "memory_bytes": 0}
-        node_used[nn]["cpu_m"] += p["cpu_m"]
-        node_used[nn]["memory_bytes"] += p["memory_bytes"]
+        used = node_used.setdefault(nn, {"cpu_m": 0, "memory_bytes": 0, "gpu": 0})
+        used["cpu_m"] += p.get("cpu_m", 0)
+        used["memory_bytes"] += p.get("memory_bytes", 0)
+        used["gpu"] += p.get("gpu", 0)
+        if not p.get("is_daemonset") and not p.get("is_mirror"):
+            evictable_by_node.setdefault(nn, []).append(p)
 
-    # 유휴 노드 후보 (사용률 < threshold)
     idle_nodes = []
     for node in ng_nodes:
         alloc = node["allocatable"]
-        used = node_used.get(node["name"], {"cpu_m": 0, "memory_bytes": 0})
-        if alloc["cpu_m"] <= 0:
-            continue
-        utilization = used["cpu_m"] / alloc["cpu_m"]
-        if utilization < threshold:
-            idle_nodes.append(node)
+        used = node_used.get(node["name"], {"cpu_m": 0, "memory_bytes": 0, "gpu": 0})
+        cpu_util = used["cpu_m"] / alloc["cpu_m"] if alloc.get("cpu_m") else 1.0
+        mem_util = used["memory_bytes"] / alloc["memory_bytes"] if alloc.get("memory_bytes") else 1.0
+        gpu_util = used["gpu"] / alloc["gpu"] if alloc.get("gpu") else 0.0
+        if max(cpu_util, mem_util, gpu_util) < threshold:
+            idle_nodes.append((node, len(evictable_by_node.get(node["name"], [])), max(cpu_util, mem_util, gpu_util)))
 
     if not idle_nodes:
-        # 유휴 노드 없음 → consecutive_idle_checks 리셋
         await _update_stampede_state(ng_id, cluster_id, {"consecutive_idle_checks": 0})
         return
 
-    # stabilization window: 연속 유휴 체크 횟수
     consecutive = state.get("consecutive_idle_checks", 0) + 1
     await _update_stampede_state(ng_id, cluster_id, {"consecutive_idle_checks": consecutive})
 
@@ -556,9 +812,46 @@ async def _scale_down_nodegroup(
         )
         return
 
-    # 삭제 대상: 빈 노드 우선 (DaemonSet/mirror pod만 있는 노드)
-    # reverse fit-check: drain할 pod들이 다른 노드에 배치 가능한지
-    remove_node = idle_nodes[0]  # Phase 1: 가장 유휴인 노드 1개씩 제거
+    idle_nodes.sort(key=lambda item: (item[1], item[2]))
+    remove_node = None
+    for candidate, _pod_count, _util in idle_nodes:
+        candidate_name = candidate["name"]
+        evictable = evictable_by_node.get(candidate_name, [])
+        remaining_free = []
+        for node in ng_nodes:
+            if node["name"] == candidate_name:
+                continue
+            alloc = node["allocatable"]
+            used = node_used.get(node["name"], {"cpu_m": 0, "memory_bytes": 0, "gpu": 0})
+            remaining_free.append(
+                {
+                    "cpu_m": max(0, alloc.get("cpu_m", 0) - used.get("cpu_m", 0)),
+                    "memory_bytes": max(0, alloc.get("memory_bytes", 0) - used.get("memory_bytes", 0)),
+                    "gpu": max(0, alloc.get("gpu", 0) - used.get("gpu", 0)),
+                }
+            )
+        if all(
+            _pod_fits_existing_capacity(
+                {
+                    "resource_requests": {
+                        "cpu_m": p.get("cpu_m", 0),
+                        "memory_bytes": p.get("memory_bytes", 0),
+                        "gpu": p.get("gpu", 0),
+                    }
+                },
+                remaining_free,
+            )
+            for p in evictable
+        ):
+            remove_node = candidate
+            break
+
+    if remove_node is None:
+        await _update_stampede_state(
+            ng_id, cluster_id, {"consecutive_idle_checks": 0, "last_blocked_reason": "scale_down_no_fit"}
+        )
+        return
+
     remove_name = remove_node["name"]
 
     # 해당 노드 VM 찾기
@@ -627,9 +920,11 @@ async def reconcile_cluster(cluster: dict) -> None:
 
     s = get_settings()
 
-    # 클러스터의 stampede nodegroup 목록
+    # 클러스터의 stampede agent nodegroup 목록. v1은 agent+explicit flavor만 autoscale한다.
     all_nodegroups = await k3s_nodegroup.list_nodegroups(cluster_id)
-    stampede_ngs = [ng for ng in all_nodegroups if ng.get("stampede_enabled")]
+    stampede_ngs = [
+        ng for ng in all_nodegroups if ng.get("stampede_enabled") and ng.get("role") == "agent" and ng.get("flavor_id")
+    ]
 
     if not stampede_ngs:
         return
@@ -642,6 +937,39 @@ async def reconcile_cluster(cluster: dict) -> None:
     except Exception as e:
         _logger.warning("stampede: cluster %s K8s API 조회 실패: %s", cluster_id, e)
         return
+
+    available_flavors = await _get_available_flavors(project_id)
+    flavors_by_id = {f["id"]: f for f in available_flavors}
+    assignments, blocked_pods, summaries = _assign_pending_pods(
+        pending_pods,
+        stampede_ngs,
+        flavors_by_id,
+        node_pods,
+        node_capacities,
+    )
+    for blocked in blocked_pods:
+        pod = blocked["pod"]
+        await _record_stampede_event(
+            project_id=project_id,
+            cluster_id=cluster_id,
+            nodegroup_id="",
+            action="blocked",
+            status="skipped",
+            extra={
+                "reason": blocked["reason"],
+                "pod": {"namespace": pod.get("namespace"), "name": pod.get("name")},
+                "message": pod.get("message", ""),
+            },
+        )
+    blocked_summary = [
+        {
+            "namespace": item["pod"].get("namespace"),
+            "name": item["pod"].get("name"),
+            "reason": item["reason"],
+            "message": item["pod"].get("message", ""),
+        }
+        for item in blocked_pods
+    ]
 
     # in_flight 재조정 (worker 재시작 대비 — 실제 CREATING VM 수와 비교)
     for ng in stampede_ngs:
@@ -675,9 +1003,20 @@ async def reconcile_cluster(cluster: dict) -> None:
     for ng in stampede_ngs:
         ng_id = ng["id"]
         try:
-            # 이 노드그룹에 할당될 pending pod 필터
-            ng_pending = [p for p in pending_pods if _node_matches_nodegroup(p, ng) and not _is_pvc_issue(p)]
-
+            pending_summary = [
+                {"namespace": p.get("namespace"), "name": p.get("name"), "resources": p.get("resource_requests", {})}
+                for p in assignments.get(ng_id, [])
+            ]
+            await _update_stampede_state(
+                ng_id,
+                cluster_id,
+                {
+                    "capacity": summaries.get(ng_id, {}),
+                    "pending_assignments": pending_summary,
+                    "blocked_reasons": blocked_summary,
+                },
+            )
+            ng_pending = assignments.get(ng_id, [])
             if ng_pending:
                 await _scale_up_nodegroup(
                     cluster_id=cluster_id,

@@ -14,7 +14,10 @@
 *.md
 LICENSE
 PLAN.md
+afterglow.conf
+afterglow.*.conf
 config.toml
+config.*.toml
 
 # ── 문서 ──────────────────────────────────────────────────────────────────────
 docs/

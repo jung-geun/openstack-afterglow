@@ -2,6 +2,7 @@ import { writable, derived } from 'svelte/store';
 
 // /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
 export const authReady = writable(false);
+export const logoutInProgress = writable(false);
 
 export interface Project {
 	id: string;
@@ -20,8 +21,6 @@ export interface AuthState {
 	projectId: string | null;
 	projectName: string | null;
 	availableProjects: Project[];
-	sessionTimeoutSeconds: number;
-	sessionWarningBeforeSeconds: number;
 	roles: string[];
 	isSystemAdmin: boolean;
 	federated: boolean;             // true = OIDC/외부 로그인 (패스워드 변경 불가)
@@ -36,8 +35,6 @@ const initial: AuthState = {
 	projectId: null,
 	projectName: null,
 	availableProjects: [],
-	sessionTimeoutSeconds: 3600,
-	sessionWarningBeforeSeconds: 300,
 	roles: [],
 	isSystemAdmin: false,
 	federated: false,
@@ -123,8 +120,3 @@ export function clearAuth() {
 	auth.set(initial);
 }
 
-/** access JWT의 만료까지 남은 초. 토큰 없으면 0. */
-export function getAccessSecondsRemaining(state: AuthState): number {
-	if (!state.accessExpiresAt) return 0;
-	return Math.max(0, state.accessExpiresAt - Math.floor(Date.now() / 1000));
-}

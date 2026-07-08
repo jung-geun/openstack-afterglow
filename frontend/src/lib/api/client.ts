@@ -1,14 +1,26 @@
-import { env } from '$env/dynamic/public';
+import { get } from 'svelte/store';
+import { siteConfig } from '$lib/config/site';
+
+function stripTrailingSlash(value: string): string {
+	return value.replace(/\/+$/, '');
+}
+
+function browserFallbackBaseUrl(): string {
+	if (typeof window === 'undefined') return 'http://localhost:8000';
+	return `${window.location.protocol}//${window.location.hostname}:8000`;
+}
 
 // 브라우저에서 직접 접근하는 Backend 주소
-// PUBLIC_API_BASE 는 docker-compose 또는 .env 에서 런타임으로 주입
+// afterglow.conf의 [app] frontend_base_url/backend_port 조합에서 런타임 주입
 export function getBaseUrl(): string {
-	if (typeof window !== 'undefined') {
-		// 브라우저: PUBLIC_API_BASE 없으면 현재 호스트의 8000 포트로 시도
-		return env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`;
-	}
-	// SSR: docker 내부 주소
-	return env.PUBLIC_API_BASE || 'http://backend:8000';
+	const configured = get(siteConfig).runtime.api_base;
+	return stripTrailingSlash(configured || browserFallbackBaseUrl());
+}
+
+export function getWebSocketUrl(path: string): string {
+	const base = new URL(getBaseUrl() || (typeof window === 'undefined' ? 'http://localhost' : window.location.origin));
+	base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+	return new URL(path, base).toString();
 }
 
 export class ApiError extends Error {
@@ -18,6 +30,25 @@ export class ApiError extends Error {
 	) {
 		super(message);
 	}
+}
+
+function formatErrorDetail(body: unknown, fallback: string): string {
+	if (!body || typeof body !== 'object') return fallback;
+	const detail = (body as { detail?: unknown }).detail;
+	if (typeof detail === 'string') return detail;
+	if (Array.isArray(detail)) {
+		return detail
+			.map((item) => {
+				if (!item || typeof item !== 'object') return String(item);
+				const record = item as { loc?: unknown; msg?: unknown };
+				const loc = Array.isArray(record.loc) ? record.loc.join('.') : '';
+				const msg = typeof record.msg === 'string' ? record.msg : JSON.stringify(item);
+				return loc ? `${loc}: ${msg}` : msg;
+			})
+			.join('; ');
+	}
+	if (detail && typeof detail === 'object') return JSON.stringify(detail);
+	return JSON.stringify(body);
 }
 
 // 동시 다수 요청이 401 받을 때 redirect 중복 호출 방지
@@ -119,7 +150,7 @@ async function tryRefresh(): Promise<string | null> {
 			const refreshToken = persisted?.refreshToken ?? state.refreshToken;
 			if (!refreshToken) return null;
 
-			const res = await fetch(`${getBaseUrl()}/api/auth/refresh`, {
+			const res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ refresh_token: refreshToken }),
@@ -204,7 +235,7 @@ async function request<T>(
 			let detail = retry.statusText;
 			try {
 				const body = await retry.json();
-				detail = body?.detail || JSON.stringify(body);
+				detail = formatErrorDetail(body, retry.statusText);
 			} catch { /* ignore */ }
 			throw new ApiError(retry.status, detail);
 		}
@@ -216,7 +247,7 @@ async function request<T>(
 		let detail = res.statusText;
 		try {
 			const body = await res.json();
-			detail = body?.detail || JSON.stringify(body);
+			detail = formatErrorDetail(body, res.statusText);
 		} catch {
 			detail = await res.text().catch(() => res.statusText);
 		}
@@ -283,7 +314,7 @@ export const api = {
 			let detail = res.statusText;
 			try {
 				const body = await res.json();
-				detail = body?.detail || JSON.stringify(body);
+				detail = formatErrorDetail(body, res.statusText);
 			} catch {
 				detail = await res.text().catch(() => res.statusText);
 			}

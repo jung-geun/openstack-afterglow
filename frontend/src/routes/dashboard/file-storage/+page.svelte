@@ -43,7 +43,7 @@
   const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
   async function fetchFileStorages(opts?: { refresh?: boolean }) {
-    const path = '/api/file-storage';
+    const path = '/api/v1/file-storage';
     const cached = swrGet<FileStorage[]>(path);
     if (cached && fileStorages.length === 0) fileStorages = cached;
     try {
@@ -58,7 +58,7 @@
   }
 
   async function fetchQuota() {
-    try { quota = await api.get<Quota>('/api/file-storage/quota', token, projectId); }
+    try { quota = await api.get<Quota>('/api/v1/file-storage/quota', token, projectId); }
     catch { quota = null; }
   }
 
@@ -72,7 +72,7 @@
     if (!await confirmDialog(`파일 스토리지 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await apiMut('파일 스토리지 삭제', () => api.delete(`/api/file-storage/${id}`, token, projectId));
+      await apiMut('파일 스토리지 삭제', () => api.delete(`/api/v1/file-storage/${id}`, token, projectId));
       await fetchFileStorages();
     } catch {
       // error toast shown by apiMut

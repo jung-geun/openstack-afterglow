@@ -1,0 +1,113 @@
+name: Helm Chart Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '배포할 차트 버전 (Chart.yaml 기본값 사용 시 비워두기)'
+        required: false
+
+jobs:
+  check-changes:
+    name: Check helm changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Decide whether to publish
+        id: decide
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]] || [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "publish=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only HEAD^1 HEAD 2>/dev/null | grep -c '^helm/afterglow/' || echo 0)
+          if [[ "$CHANGED" -gt 0 ]]; then
+            echo "publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "publish=false" >> $GITHUB_OUTPUT
+            echo "helm 파일 변경 없음 — chart publish 건너뜀"
+          fi
+
+  helm-publish:
+    name: Package & Push Helm Chart
+    needs: check-changes
+    if: needs.check-changes.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.17.0'
+
+      - name: Determine chart version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            if [[ ! "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "잘못된 버전 형식: $INPUT_VERSION" >&2
+              exit 1
+            fi
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="$(grep '^version:' helm/afterglow/Chart.yaml | awk '{print $2}')"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR (OCI)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | \
+            helm registry login ghcr.io \
+              --username "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Package chart
+        env:
+          CHART_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          helm package helm/afterglow \
+            --version "$CHART_VERSION" \
+            --app-version "$CHART_VERSION"
+
+      - name: Push to OCI registry
+        env:
+          CHART_VERSION: ${{ steps.ver.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          helm push "afterglow-${CHART_VERSION}.tgz" \
+            "oci://ghcr.io/${OWNER}/charts"
+          echo "✓ pushed: oci://ghcr.io/${OWNER}/charts/afterglow:${CHART_VERSION}"
+
+      - name: Show install command
+        env:
+          CHART_VERSION: ${{ steps.ver.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo ""
+          echo "배포 명령:"
+          echo "  helm upgrade --install afterglow-dev \\"
+          echo "    oci://ghcr.io/${OWNER}/charts/afterglow \\"
+          echo "    --version ${CHART_VERSION} \\"
+          echo "    -f values-dev.yaml -f secrets-dev.yaml \\"
+          echo "    --namespace afterglow-dev --create-namespace"

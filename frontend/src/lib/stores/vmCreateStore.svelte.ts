@@ -4,6 +4,8 @@ import { setContext, getContext } from 'svelte';
 import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { auth } from '$lib/stores/auth';
+import { betaFeatures } from '$lib/stores/betaFeatures';
+import type { BetaFeatures } from '$lib/stores/betaFeatures';
 import { toast } from '$lib/stores/toast';
 import type { NetworkInfo } from '$lib/types/networks';
 import type { SecurityGroup as SecurityGroupInfo } from '$lib/types/securityGroup';
@@ -31,6 +33,37 @@ interface ProjectQuota {
 	disk_gb: QuotaPair;
 	gpu_instances?: number;
 }
+interface VmImage {
+	id: string;
+	name?: string;
+	os_distro?: string | null;
+	os_version?: string | null;
+	properties?: Record<string, unknown> | null;
+}
+interface VmFlavor {
+	id: string;
+	name?: string;
+	vcpus: number;
+	ram: number;
+	disk: number;
+	extra_specs?: Record<string, string>;
+}
+interface LibraryItem {
+	id: string;
+	name: string;
+	version: string;
+	depends_on: string[];
+	available_prebuilt: boolean;
+	share_proto: string;
+	size_bytes?: number;
+}
+interface QuotaBlock {
+	instances?: { limit: number; in_use: number };
+	cores?: { limit: number; in_use: number };
+	ram?: { limit: number; in_use: number };
+	gigabytes?: { limit: number; in_use: number };
+}
+interface QuotaResponse { compute?: QuotaBlock; storage?: QuotaBlock; volume?: QuotaBlock; }
 export interface FlavorQuotaSummary {
 	instances?: { limit: number; in_use: number };
 	cores?: { limit: number; in_use: number };
@@ -38,8 +71,119 @@ export interface FlavorQuotaSummary {
 	gigabytes?: { limit: number; in_use: number };
 }
 
+export interface SquashfsArtifact {
+	id: number;
+	name: string;
+	parent_id: number | null;
+	ubuntu_base?: string | null;
+	base_image_id?: string | null;
+	base_image_name?: string | null;
+}
+
+export interface SquashfsProfile {
+	id: number;
+	name: string;
+	layers: string[];
+	artifacts?: SquashfsArtifact[];
+	base_image?: {
+		ubuntu_base?: string | null;
+		base_image_id?: string | null;
+		base_image_name?: string | null;
+	};
+}
+
+export function detectUbuntuBaseImage(
+	image: Pick<VmImage, 'name' | 'os_distro' | 'os_version' | 'properties'> | null | undefined,
+	fallbackName?: string | null,
+): string | null {
+	if (!image) return null;
+	const props = image.properties ?? {};
+	const distro = String(image.os_distro ?? props.os_distro ?? '').toLowerCase();
+	const version = String(image.os_version ?? props.os_version ?? props.os_version_id ?? props.release ?? '');
+	const versionMatch = version.match(/^(18\.04|20\.04|22\.04|24\.04)/);
+	if (distro === 'ubuntu' && versionMatch) return versionMatch[1];
+	const name = image.name ?? fallbackName ?? '';
+	const nameMatch = name.match(/ubuntu[^0-9]*(18\.04|20\.04|22\.04|24\.04)/i);
+	return nameMatch ? nameMatch[1] : null;
+}
+
+export function normalizeSchedulingForBeta(
+	beta: Pick<BetaFeatures, 'haDeploy'>,
+	scheduling: 'standard' | 'ha',
+): 'standard' | 'ha' {
+	return beta.haDeploy ? scheduling : 'standard';
+}
+
+export function isSquashfsWizardEligible(options: {
+	beta: Pick<BetaFeatures, 'libraryConsume'>;
+	adminMode: boolean;
+	bootSource: 'image' | 'volume';
+	selectedImageUbuntuBase: string | null;
+}): boolean {
+	return !options.adminMode && options.beta.libraryConsume && options.bootSource === 'image' && Boolean(options.selectedImageUbuntuBase);
+}
+
+export function isSquashfsSelectionReady(options: {
+	squashfsMode: 'profile' | 'artifacts' | null;
+	layerProfileName: string | null;
+	layerArtifactIds: number[];
+	squashfsBaseMismatch: boolean;
+}): boolean {
+	if (options.squashfsMode === 'profile') return Boolean(options.layerProfileName) && !options.squashfsBaseMismatch;
+	if (options.squashfsMode === 'artifacts') return options.layerArtifactIds.length > 0 && !options.squashfsBaseMismatch;
+	return true;
+}
+
+export function shouldUseSquashfsConsume(options: {
+	beta: Pick<BetaFeatures, 'libraryConsume'>;
+	adminMode: boolean;
+	bootSource: 'image' | 'volume';
+	selectedImageUbuntuBase: string | null;
+	squashfsMode: 'profile' | 'artifacts' | null;
+	layerProfileName: string | null;
+	layerArtifactIds: number[];
+	squashfsBaseMismatch: boolean;
+}): boolean {
+	if (
+		!isSquashfsWizardEligible({
+			beta: options.beta,
+			adminMode: options.adminMode,
+			bootSource: options.bootSource,
+			selectedImageUbuntuBase: options.selectedImageUbuntuBase,
+		})
+	) {
+		return false;
+	}
+	return isSquashfsSelectionReady({
+		squashfsMode: options.squashfsMode,
+		layerProfileName: options.layerProfileName,
+		layerArtifactIds: options.layerArtifactIds,
+		squashfsBaseMismatch: options.squashfsBaseMismatch,
+	}) && options.squashfsMode !== null;
+}
+
+export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
 export const TOTAL_STEPS = 6;
-export const STEP_LABELS = ['이미지', '플레이버', '라이브러리', '전략', '설정', '배포'];
+export const STEP_LABELS: Record<WizardStepId, string> = {
+	1: '이미지',
+	2: '플레이버',
+	3: '라이브러리',
+	4: '전략',
+	5: '설정',
+	6: '배포',
+};
+
+export function wizardStepSequence(options: {
+	squashfsEligible: boolean;
+	haDeploy: boolean;
+	hasLibraries?: boolean;
+}): WizardStepId[] {
+	const steps: WizardStepId[] = [1, 2];
+	if (options.squashfsEligible) steps.push(3);
+	if (options.haDeploy || options.hasLibraries) steps.push(4);
+	steps.push(5, 6);
+	return steps;
+}
 
 export const ALL_PROGRESS_STEPS = [
 	{ id: 'manila_preparing', label: 'File Storage', description: '파일 스토리지 준비', needsLibrary: true },
@@ -68,14 +212,14 @@ export function useVmCreate(): VmCreateStore {
 }
 
 export function createVmCreateStore(opts: VmCreateOpts) {
-	// Mirror wizard writable store in runes for reactive derived values
+	// Mirror writable stores in runes for reactive derived values
 	let wizardState = $state(get(wizard));
+	let betaState = $state(get(betaFeatures));
 	$effect(() => wizard.subscribe(v => { wizardState = v; }));
-
-	// Data state
-	let images = $state<any[]>([]);
-	let flavors = $state<any[]>([]);
-	let libraries = $state<any[]>([]);
+	$effect(() => betaFeatures.subscribe(v => { betaState = v; }));
+	let images = $state<VmImage[]>([]);
+	let flavors = $state<VmFlavor[]>([]);
+	let libraries = $state<LibraryItem[]>([]);
 	let networks = $state<NetworkInfo[]>([]);
 	let keypairs = $state<KeypairInfo[]>([]);
 	let volumes = $state<Volume[]>([]);
@@ -83,6 +227,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	let securityGroups = $state<SecurityGroupInfo[]>([]);
 	let availabilityZones = $state<AvailabilityZoneInfo[]>([]);
 	let defaultNetworkId = $state<string | null>(null);
+	let squashfsProfiles = $state<SquashfsProfile[]>([]);
+	let squashfsArtifacts = $state<SquashfsArtifact[]>([]);
 	let flavorQuota = $state<FlavorQuotaSummary | null>(null);
 
 	// UI state
@@ -124,6 +270,45 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		return m ? m[1] : undefined;
 	});
 
+	const selectedImage = $derived.by(() => (
+		wizardState.imageId ? images.find(image => image.id === wizardState.imageId) ?? null : null
+	));
+
+	const selectedImageUbuntuBase = $derived.by(() => detectUbuntuBaseImage(selectedImage, wizardState.imageName));
+
+	const selectedSquashfsArtifacts = $derived(
+		squashfsArtifacts.filter(artifact => wizardState.layerArtifactIds.includes(artifact.id))
+	);
+
+	const squashfsEligible = $derived.by(() =>
+		isSquashfsWizardEligible({
+			beta: betaState,
+			adminMode: opts.adminMode(),
+			bootSource: wizardState.bootSource,
+			selectedImageUbuntuBase,
+		})
+	);
+
+	const squashfsBaseMismatch = $derived.by(() => {
+		if (!wizardState.squashfsMode || !wizardState.imageId) return false;
+		const selectedBaseIds = new Set(selectedSquashfsArtifacts.map(a => a.base_image_id).filter(Boolean));
+		if (wizardState.squashfsMode === 'profile' && wizardState.layerProfileName) {
+			const profile = squashfsProfiles.find(p => p.name === wizardState.layerProfileName);
+			const profileBaseId = profile?.base_image?.base_image_id;
+			return Boolean(profileBaseId && profileBaseId !== wizardState.imageId);
+		}
+		return selectedBaseIds.size > 0 && (selectedBaseIds.size !== 1 || !selectedBaseIds.has(wizardState.imageId));
+	});
+
+	const squashfsSelectionReady = $derived.by(() =>
+		isSquashfsSelectionReady({
+			squashfsMode: wizardState.squashfsMode,
+			layerProfileName: wizardState.layerProfileName,
+			layerArtifactIds: wizardState.layerArtifactIds,
+			squashfsBaseMismatch,
+		})
+	);
+
 	const selectedNetwork = $derived(
 		wizardState.networkId ? networks.find(n => n.id === wizardState.networkId) ?? null : null
 	);
@@ -131,7 +316,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	const hasGpuFlavor = $derived(
 		flavors.find(f => f.id === wizardState.flavorId)
 			? Object.keys(flavors.find(f => f.id === wizardState.flavorId)?.extra_specs ?? {}).some(
-				k => k.toLowerCase().includes('gpu')
+				k => k.toLowerCase().includes('gpu') || k.startsWith('pci_passthrough')
 			)
 			: false
 	);
@@ -140,8 +325,22 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		libraries.some(l => wizardState.libraries.includes(l.id) && l.available_prebuilt)
 	);
 
+	const visibleStepIds = $derived.by(() =>
+		wizardStepSequence({
+			squashfsEligible,
+			haDeploy: betaState.haDeploy,
+			hasLibraries: wizardState.libraries.length > 0,
+		})
+	);
+	const visibleStepLabels = $derived(visibleStepIds.map(step => STEP_LABELS[step]));
+	const visibleTotalSteps = $derived(visibleStepIds.length);
+	const visibleStepIndex = $derived.by(() => {
+		const index = visibleStepIds.indexOf(wizardState.step as WizardStepId);
+		return index >= 0 ? index + 1 : 1;
+	});
+
 	const selectedFlavorDetail = $derived.by(() => {
-		const f = flavors.find((fl: any) => fl.id === wizardState.flavorId);
+		const f = flavors.find(fl => fl.id === wizardState.flavorId);
 		if (!f) return '';
 		const parts = [
 			`${f.vcpus} vCPU`,
@@ -161,19 +360,47 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		return parts.join(' · ');
 	});
 
+	$effect(() => {
+		const needsSchedulingReset = wizardState.scheduling !== normalizeSchedulingForBeta(betaState, wizardState.scheduling);
+		const needsSquashfsReset = !squashfsEligible && wizardState.squashfsMode !== null;
+		const needsStrategyReset = !visibleStepIds.includes(4) && wizardState.strategy !== null;
+		const isVisibleStep = visibleStepIds.includes(wizardState.step as WizardStepId);
+		const nextVisibleStep = isVisibleStep
+			? null
+			: (visibleStepIds.find(step => step > wizardState.step) ?? visibleStepIds[visibleStepIds.length - 1] ?? 1);
+		if (!needsSchedulingReset && !needsSquashfsReset && !needsStrategyReset && nextVisibleStep === null) return;
+		wizard.update(w => {
+			let next = w;
+			const nextScheduling = normalizeSchedulingForBeta(betaState, next.scheduling);
+			if (nextScheduling !== next.scheduling) {
+				next = { ...next, scheduling: nextScheduling };
+			}
+			if (!squashfsEligible && next.squashfsMode !== null) {
+				next = { ...next, squashfsMode: null, layerProfileName: null, layerArtifactIds: [] };
+			}
+			if (!visibleStepIds.includes(4) && next.strategy !== null) {
+				next = { ...next, strategy: null };
+			}
+			if (nextVisibleStep !== null && next.step !== nextVisibleStep) {
+				next = { ...next, step: nextVisibleStep };
+			}
+			return next;
+		});
+	});
+
 	const canNext = $derived((() => {
 		const adminMode = opts.adminMode();
 		switch (wizardState.step) {
 			case 1: return wizardState.bootSource === 'volume' ? !!wizardState.bootVolumeId : !!wizardState.imageId;
 			case 2: return !!wizardState.flavorId;
-			case 3: return true;
+			case 3: return squashfsSelectionReady;
 			case 4: {
 				if (!wizardState.scheduling) return false;
 				if (wizardState.libraries.length > 0 && !wizardState.strategy) return false;
 				return true;
 			}
-			case 5: return !!wizardState.instanceName.trim() && (adminMode || !!wizardState.keyName);
-			case 6: return !!wizardState.instanceName.trim();
+			case 5: return adminMode || !!wizardState.keyName;
+			case 6: return true;
 			default: return false;
 		}
 	})());
@@ -198,12 +425,39 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		function visit(lid: string) {
 			if (visited.has(lid)) return;
 			visited.add(lid);
-			const lib = libraries.find((l: any) => l.id === lid);
-			if (lib) (lib.depends_on as string[]).forEach(d => visit(d));
+			const lib = libraries.find(l => l.id === lid);
+			if (lib) (lib.depends_on ?? []).forEach(d => visit(d));
 			result.push(lid);
 		}
 		visit(id);
 		return result;
+	}
+
+	function lineageIdsForArtifact(id: number): number[] {
+		const byId = new Map(squashfsArtifacts.map(artifact => [artifact.id, artifact]));
+		const chain: number[] = [];
+		const seen = new Set<number>();
+		let current = byId.get(id);
+		while (current && !seen.has(current.id)) {
+			seen.add(current.id);
+			chain.unshift(current.id);
+			current = current.parent_id ? byId.get(current.parent_id) : undefined;
+		}
+		return chain;
+	}
+
+	async function loadSquashfsCatalog() {
+		const token = get(auth).token ?? undefined;
+		const projectId = get(auth).projectId ?? undefined;
+		try {
+			[squashfsProfiles, squashfsArtifacts] = await Promise.all([
+				api.get<SquashfsProfile[]>('/api/v1/libraries/squashfs/profiles', token, projectId),
+				api.get<SquashfsArtifact[]>('/api/v1/libraries/squashfs/artifacts', token, projectId),
+			]);
+		} catch {
+			squashfsProfiles = [];
+			squashfsArtifacts = [];
+		}
 	}
 
 	// Data loading
@@ -212,8 +466,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const projectId = get(auth).projectId ?? undefined;
 		try {
 			if (opts.adminMode() && adminSelectedProjectId) {
-				const r = await api.get<{ compute?: any; volume?: any }>(
-					`/api/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`, token, projectId,
+				const r = await api.get<QuotaResponse>(
+					`/api/v1/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`, token, projectId,
 				);
 				flavorQuota = {
 					instances: r.compute?.instances,
@@ -222,7 +476,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					gigabytes: r.volume?.gigabytes,
 				};
 			} else if (!opts.adminMode()) {
-				const r = await api.get<{ compute?: any; storage?: any }>('/api/dashboard/quotas', token, projectId);
+				const r = await api.get<QuotaResponse>('/api/v1/dashboard/quotas', token, projectId);
 				flavorQuota = {
 					instances: r.compute?.instances,
 					cores: r.compute?.cores,
@@ -240,7 +494,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const token = get(auth).token ?? undefined;
 		const projectId = get(auth).projectId ?? undefined;
 		try {
-			const rows = await api.get<ProjectQuota[]>('/api/admin/overview/projects', token, projectId);
+			const rows = await api.get<ProjectQuota[]>('/api/v1/admin/overview/projects', token, projectId);
 			const map = new Map<string, ProjectQuota>();
 			for (const r of rows) map.set(r.project_id, r);
 			adminProjectQuotas = map;
@@ -255,7 +509,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const token = get(auth).token ?? undefined;
 		const projectId = get(auth).projectId ?? undefined;
 		try {
-			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			const res = await api.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', token, projectId);
 			adminProjects = res.map(p => ({ id: p.id, name: p.name }));
 		} catch {
 			adminProjects = [];
@@ -274,41 +528,42 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			if (opts.adminMode() && adminSelectedProjectId) {
 				const pid = adminSelectedProjectId;
 				[images, flavors, libraries] = await Promise.all([
-					api.get<any[]>('/api/images', token, projectId),
-					api.get<any[]>('/api/flavors', token, projectId),
-					api.get<any[]>('/api/libraries', token, projectId),
+					api.get<VmImage[]>('/api/v1/images', token, projectId),
+					api.get<VmFlavor[]>('/api/v1/flavors', token, projectId),
+					api.get<LibraryItem[]>('/api/v1/libraries', token, projectId),
 				]);
 				[networks, volumes] = await Promise.all([
-					api.get<NetworkInfo[]>(`/api/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
-					api.get<Volume[]>(`/api/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
+					api.get<NetworkInfo[]>(`/api/v1/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
+					api.get<Volume[]>(`/api/v1/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
 				]);
 				keypairs = [];
 				try {
 					securityGroups = await api.get<SecurityGroupInfo[]>(
-						`/api/admin/instances/security-groups-for-project?project_id=${pid}`, token, projectId,
+						`/api/v1/admin/instances/security-groups-for-project?project_id=${pid}`, token, projectId,
 					);
 				} catch { securityGroups = []; }
 				availabilityZones = [];
 				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
 				} catch { /* 무시 */ }
 			} else {
 				[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
-					api.get<any[]>('/api/images', token, projectId),
-					api.get<any[]>('/api/flavors', token, projectId),
-					api.get<any[]>('/api/libraries', token, projectId),
-					api.get<NetworkInfo[]>('/api/networks', token, projectId),
-					api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
-					api.get<Volume[]>('/api/volumes', token, projectId),
+					api.get<VmImage[]>('/api/v1/images', token, projectId),
+					api.get<VmFlavor[]>('/api/v1/flavors', token, projectId),
+					api.get<LibraryItem[]>('/api/v1/libraries', token, projectId),
+					api.get<NetworkInfo[]>('/api/v1/networks', token, projectId),
+					api.get<KeypairInfo[]>('/api/v1/keypairs', token, projectId),
+					api.get<Volume[]>('/api/v1/volumes', token, projectId),
 				]);
+				await loadSquashfsCatalog();
 				try {
-					securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
+					securityGroups = await api.get<SecurityGroupInfo[]>('/api/v1/security-groups', token, projectId);
 				} catch { securityGroups = []; }
 				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
 				} catch { availabilityZones = []; }
 				try {
-					fileStorages = await api.get<typeof fileStorages>('/api/storage/file-storages', token, projectId);
+					fileStorages = await api.get<typeof fileStorages>('/api/v1/storage/file-storages', token, projectId);
 				} catch { fileStorages = []; }
 
 				if (keypairs.length === 1 && !get(wizard).keyName) {
@@ -317,7 +572,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				if (networks.length > 0 && !get(wizard).networkId) {
 					let selectedNet = networks[0];
 					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
 						defaultNetworkId = defaultRecord.network_id;
 						const found = networks.find(n => n.id === defaultRecord.network_id);
 						if (found) selectedNet = found;
@@ -328,7 +583,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
 				} else if (get(wizard).networkId) {
 					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
 						defaultNetworkId = defaultRecord.network_id;
 					} catch { /* 무시 */ }
 				}
@@ -367,15 +622,36 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		}
 	}
 
+	function nearestVisibleStep(step: number): WizardStepId {
+		return (
+			visibleStepIds.find(candidate => candidate >= step) ??
+			visibleStepIds[visibleStepIds.length - 1] ??
+			1
+		);
+	}
+
 	function nextStep() {
-		if (get(wizard).step < TOTAL_STEPS) wizard.update(w => ({ ...w, step: w.step + 1 }));
+		const current = get(wizard).step as WizardStepId;
+		const index = visibleStepIds.indexOf(current);
+		const next = visibleStepIds[Math.min(index + 1, visibleStepIds.length - 1)];
+		if (next && next !== current) wizard.update(w => ({ ...w, step: next }));
 	}
 
 	function prevStep() {
-		if (get(wizard).step > 1) wizard.update(w => ({ ...w, step: w.step - 1 }));
+		const current = get(wizard).step as WizardStepId;
+		const index = visibleStepIds.indexOf(current);
+		const prev = visibleStepIds[Math.max(index - 1, 0)];
+		if (prev && prev !== current) wizard.update(w => ({ ...w, step: prev }));
 	}
 
-	function goTo(step: number) { wizard.update(w => ({ ...w, step })); }
+	function goTo(step: number) {
+		wizard.update(w => ({ ...w, step: nearestVisibleStep(step) }));
+	}
+
+	function goToVisible(index: number) {
+		const step = visibleStepIds[index - 1];
+		if (step) wizard.update(w => ({ ...w, step }));
+	}
 
 	function selectImage(id: string, name: string) { wizard.update(w => ({ ...w, imageId: id, imageName: name })); }
 	function selectFlavor(id: string, name: string) { wizard.update(w => ({ ...w, flavorId: id, flavorName: name })); }
@@ -395,12 +671,66 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	}
 
 	function selectStrategy(s: 'prebuilt' | 'dynamic' | null) { wizard.update(w => ({ ...w, strategy: s })); }
-	function selectScheduling(s: 'standard' | 'ha') { wizard.update(w => ({ ...w, scheduling: s })); }
+	function selectScheduling(s: 'standard' | 'ha') {
+		wizard.update(w => ({ ...w, scheduling: normalizeSchedulingForBeta(betaState, s) }));
+	}
 	function selectMountProtocol(p: 'CEPHFS' | 'NFS') { wizard.update(w => ({ ...w, mountProtocol: p })); }
 
 	function selectNetwork(id: string | null) {
 		const net = networks.find(n => n.id === id) ?? null;
 		wizard.update(w => ({ ...w, networkId: id, networkName: net?.name ?? null }));
+	}
+
+	function clearSquashfsSelection() {
+		wizard.update(w => ({ ...w, squashfsMode: null, layerProfileName: null, layerArtifactIds: [] }));
+	}
+
+	function selectSquashfsMode(mode: 'profile' | 'artifacts' | null) {
+		wizard.update(w => ({
+			...w,
+			squashfsMode: mode,
+			layerProfileName: mode === 'profile' ? w.layerProfileName : null,
+			layerArtifactIds: mode === 'artifacts' ? w.layerArtifactIds : [],
+			libraries: mode ? [] : w.libraries,
+			templateName: mode ? null : w.templateName,
+			templateVersion: mode ? null : w.templateVersion,
+			strategy: mode ? null : w.strategy,
+		}));
+	}
+
+	function selectSquashfsProfile(name: string | null) {
+		wizard.update(w => ({
+			...w,
+			squashfsMode: name ? 'profile' : w.squashfsMode,
+			layerProfileName: name,
+			layerArtifactIds: [],
+			libraries: name ? [] : w.libraries,
+			templateName: name ? null : w.templateName,
+			templateVersion: name ? null : w.templateVersion,
+			strategy: name ? null : w.strategy,
+		}));
+	}
+
+	function toggleSquashfsArtifact(id: number) {
+		wizard.update(w => {
+			const ids = new Set(w.layerArtifactIds);
+			if (ids.has(id)) {
+				ids.delete(id);
+			} else {
+				lineageIdsForArtifact(id).forEach(lineageId => ids.add(lineageId));
+			}
+			const nextIds = Array.from(ids);
+			return {
+				...w,
+				squashfsMode: nextIds.length > 0 ? 'artifacts' : w.squashfsMode,
+				layerArtifactIds: nextIds,
+				layerProfileName: null,
+				libraries: nextIds.length > 0 ? [] : w.libraries,
+				templateName: nextIds.length > 0 ? null : w.templateName,
+				templateVersion: nextIds.length > 0 ? null : w.templateVersion,
+				strategy: nextIds.length > 0 ? null : w.strategy,
+			};
+		});
 	}
 
 	async function deploy() {
@@ -420,12 +750,68 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		if (authState.projectId) headers['X-Project-Id'] = authState.projectId;
 
 		const endpoint = opts.adminMode()
-			? `${baseUrl}/api/admin/instances/async`
-			: `${baseUrl}/api/instances/async`;
+			? `${baseUrl}/api/v1/admin/instances/async`
+			: `${baseUrl}/api/v1/instances/async`;
 
 		const w = get(wizard);
+		const useSquashfsConsume = shouldUseSquashfsConsume({
+			beta: betaState,
+			adminMode: opts.adminMode(),
+			bootSource: w.bootSource,
+			selectedImageUbuntuBase,
+			squashfsMode: w.squashfsMode,
+			layerProfileName: w.layerProfileName,
+			layerArtifactIds: w.layerArtifactIds,
+			squashfsBaseMismatch,
+		});
+		if (useSquashfsConsume) {
+			const requestedName = w.instanceName.trim() || null;
+			const consumeBody: Record<string, unknown> = {
+				server_name: requestedName,
+				flavor_id: w.flavorId,
+				image_id: w.imageId,
+				network_id: w.networkId,
+				key_name: w.keyName || null,
+				...(w.squashfsMode === 'profile'
+					? { profile_name: w.layerProfileName }
+					: { artifact_ids: w.layerArtifactIds }),
+			};
+			try {
+				currentStep = 'server_creating';
+				progress = 60;
+				progressMessage = 'squashfs 라이브러리 소비 VM 생성 중...';
+				const response = await fetch(`${baseUrl}/api/v1/libraries/squashfs/consume`, {
+					method: 'POST',
+					headers: { ...headers, Accept: 'application/json' },
+					body: JSON.stringify(consumeBody),
+				});
+				if (!response.ok) {
+					const text = await response.text();
+					throw new ApiError(response.status, text || response.statusText);
+				}
+				currentStep = 'completed';
+				progress = 100;
+				progressMessage = '배포 완료';
+				toast.success('인스턴스 생성 완료');
+				setTimeout(() => {
+					resetWizard();
+					closeWizard();
+					goto('/dashboard');
+				}, 1000);
+				return;
+			} catch (e) {
+				deployError = e instanceof ApiError
+					? `배포 실패: ${e.message}`
+					: `서버 연결 오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+				toast.error(`인스턴스 생성 실패: ${deployError}`);
+				deploying = false;
+				return;
+			}
+		}
+
+		const requestedName = w.instanceName.trim() || null;
 		const body: Record<string, unknown> = {
-			name: w.instanceName,
+			name: requestedName,
 			...(w.bootSource === 'volume'
 				? { boot_volume_id: w.bootVolumeId }
 				: {
@@ -436,7 +822,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			flavor_id: w.flavorId,
 			libraries: w.libraries,
 			strategy: w.strategy,
-			scheduling: w.scheduling,
+			scheduling: normalizeSchedulingForBeta(betaState, w.scheduling),
 			network_id: w.networkId,
 			key_name: w.keyName || null,
 			availability_zone: w.availabilityZone,
@@ -541,6 +927,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get availabilityZones() { return availabilityZones; },
 		get defaultNetworkId() { return defaultNetworkId; },
 		get flavorQuota() { return flavorQuota; },
+		get squashfsProfiles() { return squashfsProfiles; },
+		get squashfsArtifacts() { return squashfsArtifacts; },
 		// UI state
 		get loading() { return loading; },
 		get loadError() { return loadError; },
@@ -549,6 +937,10 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get currentStep() { return currentStep; },
 		get progress() { return progress; },
 		get progressMessage() { return progressMessage; },
+		get visibleStepIds() { return visibleStepIds; },
+		get visibleStepLabels() { return visibleStepLabels; },
+		get visibleTotalSteps() { return visibleTotalSteps; },
+		get visibleStepIndex() { return visibleStepIndex; },
 		get elapsedSeconds() { return elapsedSeconds; },
 		// Admin state
 		get adminProjects() { return adminProjects; },
@@ -563,6 +955,12 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get progressSteps() { return progressSteps; },
 		get ubuntuVersion() { return ubuntuVersion; },
 		get selectedNetwork() { return selectedNetwork; },
+		get selectedImage() { return selectedImage; },
+		get selectedImageUbuntuBase() { return selectedImageUbuntuBase; },
+		get squashfsEligible() { return squashfsEligible; },
+		get selectedSquashfsArtifacts() { return selectedSquashfsArtifacts; },
+		get squashfsBaseMismatch() { return squashfsBaseMismatch; },
+		get squashfsSelectionReady() { return squashfsSelectionReady; },
 		get hasGpuFlavor() { return hasGpuFlavor; },
 		get hasPrebuilt() { return hasPrebuilt; },
 		get selectedFlavorDetail() { return selectedFlavorDetail; },
@@ -577,12 +975,14 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		loadData,
 		loadFlavorQuota,
 		loadAdminProjects,
+		loadSquashfsCatalog,
 		// Actions
 		selectAdminProject,
 		handleReset,
 		nextStep,
 		prevStep,
 		goTo,
+		goToVisible,
 		selectImage,
 		selectFlavor,
 		toggleLibrary,
@@ -590,6 +990,10 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		selectScheduling,
 		selectMountProtocol,
 		selectNetwork,
+		clearSquashfsSelection,
+		selectSquashfsMode,
+		selectSquashfsProfile,
+		toggleSquashfsArtifact,
 		deploy,
 	};
 }

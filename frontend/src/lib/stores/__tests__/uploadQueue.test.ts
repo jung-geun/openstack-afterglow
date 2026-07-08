@@ -71,7 +71,7 @@ describe('uploadQueue', () => {
 
 		expect(api.uploadWithProgress).toHaveBeenCalledTimes(1);
 		const args = (api.uploadWithProgress as Mock).mock.calls[0];
-		expect(args[0]).toBe('/api/object-storage/bucket/upload');
+		expect(args[0]).toBe('/api/v1/object-storage/bucket/upload');
 		expect(args[1]).toBeInstanceOf(FormData);
 		expect(typeof args[2]).toBe('function');
 		expect(args[3]).toBe('tok');

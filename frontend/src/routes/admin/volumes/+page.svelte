@@ -3,7 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import type { PagedResponse, TsPoint } from '$lib/types/common';
-	import type { AdminVolume } from '$lib/types/volume';
+	import type { AdminVolume, AdminVolumeStatusSummary as VolumeStatusSummary } from '$lib/types/volume';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -22,6 +22,7 @@
 	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import AdminVolumePageSizeToggle from '$lib/components/admin/volumes/AdminVolumePageSizeToggle.svelte';
 	import AdminVolumeDetailSlide from '$lib/components/admin/volumes/AdminVolumeDetailSlide.svelte';
+	import AdminVolumeStatusSummary from '$lib/components/admin/volumes/AdminVolumeStatusSummary.svelte';
 
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
@@ -32,6 +33,8 @@
 	let tsData = $state<TsPoint[]>([]);
 	let tsRange = $state('7d');
 	let tsLoading = $state(true);
+	let statusSummary = $state<VolumeStatusSummary | null>(null);
+	let statusSummaryLoading = $state(true);
 
 	let copiedProjectId = $state<string | null>(null);
 	let openActionMenu = $state<string | null>(null);
@@ -62,7 +65,7 @@
 	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
 		if (!opts?.background) tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/volumes?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/volumes?range=${range}`, token, projectId);
 		} catch {
 			if (!opts?.background) tsData = [];
 		} finally {
@@ -70,11 +73,29 @@
 		}
 	}
 
+	async function loadStatusSummary(opts?: { background?: boolean }) {
+		if (!opts?.background && statusSummary === null) statusSummaryLoading = true;
+		try {
+			statusSummary = await api.get<VolumeStatusSummary>('/api/v1/admin/volumes/status-summary', token, projectId);
+		} catch {
+			if (!opts?.background) statusSummary = null;
+		} finally {
+			statusSummaryLoading = false;
+		}
+	}
+
+	function applyStatusFilter(status: string) {
+		statusFilter = status;
+		markerStack = [];
+		nextMarker = null;
+		load();
+	}
+
 	async function load(marker?: string) {
 		if (allVolumes.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			let url = `/api/admin/all-volumes?limit=${pageSize}`;
+			let url = `/api/v1/admin/all-volumes?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
 			if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
@@ -91,7 +112,7 @@
 	}
 
 	const ar = createAutoRefresh(
-		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange, { background: true }); },
+		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange, { background: true }); loadStatusSummary({ background: true }); },
 		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60] },
 	);
 
@@ -99,6 +120,7 @@
 		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
 		load();
 		loadTimeseries(tsRange);
+		loadStatusSummary();
 		projectNames.load(token, projectId);
 	});
 </script>
@@ -115,7 +137,7 @@
 					markerStack = []; nextMarker = null;
 					projectFilter = ''; projectSearchText = '';
 					statusFilter = ''; nameSearch = '';
-					load();
+					load(); loadStatusSummary(); loadTimeseries(tsRange);
 				}}
 			/>
 			<AdminVolumePageSizeToggle
@@ -132,6 +154,13 @@
 		onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
 	/>
 
+	<AdminVolumeStatusSummary
+		summary={statusSummary}
+		activeStatus={statusFilter}
+		loading={statusSummaryLoading}
+		onSelect={applyStatusFilter}
+	/>
+
 	<AdminVolumeFilters
 		bind:projectFilter
 		bind:projectSearchText
@@ -143,7 +172,6 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<AdminVolumeTable
 				volumes={allVolumes}
 				{selectedVolumeId}
@@ -165,7 +193,6 @@
 						prefill: { bootSource: 'volume', bootVolumeId: v.id, bootVolumeName: v.name },
 					})}
 			/>
-		</div>
 		<Pagination
 			page={markerStack.length + 1}
 			hasPrev={markerStack.length > 0}

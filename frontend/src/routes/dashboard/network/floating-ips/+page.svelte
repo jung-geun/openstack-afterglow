@@ -21,7 +21,7 @@
     error = '';
     try {
       fips = await api.get<FloatingIp[]>(
-        '/api/networks/floating-ips',
+        '/api/v1/networks/floating-ips',
         $auth.token ?? undefined,
         $auth.projectId ?? undefined,
         opts,
@@ -46,7 +46,7 @@
     if (!await confirmDialog(`Floating IP "${addr}"를 해제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/networks/floating-ips/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/networks/floating-ips/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await load();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

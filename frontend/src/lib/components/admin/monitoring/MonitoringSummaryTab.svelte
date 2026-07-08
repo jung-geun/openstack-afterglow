@@ -73,7 +73,6 @@
 {:else if !summary}
 	<div class="text-red-400 text-sm">모니터링 데이터를 불러올 수 없습니다.</div>
 {:else}
-	<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 		<!-- Compute -->
 		<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
@@ -246,6 +245,5 @@
 				</a>
 			</div>
 		</div>
-	</div>
 	</div>
 {/if}

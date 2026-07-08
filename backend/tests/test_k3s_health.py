@@ -58,7 +58,7 @@ def _make_health_result(cluster_id="k3s-1", status="HEALTHY"):
 async def test_list_cluster_health_unauthenticated():
     """인증 없이 헬스 목록 접근 시 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/health")  # 주의: 라우터 등록 경로 확인
+        resp = await ac.get("/api/v1/k3s/clusters/health")  # 주의: 라우터 등록 경로 확인
     # k3s 서비스 비활성화 상태면 404, 활성화 상태면 401
     assert resp.status_code in (401, 404)
 
@@ -67,7 +67,7 @@ async def test_list_cluster_health_unauthenticated():
 async def test_get_cluster_health_unauthenticated():
     """인증 없이 단일 클러스터 헬스 접근 시 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/k3s-1/health")
+        resp = await ac.get("/api/v1/k3s/clusters/k3s-1/health")
     assert resp.status_code in (401, 404)
 
 
@@ -80,7 +80,7 @@ async def test_get_cluster_health_not_found(client):
     ):
         mock_db.get_cluster = AsyncMock(return_value=None)
         mock_health.get_health_result = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/nonexistent/health")
+        resp = await client.get("/api/v1/k3s/clusters/nonexistent/health")
     assert resp.status_code == 404
 
 
@@ -94,7 +94,7 @@ async def test_get_cluster_health_success(client):
     ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_health.get_health_result = AsyncMock(return_value=health)
-        resp = await client.get("/api/k3s/clusters/k3s-1/health")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["cluster_id"] == "k3s-1"
@@ -113,7 +113,7 @@ async def test_get_cluster_health_no_cache(client):
     ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_health.get_health_result = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/k3s-1/health")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/health")
     assert resp.status_code == 404
 
 
@@ -130,7 +130,7 @@ async def test_trigger_health_check_success(client):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_health.check_cluster_health = AsyncMock(return_value=health)
         mock_health.store_health_result = AsyncMock()
-        resp = await client.post("/api/k3s/clusters/k3s-1/health/check")
+        resp = await client.post("/api/v1/k3s/clusters/k3s-1/health/check")
     assert resp.status_code == 200
     data = resp.json()
     assert data["cluster_id"] == "k3s-1"

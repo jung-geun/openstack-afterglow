@@ -43,7 +43,7 @@
 			if (form.min_ram !== target.min_ram) body.min_ram = form.min_ram;
 			if (Object.keys(body).length === 0) { onClose(); return; }
 			const updated = await api.patch<ImageInfo>(
-				`/api/images/${target.id}`, body,
+				`/api/v1/images/${target.id}`, body,
 				$auth.token ?? undefined, $auth.projectId ?? undefined,
 			);
 			onSaved(updated);

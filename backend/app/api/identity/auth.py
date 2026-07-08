@@ -7,8 +7,6 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import (
     _check_session_timeout,
-    extend_session,
-    get_session_remaining,
     get_token_info,
     invalidate_token_cache,
 )
@@ -33,7 +31,7 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=1)
 
 
-class SwitchProjectRequest(BaseModel):
+class ProjectScopeRequest(BaseModel):
     project_id: str = Field(..., min_length=1, max_length=255)
 
 
@@ -197,26 +195,6 @@ async def me(token_info: dict = Depends(get_token_info)):
     )
 
 
-@router.get("/session-info")
-async def session_info(token_info: dict = Depends(get_token_info)):
-    """현재 세션의 남은 시간(초)과 설정된 타임아웃을 반환."""
-    settings = get_settings()
-    remaining = await get_session_remaining(token_info["token"], token_info["project_id"])
-    return {
-        "remaining_seconds": remaining,
-        "timeout_seconds": settings.session_timeout_seconds,
-        "warning_before_seconds": settings.session_warning_before_seconds,
-    }
-
-
-@router.post("/extend-session")
-async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
-    """세션을 연장 (시작 시간을 지금으로 재설정)."""
-    await extend_session(token_info["token"], token_info["project_id"])
-    settings = get_settings()
-    return {"message": "세션이 연장되었습니다", "timeout_seconds": settings.session_timeout_seconds}
-
-
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
     """로그아웃: refresh 세션 삭제 + Keystone 토큰 폐기 + 검증/세션 캐시 invalidate."""
@@ -300,9 +278,9 @@ async def refresh_token(request: Request, req: RefreshRequest):
     )
 
 
-@router.post("/switch-project", response_model=TokenResponse)
-async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(get_token_info)):
-    """현재 JWT를 새 프로젝트로 rescope하여 새 토큰 쌍 발급."""
+@router.post("/token/project", response_model=TokenResponse)
+async def scope_project(req: ProjectScopeRequest, token_info: dict = Depends(get_token_info)):
+    """접근 가능한 프로젝트로 새 토큰 쌍 발급 (rescope)."""
     keystone_token = token_info["token"]
     try:
         kc_info = await asyncio.to_thread(keystone.validate_token, keystone_token, project_id=req.project_id)
@@ -393,7 +371,7 @@ async def list_my_groups(token_info: dict = Depends(get_token_info)):
     except PermissionError:
         return []
     except Exception:
-        _logger.exception("/api/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
+        _logger.exception("/api/v1/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
 
@@ -438,14 +416,18 @@ async def list_projects_recent(token_info: dict = Depends(get_token_info)):
     return project_infos
 
 
-@router.get("/gitlab/enabled")
+# OIDC/OAuth API router - mounted under /api/v1/auth in main.py.
+gitlab_router = APIRouter()
+
+
+@gitlab_router.get("/gitlab/enabled")
 async def gitlab_enabled():
     """GitLab OIDC 활성화 여부 반환 (프론트엔드에서 버튼 표시 여부 결정)."""
     settings = get_settings()
     return {"enabled": settings.gitlab_oidc_enabled}
 
 
-@router.get("/gitlab/authorize")
+@gitlab_router.get("/gitlab/authorize")
 async def gitlab_authorize():
     """GitLab OAuth2 인증 URL 반환."""
     settings = get_settings()
@@ -460,7 +442,7 @@ async def gitlab_authorize():
     return {"authorize_url": url}
 
 
-@router.post("/gitlab/callback", response_model=TokenResponse)
+@gitlab_router.post("/gitlab/callback", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def gitlab_callback(request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
     """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""
@@ -474,8 +456,8 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     except Exception:
         raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
-    # default_project_id는 동기 Keystone 호출로 1초 안팎 지연이 발생하므로
-    # 응답 경로에서 제외한다. exchange_code의 scoped 토큰 project_id를 그대로 사용.
+    # exchange_code는 접근 가능한 default_project_id만 채워 응답한다.
+    # frontend는 project_id/default_project_id 공통 규칙으로 다음 화면을 결정한다.
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
     background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
@@ -488,4 +470,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         roles=data.get("roles", []),
         is_system_admin=data.get("is_system_admin", False),
         auth_method="federated",
+        default_project_id=data.get("default_project_id", "") or "",
     )

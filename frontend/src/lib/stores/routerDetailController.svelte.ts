@@ -43,7 +43,7 @@ function createRouterDetailController(opts: Options) {
 		}
 		const tok = untrack(() => opts.token());
 		const proj = untrack(() => opts.projectId());
-		api.get<{ subnet_details: SubnetDetail[] }>(`/api/networks/${netId}`, tok, proj)
+		api.get<{ subnet_details: SubnetDetail[] }>(`/api/v1/networks/${netId}`, tok, proj)
 			.then(d => {
 				allSubnets = d.subnet_details ?? [];
 				selectedSubnetId = allSubnets[0]?.id ?? '';
@@ -55,7 +55,7 @@ function createRouterDetailController(opts: Options) {
 		loading = true;
 		error = '';
 		try {
-			router = await api.get<RouterDetail>(`/api/routers/${opts.routerId()}`, opts.token(), opts.projectId());
+			router = await api.get<RouterDetail>(`/api/v1/routers/${opts.routerId()}`, opts.token(), opts.projectId());
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '라우터 조회 실패';
 		} finally {
@@ -65,7 +65,7 @@ function createRouterDetailController(opts: Options) {
 
 	async function fetchNetworks() {
 		try {
-			const nets = await api.get<Network[]>('/api/networks', opts.token(), opts.projectId());
+			const nets = await api.get<Network[]>('/api/v1/networks', opts.token(), opts.projectId());
 			availableNetworks = nets.filter(n => !n.is_external);
 			externalNetworks = nets.filter(n => n.is_external);
 		} catch { /* 무시 */ }
@@ -75,7 +75,7 @@ function createRouterDetailController(opts: Options) {
 		if (!selectedSubnetId) return;
 		saving = true;
 		try {
-			await api.post(`/api/routers/${opts.routerId()}/interfaces`, { subnet_id: selectedSubnetId }, opts.token(), opts.projectId());
+			await api.post(`/api/v1/routers/${opts.routerId()}/interfaces`, { subnet_id: selectedSubnetId }, opts.token(), opts.projectId());
 			showAddInterface = false;
 			selectedNetId = '';
 			selectedSubnetId = '';
@@ -91,7 +91,7 @@ function createRouterDetailController(opts: Options) {
 		if (!(await confirmDialog('인터페이스를 제거하시겠습니까?'))) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${opts.routerId()}/interfaces/${subnetId}`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/routers/${opts.routerId()}/interfaces/${subnetId}`, opts.token(), opts.projectId());
 			await fetchRouter();
 		} catch (e) {
 			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -104,7 +104,7 @@ function createRouterDetailController(opts: Options) {
 		if (!selectedExtNetId) return;
 		saving = true;
 		try {
-			await api.post(`/api/routers/${opts.routerId()}/gateway`, { external_network_id: selectedExtNetId }, opts.token(), opts.projectId());
+			await api.post(`/api/v1/routers/${opts.routerId()}/gateway`, { external_network_id: selectedExtNetId }, opts.token(), opts.projectId());
 			showSetGateway = false;
 			selectedExtNetId = '';
 			await fetchRouter();
@@ -119,7 +119,7 @@ function createRouterDetailController(opts: Options) {
 		if (!(await confirmDialog('외부 게이트웨이를 제거하시겠습니까?'))) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${opts.routerId()}/gateway`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/routers/${opts.routerId()}/gateway`, opts.token(), opts.projectId());
 			await fetchRouter();
 		} catch (e) {
 			toast.error('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -132,7 +132,7 @@ function createRouterDetailController(opts: Options) {
 		if (!(await confirmDialog(`라우터 "${router?.name || opts.routerId()}"을 삭제하시겠습니까?`))) return;
 		saving = true;
 		try {
-			await api.delete(`/api/routers/${opts.routerId()}`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/routers/${opts.routerId()}`, opts.token(), opts.projectId());
 			if (opts.onDeleted) {
 				opts.onDeleted();
 			} else {

@@ -84,7 +84,7 @@ class InstanceInfo(BaseModel):
 
 
 class CreateInstanceRequest(BaseModel):
-    name: str
+    name: str | None = None
     image_id: str | None = None
     flavor_id: str
     libraries: list[str] = []
@@ -116,10 +116,10 @@ class CreateInstanceRequest(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: str) -> str:
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$", v):
-            raise ValueError("name은 영문자/숫자로 시작하고, 영문자·숫자·하이픈·언더스코어만 허용되며 최대 63자입니다")
-        return v
+    def validate_name(cls, v: str | None) -> str | None:
+        from app.services.instance_names import normalize_requested_instance_name
+
+        return normalize_requested_instance_name(v)
 
 
 class NewVolumeRequest(BaseModel):

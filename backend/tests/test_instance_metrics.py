@@ -41,7 +41,7 @@ async def test_metrics_returns_series(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=cpu&range=1h")
     assert resp.status_code == 200
     body = resp.json()
     assert body["metric"] == "cpu"
@@ -56,7 +56,7 @@ async def test_metrics_empty_series(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=memory&range=15m")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=memory&range=15m")
     assert resp.status_code == 200
     assert resp.json()["series"] == []
 
@@ -64,7 +64,7 @@ async def test_metrics_empty_series(client):
 @pytest.mark.anyio
 async def test_metrics_unauthorized_other_project(client):
     with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_OTHER_INSTANCE):
-        resp = await client.get("/api/instances/inst-other/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-other/metrics?metric=cpu&range=1h")
     assert resp.status_code == 403
 
 
@@ -74,20 +74,20 @@ async def test_metrics_admin_can_query_any(admin_client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_OTHER_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
     ):
-        resp = await admin_client.get("/api/instances/inst-other/metrics?metric=cpu&range=1h")
+        resp = await admin_client.get("/api/v1/instances/inst-other/metrics?metric=cpu&range=1h")
     assert resp.status_code == 200
 
 
 @pytest.mark.anyio
 async def test_metrics_instance_not_found(client):
     with patch("app.api.compute.instance_metrics.nova.get_server", side_effect=Exception("not found")):
-        resp = await client.get("/api/instances/bad-id/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/bad-id/metrics?metric=cpu&range=1h")
     assert resp.status_code == 404
 
 
 @pytest.mark.anyio
 async def test_metrics_invalid_metric(client):
-    resp = await client.get("/api/instances/inst-1/metrics?metric=invalid_xyz&range=1h")
+    resp = await client.get("/api/v1/instances/inst-1/metrics?metric=invalid_xyz&range=1h")
     assert resp.status_code == 422
 
 
@@ -99,14 +99,14 @@ async def test_metrics_prom_unavailable(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=PromUnavailable("conn error"))),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=cpu&range=1h")
     assert resp.status_code == 503
 
 
 @pytest.mark.anyio
 async def test_metrics_gpu_on_non_gpu_instance(client):
     with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=gpu_util&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=gpu_util&range=1h")
     assert resp.status_code == 400
 
 
@@ -116,7 +116,7 @@ async def test_metrics_gpu_on_gpu_instance(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_GPU_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
     ):
-        resp = await client.get("/api/instances/inst-gpu/metrics?metric=gpu_util&range=1h")
+        resp = await client.get("/api/v1/instances/inst-gpu/metrics?metric=gpu_util&range=1h")
     assert resp.status_code == 200
 
 
@@ -175,7 +175,7 @@ async def test_batch_returns_all_requested_metrics(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=fake)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
     assert resp.status_code == 200
     body = resp.json()
     assert "cpu" in body["metrics"]
@@ -203,7 +203,7 @@ async def test_batch_per_metric_error_capsulated(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
     assert resp.status_code == 200
     body = resp.json()
     # 첫 번째 메트릭 에러 캡슐화 — 전체 응답은 200
@@ -220,7 +220,7 @@ async def test_batch_skips_gpu_on_non_gpu(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,gpu_util&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-batch?metrics=cpu,gpu_util&range=1h")
     assert resp.status_code == 200
     body = resp.json()
     assert "cpu" in body["metrics"]
@@ -230,7 +230,7 @@ async def test_batch_skips_gpu_on_non_gpu(client):
 @pytest.mark.anyio
 async def test_batch_invalid_metric_returns_422(client):
     """알 수 없는 메트릭 키 포함 시 422."""
-    resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,xyz_unknown&range=1h")
+    resp = await client.get("/api/v1/instances/inst-1/metrics-batch?metrics=cpu,xyz_unknown&range=1h")
     assert resp.status_code == 422
 
 
@@ -253,7 +253,7 @@ async def test_instance_metrics_cpu_fallback_to_libvirt(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=cpu&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == libvirt_series
@@ -273,7 +273,7 @@ async def test_instance_metrics_memory_fallback(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=memory&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=memory&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == libvirt_series
@@ -293,7 +293,7 @@ async def test_instance_metrics_network_rx_fallback(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=network_rx&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=network_rx&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == libvirt_series
@@ -313,7 +313,7 @@ async def test_instance_metrics_disk_read_fallback(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=disk_read&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=disk_read&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == libvirt_series
@@ -333,7 +333,7 @@ async def test_instance_metrics_node_exporter_priority_no_fallback_call(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=cpu&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == _FAKE_SERIES
@@ -347,7 +347,7 @@ async def test_instance_metrics_both_empty_returns_empty_series(client):
         patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+        resp = await client.get("/api/v1/instances/inst-1/metrics?metric=cpu&range=1h")
 
     assert resp.status_code == 200
     assert resp.json()["series"] == []

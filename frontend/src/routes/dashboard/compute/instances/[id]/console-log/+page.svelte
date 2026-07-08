@@ -18,7 +18,7 @@
 		error = '';
 		try {
 			const data = await api.get<{ output: string }>(
-				`/api/instances/${instanceId}/log?length=100000`,
+				`/api/v1/instances/${instanceId}/log?length=100000`,
 				token,
 				projectId
 			);

@@ -3,31 +3,20 @@
 ## 디렉토리 구조
 
 ```
-k8s/
-├── namespace.yaml
-├── configmap.yaml
-├── secret.yaml
+deploy/k8s-template/
+├── configmap.yaml        # afterglow.conf/config.toml ConfigMap
+├── secret.yaml           # afterglow-secrets 예시
 ├── ingress.yaml
-├── redis/
-│   ├── deployment.yaml
-│   └── service.yaml
-├── backend/
-│   ├── deployment.yaml
-│   └── service.yaml
-├── frontend/
-│   ├── deployment.yaml
-│   └── service.yaml
-└── monitoring/
-    ├── prometheus/
-    │   ├── configmap.yaml
-    │   ├── deployment.yaml
-    │   └── service.yaml
-    ├── grafana/
-    │   ├── deployment.yaml
-    │   └── service.yaml
-    └── opensearch/
-        ├── statefulset.yaml
-        └── service.yaml
+├── cert-manager.yaml
+├── base/
+│   ├── namespace.yaml
+│   ├── backend/
+│   ├── frontend/
+│   ├── redis/
+│   └── worker/           # drover + notion-worker
+└── overlays/
+    ├── dev/
+    └── prod/
 ```
 
 ## 빠른 배포 방법
@@ -51,51 +40,50 @@ minikube image load afterglow:latest
 
 배포 전 반드시 다음 값을 실제 환경에 맞게 수정하세요.
 
-- `configmap.yaml`: OpenStack 엔드포인트, 프로젝트 설정 등
-- `secret.yaml`: OpenStack 비밀번호 및 Secret Key
-- `frontend/deployment.yaml`: `ORIGIN` 및 `PUBLIC_API_BASE` (실제 도메인)
+- `configmap.yaml`: `afterglow.conf` 인라인 설정, `APP_ORIGIN`, `PUBLIC_S3_BASE`, `APP_GRAFANA_BASE`
+- `secret.yaml`: `OS_PASSWORD`, `SECRET_KEY`, `GITLAB_OIDC_CLIENT_SECRET`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL`, `PROMETHEUS_PASSWORD`, `BUILDER_SSH_PRIVATE_KEY`
+- `base/frontend/deployment.yaml`: `ORIGIN`, `PUBLIC_API_BASE`, `PUBLIC_S3_BASE`, `PUBLIC_GRAFANA_BASE`
 - `ingress.yaml`: `host` 값 (실제 도메인)
+
+`backend`, `worker`(drover), `notion-worker`는 모두 `/app/afterglow.conf`를 마운트하고 `afterglow-secrets/SECRET_KEY`를 환경변수로 읽습니다. 세 서비스 모두 `AFTERGLOW_ENV=production`으로 실행되므로 `AFTERGLOW_ALLOW_INSECURE=1`은 이 manifest에 넣지 않습니다.
+
+> 이 빠른 배포 절차는 `afterglow` 네임스페이스용 프로덕션 정적 manifest만 다룹니다. `overlays/dev`는 `afterglow-dev` 네임스페이스를 사용하므로, dev 배포에는 `afterglow-dev`용 `afterglow-config` ConfigMap과 `afterglow-secrets` Secret을 별도로 생성하거나 ExternalSecret/ArgoCD로 관리해야 합니다.
 
 ### 3. 순서대로 배포
 
 ```bash
 # 1. 네임스페이스 생성
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f deploy/k8s-template/base/namespace.yaml
 
 # 2. ConfigMap 생성
-kubectl apply -f k8s/configmap.yaml
+kubectl apply -f deploy/k8s-template/configmap.yaml
 
 # 3. Secret 생성 (파일 수정 후 적용 또는 아래 명령어 직접 사용)
-kubectl apply -f k8s/secret.yaml
+kubectl apply -f deploy/k8s-template/secret.yaml
 # 또는 kubectl로 직접 생성:
+# Builder SSH를 쓰지 않으면 빈 파일로 키 존재만 보장합니다. 실제 사용 시 private key 경로를 지정하세요.
+# touch builder.key
 # kubectl create secret generic afterglow-secrets \
 #   --namespace=afterglow \
-#   --from-literal=OPENSTACK_PASSWORD=실제비밀번호 \
-#   --from-literal=SECRET_KEY=랜덤한시크릿키
+#   --from-literal=OS_PASSWORD=실제OpenStack비밀번호 \
+#   --from-literal=SECRET_KEY=$(openssl rand -hex 32) \
+#   --from-literal=GITLAB_OIDC_CLIENT_SECRET='' \
+#   --from-literal=K3S_KUBECONFIG_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+#   --from-literal=DATABASE_URL='mysql+asyncmy://afterglow:실제DB비밀번호@mariadb/afterglow' \
+#   --from-literal=PROMETHEUS_PASSWORD='' \
+#   --from-file=BUILDER_SSH_PRIVATE_KEY=builder.key
 
-# 4. Redis 배포
-kubectl apply -f k8s/redis/
-
-# 5. Backend 배포
-kubectl apply -f k8s/backend/
-
-# 6. Frontend 배포
-kubectl apply -f k8s/frontend/
-
-# 7. Ingress 배포
-kubectl apply -f k8s/ingress.yaml
+# 4. 전체 배포
+kubectl apply -k deploy/k8s-template/overlays/prod
 ```
 
 또는 한 번에 전체 배포 (순서 보장 필요 시 위 방법 사용):
 
 ```bash
-kubectl apply -f k8s/namespace.yaml && \
-kubectl apply -f k8s/configmap.yaml && \
-kubectl apply -f k8s/secret.yaml && \
-kubectl apply -f k8s/redis/ && \
-kubectl apply -f k8s/backend/ && \
-kubectl apply -f k8s/frontend/ && \
-kubectl apply -f k8s/ingress.yaml
+kubectl apply -f deploy/k8s-template/base/namespace.yaml && \
+kubectl apply -f deploy/k8s-template/configmap.yaml && \
+kubectl apply -f deploy/k8s-template/secret.yaml && \
+kubectl apply -k deploy/k8s-template/overlays/prod
 ```
 
 ### 4. 배포 상태 확인
@@ -123,12 +111,12 @@ kubectl get ingress -n afterglow
 
 ```bash
 # 전체 모니터링 스택 배포
-kubectl apply -f k8s/monitoring/
+kubectl apply -k deploy/k8s-template/monitoring/
 
 # 개별 배포
-kubectl apply -f k8s/monitoring/prometheus/
-kubectl apply -f k8s/monitoring/grafana/
-kubectl apply -f k8s/monitoring/opensearch/
+kubectl apply -f deploy/k8s-template/monitoring/prometheus/
+kubectl apply -f deploy/k8s-template/monitoring/grafana/
+kubectl apply -f deploy/k8s-template/monitoring/opensearch/
 ```
 
 ### Grafana 접근

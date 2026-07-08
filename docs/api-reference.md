@@ -106,7 +106,7 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `GET` | `/api/admin/hypervisors` | 하이퍼바이저 목록 |
 | `GET` | `/api/admin/overview/projects` | 프로젝트별 리소스 사용량 |
 | `GET` | `/api/admin/file-storage` | 전체 파일 스토리지 목록 |
-| `POST` | `/api/admin/file-storage/build` | 사전 빌드 share 생성 |
+| `POST` | `/api/admin/file-storage/build` | 사전 빌드 파일 스토리지 share 생성 |
 | `GET` | `/api/admin/all-instances` | 전체 인스턴스 (페이지네이션) |
 | `GET` | `/api/admin/all-volumes` | 전체 볼륨 (페이지네이션) |
 | `GET` | `/api/admin/all-containers` | 전체 컨테이너 |
@@ -128,7 +128,8 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `PUT` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
 | `DELETE` | `/api/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 GPU 쿼터 유형별 삭제 |
 | `GET` | `/api/admin/hypervisors/{id}` | 하이퍼바이저 상세 |
-| `GET` | `/api/admin/file-storage/builds` | 활성 빌드 목록 |
+| `GET` | `/api/admin/file-storage/builds` | 사전 빌드 파일 스토리지 빌드 목록 |
+| `GET`/`POST`/`DELETE` | `/api/v1/admin/libraries/...` | squashfs 레이어 라이브러리 빌드·프로필·소비 관리 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/flavors/...` | Flavor 관리 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/users/...` | 사용자 관리 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/projects/...` | 프로젝트 관리 |

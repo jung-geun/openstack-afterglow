@@ -9,6 +9,15 @@ import base64
 import shlex
 import textwrap
 
+# Shared library builder 이미지에 미리 bake 해둘 OS 패키지.
+# render_user_data() 의 packages: 블록은 오래된 이미지 호환용 fallback 으로 유지한다.
+_SHARED_BUILDER_PACKAGE_BY_ROLE = {
+    "curl": "curl",
+    "nfs": "nfs-common",
+    "ceph": "ceph-common",
+}
+SHARED_BUILDER_IMAGE_PACKAGES = tuple(_SHARED_BUILDER_PACKAGE_BY_ROLE.values())
+
 
 def render_user_data(
     recipe,
@@ -33,10 +42,10 @@ def render_user_data(
     commands = list(recipe.commands or [])
 
     if proto == "NFS":
-        apt_pkgs = _ensure_pkg(apt_pkgs, "nfs-common")
+        apt_pkgs = _ensure_pkg(apt_pkgs, _SHARED_BUILDER_PACKAGE_BY_ROLE["nfs"])
     else:
-        apt_pkgs = _ensure_pkg(apt_pkgs, "ceph-common")
-    apt_pkgs = _ensure_pkg(apt_pkgs, "curl")
+        apt_pkgs = _ensure_pkg(apt_pkgs, _SHARED_BUILDER_PACKAGE_BY_ROLE["ceph"])
+    apt_pkgs = _ensure_pkg(apt_pkgs, _SHARED_BUILDER_PACKAGE_BY_ROLE["curl"])
 
     run_build_sh = _render_run_build_sh(commands)
     run_build_b64 = base64.b64encode(run_build_sh.encode()).decode()
@@ -141,7 +150,7 @@ def _render_run_build_sh(commands: list[dict]) -> str:
         "mkdir -p /mnt/share/_build_logs",
         "",
         "_on_error() {",
-        "  tail -n 100 /var/log/cloud-init-output.log > /mnt/share/_build_logs/error.txt 2>/dev/null || true",
+        "  tail -n 1000 /var/log/cloud-init-output.log > /mnt/share/_build_logs/error.txt 2>/dev/null || true",
         "}",
         "trap _on_error ERR",
         "",
@@ -183,6 +192,9 @@ def _render_runcmd_body(mount_lines: list[str], build_token: str) -> str:
             umount /mnt/share 2>/dev/null || true
             echo "{success_sentinel}"
           else
+            echo "---AFTERGLOW-ERROR-LOG-BEGIN---"
+            cat /mnt/share/_build_logs/error.txt 2>/dev/null || echo "(no error log)"
+            echo "---AFTERGLOW-ERROR-LOG-END---"
             umount /mnt/share 2>/dev/null || true
             echo "{failure_sentinel}::rc=$_rc"
           fi

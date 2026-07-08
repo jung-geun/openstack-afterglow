@@ -33,6 +33,43 @@ replicaCount:
   sentinel: 3
 
 # -----------------------------------------------------------------------------
+# Background worker runtime manager (disabled/static by default)
+# -----------------------------------------------------------------------------
+workerRuntime:
+  mode: static
+  reconcileInterval: 30
+  failClosed: true
+  workers:
+    drover:
+      enabled: true
+      desiredReplicas: 1
+      maxReplicas: 1
+      module: app.worker
+    notionWorker:
+      enabled: true
+      desiredReplicas: 1
+      maxReplicas: 1
+      module: app.notion_worker
+  docker:
+    socketPath: ""
+    image: ""
+    network: ""
+    configMount: /app/afterglow.conf
+    configHostPath: ""
+    gpuConfigMount: /app/config.gpu.toml
+    gpuConfigHostPath: ""
+    logsMount: /app/logs
+    logsHostPath: ""
+    envAllowlist: "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+  kubernetes:
+    namespace: ""
+    serviceAccountName: afterglow-backend-worker-runtime
+    serviceAccountTokenPath: /var/run/secrets/kubernetes.io/serviceaccount/token
+    serviceAccountCaPath: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    rbac:
+      create: false
+
+# -----------------------------------------------------------------------------
 # 인그레스
 # -----------------------------------------------------------------------------
 ingress:
@@ -102,6 +139,7 @@ app:
   faviconPath: "/favicon.ico"
   refreshIntervalMs: 5000
   frontendBaseUrl: ""
+  publicApiBase: ""
   trustedProxies: "127.0.0.1/32,::1/128"
 
 # -----------------------------------------------------------------------------
@@ -176,13 +214,13 @@ gpu:
   configToml: |
     # Afterglow GPU 디바이스 맵 오버라이드
     #
-    # 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `config.toml` 옆에 두면
-    # 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
+    # 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `afterglow.conf`
+    # 또는 레거시 `config.toml` 옆에 두면 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
     #
     # 복사: cp config.gpu.toml.example config.gpu.toml
     #
     # 머지 규칙: dict는 재귀 병합, 리스트/스칼라는 이 파일이 덮어쓴다.
-    # 즉, [[gpu.devices]] 엔트리를 여기에 두면 config.toml의 동일 키를 완전히 대체한다.
+    # 즉, [[gpu.devices]] 엔트리를 여기에 두면 afterglow.conf/config.toml의 동일 키를 완전히 대체한다.
     
     [gpu]
     # GPU 디바이스 맵 커스터마이징
@@ -531,7 +569,6 @@ k3s:
   certRotationJobImage: ""
   certRotationNodeTimeoutSec: 300
   stampedeEnabled: false
-  stampedeProjectId: ""
   stampedeInterval: 60
   stampedeScaleDownWindow: 300
   stampedeScaleUpCooldown: 120
@@ -555,7 +592,7 @@ database:
 # [cors]
 # -----------------------------------------------------------------------------
 cors:
-  origins: "https://afterglow.example.com"
+  origins: "https://afterglow.example.com,http://localhost:3080,http://127.0.0.1:3080"
 
 # -----------------------------------------------------------------------------
 # [gitlab_oidc]

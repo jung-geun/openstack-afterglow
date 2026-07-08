@@ -11,6 +11,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import DbRestoreModal from '$lib/components/database/DbRestoreModal.svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
+	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
 	let backups = $state<DbBackup[]>([]);
 	let instances = $state<DbInstance[]>([]);
@@ -22,6 +24,15 @@
 
 	let showRestoreModal = $state(false);
 	let selectedBackup = $state<DbBackup | null>(null);
+	const databaseBackupsEnabled = $derived($betaFeatures.databaseBackups);
+
+	function clearBackupsState() {
+		backups = [];
+		instances = [];
+		flavors = [];
+		error = '';
+	}
+
 
 	const STUCK_MS = 6 * 3600 * 1000;
 	function isStuck(b: DbBackup): boolean {
@@ -52,8 +63,13 @@
 	}
 
 	async function fetchBackups() {
+		if (!databaseBackupsEnabled) {
+			clearBackupsState();
+			loading = false;
+			return;
+		}
 		try {
-			backups = await api.get<DbBackup[]>('/api/database-instances/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			backups = await api.get<DbBackup[]>('/api/v1/database-instances/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -63,19 +79,28 @@
 	}
 
 	async function fetchInstances() {
+		if (!databaseBackupsEnabled) {
+			instances = [];
+			return;
+		}
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			instances = await api.get<DbInstance[]>('/api/v1/database-instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function fetchFlavors() {
+		if (!databaseBackupsEnabled) {
+			flavors = [];
+			return;
+		}
 		try {
-			flavors = await api.get<DbFlavor[]>('/api/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			flavors = await api.get<DbFlavor[]>('/api/v1/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
-		await api.post('/api/database-instances/restore', {
+		if (!databaseBackupsEnabled) return;
+		await api.post('/api/v1/database-instances/restore', {
 			backup_id: backupId, name, flavor_id: flavorId, volume_size: volumeSize,
 		}, $auth.token ?? undefined, $auth.projectId ?? undefined);
 		toast.success('복원 인스턴스 생성이 시작되었습니다.');
@@ -83,6 +108,7 @@
 	}
 
 	async function deleteBackup(id: string, name: string, stuck: boolean) {
+		if (!databaseBackupsEnabled) return;
 		const baseMsg = `백업 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`;
 		const stuckNote = stuck
 			? '\n\nTrove 백업 레코드만 제거됩니다. Swift에 저장된 데이터는 이미 없을 수 있습니다.'
@@ -90,7 +116,7 @@
 		if (!await confirmDialog(baseMsg + stuckNote)) return;
 		deleting = id;
 		try {
-			await api.delete(`/api/database-instances/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/database-instances/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -117,6 +143,11 @@
 
 	$effect(() => {
 		const pid = $auth.projectId;
+		if (!databaseBackupsEnabled) {
+			clearBackupsState();
+			loading = false;
+			return;
+		}
 		if (!pid) return;
 		untrack(() => {
 			fetchBackups();
@@ -126,6 +157,11 @@
 	});
 </script>
 
+{#if !databaseBackupsEnabled}
+	<div class="p-4 md:p-8">
+		<BetaFeatureGate title="DB 백업은 베타 기능입니다" />
+	</div>
+{:else}
 <DbRestoreModal
 	bind:open={showRestoreModal}
 	backup={selectedBackup}
@@ -227,3 +263,4 @@
 		</div>
 	{/if}
 </div>
+{/if}

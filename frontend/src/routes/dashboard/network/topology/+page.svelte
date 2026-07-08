@@ -40,7 +40,7 @@
 		if (!$auth.token) return;
 		try {
 			traffic = await api.get<TopologyTraffic>(
-				'/api/networks/topology/traffic',
+				'/api/v1/networks/topology/traffic',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);
@@ -65,7 +65,7 @@
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
-				'/api/networks/topology',
+				'/api/v1/networks/topology',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 				opts,
@@ -112,7 +112,6 @@
 		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
 		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
 		{@const _projectLbs = (data.load_balancers ?? []).filter(lb => !lb.project_id || lb.project_id === $auth.projectId)}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
@@ -143,7 +142,6 @@
 			projectFipCount={_projectFips.length}
 			projectLbCount={_projectLbs.length}
 		/>
-		</div>
 	{/if}
 </div>
 

@@ -29,7 +29,7 @@
     }
     saving = true;
     try {
-      await api.post('/api/profile/password', { current_password: currentPassword, new_password: newPassword }, token, projectId);
+      await api.post('/api/v1/profile/password', { current_password: currentPassword, new_password: newPassword }, token, projectId);
       success = '패스워드가 변경되었습니다';
       currentPassword = '';
       newPassword = '';

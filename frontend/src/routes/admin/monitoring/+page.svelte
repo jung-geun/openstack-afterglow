@@ -21,7 +21,7 @@
 		if (!summary) loading = true;
 		else refreshing = true;
 		try {
-			summary = await api.get<MonitoringSummary>('/api/admin/monitoring/summary', token, projectId);
+			summary = await api.get<MonitoringSummary>('/api/v1/admin/monitoring/summary', token, projectId);
 		} catch {
 			summary = null;
 		} finally {

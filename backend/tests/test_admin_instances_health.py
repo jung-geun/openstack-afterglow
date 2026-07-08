@@ -39,7 +39,7 @@ async def test_gpu_count_detects_by_original_name(admin_client, mock_conn):
     server = _make_server("s1", "sunmin", {"original_name": "gpu.2000Ada_8c_32g"})
     mock_conn.session.get.return_value.json.return_value = {"servers": [server]}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     assert resp.json()["gpu_count"] == 1
@@ -57,7 +57,7 @@ async def test_gpu_count_detects_by_pci_alias(admin_client, mock_conn):
     server = _make_server("s2", "gpu-vm", flavor)
     mock_conn.session.get.return_value.json.return_value = {"servers": [server]}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     assert resp.json()["gpu_count"] == 1
@@ -75,7 +75,7 @@ async def test_gpu_count_ignores_audio_pci_alias(admin_client, mock_conn):
     server = _make_server("s3", "audio-vm", flavor)
     mock_conn.session.get.return_value.json.return_value = {"servers": [server]}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     assert resp.json()["gpu_count"] == 0
@@ -92,7 +92,7 @@ async def test_gpu_count_zero_for_cpu_flavor(admin_client, mock_conn):
     server = _make_server("s4", "cpu-vm", {"original_name": "cpu.4c_8g"})
     mock_conn.session.get.return_value.json.return_value = {"servers": [server]}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     assert resp.json()["gpu_count"] == 0
@@ -108,7 +108,7 @@ async def test_microversion_header_sent(admin_client, mock_conn):
     """GET /servers/detail 호출 시 OpenStack-API-Version: compute 2.53 헤더 포함."""
     mock_conn.session.get.return_value.json.return_value = {"servers": []}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     # session.get 호출 중 헤더가 포함된 호출이 있는지 확인

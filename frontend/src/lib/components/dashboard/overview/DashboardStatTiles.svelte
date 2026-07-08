@@ -61,10 +61,10 @@
 			label="Drover 클러스터"
 			value={k3sCount ?? '—'}
 			unit={k3sCount !== null ? '활성' : undefined}
-			accent="emerald"
+			accent="blue"
 		>
 			{#snippet icon()}
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5.55 3.84 10.74 8 12 0 0-4.5 1.5-8 0C8.16 22.74 4 17.55 4 12V6l8-4z"/></svg>
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linejoin="round" stroke-width="1.8" d="M12 2.4 19.8 6.1 21.7 14.3 16.3 20.8H7.7l-5.4-6.5 1.9-8.2L12 2.4Z"/><circle cx="12" cy="12" r="4.1" stroke-width="1.8"/><circle cx="12" cy="12" r="0.85" fill="currentColor" stroke="none"/><path stroke-linecap="round" stroke-width="1.8" d="M12 9.8V6.2M13.72 10.63l2.81-2.25M14.14 12.49l3.51.8M12.95 13.98l1.57 3.25M11.05 13.98l-1.57 3.25M9.86 12.49l-3.51.8M10.28 10.63 7.47 8.38"/></svg>
 			{/snippet}
 		</StatTile>
 	</div>

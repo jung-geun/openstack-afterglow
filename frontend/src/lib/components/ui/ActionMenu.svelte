@@ -36,13 +36,11 @@
     }
   }
 
-  // 외부에서 open=true 가 주입된 경우 fallback. close 시 pos clear.
   $effect(() => {
     if (open && pos === null) computePosition();
     if (!open) pos = null;
   });
 
-  // open 동안 scroll(capture) / resize 추적
   $effect(() => {
     if (!open) return;
     const reposition = () => computePosition();
@@ -54,7 +52,6 @@
     };
   });
 
-  // 외부 클릭 / Escape 로 닫기
   $effect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
@@ -75,9 +72,9 @@
 
 <button
   bind:this={triggerEl}
+  type="button"
   onclick={handleTriggerClick}
-  class="w-7 h-7 flex items-center justify-center rounded-md text-gray-400
-         hover:text-white hover:bg-gray-700/50 transition-colors {buttonClass}"
+  class="action-trigger {buttonClass}"
 >
   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
     <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
@@ -86,14 +83,40 @@
 
 {#if open && pos}
   <div
-    class="fixed z-[9999] min-w-[140px] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1"
+    class="action-menu"
     style:left="{pos.left}px"
     style:top={pos.openUp ? 'auto' : `${pos.top}px`}
     style:bottom={pos.openUp ? `${pos.bottom}px` : 'auto'}
     style:transform="translateX(-100%)"
-    onclick={(e) => e.stopPropagation()}
-    role="menu"
   >
     {@render children()}
   </div>
 {/if}
+
+<style>
+  .action-trigger {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    color: var(--color-ink-2);
+    background: transparent;
+    transition: background 0.15s, color 0.15s;
+  }
+  .action-trigger:hover {
+    color: var(--color-ink-0);
+    background: color-mix(in oklab, var(--color-surface-sunken) 65%, transparent);
+  }
+  .action-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 8.75rem;
+    padding-block: 0.25rem;
+    border: 1px solid var(--color-line-2);
+    border-radius: 0.5rem;
+    background: var(--color-surface-raised);
+    box-shadow: 0 10px 25px color-mix(in oklab, var(--color-surface-canvas) 60%, transparent);
+  }
+</style>

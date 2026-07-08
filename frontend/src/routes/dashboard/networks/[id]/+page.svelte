@@ -31,7 +31,7 @@
 		error = '';
 		try {
 			network = await api.get<NetworkDetail>(
-				`/api/networks/${id}`,
+				`/api/v1/networks/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -51,7 +51,7 @@
 		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -66,7 +66,7 @@
 		subnetError = '';
 		try {
 			await api.post(
-				`/api/networks/${network.id}/subnets`,
+				`/api/v1/networks/${network.id}/subnets`,
 				{
 					name: form.name || `${network.name}-subnet`,
 					cidr: form.cidr,

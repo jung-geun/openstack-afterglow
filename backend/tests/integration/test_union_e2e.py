@@ -69,7 +69,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         # 1. (선택) builder access — manila + RW share 설정 시에만
         if manila_enabled and rw_share_id:
             resp = await admin_client.post(
-                "/api/union/builder/access",
+                "/api/v1/union/builder/access",
                 json={"cephx_user": f"e2e-builder-{secrets.token_hex(4)}", "access_level": "rw"},
             )
             assert resp.status_code == 201, f"builder access 실패: {resp.text}"
@@ -78,7 +78,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         # 2. RW 레이어 생성
         layer_hash = _hash()
         resp = await admin_client.post(
-            "/api/union/layers",
+            "/api/v1/union/layers",
             json={
                 "name": f"e2e-base-{secrets.token_hex(4)}",
                 "version": "1.0",
@@ -95,7 +95,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         assert resp.json()["sealed"] is False
 
         # 3. seal
-        resp = await admin_client.post(f"/api/union/layers/{layer_id}/seal")
+        resp = await admin_client.post(f"/api/v1/union/layers/{layer_id}/seal")
         assert resp.status_code == 200, f"seal 실패: {resp.text}"
         body = resp.json()
         sealed_id = body["id"]
@@ -103,7 +103,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         assert body.get("sealed_at"), "sealed_at 미설정"
 
         # 4. ancestors — base-first 순으로 self 한 항목
-        resp = await admin_client.get(f"/api/union/layers/{sealed_id}/ancestors")
+        resp = await admin_client.get(f"/api/v1/union/layers/{sealed_id}/ancestors")
         assert resp.status_code == 200
         layers = resp.json().get("layers", [])
         assert len(layers) == 1, f"조상 체인 길이 예상=1 실제={len(layers)}"
@@ -112,7 +112,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         # 5. fork — 새 RW 레이어
         fork_hash = _hash()
         resp = await admin_client.post(
-            f"/api/union/layers/{sealed_id}/fork",
+            f"/api/v1/union/layers/{sealed_id}/fork",
             json={"content_hash": fork_hash, "version": "1.1"},
         )
         assert resp.status_code == 201, f"fork 실패: {resp.text}"
@@ -123,7 +123,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
 
         # 6. template 생성
         resp = await admin_client.post(
-            "/api/union/templates",
+            "/api/v1/union/templates",
             json={
                 "name": template_name,
                 "version": template_version,
@@ -135,7 +135,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         template_created = True
 
         # 7. template 상세
-        resp = await admin_client.get(f"/api/union/templates/{template_name}/{template_version}")
+        resp = await admin_client.get(f"/api/v1/union/templates/{template_name}/{template_version}")
         assert resp.status_code == 200
         tmpl = resp.json()
         assert tmpl["leaf_layer_id"] == sealed_id
@@ -144,7 +144,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         # 8. (선택) user access
         if manila_enabled and ro_share_id:
             resp = await admin_client.post(
-                "/api/union/user/access",
+                "/api/v1/union/user/access",
                 json={"cephx_user": f"e2e-user-{secrets.token_hex(4)}", "access_level": "ro"},
             )
             assert resp.status_code == 201, f"user access 실패: {resp.text}"
@@ -152,7 +152,7 @@ async def test_union_v2_lifecycle(admin_client, user_client):
 
         # 9. user_client → record_mount
         resp = await user_client.post(
-            "/api/union/mounts",
+            "/api/v1/union/mounts",
             json={"vm_hostname": "e2e-vm", "leaf_layer_id": sealed_id},
         )
         assert resp.status_code == 201, f"mount 등록 실패: {resp.text}"
@@ -161,38 +161,38 @@ async def test_union_v2_lifecycle(admin_client, user_client):
         assert mount_body["unmounted_at"] is None
 
         # 10. layer 삭제 시도 → 409 (mount + template + fork 참조)
-        resp = await admin_client.delete(f"/api/union/layers/{sealed_id}")
+        resp = await admin_client.delete(f"/api/v1/union/layers/{sealed_id}")
         assert resp.status_code == 409, f"활성 참조 있는 layer 삭제가 거부되지 않음: {resp.status_code} {resp.text}"
 
         # 11. unmount
-        resp = await user_client.post(f"/api/union/mounts/{mount_id}/unmount")
+        resp = await user_client.post(f"/api/v1/union/mounts/{mount_id}/unmount")
         assert resp.status_code == 200, f"unmount 실패: {resp.text}"
         assert resp.json().get("unmounted_at"), "unmounted_at 미설정"
         # 11-1. unmount 후에도 template/fork가 남아 있어 layer 삭제는 여전히 409
-        resp = await admin_client.delete(f"/api/union/layers/{sealed_id}")
+        resp = await admin_client.delete(f"/api/v1/union/layers/{sealed_id}")
         assert resp.status_code == 409
 
         # 12. cleanup 순서: template → fork → sealed layer
-        resp = await admin_client.delete(f"/api/union/templates/{template_name}/{template_version}")
+        resp = await admin_client.delete(f"/api/v1/union/templates/{template_name}/{template_version}")
         assert resp.status_code == 204, f"template 삭제 실패: {resp.text}"
         template_created = False
 
-        resp = await admin_client.delete(f"/api/union/layers/{fork_id}")
+        resp = await admin_client.delete(f"/api/v1/union/layers/{fork_id}")
         assert resp.status_code == 204, f"fork 삭제 실패: {resp.text}"
         fork_id = None
 
-        resp = await admin_client.delete(f"/api/union/layers/{sealed_id}")
+        resp = await admin_client.delete(f"/api/v1/union/layers/{sealed_id}")
         assert resp.status_code == 204, f"sealed layer 삭제 실패: {resp.text}"
         sealed_id = None
     finally:
         # finally cleanup — best-effort, 잔여 리소스 회수
         if template_created:
-            await _revoke_quietly(admin_client, f"/api/union/templates/{template_name}/{template_version}")
+            await _revoke_quietly(admin_client, f"/api/v1/union/templates/{template_name}/{template_version}")
         if fork_id:
-            await _revoke_quietly(admin_client, f"/api/union/layers/{fork_id}")
+            await _revoke_quietly(admin_client, f"/api/v1/union/layers/{fork_id}")
         if sealed_id:
-            await _revoke_quietly(admin_client, f"/api/union/layers/{sealed_id}")
+            await _revoke_quietly(admin_client, f"/api/v1/union/layers/{sealed_id}")
         if user_access_id:
-            await _revoke_quietly(admin_client, f"/api/union/user/access/{user_access_id}")
+            await _revoke_quietly(admin_client, f"/api/v1/union/user/access/{user_access_id}")
         if builder_access_id:
-            await _revoke_quietly(admin_client, f"/api/union/builder/access/{builder_access_id}")
+            await _revoke_quietly(admin_client, f"/api/v1/union/builder/access/{builder_access_id}")

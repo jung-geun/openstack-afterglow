@@ -22,8 +22,10 @@ Afterglow는 OpenStack 클라우드 환경을 위한 오픈소스 웹 대시보�
 | [시작하기](deployment.md) | Docker Compose / Kubernetes 배포 |
 | [kolla-ansible 배포](deployment.md#kolla-ansible-배포) | OpenStack 환경 내 단일 플레이북 배포 |
 | [k3s 클러스터](k3s.md) | k3s 프로비저닝 및 노드 관리 |
+| [Drover 동작 명세](drover-workflow.md) | Drover 클러스터 생성의 계획 대비 현재 동작과 실제 프로비저닝 워크플로우 |
 | [아키텍처](architecture.md) | 시스템 설계 및 플로우 |
 | [API 레퍼런스](api-reference.md) | REST API 전체 명세 |
+| [국소 기능테스트](testing.md) | 개발 중 빠르게 실행할 테스트 타깃 선택 가이드 |
 
 ---
 

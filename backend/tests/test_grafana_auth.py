@@ -23,7 +23,7 @@ async def test_get_grafana_dashboards(client):
     fake_settings.grafana_dashboard_instance_gpu_uid = "instance-gpu-uid"
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/grafana/dashboards")
+        resp = await client.get("/api/v1/grafana/dashboards")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -63,7 +63,7 @@ async def test_get_grafana_dashboards_no_url(client):
     fake_settings.grafana_dashboard_instance_gpu_uid = "afterglow-instance-gpu"
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/grafana/dashboards")
+        resp = await client.get("/api/v1/grafana/dashboards")
 
     assert resp.status_code == 200
     assert resp.json()["grafana_url"] == ""

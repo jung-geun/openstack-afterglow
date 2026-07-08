@@ -46,7 +46,7 @@
     error = '';
     try {
       const data = await api.get<{ sessions: Session[]; count: number }>(
-        '/api/auth/sessions', token, projectId,
+        '/api/v1/auth/sessions', token, projectId,
       );
       sessions = data.sessions ?? [];
     } catch {
@@ -61,7 +61,7 @@
     removingJti = jti;
     error = '';
     try {
-      await api.delete(`/api/auth/sessions/${jti}`, token, projectId);
+      await api.delete(`/api/v1/auth/sessions/${jti}`, token, projectId);
       await loadSessions();
       if (sessions.length === 0) {
         clearAuth();
@@ -80,7 +80,7 @@
     error = '';
     success = '';
     try {
-      await api.post('/api/auth/logout-all', {}, token, projectId);
+      await api.post('/api/v1/auth/logout-all', {}, token, projectId);
       success = '모든 세션이 폐기되었습니다. 다시 로그인해 주세요.';
       clearAuth();
       setTimeout(() => goto('/'), 1500);

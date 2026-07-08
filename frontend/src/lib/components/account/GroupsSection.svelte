@@ -21,7 +21,7 @@
     error = '';
     noPermission = false;
     try {
-      groups = await api.get<Group[]>('/api/auth/groups', token);
+      groups = await api.get<Group[]>('/api/v1/auth/groups', token);
       if (groups.length === 0) noPermission = true;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '조회 실패';

@@ -32,7 +32,7 @@ def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap", project_id: 
 async def test_list_snapshots(client, mock_conn):
     """일반 사용자 — caller_project_id=pid 로 호출되어 해당 프로젝트 스냅샷만 반환."""
     with patch("app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[make_snapshot()]) as mock_ls:
-        resp = await client.get("/api/volume-snapshots")
+        resp = await client.get("/api/v1/volume-snapshots")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["id"] == "snap-1"
@@ -48,7 +48,7 @@ async def test_list_snapshots_admin_sees_all(admin_client, mock_conn):
     with patch(
         "app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[make_snapshot(), other_snap]
     ) as mock_ls:
-        resp = await admin_client.get("/api/volume-snapshots")
+        resp = await admin_client.get("/api/v1/volume-snapshots")
     assert resp.status_code == 200
     assert len(resp.json()) == 2
     _args, kwargs = mock_ls.call_args
@@ -61,7 +61,7 @@ async def test_list_snapshots_filters_other_project(client, mock_conn):
     own_snap = make_snapshot("snap-own", project_id="test-project-123")
     # 서비스가 필터링 후 own_snap만 반환한다고 모킹
     with patch("app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[own_snap]):
-        resp = await client.get("/api/volume-snapshots")
+        resp = await client.get("/api/v1/volume-snapshots")
     assert resp.status_code == 200
     ids = [s["id"] for s in resp.json()]
     assert "snap-own" in ids
@@ -72,7 +72,7 @@ async def test_list_snapshots_filters_other_project(client, mock_conn):
 async def test_create_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.create_snapshot", return_value=make_snapshot("snap-new")):
         resp = await client.post(
-            "/api/volume-snapshots",
+            "/api/v1/volume-snapshots",
             json={
                 "volume_id": "vol-1",
                 "name": "test-snap",
@@ -86,7 +86,7 @@ async def test_create_snapshot(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.get_snapshot", return_value=make_snapshot()):
-        resp = await client.get("/api/volume-snapshots/snap-1")
+        resp = await client.get("/api/v1/volume-snapshots/snap-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "snap-1"
 
@@ -94,7 +94,7 @@ async def test_get_snapshot(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.delete_snapshot", return_value=None):
-        resp = await client.delete("/api/volume-snapshots/snap-1")
+        resp = await client.delete("/api/v1/volume-snapshots/snap-1")
     assert resp.status_code == 204
 
 
@@ -102,7 +102,7 @@ async def test_delete_snapshot(client, mock_conn):
 async def test_get_snapshot_cached(client, mock_conn):
     """GET /{snapshot_id} 는 cached_call 을 통해 반환된다."""
     with patch("app.api.storage.volume_snapshots.cinder.get_snapshot", return_value=make_snapshot()) as mock_get:
-        resp = await client.get("/api/volume-snapshots/snap-1")
+        resp = await client.get("/api/v1/volume-snapshots/snap-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "snap-1"
     mock_get.assert_called_once()
@@ -120,7 +120,7 @@ async def test_create_snapshot_invalidates_cache(client, mock_conn):
         patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
     ):
         resp = await client.post(
-            "/api/volume-snapshots",
+            "/api/v1/volume-snapshots",
             json={"volume_id": "vol-1", "name": "snap-new", "force": False},
         )
     assert resp.status_code == 201
@@ -139,7 +139,7 @@ async def test_delete_snapshot_invalidates_cache(client, mock_conn):
         ) as mock_mut,
         patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
     ):
-        resp = await client.delete("/api/volume-snapshots/snap-1")
+        resp = await client.delete("/api/v1/volume-snapshots/snap-1")
     assert resp.status_code == 204
     mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:snapshots*")
     mock_mut.assert_called_once_with("cinder", "test-project-123")
@@ -162,7 +162,7 @@ async def test_create_snapshot_in_use_without_force_returns_400(client, mock_con
         patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
     ):
         resp = await client.post(
-            "/api/volume-snapshots",
+            "/api/v1/volume-snapshots",
             json={"volume_id": "vol-1", "name": "snap-fail", "force": False},
         )
     assert resp.status_code == 400

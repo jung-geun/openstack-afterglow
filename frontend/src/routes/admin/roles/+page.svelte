@@ -23,7 +23,7 @@
 	async function load() {
 		if (roles.length === 0) loading = true;
 		else refreshing = true;
-		try { roles = await api.get<Role[]>('/api/admin/roles', token, projectId); }
+		try { roles = await api.get<Role[]>('/api/v1/admin/roles', token, projectId); }
 		catch { roles = []; }
 		finally { loading = false; refreshing = false; }
 	}
@@ -56,7 +56,7 @@
 	{:else if roles.length === 0}
 		<div class="text-gray-600 text-sm">역할이 없습니다</div>
 	{:else}
-		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

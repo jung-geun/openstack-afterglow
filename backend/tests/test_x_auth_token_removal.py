@@ -15,7 +15,7 @@ async def test_x_auth_token_only_returns_401():
     """X-Auth-Token만 보내고 Bearer가 없으면 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get(
-            "/api/k3s/clusters",
+            "/api/v1/k3s/clusters",
             headers={"X-Auth-Token": "some-keystone-token"},
         )
     assert resp.status_code == 401
@@ -25,7 +25,7 @@ async def test_x_auth_token_only_returns_401():
 async def test_no_auth_header_returns_401():
     """인증 헤더 없이 보호된 엔드포인트에 접근하면 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters")
+        resp = await ac.get("/api/v1/k3s/clusters")
     assert resp.status_code == 401
 
 
@@ -34,7 +34,7 @@ async def test_x_auth_token_with_x_project_id_returns_401():
     """X-Auth-Token + X-Project-Id 조합도 401을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get(
-            "/api/instances",
+            "/api/v1/instances",
             headers={
                 "X-Auth-Token": "some-keystone-token",
                 "X-Project-Id": "some-project-id",
@@ -47,7 +47,7 @@ async def test_x_auth_token_with_x_project_id_returns_401():
 async def test_download_without_dl_token_returns_403():
     """다운로드 토큰 없이 download 엔드포인트를 호출하면 403을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/object-storage/my-container/objects/my-file.txt/download")
+        resp = await ac.get("/api/v1/object-storage/my-container/objects/my-file.txt/download")
     assert resp.status_code == 403
 
 
@@ -56,7 +56,7 @@ async def test_download_with_x_auth_token_only_returns_403():
     """X-Auth-Token으로 download 엔드포인트에 접근하면 403을 반환해야 한다 (dl_token 없음)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get(
-            "/api/object-storage/my-container/objects/my-file.txt/download",
+            "/api/v1/object-storage/my-container/objects/my-file.txt/download",
             headers={"X-Auth-Token": "some-keystone-token"},
         )
     assert resp.status_code == 403
@@ -66,7 +66,7 @@ async def test_download_with_x_auth_token_only_returns_403():
 async def test_error_message_mentions_bearer():
     """401 응답의 detail이 Bearer 토큰을 요청하는 메시지여야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/instances")
+        resp = await ac.get("/api/v1/instances")
     assert resp.status_code == 401
     data = resp.json()
     assert "Bearer" in data.get("detail", "")

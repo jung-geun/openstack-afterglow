@@ -271,7 +271,7 @@ async def test_list_health_results(fake_redis):
 @pytest.mark.asyncio
 async def test_report_endpoint_unauthorized(client):
     resp = await client.post(
-        "/api/instances/some-id/health/report",
+        "/api/v1/instances/some-id/health/report",
         json=_make_report().model_dump(),
     )
     assert resp.status_code == 401
@@ -280,7 +280,7 @@ async def test_report_endpoint_unauthorized(client):
 @pytest.mark.asyncio
 async def test_report_endpoint_invalid_token(fake_redis, client):
     resp = await client.post(
-        "/api/instances/some-id/health/report",
+        "/api/v1/instances/some-id/health/report",
         headers={"Authorization": "Bearer invalid-token"},
         json=_make_report().model_dump(),
     )
@@ -291,7 +291,7 @@ async def test_report_endpoint_invalid_token(fake_redis, client):
 async def test_report_endpoint_wrong_instance(fake_redis, client):
     token = await svc.issue_report_token("inst-x", "proj-1")
     resp = await client.post(
-        "/api/instances/wrong-id/health/report",
+        "/api/v1/instances/wrong-id/health/report",
         headers={"Authorization": f"Bearer {token}"},
         json=_make_report().model_dump(),
     )
@@ -302,7 +302,7 @@ async def test_report_endpoint_wrong_instance(fake_redis, client):
 async def test_report_endpoint_success(fake_redis, client):
     token = await svc.issue_report_token("inst-ok", "proj-1")
     resp = await client.post(
-        "/api/instances/inst-ok/health/report",
+        "/api/v1/instances/inst-ok/health/report",
         headers={"Authorization": f"Bearer {token}"},
         json=_make_report().model_dump(),
     )
@@ -317,7 +317,7 @@ async def test_report_endpoint_success(fake_redis, client):
 @pytest.mark.asyncio
 async def test_get_health_endpoint_not_found(client):
     with patch("app.services.nova.get_server", side_effect=Exception("not found")):
-        resp = await client.get("/api/instances/nonexistent/health")
+        resp = await client.get("/api/v1/instances/nonexistent/health")
     assert resp.status_code == 404
 
 
@@ -329,7 +329,7 @@ async def test_get_health_endpoint_not_found(client):
 @pytest.mark.asyncio
 async def test_rotate_cephx_no_bearer_token(client):
     """Authorization 헤더 없으면 401."""
-    resp = await client.post("/api/instances/inst-1/credentials/rotate-cephx")
+    resp = await client.post("/api/v1/instances/inst-1/credentials/rotate-cephx")
     assert resp.status_code == 401
 
 
@@ -337,7 +337,7 @@ async def test_rotate_cephx_no_bearer_token(client):
 async def test_rotate_cephx_invalid_token(fake_redis, client):
     """유효하지 않은 토큰이면 401."""
     resp = await client.post(
-        "/api/instances/inst-1/credentials/rotate-cephx",
+        "/api/v1/instances/inst-1/credentials/rotate-cephx",
         headers={"Authorization": "Bearer invalid-token-xyz"},
     )
     assert resp.status_code == 401
@@ -351,7 +351,7 @@ async def test_rotate_cephx_disabled(fake_redis, client):
         mock_cfg = mock_settings.return_value
         mock_cfg.union_cephx_rotate_hours = 0
         resp = await client.post(
-            "/api/instances/inst-disabled/credentials/rotate-cephx",
+            "/api/v1/instances/inst-disabled/credentials/rotate-cephx",
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 503

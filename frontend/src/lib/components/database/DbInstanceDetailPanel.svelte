@@ -7,6 +7,7 @@
 	import DbDatabasesSection from '$lib/components/database/DbDatabasesSection.svelte';
 	import DbUsersSection from '$lib/components/database/DbUsersSection.svelte';
 	import DbBackupsSection from '$lib/components/database/DbBackupsSection.svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
 
 	interface Props {
 		instanceId: string;
@@ -23,6 +24,7 @@
 		token: () => token,
 		projectId: () => projectId,
 		onDeleted,
+		databaseBackupsEnabled: () => $betaFeatures.databaseBackups,
 	});
 	provideDbInstanceDetailController(s);
 
@@ -46,6 +48,6 @@
 		<DbConnectionSection />
 		<DbDatabasesSection />
 		<DbUsersSection />
-		<DbBackupsSection />
+		{#if $betaFeatures.databaseBackups}<DbBackupsSection />{/if}
 	{/if}
 </div>

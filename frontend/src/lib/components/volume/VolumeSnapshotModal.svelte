@@ -37,7 +37,7 @@
 		error = '';
 		try {
 			await api.post(
-				'/api/volume-snapshots',
+				'/api/v1/volume-snapshots',
 				{ volume_id: volume.id, name, description: description || null, force },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,

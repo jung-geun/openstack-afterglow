@@ -56,7 +56,7 @@ class TestDeactivateOwnImage:
         mock_conn.image.get_image.return_value = fake_img
 
         with patch("app.api.compute.images.glance.deactivate_image") as mock_deact:
-            resp = await user_client.post("/api/images/img-1/deactivate")
+            resp = await user_client.post("/api/v1/images/img-1/deactivate")
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "deactivated"
@@ -70,7 +70,7 @@ class TestDeactivateOwnImage:
         mock_conn.image.get_image.return_value = fake_img
 
         with patch("app.api.compute.images.glance.deactivate_image") as mock_deact:
-            resp = await user_client.post("/api/images/img-2/deactivate")
+            resp = await user_client.post("/api/v1/images/img-2/deactivate")
 
         assert resp.status_code == 403
         mock_deact.assert_not_called()
@@ -83,7 +83,7 @@ class TestDeactivateOwnImage:
         mock_conn.image.get_image.return_value = fake_img
 
         with patch("app.api.compute.images.glance.reactivate_image") as mock_react:
-            resp = await user_client.post("/api/images/img-3/reactivate")
+            resp = await user_client.post("/api/v1/images/img-3/reactivate")
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "active"

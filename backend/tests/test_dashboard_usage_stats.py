@@ -51,7 +51,7 @@ async def test_usage_stats_includes_live_cpu_ram(client, mock_conn):
             side_effect=[cpu_results, ram_results],
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-stats?range=7d")
+        resp = await client.get("/api/v1/dashboard/usage-stats?range=7d")
 
     assert resp.status_code == 200
     instances = resp.json()["top_instances"]
@@ -78,7 +78,7 @@ async def test_usage_stats_prometheus_unavailable_fallback(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
         patch("app.api.common.dashboard.prom_query.query_instant_multi", side_effect=PromUnavailable("no prometheus")),
     ):
-        resp = await client.get("/api/dashboard/usage-stats?range=7d")
+        resp = await client.get("/api/v1/dashboard/usage-stats?range=7d")
 
     assert resp.status_code == 200
     inst = resp.json()["top_instances"][0]
@@ -115,7 +115,7 @@ async def test_usage_stats_unknown_instance_returns_none(client, mock_conn):
             side_effect=[cpu_results, ram_results],
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-stats?range=7d")
+        resp = await client.get("/api/v1/dashboard/usage-stats?range=7d")
 
     assert resp.status_code == 200
     by_id = {i["id"]: i for i in resp.json()["top_instances"]}
@@ -138,7 +138,7 @@ async def test_usage_stats_empty_project_skips_prometheus(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
         patch("app.api.common.dashboard.prom_query.query_instant_multi", new_callable=AsyncMock) as mock_qr,
     ):
-        resp = await client.get("/api/dashboard/usage-stats?range=7d")
+        resp = await client.get("/api/v1/dashboard/usage-stats?range=7d")
 
     assert resp.status_code == 200
     assert resp.json()["top_instances"] == []

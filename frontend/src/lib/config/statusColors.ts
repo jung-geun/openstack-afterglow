@@ -44,6 +44,8 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
 
   // warning — stopped, non-transitioning
   SHUTOFF:             { tone: 'warning' },
+  stopped:            { tone: 'warning' },
+  stop:               { tone: 'warning', label: 'stopped' },
 
   // neutral + pulse — Trove 비동기 삭제 진행 중 (ACTIVE → SHUTDOWN → 레코드 제거)
   SHUTDOWN:            { tone: 'neutral', pulse: true, label: '삭제 중' },
@@ -59,6 +61,7 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   DELETE_FAILED:       { tone: 'danger' },
   degraded:            { tone: 'danger' },
   unhealthy:           { tone: 'danger' },
+  timeout:             { tone: 'danger', label: 'timeout' },
 
   // info + pulse — in-progress I/O operations
   attaching:           { tone: 'info', pulse: true },
@@ -78,7 +81,8 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   ONLINE_STANDBY:      { tone: 'info' },
   SHARED:              { tone: 'info' },
 
-  // neutral — shelved / reserved
+  // neutral — shelved / deleted / reserved
+  deleted:            { tone: 'neutral' },
   SHELVED:             { tone: 'neutral' },
   SHELVED_OFFLOADED:   { tone: 'neutral' },
   reserved:            { tone: 'neutral' },

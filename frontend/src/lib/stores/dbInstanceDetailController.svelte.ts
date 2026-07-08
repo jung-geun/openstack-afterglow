@@ -11,6 +11,7 @@ export interface DbInstanceDetailControllerOpts {
 	token: () => string | undefined;
 	projectId: () => string | undefined;
 	onDeleted?: () => void;
+	databaseBackupsEnabled?: () => boolean;
 }
 
 export function createDbInstanceDetailController(opts: DbInstanceDetailControllerOpts) {
@@ -56,6 +57,8 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	let loadingAutoBackup = $state(false);
 	let savingAutoBackup = $state(false);
 
+	const databaseBackupsOn = () => opts.databaseBackupsEnabled?.() ?? true;
+
 	// Derived
 	const instanceFips = $derived.by(() => {
 		const ips = instance?.ips ?? [];
@@ -90,12 +93,17 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	);
 
 	async function loadAutoBackupConfig() {
+		if (!databaseBackupsOn()) {
+			autoBackupConfig = null;
+			loadingAutoBackup = false;
+			return;
+		}
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
 		loadingAutoBackup = true;
 		try {
-			const cfg = await api.get<AutoBackupConfig>(`/api/database-instances/${id}/auto-backup`, tok, proj);
+			const cfg = await api.get<AutoBackupConfig>(`/api/v1/database-instances/${id}/auto-backup`, tok, proj);
 			autoBackupConfig = cfg;
 		} catch {
 			autoBackupConfig = null;
@@ -105,13 +113,14 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function saveAutoBackupConfig(max_daily: number, max_weekly: number, max_monthly: number) {
+		if (!databaseBackupsOn()) return;
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
 		savingAutoBackup = true;
 		try {
 			const cfg = await api.put<AutoBackupConfig>(
-				`/api/database-instances/${id}/auto-backup`,
+				`/api/v1/database-instances/${id}/auto-backup`,
 				{ max_daily, max_weekly, max_monthly },
 				tok, proj
 			);
@@ -125,12 +134,16 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function disableAutoBackup() {
+		if (!databaseBackupsOn()) {
+			autoBackupConfig = null;
+			return;
+		}
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
 		savingAutoBackup = true;
 		try {
-			await api.delete(`/api/database-instances/${id}/auto-backup`, tok, proj);
+			await api.delete(`/api/v1/database-instances/${id}/auto-backup`, tok, proj);
 			autoBackupConfig = null;
 			toast.success('자동 백업이 비활성화되었습니다.');
 		} catch (e) {
@@ -155,29 +168,33 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		const proj = opts.projectId();
 		loading = true;
 		await Promise.allSettled([
-			api.get<DbInstance>(`/api/database-instances/${id}`, tok, proj)
+			api.get<DbInstance>(`/api/v1/database-instances/${id}`, tok, proj)
 				.then(v => { instance = v; loading = false; })
 				.catch(() => { instance = null; loading = false; }),
-			api.get<DbDatabase[]>(`/api/database-instances/${id}/databases`, tok, proj)
+			api.get<DbDatabase[]>(`/api/v1/database-instances/${id}/databases`, tok, proj)
 				.then(v => { databases = v; })
 				.catch(() => {}),
-			api.get<DbUser[]>(`/api/database-instances/${id}/users`, tok, proj)
+			api.get<DbUser[]>(`/api/v1/database-instances/${id}/users`, tok, proj)
 				.then(v => { users = v; })
 				.catch(() => {}),
-			api.get<DbBackup[]>(`/api/database-instances/${id}/backups`, tok, proj)
-				.then(v => { backups = v; })
-				.catch(() => {}),
+			databaseBackupsOn()
+				? api.get<DbBackup[]>(`/api/v1/database-instances/${id}/backups`, tok, proj)
+					.then(v => { backups = v; })
+					.catch(() => {})
+				: Promise.resolve().then(() => { backups = []; }),
 			flavors.length === 0
-				? api.get<DbFlavor[]>('/api/database-instances/flavors', tok, proj)
+				? api.get<DbFlavor[]>('/api/v1/database-instances/flavors', tok, proj)
 					.then(v => { flavors = v; })
 					.catch(() => {})
 				: Promise.resolve(),
-			api.get<FloatingIp[]>('/api/networks/floating-ips', tok, proj)
+			api.get<FloatingIp[]>('/api/v1/networks/floating-ips', tok, proj)
 				.then(v => { floatingIps = v; })
 				.catch(() => {}),
-			api.get<AutoBackupConfig>(`/api/database-instances/${id}/auto-backup`, tok, proj)
-				.then(v => { autoBackupConfig = v; })
-				.catch(() => { autoBackupConfig = null; }),
+			databaseBackupsOn()
+				? api.get<AutoBackupConfig>(`/api/v1/database-instances/${id}/auto-backup`, tok, proj)
+					.then(v => { autoBackupConfig = v; })
+					.catch(() => { autoBackupConfig = null; })
+				: Promise.resolve().then(() => { autoBackupConfig = null; }),
 		]);
 		loading = false;
 	}
@@ -197,8 +214,8 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		const proj = opts.projectId();
 		attachingFip = true; fipError = '';
 		try {
-			await api.post(`/api/database-instances/${id}/floating-ip`, {}, tok, proj);
-			floatingIps = await api.get<FloatingIp[]>('/api/networks/floating-ips', tok, proj);
+			await api.post(`/api/v1/database-instances/${id}/floating-ip`, {}, tok, proj);
+			floatingIps = await api.get<FloatingIp[]>('/api/v1/networks/floating-ips', tok, proj);
 		} catch (e) { fipError = e instanceof ApiError ? e.message : '실패'; }
 		finally { attachingFip = false; }
 	}
@@ -212,10 +229,10 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		detachingFip = true; fipError = '';
 		try {
 			await api.delete(
-				`/api/database-instances/${id}/floating-ip${deleteFip ? '?delete=true' : ''}`,
+				`/api/v1/database-instances/${id}/floating-ip${deleteFip ? '?delete=true' : ''}`,
 				tok, proj
 			);
-			floatingIps = await api.get<FloatingIp[]>('/api/networks/floating-ips', tok, proj);
+			floatingIps = await api.get<FloatingIp[]>('/api/v1/networks/floating-ips', tok, proj);
 		} catch (e) { fipError = e instanceof ApiError ? e.message : '실패'; }
 		finally { detachingFip = false; }
 	}
@@ -227,7 +244,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		if (!(await confirmDialog(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`))) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/database-instances/${id}`, tok, proj);
+			await api.delete(`/api/v1/database-instances/${id}`, tok, proj);
 			opts.onDeleted?.();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -242,7 +259,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		enablingRoot = true;
 		try {
 			rootInfo = await api.post<{ name: string; password: string }>(
-				`/api/database-instances/${id}/root`, {}, tok, proj
+				`/api/v1/database-instances/${id}/root`, {}, tok, proj
 			);
 		} catch (e) {
 			toast.error('root 활성화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -261,8 +278,8 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 			const payload = isMysqlLike
 				? { name, character_set: 'utf8mb4', collate: 'utf8mb4_unicode_ci' }
 				: { name };
-			await api.post(`/api/database-instances/${id}/databases`, payload, tok, proj);
-			databases = await api.get<DbDatabase[]>(`/api/database-instances/${id}/databases`, tok, proj);
+			await api.post(`/api/v1/database-instances/${id}/databases`, payload, tok, proj);
+			databases = await api.get<DbDatabase[]>(`/api/v1/database-instances/${id}/databases`, tok, proj);
 			return true;
 		} catch (e) { dbError = e instanceof ApiError ? e.message : '실패'; return false; }
 		finally { creatingDb = false; }
@@ -275,7 +292,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		if (!(await confirmDialog(`데이터베이스 "${name}"를 삭제하시겠습니까?`))) return;
 		deletingDb = name;
 		try {
-			await api.delete(`/api/database-instances/${id}/databases/${encodeURIComponent(name)}`, tok, proj);
+			await api.delete(`/api/v1/database-instances/${id}/databases/${encodeURIComponent(name)}`, tok, proj);
 			databases = databases.filter(d => d.name !== name);
 		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deletingDb = null; }
@@ -287,13 +304,13 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		const proj = opts.projectId();
 		creatingUser = true; userError = '';
 		try {
-			await api.post(`/api/database-instances/${id}/users`, {
+			await api.post(`/api/v1/database-instances/${id}/users`, {
 				name: newUser.name,
 				password: newUser.password,
 				host: newUser.host || '%',
 				databases: newUser.dbNames,
 			}, tok, proj);
-			users = await api.get<DbUser[]>(`/api/database-instances/${id}/users`, tok, proj);
+			users = await api.get<DbUser[]>(`/api/v1/database-instances/${id}/users`, tok, proj);
 			return true;
 		} catch (e) { userError = e instanceof ApiError ? e.message : '실패'; return false; }
 		finally { creatingUser = false; }
@@ -308,7 +325,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		if (!(await confirmDialog(`유저 "${label}"를 삭제하시겠습니까?`))) return;
 		deletingUser = label;
 		try {
-			const url = `/api/database-instances/${id}/users/${encodeURIComponent(u.name)}`
+			const url = `/api/v1/database-instances/${id}/users/${encodeURIComponent(u.name)}`
 				+ `?host=${encodeURIComponent(host)}`;
 			await api.delete(url, tok, proj);
 			users = users.filter(x => !(x.name === u.name && x.host === u.host));
@@ -317,19 +334,20 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function createBackup(name: string, description: string) {
+		if (!databaseBackupsOn()) return false;
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
 		creatingBackup = true; backupError = '';
 		try {
-			await api.post(`/api/database-instances/${id}/backups`, { name, description }, tok, proj);
-			backups = await api.get<DbBackup[]>(`/api/database-instances/${id}/backups`, tok, proj);
+			await api.post(`/api/v1/database-instances/${id}/backups`, { name, description }, tok, proj);
+			backups = await api.get<DbBackup[]>(`/api/v1/database-instances/${id}/backups`, tok, proj);
 			return true;
 		} catch (e) {
 			// POST가 타임아웃 등으로 실패해도 Trove에 백업이 실제로 생성됐을 수 있음.
 			// 목록을 재조회해 해당 이름의 백업이 존재하면 성공으로 처리한다.
 			try {
-				const refreshed = await api.get<DbBackup[]>(`/api/database-instances/${id}/backups`, tok, proj);
+				const refreshed = await api.get<DbBackup[]>(`/api/v1/database-instances/${id}/backups`, tok, proj);
 				backups = refreshed;
 				if (refreshed.some(b => b.name === name)) {
 					// 백업이 Trove에 실제로 생성됨 — 오류 표시 없이 성공 반환
@@ -344,6 +362,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function deleteBackup(backupId: string) {
+		if (!databaseBackupsOn()) return;
 		const isLast = backups.length === 1;
 		const msg = isLast
 			? '마지막 백업입니다. 삭제하면 복구 수단이 없습니다. 정말 삭제하시겠습니까?'
@@ -353,18 +372,19 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		const proj = opts.projectId();
 		deletingBackup = backupId;
 		try {
-			await api.delete(`/api/database-instances/backups/${backupId}`, tok, proj);
+			await api.delete(`/api/v1/database-instances/backups/${backupId}`, tok, proj);
 			backups = backups.filter(b => b.id !== backupId);
 		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deletingBackup = null; }
 	}
 
 	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
+		if (!databaseBackupsOn()) return;
 		const tok = opts.token();
 		const proj = opts.projectId();
 		restoringBackup = backupId;
 		try {
-			await api.post('/api/database-instances/restore', {
+			await api.post('/api/v1/database-instances/restore', {
 				backup_id: backupId, name,
 				flavor_id: flavorId,
 				volume_size: volumeSize,

@@ -1,12 +1,12 @@
 # Afterglow GPU 디바이스 맵 오버라이드
 #
-# 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `config.toml` 옆에 두면
-# 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
+# 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `afterglow.conf`
+# 또는 레거시 `config.toml` 옆에 두면 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
 #
 # 복사: cp config.gpu.toml.example config.gpu.toml
 #
 # 머지 규칙: dict는 재귀 병합, 리스트/스칼라는 이 파일이 덮어쓴다.
-# 즉, [[gpu.devices]] 엔트리를 여기에 두면 config.toml의 동일 키를 완전히 대체한다.
+# 즉, [[gpu.devices]] 엔트리를 여기에 두면 afterglow.conf/config.toml의 동일 키를 완전히 대체한다.
 
 [gpu]
 # GPU 디바이스 맵 커스터마이징
@@ -23,7 +23,7 @@ vendor_id = "10DE"
 device_id = "17C2"
 name = "GTX TITAN X"
 is_audio = false
-aliases = ["GTX_TITAN_X", "gtx_titan", "gtx_titan_x"]
+aliases = ["GTX-TITAN-X", "gtx-titan", "gtx-titan-x"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
@@ -37,21 +37,21 @@ vendor_id = "10DE"
 device_id = "1B06"
 name = "GTX 1080 Ti"
 is_audio = false
-aliases = ["GTX1080Ti", "1080ti", "gtx_1080_ti"]
+aliases = ["GTX-1080Ti", "1080ti", "gtx_1080_ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "1B80"
 name = "GTX 1080"
 is_audio = false
-aliases = ["GTX1080", "1080", "gtx_1080"]
+aliases = ["GTX-1080", "1080", "gtx_1080"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "1B81"
 name = "GTX 1070"
 is_audio = false
-aliases = ["GTX1070", "1070", "gtx_1070"]
+aliases = ["GTX-1070", "1070", "gtx_1070"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
@@ -79,56 +79,56 @@ vendor_id = "10DE"
 device_id = "2204"
 name = "RTX 3090"
 is_audio = false
-aliases = ["RTX3090", "rtx3090", "3090"]
+aliases = ["RTX-3090", "rtx3090", "3090"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2203"
 name = "RTX 3090 Ti"
 is_audio = false
-aliases = ["RTX3090Ti", "3090ti", "3090Ti"]
+aliases = ["RTX-3090Ti", "3090ti", "3090Ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2206"
 name = "RTX 3080 Ti"
 is_audio = false
-aliases = ["RTX3080Ti", "3080ti"]
+aliases = ["RTX-3080Ti", "3080ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "220A"
 name = "RTX 3080"
 is_audio = false
-aliases = ["RTX3080", "3080"]
+aliases = ["RTX-3080", "3080"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2484"
 name = "RTX 3070 Ti"
 is_audio = false
-aliases = ["RTX3070Ti", "3070ti"]
+aliases = ["RTX-3070Ti", "3070ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2482"
 name = "RTX 3070"
 is_audio = false
-aliases = ["RTX3070", "3070"]
+aliases = ["RTX-3070", "3070"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2487"
 name = "RTX 3060"
 is_audio = false
-aliases = ["RTX3060", "3060"]
+aliases = ["RTX-3060", "3060"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2504"
 name = "RTX 3060 LHR"
 is_audio = false
-aliases = ["RTX3060LHR", "3060LHR"]
+aliases = ["RTX-3060LHR", "3060LHR"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
@@ -154,42 +154,42 @@ vendor_id = "10DE"
 device_id = "2684"
 name = "RTX 4090"
 is_audio = false
-aliases = ["RTX4090", "rtx4090", "4090"]
+aliases = ["RTX-4090", "rtx4090", "4090"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2704"
 name = "RTX 4080"
 is_audio = false
-aliases = ["RTX4080", "4080"]
+aliases = ["RTX-4080", "rtx4080", "4080"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2782"
 name = "RTX 4070 Ti SUPER"
 is_audio = false
-aliases = ["RTX4070TiSuper", "4070tisuper"]
+aliases = ["RTX-4070TiSuper", "4070tisuper"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2783"
 name = "RTX 4070 Ti"
 is_audio = false
-aliases = ["RTX4070Ti", "4070ti"]
+aliases = ["RTX-4070Ti", "4070ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2786"
 name = "RTX 4070 SUPER"
 is_audio = false
-aliases = ["RTX4070Super", "4070super"]
+aliases = ["RTX-4070Super", "4070super"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2882"
 name = "RTX 4060 Ti"
 is_audio = false
-aliases = ["RTX4060Ti", "4060ti"]
+aliases = ["RTX-4060Ti", "4060ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
@@ -209,14 +209,14 @@ vendor_id = "10DE"
 device_id = "2B85"
 name = "RTX 5090"
 is_audio = false
-aliases = ["RTX5090", "5090"]
+aliases = ["RTX-5090", "rtx5090", "5090"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2B80"
 name = "RTX 5080"
 is_audio = false
-aliases = ["RTX5080", "5080"]
+aliases = ["RTX-5080", "rtx5080", "5080"]
 
 # === Professional / Workstation ===
 [[gpu.devices]]
@@ -224,21 +224,21 @@ vendor_id = "10DE"
 device_id = "28B0"
 name = "RTX 2000 Ada"
 is_audio = false
-aliases = ["RTX2000Ada", "2000Ada", "2000ada"]
+aliases = ["RTX-2000Ada", "2000Ada", "2000ada"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2230"
 name = "RTX A6000"
 is_audio = false
-aliases = ["RTXA6000", "A6000"]
+aliases = ["RTX-A6000", "A6000"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "2231"
 name = "RTX A5000"
 is_audio = false
-aliases = ["RTXA5000", "A5000"]
+aliases = ["RTX-A5000", "A5000"]
 
 [[gpu.devices]]
 vendor_id = "10DE"

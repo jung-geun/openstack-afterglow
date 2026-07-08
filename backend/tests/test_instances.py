@@ -40,7 +40,7 @@ async def test_list_instances(client, mock_conn):
         patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[]),
         patch("app.api.compute.instances.cinder.get_volume_image_metadata", return_value={}),
     ):
-        resp = await client.get("/api/instances")
+        resp = await client.get("/api/v1/instances")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -52,7 +52,7 @@ async def test_get_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.list_flavors", return_value=[]),
         patch("app.api.compute.instances.glance.list_images", return_value=[]),
     ):
-        resp = await client.get("/api/instances/inst-1")
+        resp = await client.get("/api/v1/instances/inst-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "inst-1"
 
@@ -66,7 +66,7 @@ async def test_get_instance_other_project_returns_404(client, mock_conn):
     foreign.id = "inst-foreign"
     foreign.project_id = "other-project-999"  # mock_conn 의 test-project-123 과 다름
     with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
-        resp = await client.get("/api/instances/inst-foreign")
+        resp = await client.get("/api/v1/instances/inst-foreign")
     assert resp.status_code == 404
 
 
@@ -86,7 +86,7 @@ async def test_admin_can_get_other_project_instance(admin_client, mock_conn):
             return_value=[make_instance(instance_id="inst-foreign", name="vm-foreign")],
         ),
     ):
-        resp = await admin_client.get("/api/instances/inst-foreign")
+        resp = await admin_client.get("/api/v1/instances/inst-foreign")
     # admin 은 owner check 통과 — 200
     assert resp.status_code == 200
 
@@ -104,7 +104,7 @@ async def test_delete_instance_other_project_returns_404(client, mock_conn):
     foreign.union_strategy = None
     foreign.metadata = {}
     with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
-        resp = await client.delete("/api/instances/inst-foreign")
+        resp = await client.delete("/api/v1/instances/inst-foreign")
     assert resp.status_code == 404
 
 
@@ -117,7 +117,7 @@ async def test_start_instance_other_project_returns_404(client, mock_conn):
     foreign.id = "inst-foreign"
     foreign.project_id = "other-project-999"
     with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
-        resp = await client.post("/api/instances/inst-foreign/start")
+        resp = await client.post("/api/v1/instances/inst-foreign/start")
     assert resp.status_code == 404
 
 
@@ -133,7 +133,7 @@ async def test_delete_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.delete_server", return_value=None),
         patch("app.api.compute.instances.cinder.delete_volume", return_value=None),
     ):
-        resp = await client.delete("/api/instances/inst-1")
+        resp = await client.delete("/api/v1/instances/inst-1")
     assert resp.status_code == 204
 
 
@@ -163,7 +163,7 @@ async def test_delete_instance_cleans_nfs_access_rules(client, mock_conn):
         patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
     ):
-        resp = await client.delete("/api/instances/inst-1")
+        resp = await client.delete("/api/v1/instances/inst-1")
 
     assert resp.status_code == 204
     mock_list.assert_called_once_with(mock_svc_conn, "share-1")
@@ -190,7 +190,7 @@ async def test_delete_instance_nfs_cleanup_failure_continues(client, mock_conn):
         patch("app.api.compute.instances.manila.list_access_rules", side_effect=Exception("Manila 오류")),
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
     ):
-        resp = await client.delete("/api/instances/inst-1")
+        resp = await client.delete("/api/v1/instances/inst-1")
 
     assert resp.status_code == 204
 
@@ -209,7 +209,7 @@ async def test_delete_instance_dynamic_skips_nfs_rule_cleanup(client, mock_conn)
         patch("app.api.compute.instances.manila.list_access_rules") as mock_list,
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
     ):
-        resp = await client.delete("/api/instances/inst-1")
+        resp = await client.delete("/api/v1/instances/inst-1")
 
     assert resp.status_code == 204
     mock_list.assert_not_called()
@@ -234,7 +234,7 @@ async def test_start_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
         patch("app.api.compute.instances.nova.start_server", return_value=None),
     ):
-        resp = await client.post("/api/instances/inst-1/start")
+        resp = await client.post("/api/v1/instances/inst-1/start")
     assert resp.status_code == 204
 
 
@@ -244,7 +244,7 @@ async def test_stop_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
         patch("app.api.compute.instances.nova.stop_server", return_value=None),
     ):
-        resp = await client.post("/api/instances/inst-1/stop")
+        resp = await client.post("/api/v1/instances/inst-1/stop")
     assert resp.status_code == 204
 
 
@@ -254,7 +254,7 @@ async def test_reboot_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
         patch("app.api.compute.instances.nova.reboot_server", return_value=None),
     ):
-        resp = await client.post("/api/instances/inst-1/reboot")
+        resp = await client.post("/api/v1/instances/inst-1/reboot")
     assert resp.status_code == 204
 
 
@@ -264,7 +264,7 @@ async def test_shelve_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
         patch("app.api.compute.instances.nova.shelve_server", return_value=None),
     ):
-        resp = await client.post("/api/instances/inst-1/shelve")
+        resp = await client.post("/api/v1/instances/inst-1/shelve")
     assert resp.status_code == 204
 
 
@@ -274,7 +274,7 @@ async def test_unshelve_instance(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
         patch("app.api.compute.instances.nova.unshelve_server", return_value=None),
     ):
-        resp = await client.post("/api/instances/inst-1/unshelve")
+        resp = await client.post("/api/v1/instances/inst-1/unshelve")
     assert resp.status_code == 204
 
 
@@ -284,7 +284,7 @@ async def test_unshelve_instance(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_console(client, mock_conn):
     with patch("app.api.compute.instances.nova.get_console_url", return_value="https://console.example.com"):
-        resp = await client.get("/api/instances/inst-1/console")
+        resp = await client.get("/api/v1/instances/inst-1/console")
     assert resp.status_code == 200
     assert "url" in resp.json()
 
@@ -292,7 +292,7 @@ async def test_get_console(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_console_log(client, mock_conn):
     with patch("app.api.compute.instances.nova.get_console_output", return_value="log output"):
-        resp = await client.get("/api/instances/inst-1/log")
+        resp = await client.get("/api/v1/instances/inst-1/log")
     assert resp.status_code == 200
     assert "output" in resp.json()
 
@@ -301,7 +301,7 @@ async def test_get_console_log(client, mock_conn):
 async def test_get_console_log_full(client, mock_conn):
     """length=0은 전체 로그 요청 — 422가 아닌 200 반환되어야 한다."""
     with patch("app.api.compute.instances.nova.get_console_output", return_value="full log"):
-        resp = await client.get("/api/instances/inst-1/log?length=0")
+        resp = await client.get("/api/v1/instances/inst-1/log?length=0")
     assert resp.status_code == 200
     assert resp.json()["output"] == "full log"
 
@@ -309,7 +309,7 @@ async def test_get_console_log_full(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_console_log_length_negative(client, mock_conn):
     """음수 length는 거부되어야 한다."""
-    resp = await client.get("/api/instances/inst-1/log?length=-1")
+    resp = await client.get("/api/v1/instances/inst-1/log?length=-1")
     assert resp.status_code == 422
 
 
@@ -335,7 +335,7 @@ async def test_list_instance_volumes_includes_delete_on_termination(client, mock
         patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[vol_attachment]),
         patch("app.api.compute.instances.cinder.get_volume", return_value=FakeVol()),
     ):
-        resp = await client.get("/api/instances/inst-1/volumes")
+        resp = await client.get("/api/v1/instances/inst-1/volumes")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -345,14 +345,14 @@ async def test_list_instance_volumes_includes_delete_on_termination(client, mock
 @pytest.mark.asyncio
 async def test_attach_volume(client, mock_conn):
     with patch("app.api.compute.instances.nova.attach_volume", return_value={"id": "attach-1", "volumeId": "vol-1"}):
-        resp = await client.post("/api/instances/inst-1/volumes", json={"volume_id": "vol-1"})
+        resp = await client.post("/api/v1/instances/inst-1/volumes", json={"volume_id": "vol-1"})
     assert resp.status_code in (200, 201)
 
 
 @pytest.mark.asyncio
 async def test_detach_volume(client, mock_conn):
     with patch("app.api.compute.instances.nova.detach_volume", return_value=None):
-        resp = await client.delete("/api/instances/inst-1/volumes/vol-1")
+        resp = await client.delete("/api/v1/instances/inst-1/volumes/vol-1")
     assert resp.status_code == 204
 
 
@@ -365,14 +365,14 @@ async def test_attach_interface(client, mock_conn):
         "app.api.compute.instances.nova.attach_interface",
         return_value={"port_id": "port-1", "net_id": "net-1", "ip_address": "10.0.0.2"},
     ):
-        resp = await client.post("/api/instances/inst-1/interfaces", json={"net_id": "net-1"})
+        resp = await client.post("/api/v1/instances/inst-1/interfaces", json={"net_id": "net-1"})
     assert resp.status_code in (200, 201)
 
 
 @pytest.mark.asyncio
 async def test_detach_interface(client, mock_conn):
     with patch("app.api.compute.instances.nova.detach_interface", return_value=None):
-        resp = await client.delete("/api/instances/inst-1/interfaces/port-1")
+        resp = await client.delete("/api/v1/instances/inst-1/interfaces/port-1")
     assert resp.status_code == 204
 
 
@@ -383,7 +383,7 @@ async def test_detach_interface(client, mock_conn):
 async def test_update_volume_attachment_set_true(client, mock_conn):
     with patch("app.api.compute.instances.nova.update_volume_attachment_delete_flag") as mock_update:
         resp = await client.patch(
-            "/api/instances/inst-1/volumes/vol-1",
+            "/api/v1/instances/inst-1/volumes/vol-1",
             json={"delete_on_termination": True},
         )
     assert resp.status_code == 204
@@ -394,7 +394,7 @@ async def test_update_volume_attachment_set_true(client, mock_conn):
 async def test_update_volume_attachment_set_false(client, mock_conn):
     with patch("app.api.compute.instances.nova.update_volume_attachment_delete_flag") as mock_update:
         resp = await client.patch(
-            "/api/instances/inst-1/volumes/vol-1",
+            "/api/v1/instances/inst-1/volumes/vol-1",
             json={"delete_on_termination": False},
         )
     assert resp.status_code == 204
@@ -404,7 +404,7 @@ async def test_update_volume_attachment_set_false(client, mock_conn):
 @pytest.mark.asyncio
 async def test_update_volume_attachment_missing_body(client, mock_conn):
     """body 누락 시 422."""
-    resp = await client.patch("/api/instances/inst-1/volumes/vol-1", json={})
+    resp = await client.patch("/api/v1/instances/inst-1/volumes/vol-1", json={})
     assert resp.status_code == 422
 
 
@@ -416,7 +416,7 @@ async def test_update_volume_attachment_server_error(client, mock_conn):
         side_effect=Exception("Nova 오류"),
     ):
         resp = await client.patch(
-            "/api/instances/inst-1/volumes/vol-1",
+            "/api/v1/instances/inst-1/volumes/vol-1",
             json={"delete_on_termination": True},
         )
     assert resp.status_code == 500
@@ -429,7 +429,7 @@ async def test_update_volume_attachment_server_error(client, mock_conn):
 async def test_create_instance_invalid_name(client, mock_conn):
     """인스턴스 이름 regex 검증 — 특수문자 포함 시 422."""
     resp = await client.post(
-        "/api/instances",
+        "/api/v1/instances",
         json={
             "name": "invalid name!",
             "image_id": "img-1",
@@ -471,7 +471,7 @@ async def test_release_floating_ip_only_targets_instance_ports(client, mock_conn
         _make_fip("fip-3", None),  # 미연결
     ]
 
-    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    resp = await client.delete("/api/v1/instances/inst-1/floating-ip")
     assert resp.status_code == 204
 
     called_ids = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
@@ -485,7 +485,7 @@ async def test_release_floating_ip_no_ports_does_nothing(client, mock_conn):
     """포트가 없는 인스턴스 해제 시 어떤 FIP도 건드리지 않는다."""
     mock_conn.network.ports.return_value = []
 
-    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    resp = await client.delete("/api/v1/instances/inst-1/floating-ip")
     assert resp.status_code == 204
 
     mock_conn.network.update_ip.assert_not_called()
@@ -508,7 +508,7 @@ async def test_delete_instance_only_cleans_own_fips(client, mock_conn):
         patch("app.api.compute.instances.nova.delete_server", return_value=None),
         patch("app.api.compute.instances.cinder.delete_volume", return_value=None),
     ):
-        resp = await client.delete("/api/instances/inst-1")
+        resp = await client.delete("/api/v1/instances/inst-1")
     assert resp.status_code == 204
 
     called_delete_ids = [call.args[0] for call in mock_conn.network.delete_ip.call_args_list]
@@ -526,7 +526,7 @@ async def test_release_floating_ip_per_fip_failure_isolated(client, mock_conn):
     ]
     mock_conn.network.update_ip.side_effect = [Exception("Neutron 오류"), None]
 
-    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    resp = await client.delete("/api/v1/instances/inst-1/floating-ip")
     assert resp.status_code == 204
 
     update_calls = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
@@ -571,7 +571,7 @@ async def test_assign_floating_ip_single_port_success(client, mock_conn):
             return_value=_make_fip_info("fip-new", "172.30.100.1", port_id="p1"),
         ),
     ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+        resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 200
     assert resp.json()["floating_ip_address"] == "172.30.100.1"
@@ -601,7 +601,7 @@ async def test_assign_floating_ip_multi_port_selects_available(client, mock_conn
         ),
         patch("app.api.compute.instances.neutron.associate_floating_ip", side_effect=fake_associate),
     ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+        resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 200
     # 사용 가능한 포트(p2)가 선택되어야 한다
@@ -614,7 +614,7 @@ async def test_assign_floating_ip_all_ports_occupied_returns_400(client, mock_co
     mock_conn.network.ports.return_value = [_make_port("p1")]
     mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
 
-    resp = await client.post("/api/instances/inst-1/floating-ip")
+    resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 400
     assert "이미 Floating IP" in resp.json()["detail"]
@@ -626,7 +626,7 @@ async def test_assign_floating_ip_explicit_port_already_occupied_returns_409(cli
     mock_conn.network.ports.return_value = [_make_port("p1")]
     mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
 
-    resp = await client.post("/api/instances/inst-1/floating-ip?port_id=p1")
+    resp = await client.post("/api/v1/instances/inst-1/floating-ip?port_id=p1")
 
     assert resp.status_code == 409
     assert "이미 Floating IP" in resp.json()["detail"]
@@ -660,7 +660,7 @@ async def test_assign_floating_ip_conflict_exception_rolls_back(client, mock_con
         ),
         patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
     ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+        resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 409
     assert "fip-race" in deleted
@@ -676,7 +676,7 @@ async def test_assign_floating_ip_no_router_returns_422(client, mock_conn):
         "app.api.compute.instances.neutron.find_external_network_for_subnets",
         return_value=None,
     ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+        resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 422
     assert "라우터" in resp.json()["detail"]
@@ -710,7 +710,7 @@ async def test_assign_floating_ip_unreachable_external_network_returns_422(clien
         ),
         patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
     ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+        resp = await client.post("/api/v1/instances/inst-1/floating-ip")
 
     assert resp.status_code == 422
     assert "도달 불가능" in resp.json()["detail"]
@@ -758,7 +758,7 @@ async def test_create_instance_with_libraries_attaches_union_sg(client, mock_con
         patch("app.api.compute.instances.is_db_available", return_value=False),
     ):
         resp = await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",
@@ -827,7 +827,7 @@ async def test_create_instance_sg_skipped_when_disabled(client, mock_conn):
         mock_settings.return_value = s
 
         await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",
@@ -923,7 +923,7 @@ async def test_create_instance_non_gpu_attaches_node_exporter_only(client, mock_
         patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=False)),
     ):
         resp = await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",
@@ -977,7 +977,7 @@ async def test_create_instance_gpu_attaches_both_sgs(client, mock_conn):
         patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=True)),
     ):
         resp = await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",
@@ -1037,7 +1037,7 @@ async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_
         ),
     ):
         await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",
@@ -1090,7 +1090,7 @@ async def test_create_instance_monitoring_sg_skipped_when_no_cidr(client, mock_c
         ),
     ):
         await client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-vm",
                 "image_id": "img-1",

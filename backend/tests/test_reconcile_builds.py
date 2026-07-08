@@ -226,7 +226,7 @@ async def test_list_libraries_uses_service_conn_with_include_public(admin_client
             return_value=[fake_share],
         ) as mock_list,
     ):
-        resp = await admin_client.get("/api/libraries")
+        resp = await admin_client.get("/api/v1/libraries")
 
     assert resp.status_code == 200
     # include_public=True로 호출됐는지 확인

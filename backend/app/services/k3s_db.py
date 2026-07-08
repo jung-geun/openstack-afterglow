@@ -113,6 +113,15 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             stampede_enabled=bool(data.get("stampede_enabled", False)),
         )
         session.add(cluster)
+        from app.services import k3s_nodegroup as _nodegroups
+
+        await _nodegroups.create_default_nodegroups(
+            session,
+            cluster_id=cluster_id,
+            server_flavor_id=data.get("server_flavor_id") or None,
+            agent_flavor_id=data.get("agent_flavor_id") or None,
+            agent_count=int(data.get("agent_count") or 0),
+        )
         await session.commit()
 
 

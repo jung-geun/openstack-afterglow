@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
-import { env } from '$env/dynamic/public';
+import { loadPublicSiteConfig } from '$lib/server/config';
+import type { PublicSiteConfig } from '$lib/types/siteConfig';
 
 // 인증 없이 접근 가능한 경로
 const PUBLIC_PATHS = ['/', '/auth/gitlab/callback'];
@@ -8,53 +9,76 @@ const PUBLIC_PATHS = ['/', '/auth/gitlab/callback'];
 const STATIC_EXT = /\.(js|css|svg|png|jpg|jpeg|ico|woff2?|ttf|eot|map|webp|gif)$/;
 
 // connect-src에 API + S3 URL 추가 (presigned PUT 허용)
-function buildConnectSrc(): string {
+function buildConnectSrc(siteConfig: PublicSiteConfig): string {
 	const parts = ["'self'"];
-	for (const raw of [env.PUBLIC_API_BASE, env.PUBLIC_S3_BASE]) {
+	for (const raw of [siteConfig.runtime.api_base, siteConfig.runtime.s3_base]) {
 		if (!raw) continue;
-		try {
-			parts.push(new URL(raw).origin);
-		} catch {
-			// 잘못된 URL 무시
-		}
+		parts.push(raw);
 	}
 	return parts.join(' ');
 }
 
-// frame-src에 Grafana origin 추가 (iframe 임베드 허용)
-function buildFrameSrc(): string {
-	const parts = ["'self'"];
-	if (env.PUBLIC_GRAFANA_BASE) {
-		try {
-			parts.push(new URL(env.PUBLIC_GRAFANA_BASE).origin);
-		} catch {
-			// 잘못된 URL 무시
+function addOrigin(parts: Set<string>, raw: string): void {
+	if (!raw) return;
+	try {
+		const url = new URL(raw);
+		if (url.protocol === 'http:' || url.protocol === 'https:') {
+			parts.add(url.origin);
 		}
+	} catch {
+		// Relative paths stay covered by 'self'.
+	}
+}
+
+function buildImgSrc(siteConfig: PublicSiteConfig): string {
+	const parts = new Set(["'self'", 'data:']);
+	for (const raw of [
+		siteConfig.runtime.api_base,
+		siteConfig.logo_path,
+		siteConfig.logo_dark_path,
+		siteConfig.logo_light_path,
+		siteConfig.favicon_path,
+	]) {
+		addOrigin(parts, raw);
+	}
+	return [...parts].join(' ');
+}
+
+// frame-src에 Grafana origin 추가 (iframe 임베드 허용)
+function buildFrameSrc(siteConfig: PublicSiteConfig): string {
+	const parts = ["'self'"];
+	if (siteConfig.runtime.grafana_base) {
+		parts.push(siteConfig.runtime.grafana_base);
 	}
 	return parts.join(' ');
 }
 
 // 모든 응답에 추가할 보안 헤더
-const SECURITY_HEADERS: Record<string, string> = {
-	'X-Frame-Options': 'DENY',
-	'X-Content-Type-Options': 'nosniff',
-	'Referrer-Policy': 'strict-origin-when-cross-origin',
-	'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-	'X-XSS-Protection': '0',
-	'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-	// SvelteKit은 인라인 스타일/스크립트를 사용하므로 unsafe-inline 허용
-	'Content-Security-Policy':
-		`default-src 'self'; ` +
-		`script-src 'self' 'unsafe-inline'; ` +
-		`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
-		`img-src 'self' data:; ` +
-		`connect-src ${buildConnectSrc()}; ` +
-		`font-src 'self' https://fonts.gstatic.com; ` +
-		`frame-src ${buildFrameSrc()}; ` +
-		`frame-ancestors 'none'`,
-};
+function buildSecurityHeaders(siteConfig: PublicSiteConfig): Record<string, string> {
+	return {
+		'X-Frame-Options': 'DENY',
+		'X-Content-Type-Options': 'nosniff',
+		'Referrer-Policy': 'strict-origin-when-cross-origin',
+		'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+		'X-XSS-Protection': '0',
+		'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+		// SvelteKit은 인라인 스타일/스크립트를 사용하므로 unsafe-inline 허용
+		'Content-Security-Policy':
+			`default-src 'self'; ` +
+			`script-src 'self' 'unsafe-inline'; ` +
+			`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
+			`img-src ${buildImgSrc(siteConfig)}; ` +
+			`connect-src ${buildConnectSrc(siteConfig)}; ` +
+			`font-src 'self' https://fonts.gstatic.com; ` +
+			`frame-src ${buildFrameSrc(siteConfig)}; ` +
+			`frame-ancestors 'none'`,
+	};
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
+	const siteConfig = loadPublicSiteConfig();
+	const securityHeaders = buildSecurityHeaders(siteConfig);
+	event.locals.siteConfig = siteConfig;
 	const path = event.url.pathname;
 
 	// 공개 경로, 정적 리소스, SvelteKit 내부 경로는 통과
@@ -66,7 +90,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		STATIC_EXT.test(path)
 	) {
 		const response = await resolve(event);
-		for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+		for (const [key, value] of Object.entries(securityHeaders)) {
 			response.headers.set(key, value);
 		}
 		return response;
@@ -84,7 +108,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const response = await resolve(event);
-	for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+	for (const [key, value] of Object.entries(securityHeaders)) {
 		response.headers.set(key, value);
 	}
 	return response;

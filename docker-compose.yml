@@ -15,6 +15,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── Worker runtime manager opt-in (disabled by default) ─────────────────────
+  # The default development path keeps static drover/notion-worker services below.
+  # To let the backend manage extra Docker workers explicitly:
+  #   1. Add this backend volume manually:
+  #        - /var/run/docker.sock:/var/run/docker.sock
+  #   2. Set afterglow.conf:
+  #        [worker_runtime]
+  #        mode = "docker"
+  #        [worker_runtime.docker]
+  #        socket_path = "/var/run/docker.sock"
+  #        image = "ghcr.io/openstack-afterglow/afterglow-worker:dev"
+  #        config_host_path = "/absolute/host/path/to/afterglow.conf"
+  #        gpu_config_host_path = "/absolute/host/path/to/config.gpu.toml"
+  #        logs_host_path = "/absolute/host/path/to/logs"
+  #        env_allowlist = "AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+  # Never mount the Docker socket in the committed default compose file.
+
   backend:
     build:
       context: .
@@ -24,12 +41,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
     env_file:
       - path: .env
         required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -40,7 +59,7 @@ services:
         max-size: "50m"
         max-file: "5"
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -55,6 +74,7 @@ services:
     ports:
       - "3080:3080"
     volumes:
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./logs:/app/logs
     environment:
       - ORIGIN=http://localhost:3080
@@ -86,9 +106,14 @@ services:
     image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.worker
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     depends_on:
       redis:
         condition: service_started
@@ -110,9 +135,14 @@ services:
     image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.notion_worker
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     depends_on:
       redis:
         condition: service_started

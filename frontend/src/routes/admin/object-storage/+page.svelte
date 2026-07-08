@@ -41,7 +41,7 @@
 		else refreshing = true;
 		try {
 			containers = await api.get<SwiftContainer[]>(
-				'/api/object-storage?all_projects=true&include_quarantine=true&include_trash=true&include_deleted=true',
+				'/api/v1/object-storage?all_projects=true&include_quarantine=true&include_trash=true&include_deleted=true',
 				token, projectId
 			);
 		} catch {
@@ -54,7 +54,7 @@
 
 	async function createContainer(name: string): Promise<string | true> {
 		try {
-			await api.post('/api/object-storage', { name }, token, projectId);
+			await api.post('/api/v1/object-storage', { name }, token, projectId);
 			await load();
 			return true;
 		} catch (e) {
@@ -66,7 +66,7 @@
 		if (!await confirmDialog(`버킷 "${name}"을 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
-			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
+			await api.delete(`/api/v1/object-storage/${encodeURIComponent(name)}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

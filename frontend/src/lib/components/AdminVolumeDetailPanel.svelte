@@ -2,6 +2,7 @@
 	import { createAdminVolumeDetailController, provideAdminVolumeDetailController } from '$lib/stores/adminVolumeDetailController.svelte';
 	import AdminVolumeDetailHeader from '$lib/components/admin-volume/AdminVolumeDetailHeader.svelte';
 	import AdminVolumeStatusBar from '$lib/components/admin-volume/AdminVolumeStatusBar.svelte';
+	import AdminVolumeDeleteDiagnosticSection from '$lib/components/admin-volume/AdminVolumeDeleteDiagnosticSection.svelte';
 	import AdminVolumeBasicInfoSection from '$lib/components/admin-volume/AdminVolumeBasicInfoSection.svelte';
 	import AdminVolumePropertiesSection from '$lib/components/admin-volume/AdminVolumePropertiesSection.svelte';
 	import AdminVolumeAttachmentsSection from '$lib/components/admin-volume/AdminVolumeAttachmentsSection.svelte';
@@ -37,6 +38,9 @@
 			<div class="text-red-400 text-sm">{s.error}</div>
 		{:else if s.volume}
 			<AdminVolumeStatusBar />
+			{#if s.deleteDiagnostic || s.diagnosticLoading || s.diagnosticError || s.recoveryResult}
+				<AdminVolumeDeleteDiagnosticSection />
+			{/if}
 			<AdminVolumeBasicInfoSection />
 			<AdminVolumePropertiesSection />
 			{#if s.volume.attachments.length > 0}

@@ -22,7 +22,7 @@
 		loading = true;
 		loadError = '';
 		try {
-			info = await api.get<InvitationInfo>(`/api/invitations/${token}`);
+			info = await api.get<InvitationInfo>(`/api/v1/invitations/${token}`);
 		} catch (e) {
 			loadError = e instanceof ApiError ? e.message : '초대 정보를 불러오지 못했습니다';
 		} finally {
@@ -35,7 +35,7 @@
 		acting = true;
 		actionError = '';
 		try {
-			await api.post(`/api/invitations/${token}/accept`, {}, $auth.token ?? undefined);
+			await api.post(`/api/v1/invitations/${token}/accept`, {}, $auth.token ?? undefined);
 			actionDone = 'accepted';
 		} catch (e) {
 			actionError = e instanceof ApiError ? e.message : '수락 중 오류가 발생했습니다';
@@ -49,7 +49,7 @@
 		acting = true;
 		actionError = '';
 		try {
-			await api.post(`/api/invitations/${token}/decline`, {});
+			await api.post(`/api/v1/invitations/${token}/decline`, {});
 			actionDone = 'declined';
 		} catch (e) {
 			actionError = e instanceof ApiError ? e.message : '거절 중 오류가 발생했습니다';

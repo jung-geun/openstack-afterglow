@@ -53,6 +53,16 @@ export interface AdminVolume {
   project_name?: string;
 }
 
+export interface AdminVolumeStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface AdminVolumeStatusSummary {
+  total: number;
+  statuses: AdminVolumeStatusCount[];
+}
+
 export interface AdminVolumeDetail {
   id: string;
   name: string;
@@ -67,4 +77,80 @@ export interface AdminVolumeDetail {
   encrypted: boolean | null;
   multiattach: boolean | null;
   metadata: Record<string, string>;
+}
+
+export type VolumeDeleteRootCause =
+  | 'already_deleted'
+  | 'attached_volume_delete_blocked'
+  | 'dependent_snapshot_or_backup'
+  | 'recoverable_error_deleting'
+  | 'recoverable_error_state'
+  | 'normal_delete_possible'
+  | 'not_recoverable_status'
+  | 'unknown';
+
+export type VolumeDeleteRecoveryStatus =
+  | 'deleted'
+  | 'already_deleted'
+  | 'delete_submitted'
+  | 'blocked'
+  | 'failed';
+
+export type VolumeDeleteRecoveryAction =
+  | 'diagnose'
+  | 'reset_status'
+  | 'delete'
+  | 'verify_after_delete'
+  | 'force_delete'
+  | 'verify_after_force_delete';
+
+export type VolumeDeleteRecoveryStepStatus = 'success' | 'skipped' | 'failed';
+
+export interface VolumeDeleteMessage {
+  id: string | null;
+  event_id: string | null;
+  request_id: string | null;
+  message_level: string | null;
+  resource_uuid: string | null;
+  resource_type: string | null;
+  user_message: string | null;
+  created_at: string | null;
+}
+
+export interface VolumeDeleteDependency {
+  id: string;
+  status: string | null;
+  name: string | null;
+  kind: 'snapshot' | 'backup';
+}
+
+export interface VolumeDeleteDiagnostic {
+  volume_id: string;
+  status: string | null;
+  project_id: string | null;
+  attachments: Record<string, unknown>[];
+  dependencies: VolumeDeleteDependency[];
+  messages: VolumeDeleteMessage[];
+  root_cause_code: VolumeDeleteRootCause;
+  confidence: 'high' | 'medium' | 'low';
+  summary: string;
+  evidence: string[];
+  recommended_action: string;
+  recovery_available: boolean;
+  force_delete_available: boolean;
+}
+
+export interface VolumeDeleteRecoveryStep {
+  action: VolumeDeleteRecoveryAction;
+  status: VolumeDeleteRecoveryStepStatus;
+  detail: string | null;
+}
+
+export interface VolumeDeleteRecoveryResult {
+  volume_id: string;
+  status: VolumeDeleteRecoveryStatus;
+  verified_deleted: boolean;
+  final_status: string | null;
+  diagnostic: VolumeDeleteDiagnostic;
+  steps: VolumeDeleteRecoveryStep[];
 }

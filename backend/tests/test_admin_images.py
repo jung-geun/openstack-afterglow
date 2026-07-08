@@ -26,14 +26,14 @@ def _make_image(img_id: str, name: str, **extra) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 async def test_list_admin_images_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/images")
+    resp = await non_admin_client.get("/api/v1/admin/images")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_list_admin_images_allowed(admin_client, mock_conn):
     mock_conn.image.images.return_value = iter([])
-    resp = await admin_client.get("/api/admin/images")
+    resp = await admin_client.get("/api/v1/admin/images")
     assert resp.status_code != 403
 
 
@@ -47,7 +47,7 @@ async def test_list_admin_images_search_substring_case_insensitive(admin_client,
         _make_image("4", "fedora-39"),
     ]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?search=u")
+    resp = await admin_client.get("/api/v1/admin/images?search=u")
     assert resp.status_code == 200
     body = resp.json()
     names = {item["name"] for item in body["items"]}
@@ -61,7 +61,7 @@ async def test_list_admin_images_search_no_match(admin_client, mock_conn):
         _make_image("2", "centos-9"),
     ]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?search=zzznoexist")
+    resp = await admin_client.get("/api/v1/admin/images?search=zzznoexist")
     assert resp.status_code == 200
     body = resp.json()
     assert body["items"] == []
@@ -74,7 +74,7 @@ async def test_list_admin_images_search_pagination_with_marker(admin_client, moc
     """검색 결과가 limit 보다 많을 때 marker 기반 페이지네이션."""
     images = [_make_image(f"id-{i}", f"ubuntu-{i}") for i in range(5)]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?search=ubuntu&limit=2")
+    resp = await admin_client.get("/api/v1/admin/images?search=ubuntu&limit=2")
     assert resp.status_code == 200
     body = resp.json()
     assert [item["id"] for item in body["items"]] == ["id-0", "id-1"]
@@ -82,7 +82,7 @@ async def test_list_admin_images_search_pagination_with_marker(admin_client, moc
 
     # 두 번째 페이지
     mock_conn.image.images.return_value = iter(images)
-    resp2 = await admin_client.get("/api/admin/images?search=ubuntu&limit=2&marker=id-1")
+    resp2 = await admin_client.get("/api/v1/admin/images?search=ubuntu&limit=2&marker=id-1")
     assert resp2.status_code == 200
     body2 = resp2.json()
     assert [item["id"] for item in body2["items"]] == ["id-2", "id-3"]
@@ -94,7 +94,7 @@ async def test_list_admin_images_search_does_not_pass_name_to_glance(admin_clien
     """search 시 Glance에 name= 정확매칭 인자를 넘기면 안 된다 (substring은 클라이언트 필터)."""
     images = [_make_image("1", "ubuntu-24.04")]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?search=ub")
+    resp = await admin_client.get("/api/v1/admin/images?search=ub")
     assert resp.status_code == 200
     # Glance 호출 인자 검사: name 키가 없어야 함
     _, called_kwargs = mock_conn.image.images.call_args
@@ -106,7 +106,7 @@ async def test_list_admin_images_visibility_passed_to_glance(admin_client, mock_
     """?visibility=public 파라미터가 Glance 호출에 전달되어야 한다."""
     images = [_make_image("1", "ubuntu", visibility="public")]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?visibility=public")
+    resp = await admin_client.get("/api/v1/admin/images?visibility=public")
     assert resp.status_code == 200
     _, called_kwargs = mock_conn.image.images.call_args
     assert called_kwargs.get("visibility") == "public"
@@ -120,7 +120,7 @@ async def test_list_admin_images_no_visibility_no_filter(admin_client, mock_conn
         _make_image("2", "rocky", visibility="private"),
     ]
     mock_conn.image.images.return_value = iter(images)
-    resp = await admin_client.get("/api/admin/images?search=ub")
+    resp = await admin_client.get("/api/v1/admin/images?search=ub")
     assert resp.status_code == 200
     _, called_kwargs = mock_conn.image.images.call_args
     assert "visibility" not in called_kwargs
@@ -128,29 +128,29 @@ async def test_list_admin_images_no_visibility_no_filter(admin_client, mock_conn
 
 @pytest.mark.asyncio
 async def test_get_admin_image_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/images/img-1")
+    resp = await non_admin_client.get("/api/v1/admin/images/img-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_patch_admin_image_requires_admin(non_admin_client):
-    resp = await non_admin_client.patch("/api/admin/images/img-1", json={"name": "new"})
+    resp = await non_admin_client.patch("/api/v1/admin/images/img-1", json={"name": "new"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_admin_image_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/images/img-1")
+    resp = await non_admin_client.delete("/api/v1/admin/images/img-1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_deactivate_image_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/images/img-1/deactivate")
+    resp = await non_admin_client.post("/api/v1/admin/images/img-1/deactivate")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_reactivate_image_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/images/img-1/reactivate")
+    resp = await non_admin_client.post("/api/v1/admin/images/img-1/reactivate")
     assert resp.status_code == 403

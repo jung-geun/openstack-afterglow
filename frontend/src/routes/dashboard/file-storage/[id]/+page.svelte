@@ -39,7 +39,7 @@
 	async function fetchFileStorage(id: string) {
 		loading = true; error = '';
 		try {
-			fileStorage = await api.get<FileStorage>(`/api/file-storage/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			fileStorage = await api.get<FileStorage>(`/api/v1/file-storage/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally { loading = false; }
@@ -48,7 +48,7 @@
 	async function fetchAccessRules(id: string) {
 		accessLoading = true;
 		try {
-			accessRules = await api.get<AccessRule[]>(`/api/file-storage/${id}/access-rules`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			accessRules = await api.get<AccessRule[]>(`/api/v1/file-storage/${id}/access-rules`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { accessRules = []; } finally { accessLoading = false; }
 	}
 
@@ -57,7 +57,7 @@
 		addingRule = true; ruleError = '';
 		const access_type = fileStorage.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
-			await api.post(`/api/file-storage/${fileStorage.id}/access-rules`,
+			await api.post(`/api/v1/file-storage/${fileStorage.id}/access-rules`,
 				{ access_to: form.access_to.trim(), access_level: form.access_level, access_type },
 				$auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchAccessRules(fileStorage.id);
@@ -70,7 +70,7 @@
 		if (!fileStorage || !await confirmDialog('이 접근 규칙을 삭제하시겠습니까?')) return;
 		revokingId = accessId;
 		try {
-			await api.delete(`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchAccessRules(fileStorage.id);
 		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { revokingId = null; }
@@ -80,7 +80,7 @@
 		if (!fileStorage || !await confirmDialog(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deleting = false; }

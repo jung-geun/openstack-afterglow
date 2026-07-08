@@ -1,0 +1,23 @@
+export interface PublicSiteConfig {
+	site_name: string;
+	site_description: string;
+	logo_path: string;
+	logo_dark_path: string;
+	logo_light_path: string;
+	favicon_path: string;
+	refresh_interval_ms: number;
+	services: {
+		magnum: boolean;
+		manila: boolean;
+		zun: boolean;
+		k3s: boolean;
+		trove: boolean;
+		swift: boolean;
+		barbican: boolean;
+	};
+	runtime: {
+		api_base: string;
+		s3_base: string;
+		grafana_base: string;
+	};
+}

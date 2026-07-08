@@ -1,65 +1,44 @@
 import { writable, get } from 'svelte/store';
-import { env } from '$env/dynamic/public';
+import type { PublicSiteConfig } from '$lib/types/siteConfig';
 
-interface SiteConfig {
-	site_name: string;
-	site_description: string;
-	logo_path: string;
-	logo_dark_path: string;
-	logo_light_path: string;
-	favicon_path: string;
-	services: {
-		magnum: boolean;
-		manila: boolean;
-		zun: boolean;
-		k3s: boolean;
-		trove: boolean;
-		swift: boolean;
-	};
-}
+export type SiteConfig = PublicSiteConfig;
 
 const DEFAULTS: SiteConfig = {
 	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
-	logo_dark_path: '/logo-dark.png',
-	logo_light_path: '/logo-white.png',
+	logo_dark_path: '/logo-white.png',
+	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
-	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false },
+	refresh_interval_ms: 5000,
+	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+	runtime: {
+		api_base: '',
+		s3_base: '',
+		grafana_base: '',
+	},
 };
 
 export const siteConfig = writable<SiteConfig>({ ...DEFAULTS });
 
-export async function loadSiteConfig(): Promise<void> {
-	// 환경변수가 설정되어 있으면 API 호출 없이 사용
-	const nameFromEnv = env.PUBLIC_SITE_NAME;
-	const descFromEnv = env.PUBLIC_SITE_DESCRIPTION;
-	const logoFromEnv = env.PUBLIC_LOGO_PATH;
-	const faviconFromEnv = env.PUBLIC_FAVICON_PATH;
-	if (nameFromEnv || descFromEnv || logoFromEnv || faviconFromEnv) {
-		siteConfig.set({
-			site_name: nameFromEnv || DEFAULTS.site_name,
-			site_description: descFromEnv || DEFAULTS.site_description,
-			logo_path: logoFromEnv || DEFAULTS.logo_path,
-			logo_dark_path: DEFAULTS.logo_dark_path,
-			logo_light_path: DEFAULTS.logo_light_path,
-			favicon_path: faviconFromEnv || DEFAULTS.favicon_path,
-			services: DEFAULTS.services,
-		});
-		return;
-	}
-	try {
-		const apiBase = typeof window !== 'undefined'
-			? (env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`)
-			: (env.PUBLIC_API_BASE || 'http://backend:8000');
-		const res = await fetch(`${apiBase}/api/site-config`);
-		if (res.ok) {
-			const data = await res.json();
-			siteConfig.set({ ...DEFAULTS, ...data });
-		}
-	} catch {
-		// 네트워크 오류 시 기본값 유지
-	}
+export function initSiteConfig(config: Partial<PublicSiteConfig>): void {
+	siteConfig.update((current) => ({
+		...current,
+		...config,
+		services: { ...current.services, ...(config.services ?? {}) },
+		runtime: { ...current.runtime, ...(config.runtime ?? {}) },
+	}));
+}
+
+export function qualifyBackendAssetPaths(config: Partial<PublicSiteConfig>, apiBase: string): Partial<PublicSiteConfig> {
+	const qualify = (value: string | undefined) =>
+		value?.startsWith('/api/') ? `${apiBase}${value}` : value;
+	const next = { ...config };
+	if (next.logo_path) next.logo_path = qualify(next.logo_path);
+	if (next.logo_dark_path) next.logo_dark_path = qualify(next.logo_dark_path);
+	if (next.logo_light_path) next.logo_light_path = qualify(next.logo_light_path);
+	if (next.favicon_path) next.favicon_path = qualify(next.favicon_path);
+	return next;
 }
 
 export function getSiteName(): string {

@@ -12,6 +12,8 @@
   import SecurityServiceAttachModal from '$lib/components/dashboard/file-storage/security-services/SecurityServiceAttachModal.svelte';
   import SecurityServiceTable from '$lib/components/dashboard/file-storage/security-services/SecurityServiceTable.svelte';
   import { toast } from '$lib/stores/toast';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
   let services = $state<SecurityService[]>([]);
   let shareNetworks = $state<ShareNetwork[]>([]);
@@ -30,10 +32,25 @@
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
+  const securityServicesEnabled = $derived($betaFeatures.fileStorageSecurityServices);
+
+  function clearServicesState() {
+    services = [];
+    shareNetworks = [];
+    error = '';
+    createError = '';
+    attachError = '';
+  }
+
 
   async function fetchServices(opts?: { refresh?: boolean }) {
+    if (!securityServicesEnabled) {
+      clearServicesState();
+      loading = false;
+      return;
+    }
     try {
-      services = await api.get<SecurityService[]>('/api/security-services', token, projectId, opts);
+      services = await api.get<SecurityService[]>('/api/v1/security-services', token, projectId, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -45,10 +62,11 @@
   type CreateForm = { type: string; name: string; description: string; dns_ip: string; server: string; domain: string; user: string; password: string };
 
   async function createService(form: CreateForm): Promise<boolean> {
+    if (!securityServicesEnabled) return false;
     if (!form.name.trim()) return false;
     creating = true; createError = '';
     try {
-      await api.post('/api/security-services', { ...form }, token, projectId);
+      await api.post('/api/v1/security-services', { ...form }, token, projectId);
       await fetchServices();
       return true;
     } catch (e) {
@@ -58,17 +76,19 @@
   }
 
   async function openAttachModal(serviceId: string) {
+    if (!securityServicesEnabled) return;
     selectedServiceId = serviceId; selectedNetworkId = ''; attachError = '';
     showAttachModal = true;
-    try { shareNetworks = await api.get<ShareNetwork[]>('/api/share-networks', token, projectId); }
+    try { shareNetworks = await api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId); }
     catch { shareNetworks = []; }
   }
 
   async function attachToNetwork(): Promise<boolean> {
+    if (!securityServicesEnabled) return false;
     if (!selectedNetworkId) return false;
     attaching = true; attachError = '';
     try {
-      await api.post(`/api/security-services/${selectedServiceId}/attach?share_network_id=${selectedNetworkId}`, {}, token, projectId);
+      await api.post(`/api/v1/security-services/${selectedServiceId}/attach?share_network_id=${selectedNetworkId}`, {}, token, projectId);
       toast.success('Share Network에 Security Service가 연결되었습니다.');
       return true;
     } catch (e) {
@@ -78,9 +98,10 @@
   }
 
   async function deleteService(id: string, name: string) {
+    if (!securityServicesEnabled) return;
     if (!await confirmDialog(`Security Service "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
-    try { await api.delete(`/api/security-services/${id}`, token, projectId); await fetchServices(); }
+    try { await api.delete(`/api/v1/security-services/${id}`, token, projectId); await fetchServices(); }
     catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deleting = null; }
   }
@@ -98,12 +119,22 @@
   });
 
   $effect(() => {
+    if (!securityServicesEnabled) {
+      clearServicesState();
+      loading = false;
+      return;
+    }
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchServices());
   });
 </script>
 
+{#if !securityServicesEnabled}
+  <div class="p-4 md:p-8">
+    <BetaFeatureGate title="Security Service는 베타 기능입니다" />
+  </div>
+{:else}
 <SecurityServiceCreateModal bind:open={showModal} {creating} error={createError} onSubmit={createService} />
 <SecurityServiceAttachModal bind:open={showAttachModal} {shareNetworks} {attaching} error={attachError} bind:selectedNetworkId onAttach={attachToNetwork} />
 
@@ -130,3 +161,4 @@
     <SecurityServiceTable {services} {deleting} onAttachClick={openAttachModal} onDelete={deleteService} onCreateClick={() => { showModal = true; }} />
   {/if}
 </div>
+{/if}

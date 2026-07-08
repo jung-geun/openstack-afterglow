@@ -5,7 +5,8 @@ A5: root_squash 강제 + sec_flavor 옵션 (Manila API v2.65 metadata 필드)
 
 from unittest.mock import MagicMock, patch
 
-# ---------------------------------------------------------------------------
+import httpx
+
 # _build_nfs_access_metadata
 # ---------------------------------------------------------------------------
 
@@ -262,6 +263,28 @@ def test_ensure_nfs_access_rule_root_squash_disabled(mock_create, mock_list):
     assert "root_squash" not in passed_meta
 
 
+@patch("app.services.manila.get_client")
+def test_list_access_rules_legacy_fallback_suppresses_error_logging(mock_get_client):
+    """legacy os-list-access fallback은 unsupported여도 ERROR 로그를 남기지 않는다."""
+    from app.services.manila import list_access_rules
+
+    client = MagicMock()
+    client.get.return_value = {"access_rules": []}
+    request = httpx.Request("POST", "https://manila.example.com/v2/proj/shares/share-1/action")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"badRequest": {"code": 400, "message": "There is no such action: os-list-access"}},
+    )
+    client.post.side_effect = httpx.HTTPStatusError("unsupported", request=request, response=response)
+    mock_get_client.return_value = client
+
+    result = list_access_rules(MagicMock(), "share-1")
+
+    assert result == []
+    client.post.assert_called_once_with("shares/share-1/action", {"os-list-access": {}}, log_errors=False)
+
+
 # ---------------------------------------------------------------------------
 # Settings — 새 config 필드 기본값
 # ---------------------------------------------------------------------------
@@ -369,3 +392,36 @@ def test_settings_manila_cephx_key_timeout_env_override(monkeypatch):
     monkeypatch.setenv("MANILA_CEPHX_KEY_TIMEOUT_SECONDS", "600")
     s = Settings()
     assert s.manila_cephx_key_timeout_seconds == 600
+
+
+# ---------------------------------------------------------------------------
+# force_delete_file_storage
+# ---------------------------------------------------------------------------
+
+
+@patch("app.services.manila.get_client")
+def test_force_delete_file_storage_posts_force_delete_action(mock_get_client):
+    from app.services.manila import force_delete_file_storage
+
+    client = MagicMock()
+    mock_get_client.return_value = client
+
+    result = force_delete_file_storage(MagicMock(), "share-1")
+
+    assert result == "force_delete_submitted"
+    client.post.assert_called_once_with("shares/share-1/action", {"force_delete": None})
+
+
+@patch("app.services.manila.get_client")
+def test_force_delete_file_storage_returns_already_deleted_on_404(mock_get_client):
+    from app.services.manila import force_delete_file_storage
+
+    request = httpx.Request("POST", "http://manila.example/v2/project/shares/share-1/action")
+    response = httpx.Response(404, request=request)
+    client = MagicMock()
+    client.post.side_effect = httpx.HTTPStatusError("not found", request=request, response=response)
+    mock_get_client.return_value = client
+
+    result = force_delete_file_storage(MagicMock(), "share-1")
+
+    assert result == "already_deleted"

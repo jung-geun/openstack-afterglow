@@ -1,6 +1,7 @@
 """Notion 다중 타겟 + dedup 테스트."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -219,7 +220,7 @@ async def test_sync_new_instance_always_posts():
 async def test_list_notion_targets_empty(admin_client):
     """NotionTarget이 없으면 빈 배열을 반환한다."""
     with patch("app.services.notion_sync.list_notion_targets", AsyncMock(return_value=[])):
-        resp = await admin_client.get("/api/admin/notion/targets")
+        resp = await admin_client.get("/api/v1/admin/notion/targets")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -246,7 +247,7 @@ async def test_list_notion_targets_returns_masked_keys(admin_client):
         }
     ]
     with patch("app.services.notion_sync.list_notion_targets", AsyncMock(return_value=fake_targets)):
-        resp = await admin_client.get("/api/admin/notion/targets")
+        resp = await admin_client.get("/api/v1/admin/notion/targets")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -257,7 +258,7 @@ async def test_list_notion_targets_returns_masked_keys(admin_client):
 async def test_delete_notion_target_not_found(admin_client):
     """존재하지 않는 타겟 삭제 시 404를 반환한다."""
     with patch("app.services.notion_sync.delete_notion_target", AsyncMock(return_value=False)):
-        resp = await admin_client.delete("/api/admin/notion/targets/999")
+        resp = await admin_client.delete("/api/v1/admin/notion/targets/999")
     assert resp.status_code == 404
 
 
@@ -265,7 +266,7 @@ async def test_delete_notion_target_not_found(admin_client):
 async def test_delete_notion_target_success(admin_client):
     """정상 삭제 시 200과 ok 메시지를 반환한다."""
     with patch("app.services.notion_sync.delete_notion_target", AsyncMock(return_value=True)):
-        resp = await admin_client.delete("/api/admin/notion/targets/1")
+        resp = await admin_client.delete("/api/v1/admin/notion/targets/1")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
@@ -277,12 +278,140 @@ async def test_update_notion_target_not_found(admin_client):
         patch("app.services.notion_sync.get_notion_target", AsyncMock(return_value=None)),
         patch("app.services.notion_sync.update_notion_target", AsyncMock(return_value=None)),
     ):
-        resp = await admin_client.patch("/api/admin/notion/targets/999", json={"label": "new"})
+        resp = await admin_client.patch("/api/v1/admin/notion/targets/999", json={"label": "new"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_update_notion_target_invalid_interval(admin_client):
     """interval_minutes 범위 초과 시 400을 반환한다."""
-    resp = await admin_client.patch("/api/admin/notion/targets/1", json={"interval_minutes": 9999})
+    resp = await admin_client.patch("/api/v1/admin/notion/targets/1", json={"interval_minutes": 9999})
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_collect_instance_data_resolves_normalized_gpu_alias_for_notion_relation():
+    from app.services.openstack_inventory import collect_instance_data
+
+    flavor = SimpleNamespace(
+        id="flavor-3060",
+        name="gpu.3060lhr_8c_16g",
+        vcpus=8,
+        ram=16384,
+        extra_specs={"pci_passthrough:alias": "RTX-3060-LHR:1"},
+    )
+    server = SimpleNamespace(
+        id="inst-3060",
+        name="alias-vm",
+        status="ACTIVE",
+        flavor={"id": "flavor-3060", "original_name": "gpu.3060lhr_8c_16g"},
+        addresses={},
+        created_at="2026-07-01 00:00:00",
+        compute_host="compute-1",
+        user_id="user-1",
+        project_id="project-1",
+    )
+    conn = SimpleNamespace(
+        compute=SimpleNamespace(
+            flavors=MagicMock(return_value=[flavor]),
+            servers=MagicMock(return_value=[server]),
+        ),
+        identity=SimpleNamespace(
+            projects=MagicMock(return_value=[SimpleNamespace(id="project-1", name="project")]),
+            users=MagicMock(return_value=[SimpleNamespace(id="user-1", name="user", email="user@example.com")]),
+        ),
+        close=MagicMock(),
+    )
+    settings = SimpleNamespace(
+        os_auth_url="https://openstack.example/v3",
+        os_username="user",
+        os_password="password",
+        os_project_name="service",
+        os_user_domain_name="Default",
+        os_project_domain_name="Default",
+        ssl_verify=True,
+    )
+
+    with (
+        patch("openstack.connect", return_value=conn),
+        patch("app.config.get_settings", return_value=settings),
+        patch(
+            "app.services.gpu_inventory.build_alias_to_device_name_map",
+            return_value={
+                "RTX_3060_LHR": "RTX 3060 LHR",
+                "rtx3060lhr": "RTX 3060 LHR",
+            },
+        ),
+    ):
+        rows = await collect_instance_data(
+            gpu_name_to_page_id={"RTX 3060 LHR": "page-3060"},
+        )
+
+    assert rows[0]["gpu_name"] == "RTX 3060 LHR"
+    assert rows[0]["gpu_spec_page_id"] == "page-3060"
+    assert rows[0]["gpu_count"] == 1
+
+
+def test_build_gpu_usage_by_gpu_excludes_shelved_statuses():
+    from app.services.notion_sync import build_gpu_usage_by_gpu
+
+    usage_by_gpu = build_gpu_usage_by_gpu(
+        hypervisors=[
+            {
+                "gpu_groups": [
+                    {
+                        "device_name": "RTX 3090",
+                        "total": 2,
+                    }
+                ]
+            }
+        ],
+        instances=[
+            {
+                "status": "ACTIVE",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+            {
+                "status": "SHELVED_OFFLOADED",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+            {
+                "status": "SHELVED",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+        ],
+        alias_to_device_name={},
+    )
+
+    assert usage_by_gpu["RTX 3090"]["gpu_used"] == 1
+    assert usage_by_gpu["RTX 3090"]["total_gpu_used"] == 1
+    assert usage_by_gpu["RTX 3090"]["instance_count"] == 1
+    assert usage_by_gpu["RTX 3090"]["gpu_remaining"] == 1
+
+
+def test_build_instance_properties_clears_empty_gpu_map_relation():
+    from app.services.notion_sync import _build_instance_properties
+
+    schema = {
+        "Name": {"type": "title"},
+        "GPU map": {"type": "relation"},
+    }
+    props = _build_instance_properties(
+        schema,
+        "Name",
+        {
+            "name": "shelved-gpu",
+            "gpu_spec_page_id": "",
+        },
+    )
+
+    assert props["GPU map"] == {"relation": []}

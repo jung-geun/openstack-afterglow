@@ -326,21 +326,31 @@ Cinder 블록 스토리지 볼륨, 백업, 스냅샷을 관리합니다.
 
 ---
 
-## 4. 볼륨 강제 삭제
+## 4. 볼륨 강제 삭제 및 삭제 복구 진단
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `POST` | `/api/volumes/{volume_id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
+| `POST` | `/api/v1/volumes/{volume_id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
+| `GET` | `/api/v1/admin/volumes/{volume_id}/delete-diagnostics` | 관리자 전용 삭제 실패 원인 진단 |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/recover-delete` | 관리자 전용 진단 기반 자동 삭제 복구 |
 
-### POST /api/volumes/{volume_id}/force-delete
+### POST /api/v1/volumes/{volume_id}/force-delete
 
-`error` 또는 `error_deleting` 상태의 볼륨을 강제 삭제합니다. Cinder의 `os-reset-status`로 상태를 `available`로 변경한 후 삭제합니다.
+`error` 또는 `error_deleting` 상태의 볼륨을 강제 삭제합니다. 현재 구현은 Cinder의 `os-reset-status`로 상태를 `error`로 재설정한 뒤 일반 삭제를 먼저 시도하고, 실패하면 `os-force_delete`로 폴백합니다.
 
 | 파라미터 | 위치 | 타입 | 필수 | 설명 |
 |----------|------|------|------|------|
 | `volume_id` | path | string | 예 | 볼륨 UUID |
 
 **응답**: `204 No Content`
+
+### GET /api/v1/admin/volumes/{volume_id}/delete-diagnostics
+
+관리자 전용 엔드포인트입니다. `error_deleting` 등 삭제 실패 상태의 볼륨에 대해 Cinder 상태, attachment, snapshot/backup 종속성, Cinder messages를 확인하고 자동 복구 가능 여부를 반환합니다. Cinder messages 조회는 best-effort이며 실패해도 진단은 계속됩니다.
+
+### POST /api/v1/admin/volumes/{volume_id}/recover-delete
+
+관리자 전용 엔드포인트입니다. 서버가 진단을 다시 수행한 뒤 attachment와 snapshot/backup 종속성이 없는 경우에만 `reset_status(error, detached)` → 일반 삭제 → 삭제 검증 → 필요 시 force-delete → 삭제 검증 순서로 실행합니다. 스냅샷/백업 종속성은 자동 삭제하지 않으며, 존재하면 `blocked` 결과로 반환하므로 관리자가 별도 명시 작업으로 보존 또는 삭제를 결정해야 합니다.
 
 ---
 

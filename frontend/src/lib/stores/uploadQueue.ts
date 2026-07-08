@@ -34,7 +34,7 @@ function enqueue(
 		/** object-storage 업로드 시 사용. image 업로드 시에는 endpoint를 직접 지정. */
 		containerName?: string;
 		prefix?: string;
-		/** image 업로드 시 '/api/images' 등 엔드포인트를 직접 지정. */
+		/** image 업로드 시 '/api/v1/images' 등 엔드포인트를 직접 지정. */
 		endpoint?: string;
 		/** 추가 FormData 필드 (이미지 name, disk_format 등). */
 		extraFields?: Record<string, string>;
@@ -73,7 +73,7 @@ function enqueue(
 			}
 		}
 	} else {
-		uploadUrl = `/api/object-storage/${encodeURIComponent(params.containerName ?? '')}/upload`;
+		uploadUrl = `/api/v1/object-storage/${encodeURIComponent(params.containerName ?? '')}/upload`;
 		if (params.prefix) formData.append('prefix', params.prefix);
 	}
 

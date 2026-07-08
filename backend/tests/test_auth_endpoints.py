@@ -1,8 +1,11 @@
 """인증 API 단위 테스트."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from app.config import get_settings
 
 
 def make_auth_data() -> dict:
@@ -38,7 +41,7 @@ async def test_login_success(client):
         patch("app.api.identity.auth.keystone.get_openstack_connection", return_value=mock_conn),
     ):
         resp = await client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "username": "testuser",
                 "password": "password123",
@@ -56,7 +59,7 @@ async def test_login_success(client):
 async def test_login_failure(client):
     with patch("app.api.identity.auth.keystone.authenticate", side_effect=Exception("auth failed")):
         resp = await client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "username": "testuser",
                 "password": "wrongpassword",
@@ -72,35 +75,64 @@ async def test_login_failure(client):
 
 @pytest.mark.asyncio
 async def test_me(client):
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_id"] == "test-user-123"
     assert data["username"] == "testuser"
 
 
-# ────── session-info ──────
+# ────── token/project (rescope) ──────
 
 
 @pytest.mark.asyncio
-async def test_session_info(client):
-    with patch("app.api.identity.auth.get_session_remaining", new_callable=AsyncMock, return_value=3500):
-        resp = await client.get("/api/auth/session-info")
+async def test_scope_project(client):
+    """POST /api/auth/token/project: 접근 가능한 프로젝트로 새 토큰 쌍 발급."""
+    kc_info = {
+        "token": "new-ks-token",
+        "project_id": "other-project-456",
+        "project_name": "other-project",
+        "user_id": "test-user-123",
+        "username": "testuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+    }
+    with (
+        patch("app.api.identity.auth.keystone.validate_token", return_value=kc_info),
+        patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
+    ):
+        resp = await client.post(
+            "/api/v1/auth/token/project",
+            json={"project_id": "other-project-456"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert "remaining_seconds" in data
-    assert "timeout_seconds" in data
-
-
-# ────── extend-session ──────
+    assert data["project_id"] == "other-project-456"
+    assert data["token"] and data["token"].count(".") == 2
 
 
 @pytest.mark.asyncio
-async def test_extend_session(client):
-    with patch("app.api.identity.auth.extend_session", new_callable=AsyncMock):
-        resp = await client.post("/api/auth/extend-session")
-    assert resp.status_code == 200
-    assert "message" in resp.json()
+async def test_scope_project_no_access(client):
+    """접근 권한 없는 프로젝트로 rescope 시 403."""
+    with patch(
+        "app.api.identity.auth.keystone.validate_token",
+        side_effect=Exception("forbidden"),
+    ):
+        resp = await client.post(
+            "/api/v1/auth/token/project",
+            json={"project_id": "forbidden-project"},
+        )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_scope_project_old_route_gone(client):
+    """구 /switch-project 경로는 더 이상 처리되지 않아야 한다 (404 또는 405)."""
+    resp = await client.post(
+        "/api/v1/auth/switch-project",
+        json={"project_id": "any-project"},
+    )
+    assert resp.status_code in (404, 405), f"구 /switch-project가 예상치 못한 {resp.status_code}를 반환했습니다"
 
 
 # ────── logout ──────
@@ -115,7 +147,7 @@ async def test_logout(client):
         mock_r = AsyncMock()
         mock_r.delete = AsyncMock()
         mock_redis.return_value = mock_r
-        resp = await client.post("/api/auth/logout")
+        resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 200
     assert "로그아웃" in resp.json()["message"]
 
@@ -130,7 +162,7 @@ async def test_logout_invalidates_token_cache(client):
             new_callable=AsyncMock,
         ) as mock_invalidate,
     ):
-        resp = await client.post("/api/auth/logout")
+        resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 200
     # invalidate_token_cache 가 호출되어야 함 (token, project_id 인자)
     assert mock_invalidate.await_count == 1
@@ -154,7 +186,7 @@ def test_token_cache_ttl_is_short():
 async def test_list_projects(client):
     projects = [{"id": "proj-1", "name": "myproject", "description": "", "domain_id": "default", "enabled": True}]
     with patch("app.api.identity.auth.keystone.list_projects", return_value=projects):
-        resp = await client.get("/api/auth/projects")
+        resp = await client.get("/api/v1/auth/projects")
     assert resp.status_code == 200
     assert resp.json()[0]["id"] == "proj-1"
 
@@ -166,7 +198,7 @@ async def test_list_projects(client):
 async def test_list_my_groups_success(client):
     groups = [{"id": "grp-1", "name": "devteam", "description": "Dev Team", "domain_id": "default"}]
     with patch("app.api.identity.auth.keystone.list_user_groups", return_value=groups):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json()[0]["id"] == "grp-1"
     assert resp.json()[0]["name"] == "devteam"
@@ -175,7 +207,7 @@ async def test_list_my_groups_success(client):
 @pytest.mark.asyncio
 async def test_list_my_groups_forbidden(client):
     with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("forbidden")):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -184,7 +216,7 @@ async def test_list_my_groups_forbidden(client):
 async def test_list_my_groups_unexpected_error_returns_empty(client):
     # service 내부에서 어떤 예외든 PermissionError 로 변환되므로 endpoint 는 [] 반환
     with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("unexpected")):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -217,9 +249,25 @@ def test_list_user_groups_converts_exception_to_permission_error():
 
 @pytest.mark.asyncio
 async def test_gitlab_enabled(client):
-    resp = await client.get("/api/auth/gitlab/enabled")
+    resp = await client.get("/api/v1/auth/gitlab/enabled")
     assert resp.status_code == 200
     assert "enabled" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_gitlab_enabled_preflight_allows_configured_frontend_origin(client):
+    origin = get_settings().cors_origin_list[0]
+    resp = await client.options(
+        "/api/v1/auth/gitlab/enabled",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
 
 
 # ────── auth_method 필드 ──────
@@ -228,7 +276,7 @@ async def test_gitlab_enabled(client):
 @pytest.mark.asyncio
 async def test_me_returns_auth_method(client):
     """/me 응답에 auth_method 필드가 포함되어야 한다."""
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     data = resp.json()
     assert "auth_method" in data
@@ -267,7 +315,7 @@ async def test_gitlab_callback_stores_federated_auth_method():
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
-                "/api/auth/gitlab/callback",
+                "/api/v1/auth/gitlab/callback",
                 json={"code": "auth-code", "state": "state-value"},
             )
 
@@ -277,3 +325,47 @@ async def test_gitlab_callback_stores_federated_auth_method():
             f"gitlab_callback은 auth_method='federated'를 store_session에 전달해야 합니다. "
             f"실제 값: {captured.get('auth_method')!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_gitlab_callback_returns_default_project_id():
+    """gitlab_callback이 접근 가능한 default_project_id를 응답에 포함한다."""
+    exchange_data = {
+        "token": "ks-token",
+        "project_id": "proj-123",
+        "project_name": "test-project",
+        "user_id": "user-123",
+        "username": "gitlabuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+        "default_project_id": "proj-123",
+    }
+    captured: dict = {}
+
+    async def mock_store_session(*, jti, keystone_token, project_id, user_id, exp, auth_method="password", **kwargs):
+        captured["auth_method"] = auth_method
+
+    with (
+        patch("app.api.identity.auth.get_settings", return_value=SimpleNamespace(gitlab_oidc_enabled=True)),
+        patch("app.services.gitlab_oidc.exchange_code", new_callable=AsyncMock, return_value=exchange_data),
+        patch("app.services.session_store.store_session", side_effect=mock_store_session),
+        patch("app.services.jwt_service.sign_refresh", return_value=("refresh-tok", "jti-123", 9999999999)),
+        patch("app.services.jwt_service.sign_access", return_value=("access-tok", "ajti-123", 9999999999)),
+        patch("app.api.identity.auth._prewarm_dashboard"),
+        patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
+    ):
+        from httpx import ASGITransport, AsyncClient
+
+        from app.main import app
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/auth/gitlab/callback",
+                json={"code": "auth-code", "state": "state-value"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["default_project_id"] == "proj-123"
+    assert data["project_id"] == "proj-123"
+    assert captured["auth_method"] == "federated"

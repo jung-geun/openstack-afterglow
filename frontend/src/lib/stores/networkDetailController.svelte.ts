@@ -23,7 +23,7 @@ function createNetworkDetailController(opts: Options) {
 	let selectedSubnetId = $state('');
 	let connectingRouter = $state(false);
 
-	const isUserPanel = $derived(opts.apiBase() === '/api/networks');
+	const isUserPanel = $derived(opts.apiBase() === '/api/v1/networks');
 
 	$effect(() => {
 		const id = opts.networkId();
@@ -48,7 +48,7 @@ function createNetworkDetailController(opts: Options) {
 	async function openRouterConnect() {
 		if (!allRouters.length) {
 			try {
-				allRouters = await api.get<RouterListItem[]>('/api/routers', opts.token(), opts.projectId());
+				allRouters = await api.get<RouterListItem[]>('/api/v1/routers', opts.token(), opts.projectId());
 			} catch {
 				allRouters = [];
 			}
@@ -65,7 +65,7 @@ function createNetworkDetailController(opts: Options) {
 			const subnet = network?.subnet_details.find(s => s.id === selectedSubnetId);
 			const autoGateway = !subnet?.gateway_ip;
 			await api.post(
-				`/api/routers/${selectedRouterId}/interfaces`,
+				`/api/v1/routers/${selectedRouterId}/interfaces`,
 				{ subnet_id: selectedSubnetId, auto_gateway: autoGateway },
 				opts.token(),
 				opts.projectId()
@@ -88,7 +88,7 @@ function createNetworkDetailController(opts: Options) {
 		}
 		if (!(await confirmDialog(`라우터 "${router.name || router.id.slice(0, 8)}"과의 연결을 해제하시겠습니까?`))) return;
 		try {
-			await api.delete(`/api/routers/${router.id}/interfaces/${targetSubnet}`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/routers/${router.id}/interfaces/${targetSubnet}`, opts.token(), opts.projectId());
 			await fetchNetwork();
 		} catch (e) {
 			toast.error('라우터 연결 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

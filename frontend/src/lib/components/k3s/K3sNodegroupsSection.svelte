@@ -26,7 +26,7 @@
 		loading = true;
 		try {
 			nodegroups = await api.get<K3sNodegroup[]>(
-				`/api/k3s/clusters/${clusterId}/nodegroups`,
+				`/api/v1/k3s/clusters/${clusterId}/nodegroups`,
 				token,
 				projectId,
 			);
@@ -46,7 +46,7 @@
 		deleting = true;
 		deleteError = '';
 		try {
-			await api.delete(`/api/k3s/clusters/${clusterId}/nodegroups/${deleteTarget.id}`, token, projectId);
+			await api.delete(`/api/v1/k3s/clusters/${clusterId}/nodegroups/${deleteTarget.id}`, token, projectId);
 			deleteTarget = null;
 			await load();
 		} catch (e) {

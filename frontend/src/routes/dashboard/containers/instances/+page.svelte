@@ -28,7 +28,7 @@
 
   async function fetchContainers(opts?: { refresh?: boolean }) {
     try {
-      const resp = await api.get<ContainerListResponse>('/api/containers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+      const resp = await api.get<ContainerListResponse>('/api/v1/containers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       containers = resp.items;
       serviceAvailable = resp.service_available;
       serviceMessage = resp.message;
@@ -58,7 +58,7 @@
     creating = true;
     createError = '';
     try {
-      await api.post('/api/containers', buildContainerCreatePayload(payload), $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/v1/containers', buildContainerCreatePayload(payload), $auth.token ?? undefined, $auth.projectId ?? undefined);
       showModal = false;
       await fetchContainers();
       return true;
@@ -73,7 +73,7 @@
   async function startContainer(uuid: string) {
     actionTarget = uuid;
     try {
-      await api.post(`/api/containers/${uuid}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post(`/api/v1/containers/${uuid}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
       toast.error('시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -85,7 +85,7 @@
   async function stopContainer(uuid: string) {
     actionTarget = uuid;
     try {
-      await api.post(`/api/containers/${uuid}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post(`/api/v1/containers/${uuid}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
       toast.error('중지 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -98,7 +98,7 @@
     if (!await confirmDialog(`컨테이너 "${name}"을 삭제하시겠습니까?`)) return;
     actionTarget = uuid;
     try {
-      await api.delete(`/api/containers/${uuid}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/containers/${uuid}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
