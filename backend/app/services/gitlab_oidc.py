@@ -261,5 +261,8 @@ async def exchange_code(code: str, state: str) -> dict:
     if not projects:
         raise ValueError("접근 가능한 프로젝트가 없습니다")
 
-    target_pid = default_pid if default_pid and any(p["id"] == default_pid for p in projects) else projects[0]["id"]
-    return await _scope_token(unscoped_token, target_pid)
+    valid_default_pid = default_pid if default_pid and any(p["id"] == default_pid for p in projects) else ""
+    target_pid = valid_default_pid or projects[0]["id"]
+    scoped = await _scope_token(unscoped_token, target_pid)
+    scoped["default_project_id"] = valid_default_pid
+    return scoped

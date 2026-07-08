@@ -2,14 +2,10 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { setAuth, setAvailableProjects } from '$lib/stores/auth';
+	import { setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-
-	interface Project {
-		id: string;
-		name: string;
-		description?: string;
-	}
+	import type { LoginResponse } from '$lib/types/auth';
+	import { resolvePostLoginProject } from '$lib/utils/authFlow';
 
 	let error = $state('');
 	let loading = $state(true);
@@ -38,54 +34,25 @@
 		}
 
 		try {
-			const data = await api.post<{
-				token: string;
-				user_id: string;
-				username: string;
-				project_id: string;
-				project_name: string;
-				expires_at: string | null;
-				roles?: string[];
-				default_project_id?: string;
-				is_system_admin?: boolean;
-			}>('/api/v1/auth/gitlab/callback', { code, state });
-
-			// 프로젝트 목록 조회
-			let projects: Project[] = [];
-			try {
-				projects = await api.get<Project[]>('/api/v1/auth/projects', data.token);
-			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
-
-			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환
-			let selectedProjectId: string | null = null;
-			let selectedProjectName: string | null = null;
-			if (data.default_project_id && projects.length > 0) {
-				const defaultProject = projects.find(p => p.id === data.default_project_id);
-				if (defaultProject) {
-					selectedProjectId = defaultProject.id;
-					selectedProjectName = defaultProject.name;
-				}
-			}
-			if (!selectedProjectId && projects.length === 1) {
-				selectedProjectId = projects[0].id;
-				selectedProjectName = projects[0].name;
-			}
+			const data = await api.post<LoginResponse>('/api/v1/auth/gitlab/callback', { code, state });
+			const resolution = resolvePostLoginProject(data);
+			const scopedProjectId = data.project_id?.trim() || null;
 
 			setAuth({
 				token: data.token,
-				refreshToken: (data as { refresh_token?: string }).refresh_token ?? null,
+				refreshToken: data.refresh_token ?? null,
 				accessExpiresAt: data.expires_at
 					? Math.floor(new Date(data.expires_at).getTime() / 1000)
 					: null,
 				userId: data.user_id,
 				username: data.username,
-				projectId: selectedProjectId,
-				projectName: selectedProjectName,
+				projectId: resolution.projectId,
+				projectName: resolution.projectId === scopedProjectId ? (data.project_name || null) : null,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
+				federated: true,
 			});
-			setAvailableProjects(projects);
-			goto(selectedProjectId ? '/dashboard' : '/select-project');
+			await goto(resolution.target);
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status}): ${e.message}` : 'GitLab 인증에 실패했습니다';
 			loading = false;

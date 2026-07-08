@@ -1,5 +1,6 @@
 """인증 API 단위 테스트."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -324,3 +325,47 @@ async def test_gitlab_callback_stores_federated_auth_method():
             f"gitlab_callback은 auth_method='federated'를 store_session에 전달해야 합니다. "
             f"실제 값: {captured.get('auth_method')!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_gitlab_callback_returns_default_project_id():
+    """gitlab_callback이 접근 가능한 default_project_id를 응답에 포함한다."""
+    exchange_data = {
+        "token": "ks-token",
+        "project_id": "proj-123",
+        "project_name": "test-project",
+        "user_id": "user-123",
+        "username": "gitlabuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+        "default_project_id": "proj-123",
+    }
+    captured: dict = {}
+
+    async def mock_store_session(*, jti, keystone_token, project_id, user_id, exp, auth_method="password", **kwargs):
+        captured["auth_method"] = auth_method
+
+    with (
+        patch("app.api.identity.auth.get_settings", return_value=SimpleNamespace(gitlab_oidc_enabled=True)),
+        patch("app.services.gitlab_oidc.exchange_code", new_callable=AsyncMock, return_value=exchange_data),
+        patch("app.services.session_store.store_session", side_effect=mock_store_session),
+        patch("app.services.jwt_service.sign_refresh", return_value=("refresh-tok", "jti-123", 9999999999)),
+        patch("app.services.jwt_service.sign_access", return_value=("access-tok", "ajti-123", 9999999999)),
+        patch("app.api.identity.auth._prewarm_dashboard"),
+        patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
+    ):
+        from httpx import ASGITransport, AsyncClient
+
+        from app.main import app
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/auth/gitlab/callback",
+                json={"code": "auth-code", "state": "state-value"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["default_project_id"] == "proj-123"
+    assert data["project_id"] == "proj-123"
+    assert captured["auth_method"] == "federated"

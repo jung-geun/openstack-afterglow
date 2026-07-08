@@ -2,6 +2,7 @@ import { writable, derived } from 'svelte/store';
 
 // /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
 export const authReady = writable(false);
+export const logoutInProgress = writable(false);
 
 export interface Project {
 	id: string;

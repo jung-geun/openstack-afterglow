@@ -6,6 +6,7 @@
 	import LoginBrandHeader from '$lib/components/auth/LoginBrandHeader.svelte';
 	import LoginForm from '$lib/components/auth/LoginForm.svelte';
 	import type { LoginResponse } from '$lib/types/auth';
+	import { resolvePostLoginProject } from '$lib/utils/authFlow';
 
 	onMount(async () => {
 		try {
@@ -54,9 +55,9 @@
 			const data = await api.post<LoginResponse>('/api/v1/auth/login', {
 				username, password, domain_name: domainName,
 			});
+			const resolution = resolvePostLoginProject(data);
+			const scopedProjectId = data.project_id?.trim() || null;
 
-			// 백엔드가 이미 기본 프로젝트(없으면 첫 번째 활성 프로젝트)로 scope된 토큰을 반환한다.
-			// project_id 가 있으면 바로 대시보드로, 없으면 선택 화면으로 이동한다.
 			setAuth({
 				token: data.token,
 				refreshToken: data.refresh_token ?? null,
@@ -65,12 +66,12 @@
 					: null,
 				userId: data.user_id,
 				username: data.username,
-				projectId: data.project_id || null,
-				projectName: data.project_name || null,
+				projectId: resolution.projectId,
+				projectName: resolution.projectId === scopedProjectId ? (data.project_name || null) : null,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
-			// 라우팅은 $effect (isLoggedIn + auth.projectId 기반) 가 처리한다.
+			await goto(resolution.target);
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status})` : '서버 오류가 발생했습니다';
 		} finally {

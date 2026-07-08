@@ -456,8 +456,8 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     except Exception:
         raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
-    # default_project_id는 동기 Keystone 호출로 1초 안팎 지연이 발생하므로
-    # 응답 경로에서 제외한다. exchange_code의 scoped 토큰 project_id를 그대로 사용.
+    # exchange_code는 접근 가능한 default_project_id만 채워 응답한다.
+    # frontend는 project_id/default_project_id 공통 규칙으로 다음 화면을 결정한다.
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
     background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
@@ -470,4 +470,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         roles=data.get("roles", []),
         is_system_admin=data.get("is_system_admin", False),
         auth_method="federated",
+        default_project_id=data.get("default_project_id", "") or "",
     )

@@ -17,6 +17,7 @@
 	import { palette } from '$lib/stores/palette';
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
+	import { toast } from '$lib/stores/toast';
 	import './layout.css';
 
 	let { children, data } = $props();
@@ -129,7 +130,8 @@
 				} catch { /* 실패해도 로컬 정리는 진행 */ }
 			}
 			clearAuth();
-			await goto('/?logged_out=1', { replaceState: true });
+			await goto('/', { replaceState: true });
+			toast.success('정상적으로 로그아웃 되었습니다.');
 		} finally {
 			logoutInProgress.set(false);
 		}
@@ -237,8 +239,8 @@
 
 {#if $isLoggedIn}
 	<ConfirmDialog />
-	<Toast />
 {/if}
+<Toast />
 
 <!-- children은 단일 렌더 포인트에서 항상 렌더 — 분기 전환 시 컴포넌트 재마운트 방지 -->
 <main class="min-h-screen bg-gray-950 text-white">

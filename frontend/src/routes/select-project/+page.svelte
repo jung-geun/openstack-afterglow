@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { auth, clearAuth, setAuth } from '$lib/stores/auth';
+	import { auth, clearAuth, setAuth, logoutInProgress } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import type { Project } from '$lib/stores/auth';
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
+	import { toast } from '$lib/stores/toast';
 	import CreateProjectModal from '$lib/components/projects/CreateProjectModal.svelte';
 
 	let projects = $state<Project[]>([]);
@@ -81,12 +83,22 @@
 		}
 	}
 
-	function logout() {
-		if ($auth.token) {
-			api.post('/api/v1/auth/logout', {}, $auth.token).catch(() => {});
+	async function logout() {
+		if ($logoutInProgress) return;
+		logoutInProgress.set(true);
+		try {
+			const confirmed = await confirmDialog('로그아웃하시겠습니까?');
+			if (!confirmed) return;
+
+			if ($auth.token) {
+				api.post('/api/v1/auth/logout', {}, $auth.token).catch(() => {});
+			}
+			clearAuth();
+			await goto('/', { replaceState: true });
+			toast.success('정상적으로 로그아웃 되었습니다.');
+		} finally {
+			logoutInProgress.set(false);
 		}
-		clearAuth();
-		goto('/');
 	}
 
 	function formatRelativeTime(iso: string | null | undefined): string {
@@ -122,6 +134,7 @@
 			</div>
 			<button
 				onclick={logout}
+				disabled={$logoutInProgress}
 				class="text-sm text-gray-500 hover:text-white transition-colors"
 			>
 				로그아웃
