@@ -43,6 +43,7 @@ Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서�
 | [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 |
 | [API 레퍼런스](docs/api-reference.md) | 전체 REST API |
 | [보안 모델](docs/security.md) | 인증·인가, IDOR 가드, HKDF 암호화, audit log |
+| [국소 기능테스트](docs/testing.md) | 개발 중 빠른 국소 기능 검증 가이드 |
 
 릴리스 변경사항은 [CHANGELOG](CHANGELOG.md), 작업 기록·로드맵은 [`openspec/`](openspec/)(`openspec list`, 구 [milestone.md](milestone.md)에서 이관)를 참고하세요.
 
@@ -60,7 +61,10 @@ Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서�
 ```bash
 cd backend && uv sync && uv run uvicorn app.main:app --reload   # 백엔드 :8000
 cd frontend && npm install && npm run dev                       # 프론트엔드 :3000
-npm test                                                        # 전체 테스트
+npm run test:list                                               # 실행 가능한 국소 테스트 타깃 확인
+npm run test:target -- auth                                     # 예: 인증/세션 관련 국소 기능테스트
+npm test                                                        # 백엔드 단위 + 프론트엔드 전체
+npm run test:all                                                # 커밋/PR 전 전체 게이트
 ```
 
 ## 라이선스

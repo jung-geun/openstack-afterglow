@@ -27,6 +27,7 @@ Afterglow is an open-source web dashboard for OpenStack cloud environments. It p
 | [Architecture](../architecture.md) _(Korean)_ | System design and data flow |
 | [API reference](../api-reference.md) _(Korean)_ | Complete REST API specification |
 | [kolla-ansible deployment](../deployment.md#kolla-ansible-배포) | Single-playbook deployment inside OpenStack |
+| [Targeted testing](../testing.md) _(Korean)_ | Guide to choosing fast local feature-test targets |
 
 ---
 

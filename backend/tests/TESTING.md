@@ -14,6 +14,20 @@ AFTERGLOW_ALLOW_INSECURE=1 uv run pytest tests/integration/ -v
 
 > **주의**: 환경변수는 `AFTERGLOW_ALLOW_INSECURE=1` (코드 기준). CLAUDE.md 문서의 `UNION_ALLOW_INSECURE`는 오기.
 
+## 루트 국소 테스트 래퍼
+
+루트에서 실행 가능한 국소 기능테스트 가이드는 [`../../docs/testing.md`](../../docs/testing.md) 를 기준으로 삼는다.
+
+```bash
+npm run test:list
+npm run test:auth
+npm run test:access
+npm run test:db
+npm run test:target -- backend:tests/test_instances.py::test_delete_instance
+```
+
+위 래퍼는 개발 중 빠른 반복용이다. 직접 pytest 예제와 통합 테스트 크리덴셜 설명은 아래 내용을 그대로 따른다.
+
 ---
 
 ## 테스트 계층 구조

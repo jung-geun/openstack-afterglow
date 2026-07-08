@@ -43,6 +43,7 @@ See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment a
 | [Architecture](docs/architecture.md) _(Korean)_ | System structure, VM-creation flow, OverlayFS |
 | [API reference](docs/api-reference.md) _(Korean)_ | Complete REST API |
 | [Security model](docs/security.md) _(Korean)_ | Authn/authz, IDOR guards, HKDF crypto, audit log |
+| [Targeted testing](docs/testing.md) _(Korean)_ | Fast local feature-test target guide |
 
 Release changes: [CHANGELOG](CHANGELOG.md) · work log: [`openspec/`](openspec/) (`openspec list`, migrated from milestone.md).
 
@@ -60,7 +61,10 @@ Release changes: [CHANGELOG](CHANGELOG.md) · work log: [`openspec/`](openspec/)
 ```bash
 cd backend && uv sync && uv run uvicorn app.main:app --reload   # backend :8000
 cd frontend && npm install && npm run dev                       # frontend :3000
-npm test                                                        # all tests
+npm run test:list                                               # discover targeted local test lanes
+npm run test:target -- auth                                     # example targeted auth/session checks
+npm test                                                        # backend unit + frontend full tests
+npm run test:all                                                # full pre-commit gate
 ```
 
 ## License
