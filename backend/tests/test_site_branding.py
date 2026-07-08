@@ -91,8 +91,8 @@ async def test_public_site_config_returns_login_logo_defaults_when_db_is_unavail
 
     assert resp.status_code == 200
     assert resp.json()["logo_path"] == "/logo.png"
-    assert resp.json()["logo_dark_path"] == "/logo-dark.png"
-    assert resp.json()["logo_light_path"] == "/logo-white.png"
+    assert resp.json()["logo_dark_path"] == "/logo-white.png"
+    assert resp.json()["logo_light_path"] == "/logo-dark.png"
 
 
 @pytest.mark.asyncio
@@ -174,14 +174,14 @@ async def test_admin_branding_reset_removes_asset_and_restores_public_default(ad
     assert reset.status_code == 200
     assert "logo_light" not in store
     assert reset.json()["assets"]["logo_light"] is None
-    assert reset.json()["effective"]["logo_light_path"] == "/logo-white.png"
+    assert reset.json()["effective"]["logo_light_path"] == "/logo-dark.png"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         public_config = await ac.get("/api/v1/site-config")
         old_asset = await ac.get(expected_url)
 
     assert public_config.status_code == 200
-    assert public_config.json()["logo_light_path"] == "/logo-white.png"
+    assert public_config.json()["logo_light_path"] == "/logo-dark.png"
     assert old_asset.status_code == 404
 
 

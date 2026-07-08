@@ -36,8 +36,8 @@ const baseSiteConfig: PublicSiteConfig = {
 	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
-	logo_dark_path: '/logo-dark.png',
-	logo_light_path: '/logo-white.png',
+	logo_dark_path: '/logo-white.png',
+	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
 	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
@@ -171,7 +171,7 @@ describe('AdminLoginBrandingPanel', () => {
 			buildStatus({
 				effective: {
 					logo_path: '/logo.png',
-					logo_light_path: '/logo-white.png',
+					logo_light_path: '/logo-dark.png',
 					logo_dark_path: 'https://api.example.com/api/v1/site-config/assets/logo_dark',
 				},
 				assets: {
@@ -198,7 +198,7 @@ describe('AdminLoginBrandingPanel', () => {
 		});
 
 		await waitFor(() => {
-			expect(get(siteConfig).logo_light_path).toBe('/logo-white.png');
+			expect(get(siteConfig).logo_light_path).toBe('/logo-dark.png');
 		});
 	});
 });

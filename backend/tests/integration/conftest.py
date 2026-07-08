@@ -19,8 +19,10 @@ admin/user 권한 분리 테스트를 위한 일반 유저 계정 설정:
   또는 환경변수: AFTERGLOW_TEST_USER_USERNAME, AFTERGLOW_TEST_USER_PASSWORD, AFTERGLOW_TEST_USER_PROJECT
 """
 
+import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -68,6 +70,86 @@ def require_service(flag: str) -> None:
     settings = get_settings()
     if not getattr(settings, flag, False):
         pytest.skip(f"{flag}=false — 서비스 미활성화")
+
+
+@dataclass
+class IntegrationAuthSession:
+    """실제 로그인 세션 상태.
+
+    장시간 integration run 도중 access JWT 가 401로 만료되면 refresh 토큰으로
+    한 번 회전하고, refresh 자체도 만료/실패한 경우에는 같은 크리덴셜로 즉시
+    재로그인해 후속 요청을 계속 진행한다.
+    """
+
+    credentials: dict[str, str]
+    label: str
+    token_data: dict[str, Any] | None = None
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def get_token_data(self) -> dict[str, Any]:
+        async with self._lock:
+            if self.token_data is None:
+                await self._login_locked()
+            assert self.token_data is not None
+            return dict(self.token_data)
+
+    async def refresh_or_relogin(self) -> dict[str, Any]:
+        async with self._lock:
+            if not await self._refresh_locked():
+                await self._login_locked()
+            assert self.token_data is not None
+            return dict(self.token_data)
+
+    async def _login_locked(self) -> None:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/api/v1/auth/login", json=self.credentials)
+        assert resp.status_code == 200, f"{self.label} 로그인 실패: {resp.text}"
+        self.token_data = resp.json()
+
+    async def _refresh_locked(self) -> bool:
+        if not self.token_data or not self.token_data.get("refresh_token"):
+            return False
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": self.token_data["refresh_token"]},
+            )
+        if resp.status_code != 200:
+            return False
+
+        self.token_data = resp.json()
+        return True
+
+
+class AutoRefreshingAsyncClient(AsyncClient):
+    """401 발생 시 refresh → 재로그인 순으로 1회 복구를 시도하는 테스트 전용 클라이언트."""
+
+    def __init__(self, *, auth_session: IntegrationAuthSession, **kwargs):
+        self._auth_session = auth_session
+        super().__init__(**kwargs)
+
+    async def request(self, method: str, url, **kwargs):
+        initial = await self._auth_session.get_token_data()
+        first_kwargs = dict(kwargs)
+        first_kwargs["headers"] = self._auth_headers(first_kwargs.get("headers"), initial)
+
+        response = await super().request(method, url, **first_kwargs)
+        if response.status_code != 401:
+            return response
+
+        await response.aread()
+        rotated = await self._auth_session.refresh_or_relogin()
+        retry_kwargs = dict(kwargs)
+        retry_kwargs["headers"] = self._auth_headers(retry_kwargs.get("headers"), rotated)
+        return await super().request(method, url, **retry_kwargs)
+
+    @staticmethod
+    def _auth_headers(headers: Any, token_data: dict[str, Any]) -> dict[str, str]:
+        merged = dict(headers or {})
+        merged["Authorization"] = f"Bearer {token_data['token']}"
+        merged["X-Project-Id"] = str(token_data["project_id"])
+        return merged
 
 
 # ---------------------------------------------------------------------------
@@ -155,27 +237,6 @@ def integration_resources():
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-async def flush_cache_before_integration():
-    """통합 테스트 세션 시작 전 Redis 캐시를 초기화한다.
-
-    단위 테스트가 먼저 실행될 경우(npm run test:all), mock conn이 빈 결과를
-    Redis에 캐시해 통합 테스트에서 캐시 히트로 잘못된 값을 받는 문제를 방지한다.
-    Redis 미실행 시 조용히 무시.
-    """
-    try:
-        from app.services.cache import _get_client
-
-        client = _get_client()
-        # afterglow:admin:* 키 전체 삭제 (관리자 API 캐시)
-        keys = await client.keys("afterglow:admin:*")
-        if keys:
-            await client.delete(*keys)
-    except Exception:
-        pass
-    yield
-
-
 @pytest.fixture(scope="session")
 def admin_credentials_fx():
     """admin 크리덴셜 (credentials.toml > config.toml 폴백)."""
@@ -223,8 +284,8 @@ def project_b_credentials_fx():
     if creds is None:
         pytest.skip(
             "project_b 크리덴셜 미설정 — "
-            "AFTERGLOW_TEST_PROJECT_B_USERNAME / AFTERGLOW_TEST_PROJECT_B_PASSWORD / "
-            "AFTERGLOW_TEST_PROJECT_B_NAME 환경변수를 설정하세요."
+            "tests/integration/credentials.toml 의 [project_b] 섹션 또는 "
+            "AFTERGLOW_TEST_PROJECT_B_USERNAME / AFTERGLOW_TEST_PROJECT_B_PASSWORD 환경변수를 설정하세요."
         )
     return creds
 
@@ -237,28 +298,25 @@ def credentials(admin_credentials_fx):
 
 
 @pytest.fixture(scope="session")
-async def project_b_auth_data(project_b_credentials_fx):
-    """project_b 계정으로 실제 Keystone 로그인. 세션 전체에서 재사용."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as ac:
-        resp = await ac.post("/api/v1/auth/login", json=project_b_credentials_fx)
-        assert resp.status_code == 200, f"project_b 로그인 실패: {resp.text}"
-        return resp.json()
+async def project_b_login_session(project_b_credentials_fx):
+    session = IntegrationAuthSession(project_b_credentials_fx, "project_b")
+    await session.get_token_data()
+    return session
 
 
 @pytest.fixture(scope="session")
-async def project_b_client(project_b_auth_data):
+async def project_b_auth_data(project_b_login_session):
+    """project_b 계정으로 실제 Keystone 로그인. 세션 전체에서 재사용."""
+    return await project_b_login_session.get_token_data()
+
+
+@pytest.fixture(scope="session")
+async def project_b_client(project_b_login_session):
     """project_b 계정으로 인증된 AsyncClient (격리 테스트용)."""
-    headers = {
-        "Authorization": f"Bearer {project_b_auth_data['token']}",
-        "X-Project-Id": project_b_auth_data["project_id"],
-    }
-    async with AsyncClient(
+    async with AutoRefreshingAsyncClient(
+        auth_session=project_b_login_session,
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=headers,
         timeout=30,
     ) as ac:
         yield ac
@@ -275,39 +333,42 @@ def anyio_backend():
 
 
 @pytest.fixture(scope="session")
-async def admin_auth_data(admin_credentials_fx):
+async def admin_login_session(admin_credentials_fx):
+    session = IntegrationAuthSession(admin_credentials_fx, "admin")
+    await session.get_token_data()
+    return session
+
+
+@pytest.fixture(scope="session")
+async def admin_user_login_session(admin_user_credentials_fx):
+    session = IntegrationAuthSession(admin_user_credentials_fx, "admin_user")
+    await session.get_token_data()
+    return session
+
+
+@pytest.fixture(scope="session")
+async def user_login_session(user_credentials_fx):
+    session = IntegrationAuthSession(user_credentials_fx, "일반 유저")
+    await session.get_token_data()
+    return session
+
+
+@pytest.fixture(scope="session")
+async def admin_auth_data(admin_login_session):
     """admin 계정으로 실제 Keystone 로그인. 세션 전체에서 재사용."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as ac:
-        resp = await ac.post("/api/v1/auth/login", json=admin_credentials_fx)
-        assert resp.status_code == 200, f"admin 로그인 실패: {resp.text}"
-        return resp.json()
+    return await admin_login_session.get_token_data()
 
 
 @pytest.fixture(scope="session")
-async def admin_user_auth_data(admin_user_credentials_fx):
+async def admin_user_auth_data(admin_user_login_session):
     """admin_user 계정으로 실제 Keystone 로그인. 세션 전체에서 재사용."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as ac:
-        resp = await ac.post("/api/v1/auth/login", json=admin_user_credentials_fx)
-        assert resp.status_code == 200, f"admin_user 로그인 실패: {resp.text}"
-        return resp.json()
+    return await admin_user_login_session.get_token_data()
 
 
 @pytest.fixture(scope="session")
-async def user_auth_data(user_credentials_fx):
+async def user_auth_data(user_login_session):
     """일반 유저 계정으로 실제 Keystone 로그인. 세션 전체에서 재사용."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as ac:
-        resp = await ac.post("/api/v1/auth/login", json=user_credentials_fx)
-        assert resp.status_code == 200, f"일반 유저 로그인 실패: {resp.text}"
-        return resp.json()
+    return await user_login_session.get_token_data()
 
 
 # 하위 호환: 기존 `auth_data` → admin 위임
@@ -344,48 +405,36 @@ def auth_headers(token, project_id):
 
 
 @pytest.fixture(scope="session")
-async def admin_client(admin_auth_data):
+async def admin_client(admin_login_session):
     """admin 계정으로 인증된 AsyncClient."""
-    headers = {
-        "Authorization": f"Bearer {admin_auth_data['token']}",
-        "X-Project-Id": admin_auth_data["project_id"],
-    }
-    async with AsyncClient(
+    async with AutoRefreshingAsyncClient(
+        auth_session=admin_login_session,
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=headers,
         timeout=30,
     ) as ac:
         yield ac
 
 
 @pytest.fixture(scope="session")
-async def admin_user_client(admin_user_auth_data):
+async def admin_user_client(admin_user_login_session):
     """admin_user 계정으로 인증된 AsyncClient (scoped project ≠ admin 일 수 있는 admin 권한 검증용)."""
-    headers = {
-        "Authorization": f"Bearer {admin_user_auth_data['token']}",
-        "X-Project-Id": admin_user_auth_data["project_id"],
-    }
-    async with AsyncClient(
+    async with AutoRefreshingAsyncClient(
+        auth_session=admin_user_login_session,
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=headers,
         timeout=30,
     ) as ac:
         yield ac
 
 
 @pytest.fixture(scope="session")
-async def user_client(user_auth_data):
+async def user_client(user_login_session):
     """일반 유저 계정으로 인증된 AsyncClient (권한 분리 테스트용)."""
-    headers = {
-        "Authorization": f"Bearer {user_auth_data['token']}",
-        "X-Project-Id": user_auth_data["project_id"],
-    }
-    async with AsyncClient(
+    async with AutoRefreshingAsyncClient(
+        auth_session=user_login_session,
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=headers,
         timeout=30,
     ) as ac:
         yield ac
@@ -393,12 +442,12 @@ async def user_client(user_auth_data):
 
 # 하위 호환: 기존 `client` → admin_client 위임
 @pytest.fixture(scope="session")
-async def client(auth_headers):
+async def client(admin_login_session):
     """인증 헤더가 포함된 AsyncClient (admin). 기존 테스트 하위 호환용."""
-    async with AsyncClient(
+    async with AutoRefreshingAsyncClient(
+        auth_session=admin_login_session,
         transport=ASGITransport(app=app),
         base_url="http://test",
-        headers=auth_headers,
         timeout=30,
     ) as ac:
         yield ac

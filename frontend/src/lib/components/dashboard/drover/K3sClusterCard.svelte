@@ -26,9 +26,9 @@
 >
 	<!-- Header -->
 	<div class="flex items-center gap-2.5 mb-3">
-		<div class="w-[34px] h-[34px] rounded-[9px] bg-emerald-500/12 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
-			<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+		<div class="cluster-badge w-[34px] h-[34px] rounded-[9px] flex items-center justify-center shrink-0">
+			<svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+				<path stroke-linejoin="round" stroke-width="1.8" d="M12 2.4 19.8 6.1 21.7 14.3 16.3 20.8H7.7l-5.4-6.5 1.9-8.2L12 2.4Z"/><circle cx="12" cy="12" r="4.1" stroke-width="1.8"/><circle cx="12" cy="12" r="0.85" fill="currentColor" stroke="none"/><path stroke-linecap="round" stroke-width="1.8" d="M12 9.8V6.2M13.72 10.63l2.81-2.25M14.14 12.49l3.51.8M12.95 13.98l1.57 3.25M11.05 13.98l-1.57 3.25M9.86 12.49l-3.51.8M10.28 10.63 7.47 8.38"/>
 			</svg>
 		</div>
 		<div class="flex-1 min-w-0">
@@ -85,3 +85,11 @@
 		{/if}
 	</div>
 </div>
+
+<style>
+	.cluster-badge {
+		background: color-mix(in oklab, var(--color-accent) 12%, transparent);
+		border: 1px solid color-mix(in oklab, var(--color-accent) 30%, transparent);
+		color: var(--color-accent);
+	}
+</style>

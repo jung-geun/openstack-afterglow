@@ -1,9 +1,9 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
-import { flushSync } from 'svelte';
 import type { PublicSiteConfig } from '$lib/types/siteConfig';
 import { siteConfig } from '$lib/config/site';
-import { theme, type ThemePreference } from '$lib/stores/theme';
+import { theme } from '$lib/stores/theme';
+import type { ThemePreference } from '$lib/stores/theme';
 
 import LoginBrandHeader from '../LoginBrandHeader.svelte';
 
@@ -11,8 +11,8 @@ const baseConfig: PublicSiteConfig = {
 	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
-	logo_dark_path: '/logo-dark.png',
-	logo_light_path: '/logo-white.png',
+	logo_dark_path: '/logo-white.png',
+	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
 	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
@@ -68,13 +68,13 @@ describe('LoginBrandHeader', () => {
 			config: { logo_path: '/brand/legacy.png', logo_dark_path: '' },
 			expectedSrc: '/brand/legacy.png',
 		},
-	])('$name', ({ preference, config, expectedSrc }) => {
+	])('$name', async ({ preference, config, expectedSrc }) => {
 		theme.set(preference);
 		siteConfig.set(buildConfig(config));
 
 		render(LoginBrandHeader);
-		flushSync();
 
-		expect(screen.getByRole('img', { name: 'Afterglow' }).getAttribute('src')).toBe(expectedSrc);
+		const img = await screen.findByRole('img', { name: 'Afterglow' });
+		expect(img.getAttribute('src')).toBe(expectedSrc);
 	});
 });
