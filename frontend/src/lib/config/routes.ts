@@ -64,6 +64,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   monitoring: '통합 모니터링',
   services: '서비스 상태',
   notion: 'Notion 연동',
+  settings: '기본 설정',
   users: '사용자',
   projects: '프로젝트',
   quotas: '쿼터',
