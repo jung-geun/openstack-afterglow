@@ -1,4 +1,6 @@
 import { getBaseUrl } from './client';
+import { maybeMockK3sStream } from '$lib/mockup/transport';
+
 
 export interface K3sSseProgressMessage {
   step: string;
@@ -13,6 +15,11 @@ export async function* streamK3sProgress(
   path: string,
   init: { method: 'POST'; body?: unknown; token?: string; projectId?: string },
 ): AsyncGenerator<K3sSseProgressMessage> {
+  const mockStream = maybeMockK3sStream(path, init.body, init.token, init.projectId);
+  if (mockStream) {
+    yield* mockStream;
+    return;
+  }
   const res = await fetch(`${getBaseUrl()}${path}`, {
     method: init.method,
     headers: {

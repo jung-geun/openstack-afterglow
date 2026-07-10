@@ -14,6 +14,10 @@
 
 	let dashboardOpen = $state(false);
 
+	const mockup = $derived($page.data.mockup);
+	const mockupTutorialActive = $derived(mockup?.active === true && mockup.profile === 'tutorial');
+	const mockupAllowedHrefs = new Set(['/dashboard', '/dashboard/compute/instances', '/dashboard/drover', '/dashboard/network/topology']);
+
 	const sections = $state([
 		{
 			label: 'Compute',
@@ -149,13 +153,15 @@
 		return svcs?.[section.service] ?? false;
 	}
 
-	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { href: string; beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+		if (mockupTutorialActive) return section.items.some(item => isItemVisible(item));
 		if (!isBetaVisible(section.beta)) return false;
 		if (!isSectionServiceVisible(section)) return false;
 		return section.items.some(item => isItemVisible(item));
 	}
 
-	function isItemVisible(item: { beta?: BetaFeatureKey; service?: string | null }): boolean {
+	function isItemVisible(item: { href?: string; beta?: BetaFeatureKey; service?: string | null }): boolean {
+		if (mockupTutorialActive) return !!item.href && mockupAllowedHrefs.has(item.href);
 		if (!isBetaVisible(item.beta)) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!item.service) return true;
@@ -199,12 +205,14 @@
 	</div>
 
 	<!-- VM 생성 버튼 -->
-	<div class="px-3 pb-3 pt-2 lg:pt-0">
-		<Button onclick={() => openWizard()} class="w-full">
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
-			VM 생성
-		</Button>
-	</div>
+	{#if !mockupTutorialActive}
+		<div class="px-3 pb-3 pt-2 lg:pt-0">
+			<Button onclick={() => openWizard()} class="w-full">
+				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+				VM 생성
+			</Button>
+		</div>
+	{/if}
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
 		<!-- 대시보드 섹션 -->
@@ -222,9 +230,11 @@
 			{#if dashboardOpen}
 				<div class="ml-3 mt-0.5 space-y-0.5">
 					<a href="/dashboard" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname === '/dashboard'}>개요</a>
-					<a href="/dashboard/usage" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage') && !$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량</a>
-					<a href="/dashboard/usage-report" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량 리포트</a>
-					<a href="/dashboard/activity" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/activity')}>활동</a>
+					{#if !mockupTutorialActive}
+						<a href="/dashboard/usage" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage') && !$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량</a>
+						<a href="/dashboard/usage-report" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량 리포트</a>
+						<a href="/dashboard/activity" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/activity')}>활동</a>
+					{/if}
 				</div>
 			{/if}
 		</div>

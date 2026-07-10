@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth, clearAuth, setAuth, logoutInProgress } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -13,6 +14,8 @@
 	let switching = $state(false);
 	let error = $state('');
 	let showCreateModal = $state(false);
+	const mockupActive = $derived($page.data.mockup?.active === true);
+
 
 	async function load() {
 		loading = true;
@@ -42,10 +45,10 @@
 	// Fix 1: 토큰 변경에 반응하는 $effect 대신 onMount 1회성 로드로 전환.
 	// 기존 $effect는 selectProject() → setAuth(새 토큰) → effect 재실행 → load() 재진입 루프를 일으킴.
 	onMount(() => {
-		if ($auth.token) {
+		if ($auth.token || mockupActive) {
 			load();
 		} else {
-			goto('/');
+			goto('/login');
 		}
 	});
 
@@ -81,6 +84,14 @@
 		} finally {
 			switching = false;
 		}
+	}
+
+	function openCreateProject() {
+		if (mockupActive) {
+			toast.info('mockup mode에서는 프로젝트 생성을 제외합니다.');
+			return;
+		}
+		showCreateModal = true;
 	}
 
 	async function logout() {
@@ -147,7 +158,7 @@
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-lg font-semibold text-white">최근 프로젝트 선택</h1>
 			<button
-				onclick={() => (showCreateModal = true)}
+				onclick={openCreateProject}
 				class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
 			>
 				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,7 +208,7 @@
 	</div>
 </div>
 
-{#if showCreateModal}
+{#if showCreateModal && !mockupActive}
 	<CreateProjectModal
 		onClose={() => (showCreateModal = false)}
 		onSuccess={(proj) => {

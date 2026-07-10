@@ -1,4 +1,4 @@
-import { api, ApiError, getBaseUrl } from '$lib/api/client';
+import { api, ApiError } from '$lib/api/client';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
 import { toast } from '$lib/stores/toast';
 import { K3S_CREATE_STEPS } from '$lib/components/k3sSteps';
@@ -120,22 +120,20 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
   }
 
   async function downloadKubeconfig(id: string, name: string) {
-    const baseUrl = getBaseUrl();
-    const res = await fetch(`${baseUrl}/api/v1/k3s/clusters/${id}/kubeconfig`, {
-      headers: {
-        ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()}` } : {}),
-        ...(opts.projectId() ? { 'X-Project-Id': opts.projectId() } : {}),
-      },
-    });
-    if (!res.ok) {
-      if (res.status === 404) {
+    try {
+      const { blob } = await api.downloadBlob(
+        `/api/v1/k3s/clusters/${id}/kubeconfig`,
+        opts.token(),
+        opts.projectId(),
+      );
+      downloadBlobAs(blob, `kubeconfig-${name}.yaml`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
         toast.warning('kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다.');
       } else {
-        toast.error(`다운로드 실패: HTTP ${res.status}`);
+        toast.error(`다운로드 실패: ${e instanceof ApiError ? e.message : String(e)}`);
       }
-      return;
     }
-    downloadBlobAs(await res.blob(), `kubeconfig-${name}.yaml`);
   }
 
   async function forceRefresh() {

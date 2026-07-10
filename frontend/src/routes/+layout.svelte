@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { onMount, untrack } from 'svelte';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
-	import { auth, authReady, isLoggedIn, isAdmin, clearAuth, logoutInProgress } from '$lib/stores/auth';
+	import { auth, authReady, isLoggedIn, isAdmin, clearAuth, logoutInProgress, enterMockAuth, exitMockAuth, getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api, getBaseUrl } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
-	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths } from '$lib/config/site';
+	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig } from '$lib/config/site';
+	import { resolveFaviconPath } from '$lib/config/brandAssets';
 	import type { PublicSiteConfig } from '$lib/types/siteConfig';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
@@ -18,11 +19,94 @@
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
+	import MockupBanner from '$lib/components/mockup/MockupBanner.svelte';
+	import { buildMockAuth } from '$lib/mockup/auth';
+	import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId, isMockupPathAllowed, getMockupHomePath } from '$lib/mockup/contracts';
+	import type { MockupProfileId } from '$lib/mockup/contracts';
 	import './layout.css';
 
 	let { children, data } = $props();
+	const initialSiteConfig = untrack(() => data.siteConfig);
+	const initialMockup = untrack(() => data.mockup);
+	let themeReady = $state(false);
+	let mockupClientReady = $state(false);
+	let clientMockProfile = $state<MockupProfileId | null>(null);
+	let enteredMockProfile: MockupProfileId | null = null;
+	let previousMockupActive = initialMockup.active;
+	let explicitMockupOff = false;
+	let brandRefreshSerial = 0;
+	const effectiveBrandTheme = $derived(themeReady ? $resolvedTheme : 'dark');
+	const themedFaviconPath = $derived(resolveFaviconPath($siteConfig, effectiveBrandTheme));
+	const mockup = $derived(data.mockup);
+	let lastVerifiedToken: string | null = null;
 
-	initSiteConfig(data.siteConfig);
+	replaceSiteConfig(initialSiteConfig);
+
+	async function refreshPublicSiteConfig() {
+		const serial = ++brandRefreshSerial;
+		try {
+			const config = await api.get<Partial<PublicSiteConfig>>('/api/v1/site-config');
+			if (serial !== brandRefreshSerial || mockup.active) return;
+			initSiteConfig(qualifyBackendAssetPaths(config, getBaseUrl()));
+		} catch {
+			// Branding refresh is best effort; the server-provided config remains visible.
+		}
+	}
+
+	$effect.pre(() => {
+		const active = mockup.active;
+		if (active) {
+			brandRefreshSerial += 1;
+			initSiteConfig({ services: MOCKUP_SERVICE_OVERRIDES });
+			if (mockupClientReady && mockup.profile && clientMockProfile === mockup.profile && enteredMockProfile !== mockup.profile) {
+				if (!isMockAuthActive() || getMockupProfile() !== mockup.profile || !get(auth).token) {
+					enterMockAuth(buildMockAuth(mockup.profile, $page.url.pathname), mockup.profile);
+				}
+				enteredMockProfile = mockup.profile;
+			}
+		} else if (explicitMockupOff && isMockAuthActive()) {
+			lastVerifiedToken = null;
+			exitMockAuth();
+			void refreshPublicSiteConfig();
+			enteredMockProfile = null;
+			explicitMockupOff = false;
+		} else if (
+			mockupClientReady &&
+			clientMockProfile &&
+			isMockAuthActive() &&
+			$page.url.searchParams.get(MOCKUP_QUERY_KEY) !== clientMockProfile
+		) {
+			const path = $page.url.pathname;
+			const nextPath =
+				(path.startsWith('/dashboard') || path.startsWith('/admin')) &&
+				isMockupPathAllowed(clientMockProfile, path)
+					? path
+					: getMockupHomePath(clientMockProfile);
+			void goto(`${nextPath}?${MOCKUP_QUERY_KEY}=${clientMockProfile}`, { replaceState: true });
+		}
+		previousMockupActive = active;
+	});
+	beforeNavigate(({ to, cancel }) => {
+		if (typeof window === 'undefined' || !to?.url || to.url.origin !== location.origin) return;
+		const requested = to.url.searchParams.get(MOCKUP_QUERY_KEY);
+		if (requested === 'off') {
+			sessionStorage.removeItem(MOCKUP_SESSION_KEY);
+			clientMockProfile = null;
+			explicitMockupOff = true;
+			return;
+		}
+		if (isMockupProfileId(requested)) {
+			sessionStorage.setItem(MOCKUP_SESSION_KEY, requested);
+			clientMockProfile = requested;
+			return;
+		}
+		const profile = clientMockProfile;
+		if (!profile) return;
+		const next = new URL(to.url);
+		next.searchParams.set(MOCKUP_QUERY_KEY, profile);
+		cancel();
+		void goto(`${next.pathname}${next.search}${next.hash}`);
+	});
 
 
 	// breadcrumb + title from URL
@@ -33,14 +117,17 @@
 		($auth.username ?? 'U').slice(0, 2).toUpperCase()
 	);
 
-	const publicRoutes = ['/', '/auth/gitlab/callback'];
-	const projectAgnosticRoutes = ['/', '/auth/gitlab/callback', '/select-project'];
+	const publicRoutes = ['/', '/login', '/auth/gitlab/callback'];
+	const projectAgnosticRoutes = ['/', '/login', '/auth/gitlab/callback', '/select-project'];
 
 	const isInvitationRoute = $derived($page.url.pathname.startsWith('/invitations/'));
+	const shelllessRoutes = ['/', '/login', '/auth/gitlab/callback', '/select-project'];
+	const showAppChrome = $derived($isLoggedIn && !shelllessRoutes.includes($page.url.pathname) && !isInvitationRoute);
 
 	$effect(() => {
+		if (!mockupClientReady) return;
 		if (!$logoutInProgress && !$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
-			goto('/');
+			goto('/login');
 		}
 	});
 
@@ -51,23 +138,21 @@
 	});
 
 	// 토큰이 설정되면 (로그인 직후 포함) 서버에서 권한 검증
-	let lastVerifiedToken: string | null = null;
 	$effect(() => {
 		const token = $auth.token;
 		const projectId = $auth.projectId;
-		if (!token || token === lastVerifiedToken) return;
+		if (mockup.active || isMockAuthActive() || !token || token === lastVerifiedToken) return;
 		lastVerifiedToken = token;
 		(async () => {
 			try {
-				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
+				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean; auth_method?: string }>(
 					'/api/v1/auth/me', token, projectId ?? undefined,
 				);
-				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
+				if (get(auth).token !== token || mockup.active || isMockAuthActive()) return;
+				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === 'federated' }));
 				authReady.set(true);
 			} catch {
-				// Fix 2: stale 토큰 가드 — 비동기 /api/auth/me 검증 중 토큰이 교체됐으면
-				// 그 사이 새 토큰으로 이미 세션이 복구됐으므로 로그아웃하지 않음.
-				if (get(auth).token === token) {
+				if (get(auth).token === token && !mockup.active && !isMockAuthActive()) {
 					authReady.set(false);
 					clearAuth();
 				}
@@ -76,13 +161,41 @@
 	});
 
 	onMount(() => {
-		api.get<Partial<PublicSiteConfig>>('/api/v1/site-config')
-			.then((config) => initSiteConfig(qualifyBackendAssetPaths(config, getBaseUrl())))
-			.catch(() => {});
+		themeReady = true;
+		const requested = $page.url.searchParams.get(MOCKUP_QUERY_KEY);
+		let bootstrapUrl: string | null = null;
+		if (isMockupProfileId(requested)) {
+			clientMockProfile = requested;
+			sessionStorage.setItem(MOCKUP_SESSION_KEY, requested);
+			if ((location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/admin')) && !isMockupPathAllowed(requested, location.pathname)) {
+				bootstrapUrl = `${getMockupHomePath(requested)}?${MOCKUP_QUERY_KEY}=${requested}`;
+			}
+		} else if (requested === 'off') {
+			sessionStorage.removeItem(MOCKUP_SESSION_KEY);
+			clientMockProfile = null;
+			explicitMockupOff = true;
+		} else {
+			const stored = sessionStorage.getItem(MOCKUP_SESSION_KEY);
+			if (isMockupProfileId(stored)) {
+				clientMockProfile = stored;
+				const nextPath = (location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/admin')) && isMockupPathAllowed(stored, location.pathname)
+					? location.pathname
+					: getMockupHomePath(stored);
+				bootstrapUrl = `${nextPath}?${MOCKUP_QUERY_KEY}=${stored}`;
+			}
+		}
+		if (clientMockProfile && !isMockAuthActive()) {
+			lastVerifiedToken = null;
+			enterMockAuth(buildMockAuth(clientMockProfile, $page.url.pathname), clientMockProfile);
+			enteredMockProfile = clientMockProfile;
+		}
+		mockupClientReady = true;
+		if (bootstrapUrl) void goto(bootstrapUrl, { replaceState: true });
+		if (!mockup.active && !bootstrapUrl) void refreshPublicSiteConfig();
 
 		// access JWT 만료 2분 전에 자동 갱신 (client.ts의 401 재시도 보완)
 		const interval = setInterval(async () => {
-			if (!$auth.token || !$auth.refreshToken) return;
+			if (mockup.active || !$auth.token || !$auth.refreshToken) return;
 			const expiresAt = $auth.accessExpiresAt;
 			if (!expiresAt) return;
 			const remaining = expiresAt - Math.floor(Date.now() / 1000);
@@ -113,7 +226,7 @@
 	// 테마 변경 시 <html> 클래스 업데이트
 	$effect(() => {
 		if (typeof document === 'undefined') return;
-		document.documentElement.classList.toggle('light', $resolvedTheme === 'light');
+		document.documentElement.classList.toggle('light', themeReady && $resolvedTheme === 'light');
 	});
 
 	async function logout() {
@@ -138,9 +251,9 @@
 	}
 </script>
 
-<svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
+<svelte:head><link rel="icon" href={themedFaviconPath} /></svelte:head>
 
-{#if $isLoggedIn && !($page.url.pathname.startsWith('/select-project') || isInvitationRoute)}
+{#if showAppChrome}
 	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button
@@ -233,12 +346,17 @@
 			</button>
 		</div>
 	</nav>
-	<UploadDock />
-	<CmdPalette />
+	{#if !mockup.active}
+		<UploadDock />
+		<CmdPalette />
+	{/if}
 {/if}
 
 {#if $isLoggedIn}
 	<ConfirmDialog />
+{/if}
+{#if mockup.active}
+	<MockupBanner />
 {/if}
 <Toast />
 

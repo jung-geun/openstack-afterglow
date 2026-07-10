@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -12,6 +13,7 @@
 	import VersionInfoPanel from '$lib/components/admin/overview/VersionInfoPanel.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import { Alert, StatTile, Pill } from '$lib/components/ui';
+	import { toast } from '$lib/stores/toast';
 
 	interface Notification {
 		severity: string;
@@ -45,6 +47,15 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
+	const mockupAdminActive = $derived($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin');
+
+	function selectProjectUsage(project: ProjectUsage) {
+		if (mockupAdminActive) {
+			toast.info('mockup mode에서는 관리자 개요만 지원합니다.');
+			return;
+		}
+		selectedProject = project;
+	}
 	function loadProjectUsage() {
 		projectUsageLoading = true;
 		api.get<ProjectUsage[]>('/api/v1/admin/overview/projects', token, projectId)
@@ -223,7 +234,7 @@
 			<ProjectUsageTable
 				projects={projectUsage}
 				loading={projectUsageLoading}
-				onSelectProject={(p) => { selectedProject = p; }}
+				onSelectProject={selectProjectUsage}
 			/>
 			<ServiceCountCards {overview} />
 		</div>

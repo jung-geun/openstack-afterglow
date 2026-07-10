@@ -13,12 +13,20 @@
 		onchange: (value: string) => void;
 		size?: 'xs' | 'sm';
 		class?: string;
+		ariaLabel?: string;
 	}
 
-	let { value, options, onchange, size = 'sm', class: className = '' }: Props = $props();
+	let {
+		value,
+		options,
+		onchange,
+		size = 'sm',
+		class: className = '',
+		ariaLabel
+	}: Props = $props();
 </script>
 
-<div class="toggle-group toggle-{size} {className}" role="group">
+<div class="toggle-group toggle-{size} {className}" role="group" aria-label={ariaLabel}>
 	{#each options as option}
 		<button
 			type="button"

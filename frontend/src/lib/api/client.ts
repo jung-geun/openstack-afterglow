@@ -1,5 +1,8 @@
 import { get } from 'svelte/store';
 import { siteConfig } from '$lib/config/site';
+import { ApiError } from '$lib/api/errors';
+import { maybeMockBlob, maybeMockJson, maybeMockK3sStream, symbolNoMatch } from '$lib/mockup/transport';
+export { ApiError } from '$lib/api/errors';
 
 function stripTrailingSlash(value: string): string {
 	return value.replace(/\/+$/, '');
@@ -23,14 +26,6 @@ export function getWebSocketUrl(path: string): string {
 	return new URL(path, base).toString();
 }
 
-export class ApiError extends Error {
-	constructor(
-		public status: number,
-		message: string
-	) {
-		super(message);
-	}
-}
 
 function formatErrorDetail(body: unknown, fallback: string): string {
 	if (!body || typeof body !== 'object') return fallback;
@@ -57,6 +52,8 @@ let _redirectingTo401 = false;
 let _handling403Admin = false;
 // 동시 다수 요청이 토큰 refresh를 중복 호출하지 않도록 직렬화
 let _refreshPromise: Promise<string | null> | null = null;
+const AUTH_PUBLIC_PATHS = new Set(['/', '/login', '/auth/gitlab/callback']);
+
 
 /**
  * /api/admin/ 경로에서 403 응답 시 isSystemAdmin=false 강등 + /dashboard로 이동.
@@ -82,7 +79,7 @@ async function handleAdminForbidden(): Promise<void> {
 }
 
 /**
- * 401 응답 시 인증 상태 정리 + 로그인 페이지(/)로 자동 redirect.
+ * 401 응답 시 인증 상태 정리 + 로그인 페이지(/login)로 자동 redirect.
  */
 async function handleUnauthorized(): Promise<void> {
 	if (typeof window === 'undefined') return;
@@ -96,7 +93,7 @@ async function handleUnauthorized(): Promise<void> {
 		if (recovered) return;
 	}
 
-	if (window.location.pathname === '/') return;
+	if (AUTH_PUBLIC_PATHS.has(window.location.pathname)) return;
 	_redirectingTo401 = true;
 	try {
 		const [{ clearAuth }, { goto }] = await Promise.all([
@@ -104,9 +101,9 @@ async function handleUnauthorized(): Promise<void> {
 			import('$app/navigation'),
 		]);
 		clearAuth();
-		await goto('/');
+		await goto('/login');
 	} catch {
-		window.location.href = '/';
+		window.location.href = '/login';
 	} finally {
 		setTimeout(() => { _redirectingTo401 = false; }, 1000);
 	}
@@ -209,6 +206,17 @@ async function request<T>(
 	// Fix 3: caller가 401을 직접 처리하는 경우 전역 로그아웃 리다이렉트를 억제할 수 있음
 	reqOpts?: { suppressAuthRedirect?: boolean }
 ): Promise<T> {
+	const method = (options.method ?? 'GET').toString().toUpperCase();
+	let requestBody: unknown = options.body;
+	if (typeof options.body === 'string') {
+		try { requestBody = JSON.parse(options.body); } catch { /* non-JSON body */ }
+	}
+	const mock = await maybeMockJson<T>(method, path, requestBody, token, projectId);
+	if (mock !== symbolNoMatch) {
+		if (method === 'GET') memoryCache.set(path, { data: mock, timestamp: Date.now() });
+		return mock;
+	}
+
 	const headers = _buildHeaders(token, projectId, options.headers as Record<string, string>);
 
 	const res = await fetch(`${getBaseUrl()}${path}`, {
@@ -440,6 +448,8 @@ export const api = {
 	},
 
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
+		const mock = await maybeMockBlob('GET', path, token, projectId);
+		if (mock !== symbolNoMatch) return { blob: mock, filename: 'afterglow-mockup-kubeconfig.yaml' };
 		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
@@ -478,6 +488,17 @@ export const api = {
 		onMessage?: (data: T) => void,
 		onError?: (error: Error) => void
 	): void => {
+		const mockStream = maybeMockK3sStream(path, body, token, projectId);
+		if (mockStream) {
+			(async () => {
+				try {
+					for await (const message of mockStream) onMessage?.(message as T);
+				} catch (err) {
+					onError?.(err instanceof Error ? err : new Error(String(err)));
+				}
+			})();
+			return;
+		}
 		const baseUrl = getBaseUrl();
 		const url = new URL(`${baseUrl}${path}`);
 

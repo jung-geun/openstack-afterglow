@@ -75,7 +75,7 @@
 				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
 					{error}
 				</div>
-				<a href="/" class="block w-full text-center bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg py-2.5 text-sm transition-colors">
+				<a href="/login" class="block w-full text-center bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg py-2.5 text-sm transition-colors">
 					로그인 페이지로 돌아가기
 				</a>
 			</div>

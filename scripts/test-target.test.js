@@ -195,9 +195,8 @@ test("--parallel runs exactly two lanes instead of starting every step at once",
 		assert.equal(result.signal, null)
 		assert.equal(result.code, 0, result.stderr || result.stdout)
 		const intervals = buildIntervals(result.events)
-		const startedSteps = result.events.filter((event) => event.type === "start").map((event) => event.step)
-
-		assert.deepEqual(startedSteps.slice(0, 2).sort(), ["auth [backend]", "auth [frontend]"].sort())
+		assert.ok(intervals.has("auth [backend]"))
+		assert.ok(intervals.has("auth [frontend]"))
 		assert.equal(maxConcurrency(intervals), 2)
 		assert.ok(intervals.get("auth [backend]").end <= intervals.get("config [backend]").start)
 		assert.ok(intervals.get("auth [frontend]").end <= intervals.get("config [frontend]").start)

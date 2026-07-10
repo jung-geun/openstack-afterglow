@@ -53,7 +53,11 @@ describe('frontend CSP branding origins', () => {
 		vi.doUnmock('$lib/server/config');
 	});
 
-	it('allows cross-origin API and uploaded branding origins in img-src', async () => {
+	it('allows configured runtime and uploaded branding origins in CSP directives', async () => {
+		const apiOrigin = 'https://api.example.com';
+		const s3Origin = 'https://s3.example.com';
+		const githubOrigin = 'https://api.github.com';
+
 		vi.resetModules();
 		vi.doMock('$lib/server/config', () => ({
 			loadPublicSiteConfig: () => ({
@@ -66,8 +70,8 @@ describe('frontend CSP branding origins', () => {
 				refresh_interval_ms: 5000,
 				services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
 				runtime: {
-					api_base: 'https://api.example.com/root/path',
-					s3_base: '',
+					api_base: apiOrigin,
+					s3_base: s3Origin,
 					grafana_base: '',
 				},
 			}),
@@ -86,11 +90,21 @@ describe('frontend CSP branding origins', () => {
 
 		const csp = response.headers.get('Content-Security-Policy');
 		expect(csp).toBeTruthy();
-		const imgSrc = csp?.split(';').find((directive) => directive.trimStart().startsWith('img-src'));
-		expect(imgSrc).toContain("img-src 'self' data:");
-		expect(imgSrc).toContain('https://api.example.com');
-		expect(imgSrc).toContain('https://uploads.example.com');
-		expect(imgSrc).toContain('https://cdn.example.com');
+		const directives = new Map<string, string[]>();
+		for (const directive of csp!.split(';')) {
+			const [name, ...sources] = directive.trim().split(/\s+/);
+			if (name) directives.set(name, sources);
+		}
+
+		expect([...directives.keys()]).toEqual(
+			expect.arrayContaining(['default-src', 'script-src', 'style-src', 'img-src', 'connect-src', 'font-src', 'frame-src', 'frame-ancestors']),
+		);
+		expect(directives.get('connect-src')).toEqual(expect.arrayContaining([apiOrigin, s3Origin]));
+		expect(directives.get('connect-src')).not.toContain(githubOrigin);
+		expect([...directives.values()].flat()).not.toContain(githubOrigin);
+		expect(directives.get('img-src')).toEqual(
+			expect.arrayContaining(["'self'", 'data:', 'https://api.example.com', 'https://uploads.example.com', 'https://cdn.example.com']),
+		);
 		expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 	});
 });

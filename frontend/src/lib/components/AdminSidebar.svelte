@@ -9,6 +9,8 @@
 	import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
 
 	type BetaFeatureKey = keyof BetaFeatures;
+	const mockupAdminActive = $derived($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin');
+
 
 	const sections = $state([
 		{
@@ -153,6 +155,7 @@
 	}
 
 	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+		if (mockupAdminActive) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!isBetaVisible(section.beta)) return false;
 		if (section.service && !(svcs?.[section.service] ?? false)) return false;

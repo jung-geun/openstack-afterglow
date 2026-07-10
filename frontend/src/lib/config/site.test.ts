@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import type { PublicSiteConfig } from '$lib/types/siteConfig';
-import { initSiteConfig, qualifyBackendAssetPaths, siteConfig } from './site';
+import { initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig, siteConfig } from './site';
 
 const baseConfig: PublicSiteConfig = {
 	site_name: 'Afterglow',
@@ -64,6 +64,51 @@ describe('site config refresh', () => {
 			logo_path: '/logo.png',
 			logo_light_path: 'https://cdn.example.com/login-light.png',
 			favicon_path: '/favicon.ico',
+		});
+	});
+
+	it('replaceSiteConfig drops stale nested overrides instead of merge-preserving them', () => {
+		initSiteConfig({
+			services: { manila: true, trove: true },
+			runtime: { grafana_base: 'https://grafana.example.com' },
+		});
+
+		replaceSiteConfig({
+			...baseConfig,
+			site_name: 'Afterglow Mockup',
+			services: {
+				magnum: true,
+				manila: false,
+				zun: false,
+				k3s: true,
+				trove: false,
+				swift: false,
+				barbican: false,
+			},
+			runtime: {
+				api_base: 'https://mock-api.example.com',
+				s3_base: 'https://mock-s3.example.com',
+				grafana_base: '',
+			},
+		});
+
+		expect(get(siteConfig)).toEqual({
+			...baseConfig,
+			site_name: 'Afterglow Mockup',
+			services: {
+				magnum: true,
+				manila: false,
+				zun: false,
+				k3s: true,
+				trove: false,
+				swift: false,
+				barbican: false,
+			},
+			runtime: {
+				api_base: 'https://mock-api.example.com',
+				s3_base: 'https://mock-s3.example.com',
+				grafana_base: '',
+			},
 		});
 	});
 });

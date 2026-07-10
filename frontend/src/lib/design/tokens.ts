@@ -12,6 +12,14 @@ export const TONE_CSS_VAR: Record<DesignTone, string> = {
 	'admin-tone': 'var(--admin-tone)',
 };
 
+export const EDITORIAL_CSS_VAR = {
+	canvas: 'var(--gradient-editorial-canvas)',
+	grid: 'var(--pattern-editorial-grid)',
+	gridMask: 'var(--gradient-editorial-grid-mask)',
+	cta: 'var(--gradient-editorial-cta)',
+	mediaSurface: 'var(--color-surface-editorial-media)',
+} as const;
+
 export const CHART_COLORS = [
 	'var(--color-chart-1)',
 	'var(--color-chart-2)',

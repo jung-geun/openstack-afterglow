@@ -30,6 +30,14 @@ export function initSiteConfig(config: Partial<PublicSiteConfig>): void {
 	}));
 }
 
+export function replaceSiteConfig(config: PublicSiteConfig): void {
+	siteConfig.set({
+		...config,
+		services: { ...config.services },
+		runtime: { ...config.runtime },
+	});
+}
+
 export function qualifyBackendAssetPaths(config: Partial<PublicSiteConfig>, apiBase: string): Partial<PublicSiteConfig> {
 	const qualify = (value: string | undefined) =>
 		value?.startsWith('/api/') ? `${apiBase}${value}` : value;

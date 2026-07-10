@@ -1,5 +1,45 @@
 @import 'tailwindcss';
 
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-ExtraLight.ttf') format('truetype');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Design system theme tokens */
 @theme static {
   /* Surface */
@@ -28,7 +68,7 @@
   --color-state-info: #5ed4e4;
   --color-state-neutral: #8a93a4;
   /* Font */
-  --font-sans: "Geist", Inter, system-ui, sans-serif;
+  --font-sans: "MaruBuri", "Geist", Inter, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
@@ -47,6 +87,11 @@
   --gradient-usage: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-2) 45%, var(--color-warm) 100%);
   --gradient-usage-warning: linear-gradient(90deg, var(--color-state-warning) 0%, var(--color-warm) 100%);
   --gradient-usage-danger: linear-gradient(90deg, var(--color-state-danger) 0%, var(--color-warm) 100%);
+  --gradient-editorial-canvas: radial-gradient(circle at 18% 8%, color-mix(in oklab, var(--color-warm), transparent 78%), transparent 28rem), radial-gradient(circle at 88% 12%, color-mix(in oklab, var(--color-accent), transparent 82%), transparent 30rem), linear-gradient(180deg, var(--color-surface-canvas), color-mix(in oklab, var(--color-surface-canvas), black 10%) 52%, var(--color-surface-canvas));
+  --pattern-editorial-grid: linear-gradient(color-mix(in oklab, var(--color-line), transparent 34%) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--color-line), transparent 34%) 1px, transparent 1px);
+  --gradient-editorial-grid-mask: linear-gradient(180deg, black, transparent 82%);
+  --gradient-editorial-cta: linear-gradient(135deg, color-mix(in oklab, var(--color-warm), transparent 82%), transparent 58%);
+  --color-surface-editorial-media: oklch(13.4% 0.012 264.7);
   --glow-warm: 0 8px 24px color-mix(in oklab, var(--color-warm) 25%, transparent);
   --glow-accent: 0 8px 24px color-mix(in oklab, var(--color-accent) 25%, transparent);
   --focus-ring: 0 0 0 3px var(--accent-ring);
@@ -71,6 +116,7 @@
 html,
 body {
   background-color: var(--color-surface-canvas);
+  font-family: var(--font-sans);
 }
 
 /* Light theme token overrides */

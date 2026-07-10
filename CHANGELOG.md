@@ -5,6 +5,12 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 을 따르며,
 프로젝트는 [SemVer](https://semver.org/lang/ko/) 2.0.0 을 따릅니다.
 
+## [Unreleased]
+
+### Added
+
+- **공개 랜딩 페이지** — 테마 대응 에디토리얼 연구 클라우드 소개, 고정 섹션 내비게이션, VM/GPU·Kubernetes 워크플로우 안내, 실제 대상 사용자·조직 표기, 데이터·관측·레이어·라우터 워크플로우 비주얼, 합성 제품 proof 화면, 테마 불변 SVG media canvas, 테마별 헤더·favicon 아이콘, 인터랙티브 워크플로우, 인증 상태별 콘솔 접속 및 직접 문의 CTA를 루트 경로에 추가하고 로그인 화면을 `/login`으로 분리.
+
 ## [1.16.1] - 2026-07-08
 
 ### Added

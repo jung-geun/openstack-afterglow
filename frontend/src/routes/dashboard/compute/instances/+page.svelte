@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
+	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { createSwr } from '$lib/utils/swr.svelte';
@@ -27,6 +28,15 @@
 	let selectedIds = $state(new Set<string>());
 	let bulkActioning = $state(false);
 
+	const mockupActive = $derived($page.data.mockup?.active === true);
+
+	function openCreateEntryPoint() {
+		if (mockupActive) {
+			toast.info('mockup mode에서는 VM 생성 wizard를 제외합니다.');
+			return;
+		}
+		openWizard();
+	}
 	const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
 	async function fetchInstances(opts?: { refresh?: boolean }) {
@@ -167,7 +177,7 @@
 	async function openConsole(id: string) {
 		try {
 			const data = await api.get<{ url: string }>(`/api/v1/instances/${id}/console`, $auth.token ?? undefined, $auth.projectId ?? undefined);
-			window.open(data.url, '_blank');
+			window.open(data.url, '_blank', 'noopener,noreferrer');
 		} catch {
 			toast.error('콘솔 URL을 가져올 수 없습니다');
 		}
@@ -210,7 +220,7 @@
 				refreshing={refreshing}
 				onManualRefresh={forceRefresh}
 			/>
-			<button type="button" onclick={() => openWizard()} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+			<button type="button" onclick={openCreateEntryPoint} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
 				+ VM 생성
 			</button>
 		{/snippet}
@@ -227,7 +237,7 @@
 		<div class="text-center py-20 text-gray-600">
 			<div class="text-5xl mb-4">☁️</div>
 			<p class="text-lg">인스턴스가 없습니다</p>
-			<button type="button" onclick={() => openWizard()} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
+			<button type="button" onclick={openCreateEntryPoint} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
 		</div>
 	{:else}
 		<InstancesTable

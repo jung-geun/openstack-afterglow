@@ -7,7 +7,9 @@ const readSource = (path: string) => readFileSync(resolve(repoRoot, path), 'utf8
 
 const layoutSource = readSource('src/routes/+layout.svelte');
 const selectProjectSource = readSource('src/routes/select-project/+page.svelte');
-const loginSource = readSource('src/routes/+page.svelte');
+const loginRouteSource = readSource('src/routes/login/+page.svelte');
+const loginComponentSource = readSource('src/lib/components/auth/LoginPage.svelte');
+const loginSource = `${loginRouteSource}\n${loginComponentSource}`;
 
 describe('logout flow source contracts', () => {
 	it('keeps confirmed logout redirect and success toast in both logged-in exit points', () => {

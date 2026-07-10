@@ -15,6 +15,11 @@ describe('ToggleGroup', () => {
 		expect(screen.getByRole('button', { name: '20' }).getAttribute('aria-pressed')).toBe('false');
 	});
 
+	it('exposes an accessible name for the toggle group', () => {
+		render(ToggleGroup, { value: '10', options, onchange: vi.fn(), ariaLabel: '워크플로우 필터' });
+		expect(screen.getByRole('group', { name: '워크플로우 필터' })).toBeTruthy();
+	});
+
 	it('calls onchange once with the clicked option value', async () => {
 		const onchange = vi.fn();
 		render(ToggleGroup, { value: '10', options, onchange });

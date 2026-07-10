@@ -1,0 +1,238 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { MOCKUP_SESSION_KEY } from '$lib/mockup/contracts';
+import type { K3sSseProgressMessage } from '$lib/api/k3sSseStream';
+import type { K3sCluster } from '$lib/types/k3s';
+let fetchMock = vi.fn();
+
+beforeEach(() => {
+	vi.resetModules();
+	fetchMock = vi.fn(() => {
+		throw new Error('mockup transport tests must stay network-free');
+	});
+	vi.stubGlobal('fetch', fetchMock);
+	localStorage.clear();
+	sessionStorage.clear();
+	sessionStorage.setItem(MOCKUP_SESSION_KEY, 'tutorial');
+});
+
+afterEach(() => {
+	window.history.replaceState({}, '', '/');
+	vi.unstubAllGlobals();
+});
+
+describe('mockup transport', () => {
+	it('serves supported JSON reads and applies local instance mutations to later GETs', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockJson } = await import('./transport');
+		const instancesBefore = (await maybeMockJson<Array<{ id: string; status: string }>>(
+			'GET',
+			'/api/v1/instances',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Array<{ id: string; status: string }>;
+		const stopped = instancesBefore.find((instance) => instance.status === 'SHUTOFF');
+
+		expect(stopped).toBeTruthy();
+
+		await maybeMockJson(
+			'POST',
+			`/api/v1/instances/${stopped!.id}/start`,
+			{},
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const instancesAfter = (await maybeMockJson<Array<{ id: string; status: string }>>(
+			'GET',
+			'/api/v1/instances',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Array<{ id: string; status: string }>;
+
+		expect(instancesAfter.find((instance) => instance.id === stopped!.id)?.status).toBe('ACTIVE');
+		const consoleTarget = (await maybeMockJson<{ url: string }>(
+			'GET',
+			`/api/v1/instances/${stopped!.id}/console`,
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as { url: string };
+
+		expect(consoleTarget).toEqual({ url: '/mockup-console.html' });
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('streams fake k3s progress and exposes the created cluster on subsequent reads', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockJson, maybeMockK3sStream } = await import('./transport');
+		const clustersBefore = (await maybeMockJson<K3sCluster[]>(
+			'GET',
+			'/api/v1/k3s/clusters',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as K3sCluster[];
+		const progress = maybeMockK3sStream(
+			'/api/v1/k3s/clusters/async',
+			{ name: 'tutorial-created-cluster', agent_count: 2, os_type: 'ubuntu' },
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const messages: K3sSseProgressMessage[] = [];
+
+		expect(progress).not.toBeNull();
+
+		for await (const message of progress!) {
+			messages.push(message);
+		}
+
+		expect(messages.length).toBeGreaterThan(0);
+		expect(messages.at(-1)).toMatchObject({ step: 'completed' });
+
+		const clustersAfter = (await maybeMockJson<K3sCluster[]>(
+			'GET',
+			'/api/v1/k3s/clusters',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as K3sCluster[];
+
+		expect(clustersAfter).toHaveLength(clustersBefore.length + 1);
+		expect(clustersAfter.some((cluster) => cluster.name === 'tutorial-created-cluster')).toBe(true);
+	});
+
+	it('serves K3s detail and health contracts, including deleted clusters on request', async () => {
+		// Dynamic import reinitializes the mutable mock fixture with the session-scoped profile.
+		const { maybeMockJson, maybeMockK3sStream } = await import('./transport');
+		const clusters = (await maybeMockJson<K3sCluster[]>('GET', '/api/v1/k3s/clusters')) as K3sCluster[];
+		const active = clusters.find((cluster) => cluster.status === 'ACTIVE');
+
+		expect(active).toBeTruthy();
+		const detail = await maybeMockJson<K3sCluster>('GET', `/api/v1/k3s/clusters/${active!.id}`);
+		const health = (await maybeMockJson<{
+			status: string;
+			api_server_reachable: boolean;
+			healthz_ok: boolean;
+			nodes: { ready: boolean; kubelet_version: string | null }[];
+			error: string | null;
+		}>('GET', `/api/v1/k3s/clusters/${active!.id}/health`)) as {
+			status: string;
+			api_server_reachable: boolean;
+			healthz_ok: boolean;
+			nodes: { ready: boolean; kubelet_version: string | null }[];
+			error: string | null;
+		};
+
+		expect(detail).toMatchObject({ id: active!.id, status: 'ACTIVE' });
+		expect(health).toMatchObject({
+			status: 'HEALTHY',
+			api_server_reachable: true,
+			healthz_ok: true,
+			error: null,
+		});
+		expect(health.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ ready: true, kubelet_version: 'v1.30.4+k3s1' })]));
+
+		const deletion = maybeMockK3sStream(`/api/v1/k3s/clusters/${active!.id}/delete-async`, {}, undefined, undefined);
+		expect(deletion).not.toBeNull();
+		const current = (await maybeMockJson<K3sCluster[]>('GET', '/api/v1/k3s/clusters')) as K3sCluster[];
+		const withDeleted = (await maybeMockJson<K3sCluster[]>('GET', '/api/v1/k3s/clusters?include_deleted=true')) as K3sCluster[];
+
+		expect(current.some((cluster) => cluster.id === active!.id)).toBe(false);
+		expect(withDeleted).toContainEqual(expect.objectContaining({ id: active!.id, status: 'DELETED' }));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('keeps administrator privileges when an admin mock changes project', async () => {
+		sessionStorage.clear();
+		sessionStorage.setItem(MOCKUP_SESSION_KEY, 'admin');
+		vi.resetModules();
+		// Dynamic import reloads auth and transport against the administrator tab fixture.
+		const { maybeMockJson } = await import('./transport');
+		const token = await maybeMockJson<{
+			is_system_admin: boolean;
+			roles: string[];
+		}>('POST', '/api/v1/auth/token/project', { project_id: 'mock-project-2' });
+
+		expect(token).toMatchObject({ is_system_admin: true, roles: ['admin'] });
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('intercepts a query-activated mock before auth hydration can reach fetch', async () => {
+		sessionStorage.clear();
+		window.history.replaceState({}, '', '/dashboard?mockup=tutorial');
+		vi.resetModules();
+		// Dynamic import proves query bootstrap works before auth has a stored mock snapshot.
+		const { maybeMockJson } = await import('./transport');
+		const instances = await maybeMockJson<Array<{ id: string }>>('GET', '/api/v1/instances');
+
+		expect(instances).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'mock-instance-1' })]));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('serves kubeconfig availability through HEAD and blob handlers for active clusters', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockBlob, maybeMockHead, maybeMockJson } = await import('./transport');
+		const clusters = (await maybeMockJson<K3sCluster[]>(
+			'GET',
+			'/api/v1/k3s/clusters',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as K3sCluster[];
+		const activeCluster = clusters.find((cluster) => cluster.status === 'ACTIVE');
+
+		expect(activeCluster).toBeTruthy();
+
+		const head = (await maybeMockHead(
+			`/api/v1/k3s/clusters/${activeCluster!.id}/kubeconfig`,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Response;
+		const blob = (await maybeMockBlob(
+			'GET',
+			`/api/v1/k3s/clusters/${activeCluster!.id}/kubeconfig`,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Blob;
+		const ca = (await maybeMockBlob(
+			'GET',
+			`/api/v1/k3s/clusters/${activeCluster!.id}/ca-certificate`,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Blob;
+		const text = await blob.text();
+
+		expect(head.ok).toBe(true);
+		expect(text).toContain('apiVersion:');
+		expect(text).toContain('kind: Config');
+		await expect(ca.text()).resolves.toContain('BEGIN CERTIFICATE');
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('throws the exact 409 mockup error for unsupported mutations on supported pages', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockJson } = await import('./transport');
+		const instances = (await maybeMockJson<Array<{ id: string }>>(
+			'GET',
+			'/api/v1/instances',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Array<{ id: string }>;
+
+		await expect(
+			maybeMockJson(
+				'POST',
+				`/api/v1/instances/${instances[0]!.id}/floating-ip?port_id=mock-port-1`,
+				{},
+				'mock-token-tutorial-scoped',
+				'mock-project-1',
+			),
+		).rejects.toMatchObject({
+			status: 409,
+			message: 'mockup mode에서는 이 작업을 아직 지원하지 않습니다.',
+		});
+	});
+});
