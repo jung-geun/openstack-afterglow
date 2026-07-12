@@ -20,9 +20,9 @@ describe('theme-aware public brand assets', () => {
 		expect(resolveLandingLogoPath({ ...legacyBranding, logo_light_path: '', logo_path: '/api/logo-legacy.png' }, 'dark')).toBe('/api/logo-legacy.png');
 	});
 
-	it('uses paired default marks for the legacy favicon and preserves a configured favicon', () => {
-		expect(resolveFaviconPath(legacyBranding, 'dark')).toBe('/brand/afterglow-mark-light.svg');
-		expect(resolveFaviconPath(legacyBranding, 'light')).toBe('/brand/afterglow-mark-dark.svg');
+	it('restores the legacy /favicon.ico for the default config and preserves a configured favicon', () => {
+		expect(resolveFaviconPath(legacyBranding, 'dark')).toBe('/favicon.ico');
+		expect(resolveFaviconPath(legacyBranding, 'light')).toBe('/favicon.ico');
 		expect(resolveFaviconPath({ favicon_path: '/api/custom-favicon.png' }, 'dark')).toBe('/api/custom-favicon.png');
 	});
 });
