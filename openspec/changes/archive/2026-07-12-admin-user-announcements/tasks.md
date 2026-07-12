@@ -9,4 +9,4 @@
 - [x] Add notifications inbox page (`/dashboard/notifications`)
 - [x] Add admin announcement composer page (`/admin/announcements`)
 - [x] Add backend regression tests (CRUD, targeting correctness, IDOR, validation, unread-count)
-- [ ] Run required project checks (`npm run test:all`, `npm run lint:backend`) — blocked: unrelated concurrent WireGuard VPN work (uncommitted, same tree) fails `test_no_unexpected_public_routes` and `test_mutation_handlers_have_invalidation`; all announcement-scoped tests pass in isolation (backend 20 passed/13 db-skipped, frontend 450 passed). See proposal notes.
+- [x] Run required project checks (`npm run test:all`, `npm run lint:backend`) — both green after the concurrent WireGuard VPN session resolved its two gate failures; committed as 966c7ea via surgically-scoped staging (git apply --cached on shared files) to avoid touching concurrent sessions' uncommitted work.
