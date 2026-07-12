@@ -14,4 +14,9 @@ describe('UsageBar', () => {
 		expect(render(UsageBar, { percent: 70, thresholds: { warning: 70, danger: 90 } }).container.querySelector('.usage-fill-warning')).toBeTruthy();
 		expect(render(UsageBar, { percent: 90, thresholds: { warning: 70, danger: 90 } }).container.querySelector('.usage-fill-danger')).toBeTruthy();
 	});
+
+	it('renders a finite zero maximum instead of hiding it', () => {
+		const { container } = render(UsageBar, { value: 0, max: 0 });
+		expect(container.querySelector('.usage-value')?.textContent).toMatch(/0\s*\/\s*0/);
+	});
 });

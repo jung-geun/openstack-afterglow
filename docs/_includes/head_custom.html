@@ -1,0 +1,9 @@
+<meta name="color-scheme" content="light dark">
+<script>
+  (function () {
+    const saved = window.localStorage.getItem('afterglow-docs-theme');
+    const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = saved || (systemDark ? 'dark' : 'light');
+  })();
+</script>
+<script src="{{ '/assets/js/theme-toggle.js' | relative_url }}" defer></script>

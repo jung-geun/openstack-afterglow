@@ -248,6 +248,11 @@ Thumbs.db
 # Docker 볼륨 데이터
 monitoring/data/
 
+.sass-cache/
+*.css.map
+*.sass.map
+*.scss.map
+
 docker-compose.override.yml
 .claude/settings.json
 .gstack/

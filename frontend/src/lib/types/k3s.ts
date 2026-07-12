@@ -1,3 +1,8 @@
+export interface DashboardK3sStats {
+  total: number;
+  active: number;
+}
+
 export interface K3sCluster {
 	id: string;
 	name: string;

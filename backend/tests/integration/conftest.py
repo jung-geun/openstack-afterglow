@@ -167,17 +167,6 @@ def _fake_redis_global():
     yield
 
 
-@pytest.fixture(autouse=True)
-async def _flush_afterglow_cache():
-    """루트 Redis flush를 통합 테스트에서 비활성화한다.
-
-    루트 tests/conftest.py의 _flush_afterglow_cache는 단위 테스트 격리를 위해
-    afterglow:* 전체를 지우는데, 통합 테스트에서는 실제 Redis의
-    afterglow:refresh:* 세션 키까지 테스트 사이에 삭제해 인증이 401로 깨진다.
-    """
-    yield
-
-
 # ---------------------------------------------------------------------------
 # 설정 / 크리덴셜
 # ---------------------------------------------------------------------------

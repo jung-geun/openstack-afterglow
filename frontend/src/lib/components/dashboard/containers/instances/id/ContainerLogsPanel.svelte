@@ -1,11 +1,11 @@
 <script lang="ts">
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-  import type { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 
   interface Props {
     logs: string;
     logsLoading: boolean;
-    ar: ReturnType<typeof createAutoRefresh>;
+    ar: AutoRefreshController;
     onManualRefresh: () => void;
   }
 

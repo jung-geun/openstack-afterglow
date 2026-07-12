@@ -8,7 +8,17 @@ interface AutoRefreshOptions {
 	invokeOnMount?: boolean;
 }
 
-export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoRefreshOptions) {
+export interface AutoRefreshController {
+	active: boolean;
+	intervalSeconds: number;
+	readonly intervalOptions: number[];
+	setBoost(seconds: number | null): void;
+}
+
+export function createAutoRefresh(
+	fn: () => void | Promise<void>,
+	options: AutoRefreshOptions,
+): AutoRefreshController {
 	const {
 		storageKey,
 		defaultActive = true,

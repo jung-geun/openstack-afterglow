@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 
 	let {
 		showDeleted = $bindable(),
@@ -12,7 +12,7 @@
 		onToggleDeleted,
 	}: {
 		showDeleted: boolean;
-		ar: ReturnType<typeof createAutoRefresh>;
+		ar: AutoRefreshController;
 		refreshing: boolean;
 		onForceRefresh: () => void;
 		onOpenCreate: () => void;

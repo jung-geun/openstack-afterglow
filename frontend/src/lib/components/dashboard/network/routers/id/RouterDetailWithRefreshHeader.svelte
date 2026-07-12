@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { RouterDetail } from '$lib/types/router';
-	import type { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	let {
@@ -13,7 +13,7 @@
 	}: {
 		router: RouterDetail;
 		saving: boolean;
-		ar: ReturnType<typeof createAutoRefresh>;
+		ar: AutoRefreshController;
 		onManualRefresh: () => void;
 		onDelete: () => Promise<void>;
 		onBack: () => void;

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import openstack
@@ -12,12 +12,12 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, func, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import and_, case, func, select
+from sqlalchemy.exc import InterfaceError, OperationalError
 
-from app.api.deps import CacheMode, cache_mode, get_os_conn
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.config import get_settings
-from app.database import get_session_factory, is_db_available, mark_db_unhealthy
+from app.database import get_session_factory, is_db_available, is_db_configured, mark_db_unhealthy
 from app.services import cinder, nova, prom_query
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
@@ -29,19 +29,92 @@ router = APIRouter()
 _logger = logging.getLogger(__name__)
 
 
+def _dashboard_service_unavailable(detail: str) -> HTTPException:
+    """Create a reviewed public 503 handled by the central sanitizer."""
+    error = HTTPException(status_code=503, detail=detail)
+    error._afterglow_safe_public_detail = True
+    return error
+
+
+def _serialize_ip_address(value) -> dict:
+    """Return an IP address object in the JSON shape used by dashboard clients."""
+    if isinstance(value, dict):
+        return {
+            "addr": value.get("addr", ""),
+            "type": value.get("type", "fixed"),
+            "network_name": value.get("network_name", ""),
+        }
+    if hasattr(value, "model_dump"):
+        return _serialize_ip_address(value.model_dump())
+    return {
+        "addr": getattr(value, "addr", ""),
+        "type": getattr(value, "type", "fixed"),
+        "network_name": getattr(value, "network_name", ""),
+    }
+
+
 def _list_servers_as_dicts(conn):
     """서버 목록을 dict 리스트로 반환 (캐시 직렬화 호환)."""
     return [
         {
-            "id": s.id,
+            "id": getattr(s, "id", None),
             "name": getattr(s, "name", "") or "",
-            "status": s.status,
-            "flavor_id": s.flavor_id,
-            "flavor_name": s.flavor_name,
+            "status": getattr(s, "status", "") or "",
+            "flavor_id": getattr(s, "flavor_id", None),
+            "flavor_name": getattr(s, "flavor_name", None),
+            "ip_addresses": [_serialize_ip_address(ip) for ip in (getattr(s, "ip_addresses", None) or [])],
             "created_at": getattr(s, "created_at", None),
         }
         for s in nova.list_servers(conn)
     ]
+
+
+def _recent_instances(servers: list[dict], limit: int = 5) -> list[dict]:
+    """Select the newest instances while tolerating legacy cached rows.
+
+    Cached rows written before ``ip_addresses`` was added are intentionally
+    accepted here; this helper is the compatibility boundary for the lean
+    overview response.
+    """
+
+    def _timestamp(value) -> tuple[bool, float]:
+        if not value:
+            return False, 0.0
+        try:
+            if isinstance(value, datetime):
+                dt = value
+            else:
+                dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return True, dt.timestamp()
+        except (TypeError, ValueError, OverflowError):
+            return False, 0.0
+
+    normalized: list[tuple[bool, float, str, dict]] = []
+    for row in servers:
+        if not isinstance(row, dict):
+            continue
+        valid, timestamp = _timestamp(row.get("created_at"))
+        normalized.append(
+            (
+                valid,
+                timestamp,
+                str(row.get("id") or ""),
+                {
+                    "id": row.get("id"),
+                    "name": row.get("name", "") or "",
+                    "status": row.get("status", "") or "",
+                    "flavor_name": row.get("flavor_name"),
+                    "ip_addresses": row.get("ip_addresses") or [],
+                    "created_at": row.get("created_at"),
+                },
+            )
+        )
+    # Valid timestamps first, newest first; invalid timestamps are last. IDs
+    # provide a stable ordering when two timestamps are equal.
+    normalized.sort(key=lambda item: (-int(item[0]), -item[1], item[2]))
+    return [item[3] for item in normalized[:limit]]
 
 
 def _list_flavors_as_dicts(conn):
@@ -101,10 +174,35 @@ def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
 
 @router.get("/summary")
 async def get_dashboard_summary(
+    view: Literal["full", "overview"] = Query("full"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
     cm: CacheMode = Depends(cache_mode),
 ):
     project_id = conn._afterglow_project_id
+
+    if view == "overview":
+        try:
+            servers = await cached_call(
+                f"afterglow:nova:{project_id}:servers",
+                ttl_fast(),
+                lambda: _list_servers_as_dicts(conn),
+                enabled=cm.enabled,
+                refresh=cm.refresh,
+            )
+        except Exception:
+            _logger.warning("dashboard overview instance 조회 실패", exc_info=True)
+            raise _dashboard_service_unavailable("인스턴스 현황을 불러오지 못했습니다")
+        if isinstance(servers, Exception) or not isinstance(servers, list):
+            raise _dashboard_service_unavailable("인스턴스 현황을 불러오지 못했습니다")
+        return {
+            "instances": {
+                "total": len(servers),
+                "active": sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "ACTIVE"),
+                "shutoff": sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "SHUTOFF"),
+                "error": sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "ERROR"),
+            },
+            "recent_instances": _recent_instances(servers, limit=5),
+        }
 
     try:
         servers, all_flavors = await asyncio.gather(
@@ -155,14 +253,274 @@ async def get_dashboard_config():
     return {"refresh_interval_ms": settings.refresh_interval_ms}
 
 
+@router.get("/k3s-stats")
+async def get_dashboard_k3s_stats(
+    token_info: dict = Depends(get_token_info),
+    cm: CacheMode = Depends(cache_mode),
+):
+    """Return tenant K3s totals through a bounded, read-only source path."""
+    _ = cm  # Preserve the established cache-mode query contract without caching source state.
+    if not get_settings().service_k3s_enabled:
+        raise HTTPException(status_code=404, detail="K3s 서비스가 비활성화되어 있습니다")
+
+    project_id = token_info.get("project_id")
+    if not isinstance(project_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id) is None:
+        raise HTTPException(status_code=400, detail="유효하지 않은 프로젝트 ID")
+
+    if is_db_configured():
+        if not is_db_available():
+            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+        factory = get_session_factory()
+        if factory is None:
+            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+        try:
+            from app.models.db import K3sCluster
+
+            async with factory() as session:
+                result = await session.execute(
+                    select(
+                        func.count(K3sCluster.id),
+                        func.coalesce(
+                            func.sum(case((K3sCluster.status == "ACTIVE", 1), else_=0)),
+                            0,
+                        ),
+                    ).where(
+                        and_(
+                            K3sCluster.project_id == project_id,
+                            K3sCluster.deleted_at.is_(None),
+                        )
+                    )
+                )
+                total, active = result.one()
+            return {"total": int(total or 0), "active": int(active or 0)}
+        except (OperationalError, InterfaceError):
+            mark_db_unhealthy()
+            _logger.warning("dashboard K3s stats DB 연결 실패", exc_info=True)
+            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+        except Exception:
+            _logger.warning("dashboard K3s stats DB 조회 실패", exc_info=True)
+            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+
+    from app.services import k3s_cluster
+
+    try:
+        return await k3s_cluster.dashboard_cluster_stats(project_id)
+    except Exception:
+        _logger.warning("dashboard K3s stats Redis 조회 실패", exc_info=True)
+        raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+
+
+def _quota_threshold(resource: str, quota: dict) -> dict | None:
+    """Return a normalized threshold alert for a validated quota entry.
+
+    ``type`` is deliberately left to the caller: overview uses one
+    ``quota`` type while the legacy notifications adapter keeps its historic
+    resource-specific types.
+    """
+    if not isinstance(quota, dict):
+        return None
+    limit = quota.get("limit")
+    used = quota.get("in_use")
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool):
+        return None
+    if not isinstance(used, (int, float)) or isinstance(used, bool):
+        return None
+    if limit <= 0:
+        return None
+    pct = used / limit
+    if pct >= 1.0:
+        return {
+            "state": "full",
+            "severity": "danger",
+            "message": f"{resource} 쿼터 가득 참 ({used}/{limit})",
+            "count": 1,
+        }
+    if pct >= 0.9:
+        return {
+            "state": "warn",
+            "severity": "warning",
+            "message": f"{resource} 쿼터 {int(pct * 100)}% 사용 ({used}/{limit})",
+            "count": 1,
+        }
+    return None
+
+
+def _strict_quota_entry(raw: object, key: str, *, usage_keys: tuple[str, ...] = ("in_use",)) -> dict:
+    """Validate one usage-bearing quota entry before any fallback normalization."""
+    if not isinstance(raw, dict) or key not in raw or not isinstance(raw[key], dict):
+        raise ValueError(f"missing quota entry: {key}")
+    entry = raw[key]
+    if "limit" not in entry:
+        raise ValueError(f"missing quota limit: {key}")
+    usage_key = next((candidate for candidate in usage_keys if candidate in entry), None)
+    if usage_key is None:
+        raise ValueError(f"missing quota usage: {key}")
+    limit = entry["limit"]
+    in_use = entry[usage_key]
+    if (
+        not isinstance(limit, (int, float))
+        or isinstance(limit, bool)
+        or not isinstance(in_use, (int, float))
+        or isinstance(in_use, bool)
+        or not math.isfinite(float(limit))
+        or not math.isfinite(float(in_use))
+        or limit < -1
+        or in_use < 0
+    ):
+        raise ValueError(f"malformed quota entry: {key}")
+    return {"limit": limit, "in_use": in_use}
+
+
+def _validate_overview_quotas(
+    nova_q: object,
+    cinder_q: object,
+    neutron_q: object,
+    manila_q: object | None,
+) -> dict:
+    """Validate and narrow strict service responses to dashboard fields."""
+    compute = {key: _strict_quota_entry(nova_q, key) for key in ("instances", "cores", "ram")}
+    storage = {key: _strict_quota_entry(cinder_q, key) for key in ("volumes", "gigabytes")}
+    network = {"floatingip": _strict_quota_entry(neutron_q, "floatingip", usage_keys=("used", "in_use"))}
+    file_storage = None
+    if manila_q is not None:
+        file_storage = {key: _strict_quota_entry(manila_q, key) for key in ("shares", "gigabytes")}
+    return {
+        "compute": compute,
+        "storage": storage,
+        "network": network,
+        "file_storage": file_storage,
+    }
+
+
+async def _drain_named_quota_tasks(calls: dict[str, object]) -> dict[str, object]:
+    """Run quota calls concurrently and settle every worker before returning.
+
+    ``to_thread`` work cannot be stopped safely once submitted.  Shielding a
+    single return-exceptions gather means cancellation of the request task
+    does not leave a request-scoped OpenStack connection in use by siblings.
+    """
+    tasks = {
+        name: asyncio.create_task(asyncio.to_thread(call), name=f"dashboard-quota-{name}")
+        for name, call in calls.items()
+    }
+    gathered = asyncio.gather(*tasks.values(), return_exceptions=True)
+    try:
+        results = await asyncio.shield(gathered)
+    except BaseException:
+        try:
+            await asyncio.shield(gathered)
+        except BaseException:
+            # Preserve the original cancellation/failure.  The shielded
+            # gather still owns all child tasks and is allowed to settle.
+            pass
+        raise
+    return dict(zip(tasks, results, strict=True))
+
+
+async def _fetch_overview_quotas(conn, project_id: str, *, manila_enabled: bool) -> dict:
+    calls: dict[str, object] = {
+        "compute": lambda: nova.get_project_quota(conn, project_id, strict=True),
+        "storage": lambda: cinder.get_volume_quota(conn, project_id, strict=True),
+        "network": lambda: neutron_svc.get_network_quota(conn, project_id, strict=True),
+    }
+    if manila_enabled:
+        calls["file_storage"] = lambda: manila_svc.get_file_storage_quota(conn, strict=True)
+    results = await _drain_named_quota_tasks(calls)
+    failures = {name: value for name, value in results.items() if isinstance(value, BaseException)}
+    if failures:
+        name, error = next(iter(failures.items()))
+        raise RuntimeError(f"dashboard overview quota source failed: {name}") from error
+    return _validate_overview_quotas(
+        results["compute"],
+        results["storage"],
+        results["network"],
+        results.get("file_storage"),
+    )
+
+
+def _overview_quota_alerts(quotas: dict) -> list[dict]:
+    alerts: list[dict] = []
+    resources = (
+        ("compute", "instances", "인스턴스"),
+        ("compute", "cores", "vCPU"),
+        ("compute", "ram", "RAM"),
+        ("storage", "volumes", "볼륨"),
+        ("storage", "gigabytes", "스토리지(GB)"),
+        ("network", "floatingip", "Floating IP"),
+        ("file_storage", "shares", "Manila Shares"),
+        ("file_storage", "gigabytes", "Manila Storage(GB)"),
+    )
+    for group, key, label in resources:
+        source = quotas.get(group)
+        if not isinstance(source, dict):
+            continue
+        alert = _quota_threshold(label, source.get(key))
+        if alert:
+            alerts.append(
+                {
+                    "type": "quota",
+                    "severity": alert["severity"],
+                    "message": alert["message"],
+                    "count": alert["count"],
+                }
+            )
+    return alerts
+
+
+def _legacy_quota_notification(resource_key: str, display_label: str, quota: dict) -> dict | None:
+    alert = _quota_threshold(display_label, quota)
+    if not alert:
+        return None
+    return {
+        "type": f"quota_{'full' if alert['state'] == 'full' else 'warn'}_{resource_key}",
+        "severity": alert["severity"],
+        "message": alert["message"],
+        "count": alert["count"],
+    }
+
+
 @router.get("/quotas")
 async def get_project_quotas(
+    view: Literal["full", "overview"] = Query("full"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
     cm: CacheMode = Depends(cache_mode),
 ):
-    """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage/gpu) 조회."""
+    """현재 프로젝트의 전체 또는 렌더링용 할당량 조회."""
     project_id = conn._afterglow_project_id
     settings = get_settings()
+
+    if view == "overview":
+        manila_enabled = bool(getattr(settings, "service_manila_enabled", False))
+
+        async def _load_overview_quotas():
+            return await _fetch_overview_quotas(
+                conn,
+                project_id,
+                manila_enabled=manila_enabled,
+            )
+
+        try:
+            overview = await cached_call(
+                f"afterglow:dashboard:{project_id}:quotas:overview",
+                ttl_normal(),
+                _load_overview_quotas,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
+            )
+            if not isinstance(overview, dict):
+                raise ValueError("invalid overview quota payload")
+            overview = _validate_overview_quotas(
+                overview.get("compute"),
+                overview.get("storage"),
+                overview.get("network"),
+                overview.get("file_storage"),
+            )
+            return {**overview, "alerts": _overview_quota_alerts(overview)}
+        except HTTPException:
+            raise
+        except Exception:
+            _logger.warning("dashboard overview quota 조회 실패", exc_info=True)
+            raise _dashboard_service_unavailable("쿼터를 불러오지 못했습니다")
 
     async def _fetch_quotas():
         tasks: list = [
@@ -562,21 +920,21 @@ async def get_dashboard_usage_stats(
     top20 = top_instances[:20]
 
     # 인스턴스별 실 사용률 — libvirt instant query (Prometheus 미가용 시 silent fallback)
-    uuids = [inst["id"] for inst in top20 if inst.get("id")]
+    uuids = [inst["id"] for inst in top20 if prom_query.is_safe_label_value(inst.get("id"))]
     cpu_by_id: dict[str, float] = {}
     ram_by_id: dict[str, float] = {}
     if uuids:
         uuid_re = "|".join(uuids)
         cpu_expr = (
             f"sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m])"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
             f" / sum by (instance_id) (libvirt_domain_info_virtual_cpus"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
             f" * 100"
         )
         ram_expr = (
             f"avg by (instance_id) (libvirt_domain_memory_stats_used_percent"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
         )
         try:
             cpu_results, ram_results = await asyncio.gather(
@@ -714,28 +1072,28 @@ async def get_dashboard_usage_report(
 
 @router.get("/metrics/trend")
 async def get_dashboard_metrics_trend(
-    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
     range_: str = Query("14d", alias="range", description="24h|7d|14d"),
+    include_network: bool = Query(True),
     cm: CacheMode = Depends(cache_mode),
 ):
-    """vCPU/메모리/스토리지/네트워크 추세 (PromQL).
-
-    range 별 step: 24h=5분(288pt), 7d=1시간(168pt), 14d=6시간(56pt).
-    스토리지는 인스턴스 root fs 사용률 %(node_exporter) — Cinder 볼륨 아님.
-    Prometheus 미설치 시 prometheus_available=false.
-    """
+    """Project-scoped vCPU/memory/storage/network PromQL trend."""
     if range_ not in ("24h", "7d", "14d"):
         raise HTTPException(status_code=400, detail=f"유효하지 않은 range: {range_}. 허용값: 24h, 7d, 14d")
 
-    project_id = conn._afterglow_project_id
+    project_id = token_info.get("project_id")
+    if not isinstance(project_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id) is None:
+        raise HTTPException(status_code=400, detail="유효하지 않은 프로젝트 ID")
 
-    _RANGE_CFG = {
+    range_cfg = {
         "24h": {"seconds": 86400, "step": 300, "ttl": 15},
         "7d": {"seconds": 7 * 86400, "step": 3600, "ttl": 120},
         "14d": {"seconds": 14 * 86400, "step": 6 * 3600, "ttl": 300},
     }
-    cfg = _RANGE_CFG[range_]
+    cfg = range_cfg[range_]
     cache_key = f"afterglow:dashboard:trend:{project_id}:{range_}"
+    if not include_network:
+        cache_key += ":network-0"
 
     async def _query_all() -> dict:
         now = int(datetime.now(UTC).timestamp())
@@ -743,72 +1101,81 @@ async def get_dashboard_metrics_trend(
         step = cfg["step"]
 
         def _vals(series: list[dict]) -> list[float]:
-            return [round(p["value"], 2) for p in series if not math.isnan(p["value"])]
+            values: list[float] = []
+            for point in series:
+                try:
+                    value = float(point["value"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    values.append(round(value, 2))
+            return values
 
-        async def _safe_query(expr: str) -> list[float]:
+        async def _safe_query(expr: str) -> dict:
             try:
                 series = await prom_query.query_range(expr, start_ts=start, end_ts=now, step_s=step)
-                return _vals(series)
+                return {"data": _vals(series), "reachable": True}
+            except prom_query.PromBadQuery:
+                # A 4xx proves the Prometheus endpoint itself is reachable.
+                return {"data": [], "reachable": True}
+            except prom_query.PromUnavailable:
+                return {"data": [], "reachable": False}
             except Exception:
-                return []
+                return {"data": [], "reachable": False}
 
-        # 프로젝트 인스턴스 UUID 리스트 수집 — libvirt 조인에 사용 (networks.py:488 패턴)
-        uuids = [s.id for s in conn.compute.servers() if s.id]
-        empty: list[float] = []
-        if not uuids:
-            return {
-                "vcpu": {"data": empty, "points": 0, "available": False},
-                "memory": {"data": empty, "points": 0, "available": False},
-                "storage": {"data": empty, "points": 0, "available": False},
-                "network": {"data": empty, "points": 0, "available": False, "unit": "KiB/s"},
-                "prometheus_available": False,
-                "range": range_,
-            }
-        uuid_re = "|".join(uuids)  # UUID는 [0-9a-f-]만 — re.escape 불필요
-
-        # vCPU: libvirt cpu_time / virtual_cpus, instance_id 조인 (모든 인스턴스 커버)
+        info = f'libvirt_domain_openstack_info{{project_id="{project_id}"}}'
         vcpu_expr = (
             f"sum(rate(libvirt_domain_info_cpu_time_seconds_total[5m])"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f" * on (instance, domain) group_left(instance_id) {info})"
             f" / sum(libvirt_domain_info_virtual_cpus"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f" * on (instance, domain) group_left(instance_id) {info})"
             f" * 100"
         )
-        # RAM: virtio-balloon stats_used_percent 평균 (미활성 인스턴스는 자연 제외)
         mem_expr = (
-            f"avg(libvirt_domain_memory_stats_used_percent"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f"avg(libvirt_domain_memory_stats_used_percent * on (instance, domain) group_left(instance_id) {info})"
         )
-        # Storage: node_exporter root fs 사용률 % (libvirt에 디스크 사용률 메트릭 없음)
         storage_expr = (
             f'(1 - sum(node_filesystem_avail_bytes{{project_id="{project_id}",mountpoint="/",'
             f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})'
             f' / sum(node_filesystem_size_bytes{{project_id="{project_id}",mountpoint="/",'
             f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})) * 100'
         )
-        # Network: libvirt interface_stats + instance_id 조인 KiB/s (prometheus_available 판정 제외)
-        net_expr = (
-            f"(sum(rate(libvirt_domain_interface_stats_receive_bytes_total[5m])"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f" + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total[5m])"
-            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}}))'
-            f" / 1024"
-        )
-
-        vcpu_data, mem_data, storage_data, net_data = await asyncio.gather(
+        query_coroutines = [
             _safe_query(vcpu_expr),
             _safe_query(mem_expr),
             _safe_query(storage_expr),
-            _safe_query(net_expr),
-        )
+        ]
+        if include_network:
+            net_expr = (
+                f"(sum(rate(libvirt_domain_interface_stats_receive_bytes_total[5m])"
+                f" * on (instance, domain) group_left(instance_id) {info})"
+                f" + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total[5m])"
+                f" * on (instance, domain) group_left(instance_id) {info}))"
+                f" / 1024"
+            )
+            query_coroutines.append(_safe_query(net_expr))
 
-        prometheus_available = any([vcpu_data, mem_data, storage_data])
+        results = await asyncio.gather(*query_coroutines)
+        vcpu_result, mem_result, storage_result = results[:3]
+        if include_network:
+            network_result = results[3]
+        else:
+            network_result = {"data": [], "reachable": True}
+
+        def _series(result: dict, *, unit: str | None = None) -> dict:
+            data = result["data"]
+            payload = {"data": data, "points": len(data), "available": bool(data)}
+            if unit is not None:
+                payload["unit"] = unit
+            return payload
+
+        enabled_results = (vcpu_result, mem_result, storage_result)
         return {
-            "vcpu": {"data": vcpu_data, "points": len(vcpu_data), "available": bool(vcpu_data)},
-            "memory": {"data": mem_data, "points": len(mem_data), "available": bool(mem_data)},
-            "storage": {"data": storage_data, "points": len(storage_data), "available": bool(storage_data)},
-            "network": {"data": net_data, "points": len(net_data), "available": bool(net_data), "unit": "KiB/s"},
-            "prometheus_available": prometheus_available,
+            "vcpu": _series(vcpu_result),
+            "memory": _series(mem_result),
+            "storage": _series(storage_result),
+            "network": _series(network_result, unit="KiB/s"),
+            "prometheus_available": any(result["reachable"] for result in enabled_results),
             "range": range_,
         }
 
@@ -918,39 +1285,19 @@ async def get_dashboard_notifications(
                 }
             )
 
-    # 컴퓨트 쿼터 경고
-    def _quota_notif(resource: str, used: int, limit: int) -> dict | None:
-        if limit <= 0:
-            return None
-        pct = used / limit
-        if pct >= 1.0:
-            return {
-                "type": f"quota_full_{resource}",
-                "severity": "danger",
-                "message": f"{resource} 쿼터 가득 참 ({used}/{limit})",
-                "count": 1,
-            }
-        if pct >= 0.9:
-            return {
-                "type": f"quota_warn_{resource}",
-                "severity": "warning",
-                "message": f"{resource} 쿼터 {int(pct * 100)}% 사용 ({used}/{limit})",
-                "count": 1,
-            }
-        return None
-
+    # 컴퓨트 쿼터 경고 — nested legacy source 해석과 wire type을 유지한다.
     if isinstance(compute_limits, dict):
         for key, label in (("instances", "인스턴스"), ("cores", "vCPU"), ("ram", "RAM")):
             q = compute_limits.get(key, {})
             if isinstance(q, dict):
-                n = _quota_notif(label, q.get("in_use", 0), q.get("limit", 0))
+                n = _legacy_quota_notification(key, label, q)
                 if n:
                     notifications.append(n)
 
     if isinstance(volume_limits, dict):
         q = volume_limits.get("gigabytes", {})
         if isinstance(q, dict):
-            n = _quota_notif("스토리지(GB)", q.get("in_use", 0), q.get("limit", 0))
+            n = _legacy_quota_notification("gigabytes", "스토리지(GB)", q)
             if n:
                 notifications.append(n)
 

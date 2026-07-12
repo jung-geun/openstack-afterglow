@@ -105,13 +105,12 @@ def get_volume_limits(conn: openstack.connection.Connection) -> dict:
 _QUOTA_KEYS = ("volumes", "snapshots", "gigabytes", "backups", "backup_gigabytes")
 
 
-def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+def get_volume_quota(conn: openstack.connection.Connection, project_id: str, *, strict: bool = False) -> dict:
     """프로젝트의 상세 Cinder 할당량 (usage 포함).
 
-    openstacksdk `block_storage.get_quota_set(usage=True)` 가 nested
-    `{limit, in_use, reserved}` dict 를 plain int 로 평탄화해서 in_use 정보를
-    잃는 케이스가 있어 — admin endpoint 와 동일하게 raw Cinder REST API
-    `GET /os-quota-sets/{project_id}?usage=true` 를 직접 호출한다.
+    Overview callers use ``strict`` to require explicit usage fields for the
+    rendered resources.  Default callers keep legacy sentinel fallback
+    semantics intact.
     """
 
     def _normalize(q) -> dict:
@@ -121,32 +120,75 @@ def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> 
             return {"limit": q, "in_use": 0}
         return {"limit": -1, "in_use": 0}
 
+    def _strict_entry(q, key: str) -> dict:
+        if not isinstance(q, dict) or "limit" not in q or "in_use" not in q:
+            raise ValueError(f"Cinder quota usage is missing for {key}")
+        limit, in_use = q["limit"], q["in_use"]
+        if (
+            not isinstance(limit, (int, float))
+            or isinstance(limit, bool)
+            or not isinstance(in_use, (int, float))
+            or isinstance(in_use, bool)
+        ):
+            raise ValueError(f"Cinder quota data is malformed for {key}")
+        return {"limit": limit, "in_use": in_use}
+
+    def _strict_limits_entry(limits, limit_attr: str, used_attr: str, key: str) -> dict:
+        limit = getattr(limits, limit_attr, None)
+        in_use = getattr(limits, used_attr, None)
+        if limit is None or in_use is None:
+            raise ValueError(f"Cinder limits usage is missing for {key}")
+        return _strict_entry({"limit": limit, "in_use": in_use}, key)
+
     try:
         bs_endpoint = conn.block_storage.get_endpoint()
         resp = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
-        qs = resp.json().get("quota_set", {})
+        if strict:
+            resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Cinder quota payload is malformed")
+        qs = payload.get("quota_set", {})
+        if not isinstance(qs, dict):
+            raise ValueError("Cinder quota_set is malformed")
+        if strict:
+            return {key: _strict_entry(qs.get(key), key) for key in ("volumes", "gigabytes")}
         return {k: _normalize(qs.get(k)) for k in _QUOTA_KEYS}
-    except Exception:
+    except Exception as exc:
+        if strict and isinstance(exc, ValueError):
+            raise
         import logging as _logging
 
         _logging.getLogger(__name__).warning("Cinder quota_set 조회 실패 — limits API로 fallback", exc_info=True)
-        # fallback: limits API (in_use 일부만 제공)
         limits = conn.block_storage.get_limits()
-        a = limits.absolute
+        absolute = limits.absolute
+        if strict:
+            return {
+                "volumes": _strict_limits_entry(absolute, "max_total_volumes", "total_volumes_used", "volumes"),
+                "gigabytes": _strict_limits_entry(
+                    absolute, "max_total_volume_gigabytes", "total_gigabytes_used", "gigabytes"
+                ),
+            }
         return {
-            "volumes": {"limit": getattr(a, "max_total_volumes", -1), "in_use": getattr(a, "total_volumes_used", 0)},
+            "volumes": {
+                "limit": getattr(absolute, "max_total_volumes", -1),
+                "in_use": getattr(absolute, "total_volumes_used", 0),
+            },
             "snapshots": {
-                "limit": getattr(a, "max_total_snapshots", -1),
-                "in_use": getattr(a, "total_snapshots_used", 0),
+                "limit": getattr(absolute, "max_total_snapshots", -1),
+                "in_use": getattr(absolute, "total_snapshots_used", 0),
             },
             "gigabytes": {
-                "limit": getattr(a, "max_total_volume_gigabytes", -1),
-                "in_use": getattr(a, "total_gigabytes_used", 0),
+                "limit": getattr(absolute, "max_total_volume_gigabytes", -1),
+                "in_use": getattr(absolute, "total_gigabytes_used", 0),
             },
-            "backups": {"limit": getattr(a, "max_total_backups", -1), "in_use": getattr(a, "total_backups_used", 0)},
+            "backups": {
+                "limit": getattr(absolute, "max_total_backups", -1),
+                "in_use": getattr(absolute, "total_backups_used", 0),
+            },
             "backup_gigabytes": {
-                "limit": getattr(a, "max_total_backup_gigabytes", -1),
-                "in_use": getattr(a, "total_backup_gigabytes_used", 0),
+                "limit": getattr(absolute, "max_total_backup_gigabytes", -1),
+                "in_use": getattr(absolute, "total_backup_gigabytes_used", 0),
             },
         }
 

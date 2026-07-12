@@ -234,24 +234,51 @@ def cleanup_instance_fips(conn: openstack.connection.Connection, instance_id: st
 # ---------------------------------------------------------------------------
 
 
-def get_network_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+def get_network_quota(conn: openstack.connection.Connection, project_id: str, *, strict: bool = False) -> dict:
     """프로젝트의 Neutron 할당량 (limit + in_use) 조회."""
+
+    keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
 
     def _q(q, key):
         if isinstance(q, dict):
-            return q.get(key, {"limit": -1, "in_use": 0})
-        v = getattr(q, key, None)
-        if isinstance(v, dict):
-            return {"limit": v.get("limit", -1), "in_use": v.get("used", v.get("in_use", 0))}
-        return {"limit": int(v) if v is not None else -1, "in_use": 0}
+            value = q.get(key)
+            if isinstance(value, dict):
+                return {"limit": value.get("limit", -1), "in_use": value.get("used", value.get("in_use", 0))}
+            return {"limit": int(value) if value is not None else -1, "in_use": 0}
+        value = getattr(q, key, None)
+        if isinstance(value, dict):
+            return {"limit": value.get("limit", -1), "in_use": value.get("used", value.get("in_use", 0))}
+        return {"limit": int(value) if value is not None else -1, "in_use": 0}
+
+    def _strict_floatingip(raw: object) -> dict:
+        if not isinstance(raw, dict) or "limit" not in raw:
+            raise ValueError("Neutron floatingip limit is missing")
+        usage_key = "used" if "used" in raw else "in_use" if "in_use" in raw else None
+        if usage_key is None:
+            raise ValueError("Neutron floatingip usage is missing")
+        limit, in_use = raw["limit"], raw[usage_key]
+        if (
+            not isinstance(limit, (int, float))
+            or isinstance(limit, bool)
+            or not isinstance(in_use, (int, float))
+            or isinstance(in_use, bool)
+        ):
+            raise ValueError("Neutron floatingip quota data is malformed")
+        return {"limit": limit, "in_use": in_use}
 
     try:
-        # details=True는 used 필드를 포함한 상세 할당량 반환
+        # details=True is the only source accepted in strict mode because it
+        # carries usage; the non-detailed legacy fallback is limit-only.
         quota = conn.network.get_quota(project_id, details=True)
-        quota_dict = quota.to_dict() if hasattr(quota, "to_dict") else {}
-        keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
-        result = {k: _q(quota_dict, k) for k in keys}
-        # Fallback: quota details가 in_use=0으로 반환할 때 실제 리소스 카운트
+        if hasattr(quota, "to_dict"):
+            quota_dict = quota.to_dict(original_names=True)
+        else:
+            quota_dict = {}
+        if strict:
+            result = {key: _q(quota_dict, key) for key in keys}
+            result["floatingip"] = _strict_floatingip(quota_dict.get("floatingip"))
+            return result
+        result = {key: _q(quota_dict, key) for key in keys}
         if result["floatingip"]["in_use"] == 0:
             try:
                 result["floatingip"]["in_use"] = sum(1 for _ in conn.network.ips(project_id=project_id))
@@ -264,24 +291,20 @@ def get_network_quota(conn: openstack.connection.Connection, project_id: str) ->
                 pass
         return result
     except Exception:
+        if strict:
+            raise
         import logging as _logging
 
         _logging.getLogger(__name__).warning("Neutron quota details 조회 실패 — fallback", exc_info=True)
         try:
-            # fallback: details 없이 limit만 조회
             quota = conn.network.get_quota(project_id)
-            quota_dict = quota.to_dict() if hasattr(quota, "to_dict") else {}
-            keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
-            result = {}
-            for k in keys:
-                val = quota_dict.get(k, -1)
-                result[k] = {"limit": int(val) if val is not None else -1, "in_use": 0}
-            return result
-        except Exception:
+            quota_dict = quota.to_dict(original_names=True) if hasattr(quota, "to_dict") else {}
             return {
-                k: {"limit": -1, "in_use": 0}
-                for k in ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
+                key: {"limit": int(quota_dict.get(key, -1)) if quota_dict.get(key) is not None else -1, "in_use": 0}
+                for key in keys
             }
+        except Exception:
+            return {key: {"limit": -1, "in_use": 0} for key in keys}
 
 
 def list_floating_ips(conn: openstack.connection.Connection, project_id: str | None = None) -> list[FloatingIpInfo]:

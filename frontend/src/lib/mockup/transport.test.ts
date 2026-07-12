@@ -211,6 +211,78 @@ describe('mockup transport', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+
+	it('serves lean dashboard overview contracts without changing full fixtures', async () => {
+		const { maybeMockJson, maybeMockK3sStream } = await import('./transport');
+		const fullSummary = await maybeMockJson<{ gpu_used: number }>(
+			'GET',
+			'/api/v1/dashboard/summary',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const overviewSummary = await maybeMockJson<{ recent_instances: unknown[] }>(
+			'GET',
+			'/api/v1/dashboard/summary?view=overview',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const overviewQuotas = await maybeMockJson<{ file_storage: unknown; alerts: unknown[] }>(
+			'GET',
+			'/api/v1/dashboard/quotas?view=overview',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const k3sStats = await maybeMockJson<{ total: number; active: number }>(
+			'GET',
+			'/api/v1/dashboard/k3s-stats',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		const trend = await maybeMockJson<{ network: { unit: string; data: unknown[] } }>(
+			'GET',
+			'/api/v1/dashboard/metrics/trend?range=14d&include_network=false',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+
+		expect(fullSummary).toMatchObject({ gpu_used: expect.any(Number) });
+		expect(overviewSummary).toMatchObject({ recent_instances: expect.any(Array) });
+		expect(overviewQuotas).toMatchObject({ alerts: expect.any(Array) });
+		expect(k3sStats.total).toBeGreaterThanOrEqual(k3sStats.active);
+		expect(trend.network).toMatchObject({ unit: 'KiB/s', data: [] });
+
+		const clusters = (await maybeMockJson<Array<{ id: string; status: string }>>(
+			'GET',
+			'/api/v1/k3s/clusters',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as Array<{ id: string; status: string }>;
+		const deleted = clusters.find((cluster) => cluster.status === 'ACTIVE')!;
+		const stream = maybeMockK3sStream(
+			`/api/v1/k3s/clusters/${deleted.id}/delete-async`,
+			{},
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)!;
+		for await (const _event of stream) {
+			// Exhaust the local mutation stream.
+		}
+		const afterDelete = (await maybeMockJson<{ total: number; active: number }>(
+			'GET',
+			'/api/v1/dashboard/k3s-stats',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		)) as { total: number; active: number };
+		expect(afterDelete.total).toBe(k3sStats.total - 1);
+		expect(afterDelete.active).toBe(k3sStats.active - 1);
+	});
 	it('throws the exact 409 mockup error for unsupported mutations on supported pages', async () => {
 		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
 		const { maybeMockJson } = await import('./transport');

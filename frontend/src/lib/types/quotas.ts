@@ -15,3 +15,17 @@ export interface DashboardQuotas {
   network: { floatingip: QuotaItem; };
   file_storage: { shares: QuotaItem; gigabytes: QuotaItem; };
 }
+export interface DashboardAlert {
+	type: 'quota' | 'instance_error';
+	severity: 'warning' | 'danger';
+	message: string;
+	count: number;
+}
+
+export interface DashboardOverviewQuotas {
+	compute: { instances: QuotaItem; cores: QuotaItem; ram: QuotaItem };
+	storage: { volumes: QuotaItem; gigabytes: QuotaItem };
+	network: { floatingip: QuotaItem };
+	file_storage: { shares: QuotaItem; gigabytes: QuotaItem; share_networks?: QuotaItem } | null;
+	alerts: DashboardAlert[];
+}

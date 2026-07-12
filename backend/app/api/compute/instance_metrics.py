@@ -16,6 +16,7 @@ from app.services.prom_query import (
     PromBadQuery,
     PromUnavailable,
     calc_step,
+    is_safe_label_value,
     query_instant_multi,
     query_range,
 )
@@ -82,7 +83,7 @@ def _build_libvirt_expr(metric: str, instance_id: str) -> str | None:
     GPU 메트릭은 DCGM 전용이므로 None 반환.
     """
     iid = f'instance_id="{instance_id}"'
-    join = f"* on (domain) group_left(instance_id) libvirt_domain_openstack_info{{{iid}}}"
+    join = f"* on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{{iid}}}"
     if metric == "cpu":
         # cpu_time_seconds 는 누적 counter — vCPU 수로 나눠 0-100% 정규화
         return (
@@ -117,6 +118,13 @@ def _authorize(server, token_info: dict) -> None:
         raise HTTPException(status_code=403, detail="해당 인스턴스에 접근 권한이 없습니다")
 
 
+def _metric_instance_id(server) -> str:
+    instance_id = getattr(server, "id", None)
+    if not is_safe_label_value(instance_id):
+        raise HTTPException(status_code=502, detail="인스턴스 메트릭 식별자가 유효하지 않습니다")
+    return instance_id
+
+
 def _is_gpu(server) -> bool:
     return (server.flavor_name or "").lower().startswith("gpu.")
 
@@ -141,6 +149,7 @@ async def get_instance_metrics(
     """
     server = _resolve_server(conn, instance_id)
     _authorize(server, token_info)
+    metric_instance_id = _metric_instance_id(server)
 
     if metric in _GPU_METRICS and not _is_gpu(server):
         raise HTTPException(status_code=400, detail="GPU 메트릭은 GPU 인스턴스에서만 조회 가능합니다")
@@ -151,9 +160,11 @@ async def get_instance_metrics(
     step_s = calc_step(range_s)
 
     try:
-        series = await query_range(_build_expr(metric, server.id), start_ts=start_ts, end_ts=end_ts, step_s=step_s)
+        series = await query_range(
+            _build_expr(metric, metric_instance_id), start_ts=start_ts, end_ts=end_ts, step_s=step_s
+        )
         if not series:
-            lv_expr = _build_libvirt_expr(metric, server.id)
+            lv_expr = _build_libvirt_expr(metric, metric_instance_id)
             if lv_expr:
                 series = await query_range(lv_expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
     except PromUnavailable as exc:
@@ -191,6 +202,7 @@ async def get_instance_metrics_batch(
 
     server = _resolve_server(conn, instance_id)
     _authorize(server, token_info)
+    metric_instance_id = _metric_instance_id(server)
 
     # GPU 메트릭은 GPU 인스턴스만 — batch 에서는 422 대신 silent skip
     if not _is_gpu(server):
@@ -204,14 +216,14 @@ async def get_instance_metrics_batch(
     async def _one(metric: str) -> tuple[str, dict]:
         try:
             series = await query_range(
-                _build_expr(metric, server.id),
+                _build_expr(metric, metric_instance_id),
                 start_ts=start_ts,
                 end_ts=end_ts,
                 step_s=step_s,
             )
             # node_exporter 미노출 시 libvirt-exporter 폴백 (테넌트망 격리 인스턴스 대응)
             if not series:
-                lv_expr = _build_libvirt_expr(metric, server.id)
+                lv_expr = _build_libvirt_expr(metric, metric_instance_id)
                 if lv_expr:
                     series = await query_range(lv_expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
             return metric, {"series": series, "error": None}
@@ -296,14 +308,14 @@ async def get_metrics_summary_batch(
     )
     cpu_expr_lv = (
         f"avg_over_time(((sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m])"
-        f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}}))'
+        f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}}))'
         f" / (sum by (instance_id) (libvirt_domain_info_virtual_cpus"
-        f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}})))'
+        f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}})))'
         f" * 100)[{range_s}s:{step_s}s])"
     )
     mem_expr_lv = (
         f"avg_over_time((avg by (instance_id) (libvirt_domain_memory_stats_used_percent"
-        f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}})'
+        f' * on (instance, domain) group_left(instance_id) libvirt_domain_openstack_info{{project_id="{pid}"}})'
         f")[{range_s}s:{step_s}s])"
     )
 
@@ -370,6 +382,7 @@ async def get_instance_metrics_summary(
     """
     server = _resolve_server(conn, instance_id)
     _authorize(server, token_info)
+    metric_instance_id = _metric_instance_id(server)
 
     range_s = _RANGE_SECONDS[range]
     step_s = calc_step(range_s)
@@ -379,7 +392,7 @@ async def get_instance_metrics_summary(
     async def _safe_fetch(metric: str) -> dict[str, float | None]:
         nonlocal _prom_unavailable
         try:
-            return await _fetch_stat_with_fallback(metric, server.id, range_s, step_s)
+            return await _fetch_stat_with_fallback(metric, metric_instance_id, range_s, step_s)
         except PromUnavailable:
             _prom_unavailable = True
             return {"avg": None, "min": None, "max": None}

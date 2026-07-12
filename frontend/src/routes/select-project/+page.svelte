@@ -2,8 +2,8 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { auth, clearAuth, setAuth, logoutInProgress } from '$lib/stores/auth';
-	import { api, ApiError } from '$lib/api/client';
+	import { auth, clearAuth, setAuth, logoutInProgress, exitMockAuth, isMockAuthActive } from '$lib/stores/auth';
+	import { api, ApiError, beginSessionRevocation, endSessionRevocation } from '$lib/api/client';
 	import type { Project } from '$lib/stores/auth';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
@@ -14,6 +14,7 @@
 	let switching = $state(false);
 	let error = $state('');
 	let showCreateModal = $state(false);
+	let logoutConfirming = $state(false);
 	const mockupActive = $derived($page.data.mockup?.active === true);
 
 
@@ -53,7 +54,8 @@
 	});
 
 	async function selectProject(proj: Project) {
-		if (!$auth.token || switching) return;
+		const token = $auth.token;
+		if (!token || switching) return;
 		switching = true;
 		try {
 			const resp = await api.post<{
@@ -66,7 +68,9 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/v1/auth/token/project', { project_id: proj.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: proj.id }, token);
+
+			if ($logoutInProgress || !$auth.token) return;
 			setAuth({
 				token: resp.token,
 				refreshToken: resp.refresh_token,
@@ -95,19 +99,33 @@
 	}
 
 	async function logout() {
-		if ($logoutInProgress) return;
+		if ($logoutInProgress || logoutConfirming) return;
+		logoutConfirming = true;
+		let confirmed: boolean;
+		try {
+			confirmed = await confirmDialog('로그아웃하시겠습니까?');
+		} finally {
+			logoutConfirming = false;
+		}
+		if (!confirmed) return;
+
 		logoutInProgress.set(true);
 		try {
-			const confirmed = await confirmDialog('로그아웃하시겠습니까?');
-			if (!confirmed) return;
-
-			if ($auth.token) {
-				api.post('/api/v1/auth/logout', {}, $auth.token).catch(() => {});
+			const pendingRefresh = beginSessionRevocation();
+			await pendingRefresh;
+			const logoutToken = $auth.token;
+			if (logoutToken) {
+				try {
+					await api.post('/api/v1/auth/logout', {}, logoutToken);
+				} catch { /* 실패해도 로컬 정리는 진행 */ }
 			}
+			const mockLogout = isMockAuthActive();
+			if (mockLogout) exitMockAuth();
 			clearAuth();
-			await goto('/', { replaceState: true });
+			await goto(mockLogout ? '/login?mockup=off' : '/login', { replaceState: true });
 			toast.success('정상적으로 로그아웃 되었습니다.');
 		} finally {
+			endSessionRevocation();
 			logoutInProgress.set(false);
 		}
 	}

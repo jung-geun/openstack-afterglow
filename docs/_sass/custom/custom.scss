@@ -1,0 +1,195 @@
+// Afterglow documentation overrides for pinned Just the Docs.
+// Theme selection is applied by assets/js/theme-toggle.js before first paint.
+
+:root {
+  color-scheme: light;
+  --ag-canvas: #fafbff;
+  --ag-surface: #ffffff;
+  --ag-raised: #ffffff;
+  --ag-sunken: #f4f6fb;
+  --ag-text: #0f172a;
+  --ag-text-muted: #475569;
+  --ag-line: #cbd5e1;
+  --ag-accent: #2563eb;
+  --ag-focus: #6d28d9;
+  --ag-code: #f4f6fb;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ag-canvas: #06080d;
+  --ag-surface: #0b0f17;
+  --ag-raised: #10141d;
+  --ag-sunken: #161b27;
+  --ag-text: #f4f6fb;
+  --ag-text-muted: #c8cfdc;
+  --ag-line: #262e3f;
+  --ag-accent: #9eb9ff;
+  --ag-focus: #c2adff;
+  --ag-code: #10141d;
+}
+
+html,
+body,
+.side-bar,
+.main,
+.main-header,
+.site-header,
+.search-input,
+.search-results,
+.search-result,
+.nav-list .nav-list-item .nav-list-link.active {
+  background-color: var(--ag-surface);
+  color: var(--ag-text);
+}
+
+body,
+.main-content,
+.main-content p,
+.main-content li,
+.main-content td,
+.site-title,
+.nav-list .nav-list-item .nav-list-link,
+.search-result-doc,
+.search-result-section {
+  color: var(--ag-text);
+}
+
+.main-content-wrap {
+  max-width: 78rem;
+}
+
+.main-content {
+  max-width: 74rem;
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.main-content h1,
+.main-content h2,
+.main-content h3 {
+  color: var(--ag-text);
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+.main-content h2 {
+  border-bottom: 1px solid var(--ag-line);
+  margin-top: 3rem;
+  padding-bottom: 0.55rem;
+}
+
+.main-content p,
+.main-content li {
+  max-width: 78ch;
+}
+
+.main-content a,
+.nav-list .nav-list-item .nav-list-link.active,
+.site-title:hover {
+  color: var(--ag-accent);
+}
+
+.main-content a {
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.main-content pre,
+.main-content .highlight,
+.main-content :not(pre) > code,
+.main-content table,
+.search-input {
+  border-color: var(--ag-line);
+}
+
+.main-content pre,
+.main-content .highlight {
+  background: var(--ag-code);
+  border: 1px solid var(--ag-line);
+  border-radius: 0.4rem;
+  box-shadow: none;
+}
+
+.main-content :not(pre) > code {
+  background: var(--ag-sunken);
+  border: 1px solid var(--ag-line);
+  border-radius: 0.2rem;
+  color: var(--ag-text);
+}
+
+.main-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.main-content th {
+  background: var(--ag-sunken);
+  color: var(--ag-text);
+}
+
+.main-content td,
+.main-content th {
+  border-color: var(--ag-line);
+}
+
+.mermaid {
+  background: var(--ag-code);
+  border: 1px solid var(--ag-line);
+  border-radius: 0.4rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+
+pre.mermaid-scroll {
+  background: var(--ag-code);
+  border: 1px solid var(--ag-line);
+  border-radius: 0.4rem;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+pre.mermaid-scroll > code.language-mermaid {
+  display: block;
+  width: max-content;
+}
+
+pre.mermaid-scroll svg {
+  height: auto !important;
+  max-width: none !important;
+}
+.theme-toggle {
+  align-items: center;
+  background: var(--ag-sunken);
+  border: 1px solid var(--ag-line);
+  border-radius: 0.3rem;
+  color: var(--ag-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.8rem;
+  gap: 0.35rem;
+  line-height: 1.2;
+  margin: 0.4rem 0.6rem;
+  padding: 0.42rem 0.55rem;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  border-color: var(--ag-accent);
+  color: var(--ag-accent);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--ag-focus);
+  outline-offset: 2px;
+}
+
+.site-footer {
+  color: var(--ag-text-muted);
+}

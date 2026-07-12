@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-	import { auth, setAuth } from '$lib/stores/auth';
+	import { auth, logoutInProgress, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSpinner from './LoadingSpinner.svelte';
 	import CreateProjectModal from './projects/CreateProjectModal.svelte';
@@ -39,7 +39,8 @@
 	}
 
 	async function selectProject(project: Project) {
-		if (!$auth.token || switching) return;
+		const token = $auth.token;
+		if (!token || switching) return;
 		if (project.id === $auth.projectId) { isOpen = false; return; }
 
 		switching = true;
@@ -54,7 +55,9 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/v1/auth/token/project', { project_id: project.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: project.id }, token);
+
+			if ($logoutInProgress || !$auth.token) return;
 
 			setAuth({
 				token: resp.token,

@@ -185,7 +185,8 @@ async def test_trend_vcpu_uses_libvirt_cpu_expr(client, mock_conn):
     cpu_exprs = [e for e in captured_exprs if "libvirt_domain_info_cpu_time_seconds_total" in e]
     assert cpu_exprs, "libvirt_domain_info_cpu_time_seconds_total 식이 쿼리에 없음"
     assert any("libvirt_domain_openstack_info" in e for e in cpu_exprs), "libvirt_domain_openstack_info 조인이 없음"
-    assert any("instance_id=~" in e for e in cpu_exprs), "instance_id=~ UUID regex 필터가 없음"
+    assert any('project_id="' in e for e in cpu_exprs), "project_id tenant filter가 없음"
+    assert any("on (instance, domain)" in e for e in cpu_exprs), "instance/domain 조인이 없음"
     node_cpu = [e for e in captured_exprs if "node_cpu_seconds_total" in e]
     assert not node_cpu, "node_cpu_seconds_total이 여전히 쿼리에 남아 있음"
 
@@ -210,22 +211,22 @@ async def test_trend_memory_uses_libvirt_memory_expr(client, mock_conn):
 
 
 # ---------------------------------------------------------------------------
-# 빈 프로젝트 — Prometheus 호출 없이 available=false 즉시 반환
-# ---------------------------------------------------------------------------
-
-
+# 프로젝트 인스턴스 열거 없이 PromQL은 빈 데이터도 reachability를 판정한다.
+#
 @pytest.mark.asyncio
-async def test_trend_empty_project_skips_prometheus(client, mock_conn):
-    """인스턴스가 없는 프로젝트는 PromQL 호출 없이 prometheus_available=False를 반환한다."""
+async def test_trend_empty_project_queries_project_scope(client, mock_conn):
+    """Nova 열거 없이 세 개의 project-scoped PromQL 쿼리를 실행한다."""
     mock_conn.compute.servers.return_value = []
     with _patch_prom_query([]) as mock_qr:
-        resp = await client.get("/api/v1/dashboard/metrics/trend?range=24h")
+        resp = await client.get("/api/v1/dashboard/metrics/trend?range=24h&include_network=false")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["prometheus_available"] is False
+    assert data["prometheus_available"] is True
     assert data["vcpu"]["available"] is False
-    assert mock_qr.call_count == 0, f"빈 프로젝트에서 PromQL 호출 불필요, 실제: {mock_qr.call_count}"
+    assert data["network"] == {"data": [], "points": 0, "available": False, "unit": "KiB/s"}
+    assert mock_qr.call_count == 3, f"include_network=false는 세 쿼리만 실행, 실제: {mock_qr.call_count}"
+    mock_conn.compute.servers.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +276,7 @@ async def test_trend_invalid_range_returns_400(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_trend_nan_values_filtered(client, mock_conn):
-    """NaN 포인트는 제거되어 available=False로 떨어진다 (인스턴스 0개 상황)."""
+    """NaN 포인트는 제거되며 Prometheus 자체는 reachable로 판정된다."""
     nan_series = [{"ts": 1000, "value": float("nan")}]
     with _patch_prom_query(nan_series):
         resp = await client.get("/api/v1/dashboard/metrics/trend?range=24h")
@@ -283,7 +284,7 @@ async def test_trend_nan_values_filtered(client, mock_conn):
     data = resp.json()
     assert data["vcpu"]["data"] == []
     assert data["vcpu"]["available"] is False
-    assert data["prometheus_available"] is False
+    assert data["prometheus_available"] is True
 
 
 # ---------------------------------------------------------------------------

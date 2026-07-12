@@ -364,7 +364,46 @@ def test_build_libvirt_expr_returns_single_series_format():
         assert f'instance_id="{uuid}"' in expr, f"{metric}: instance_id 셀렉터 누락"
         assert "group_left(instance_id)" in expr, f"{metric}: group_left 조인 누락"
         assert "libvirt_domain_openstack_info" in expr, f"{metric}: openstack_info 조인 누락"
+        assert "on (instance, domain)" in expr, f"{metric}: instance/domain 조인 누락"
 
     # GPU 는 libvirt 대체 없음
     assert _build_libvirt_expr("gpu_util", uuid) is None
     assert _build_libvirt_expr("gpu_mem", uuid) is None
+
+
+def test_metric_instance_id_rejects_promql_label_injection():
+    from fastapi import HTTPException
+
+    from app.api.compute.instance_metrics import _metric_instance_id
+
+    server = MagicMock(id='safe"} or vector(1) or instance_id="x', project_id=_PROJECT_ID)
+    with pytest.raises(HTTPException) as error:
+        _metric_instance_id(server)
+    assert error.value.status_code == 502
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/instances/request-id/metrics?metric=cpu&range=1h",
+        "/api/v1/instances/request-id/metrics-batch?metrics=cpu&range=1h",
+        "/api/v1/instances/request-id/metrics-summary",
+    ],
+)
+async def test_metric_routes_reject_untrusted_nova_id_before_prometheus_query(client, path):
+    bad_server = MagicMock(
+        id='safe"} or vector(1) or instance_id="x',
+        project_id=_PROJECT_ID,
+        flavor_name="m1.large",
+    )
+    with (
+        patch("app.api.compute.instance_metrics._resolve_server", return_value=bad_server),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock()) as query,
+        patch("app.api.compute.instance_metrics._fetch_stat_with_fallback", new=AsyncMock()) as stats,
+    ):
+        response = await client.get(path)
+
+    assert response.status_code == 502
+    query.assert_not_awaited()
+    stats.assert_not_awaited()

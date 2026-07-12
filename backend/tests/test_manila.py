@@ -3,9 +3,10 @@
 A5: root_squash 강제 + sec_flavor 옵션 (Manila API v2.65 metadata 필드)
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import httpx
+import pytest
 
 # _build_nfs_access_metadata
 # ---------------------------------------------------------------------------
@@ -425,3 +426,44 @@ def test_force_delete_file_storage_returns_already_deleted_on_404(mock_get_clien
     result = force_delete_file_storage(MagicMock(), "share-1")
 
     assert result == "already_deleted"
+
+
+@patch("app.services.manila.get_client")
+def test_strict_file_storage_quota_requires_usage_fields(mock_get_client):
+    from app.services.manila import get_file_storage_quota
+
+    client = MagicMock()
+    client.get.return_value = {"quota_set": {"shares": {"limit": 2}, "gigabytes": {"limit": 20, "in_use": 1}}}
+    mock_get_client.return_value = client
+    conn = MagicMock()
+    conn._afterglow_project_id = "project-a"
+
+    with pytest.raises(ValueError):
+        get_file_storage_quota(conn, strict=True)
+
+
+@patch("app.services.manila.get_client")
+def test_strict_file_storage_quota_keeps_unlimited_and_zero(mock_get_client):
+    from app.services.manila import get_file_storage_quota
+
+    client = MagicMock()
+    client.get.return_value = {
+        "quota_set": {
+            "shares": {"limit": -1, "in_use": 0},
+            "gigabytes": {"limit": 0, "in_use": 0},
+        }
+    }
+    mock_get_client.return_value = client
+    conn = MagicMock()
+    conn._afterglow_project_id = "project-a"
+
+    assert get_file_storage_quota(conn, strict=True) == {
+        "shares": {"limit": -1, "in_use": 0},
+        "gigabytes": {"limit": 0, "in_use": 0},
+    }
+    client.get.assert_has_calls(
+        [
+            call("quota-sets/project-a/detail", params={"usage": "true"}),
+            call("shares/detail"),
+        ]
+    )

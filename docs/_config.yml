@@ -5,13 +5,25 @@ url: "https://openstack-afterglow.github.io"
 repository: openstack-afterglow/openstack-afterglow
 lang: ko
 
-remote_theme: just-the-docs/just-the-docs
+
+# Front matter가 없는 기존 Markdown 문서에도 Just the Docs layout을 적용한다.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+remote_theme: just-the-docs/just-the-docs@v0.12.0
 
 # 검색 활성화
 search_enabled: true
 
 # 색상 테마
-color_scheme: dark
+color_scheme: light
+
+# 긴 기술 문서의 탐색성과 deep link
+heading_anchors: true
+back_to_top: true
+back_to_top_text: "위로"
 
 # 헤더 링크
 aux_links:
@@ -30,10 +42,24 @@ footer_content: "Afterglow — OpenStack Dashboard. MIT License."
 # 플러그인
 plugins:
   - jekyll-seo-tag
+  - jekyll-remote-theme
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
 
-# 네비게이션 순서
+# Markdown without front matter is still a rendered documentation page.
+
+optional_front_matter:
+  enabled: true
+  remove_originals: true
+
+relative_links:
+  enabled: true
+  collections: true
+
+include:
+  - class-diagrams
 nav_sort: case_insensitive
 
 # Mermaid 다이어그램 지원
 mermaid:
-  version: "10"
+  version: "11.16.0"

@@ -1,0 +1,54 @@
+{% if site.mermaid.version %}
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@{{ site.mermaid.version }}/dist/mermaid.esm.min.mjs';
+
+  const diagrams = Array.from(document.querySelectorAll('.language-mermaid'));
+  const sources = new Map(diagrams.map((element) => [element, element.textContent]));
+
+  const themeVariables = (theme) => theme === 'dark'
+    ? {
+        background: '#10141d', primaryColor: '#161b27', primaryTextColor: '#f4f6fb',
+        primaryBorderColor: '#7da3ff', secondaryColor: '#0b0f17', tertiaryColor: '#10141d',
+        lineColor: '#9eb9ff', textColor: '#f4f6fb', noteBkgColor: '#161b27', noteTextColor: '#f4f6fb',
+        actorBkg: '#161b27', actorBorder: '#7da3ff', actorTextColor: '#f4f6fb',
+        signalColor: '#9eb9ff', signalTextColor: '#f4f6fb', labelBoxBkgColor: '#0b0f17',
+        labelTextColor: '#f4f6fb', loopTextColor: '#f4f6fb'
+      }
+    : {
+        background: '#f4f6fb', primaryColor: '#ffffff', primaryTextColor: '#0f172a',
+        primaryBorderColor: '#2563eb', secondaryColor: '#fafbff', tertiaryColor: '#f4f6fb',
+        lineColor: '#2563eb', textColor: '#0f172a', noteBkgColor: '#fff7ed', noteTextColor: '#0f172a',
+        actorBkg: '#ffffff', actorBorder: '#2563eb', actorTextColor: '#0f172a',
+        signalColor: '#2563eb', signalTextColor: '#0f172a', labelBoxBkgColor: '#ffffff',
+        labelTextColor: '#0f172a', loopTextColor: '#0f172a'
+      };
+
+  const render = async () => {
+    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    for (const diagram of diagrams) {
+      diagram.textContent = sources.get(diagram);
+      diagram.removeAttribute('data-processed');
+    }
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      themeVariables: themeVariables(theme)
+    });
+    await mermaid.run({ nodes: diagrams });
+    for (const diagram of diagrams) {
+      const svg = diagram.querySelector('svg');
+      const [, , width] = (svg?.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+      if (svg && Number.isFinite(width)) {
+        svg.setAttribute('width', String(width));
+        svg.style.maxWidth = 'none';
+        svg.style.height = 'auto';
+        diagram.parentElement?.classList.add('mermaid-scroll');
+      }
+    }
+  };
+
+  window.addEventListener('afterglow-theme-change', () => { void render(); });
+  void render();
+</script>
+{% endif %}

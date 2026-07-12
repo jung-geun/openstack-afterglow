@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import type { Cluster } from '$lib/types/cluster';
-  import type { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 
   let {
     cluster,
@@ -13,7 +13,7 @@
   }: {
     cluster: Cluster;
     refreshing: boolean;
-    ar: ReturnType<typeof createAutoRefresh>;
+    ar: AutoRefreshController;
     onManualRefresh: () => void;
     onDelete: () => void;
   } = $props();

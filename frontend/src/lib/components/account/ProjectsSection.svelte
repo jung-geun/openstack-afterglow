@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { auth, setAuth } from '$lib/stores/auth';
+  import { auth, logoutInProgress, setAuth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
 
   interface Project {
@@ -37,7 +37,8 @@
   }
 
   async function selectProject(proj: Project) {
-    if (!$auth.token || switching) return;
+    const currentToken = $auth.token;
+    if (!currentToken || switching) return;
     if (proj.id === $auth.projectId) return;
 
     switching = true;
@@ -52,7 +53,9 @@
         username: string;
         roles: string[];
         is_system_admin: boolean;
-      }>('/api/v1/auth/token/project', { project_id: proj.id }, $auth.token);
+      }>('/api/v1/auth/token/project', { project_id: proj.id }, currentToken);
+
+      if ($logoutInProgress || !$auth.token) return;
 
       setAuth({
         token: resp.token,

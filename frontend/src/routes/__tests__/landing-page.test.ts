@@ -117,10 +117,10 @@ describe('public landing and login route source contracts', () => {
 	it('redirects protected auth failures to /login while leaving public shellless routes explicit', () => {
 		expect(layoutSource).toContain("const publicRoutes = ['/', '/login', '/auth/gitlab/callback'];");
 		expect(layoutSource).toContain("const shelllessRoutes = ['/', '/login', '/auth/gitlab/callback', '/select-project'];");
-		expect(layoutSource).toContain("goto('/login')");
+		expect(layoutSource).toContain("goto('/login', { replaceState: true })");
 		expect(layoutSource).toContain('{#if showAppChrome}');
 		expect(clientSource).toContain("const AUTH_PUBLIC_PATHS = new Set(['/', '/login', '/auth/gitlab/callback']);");
-		expect(clientSource).toContain("await goto('/login')");
+		expect(clientSource).toContain("await goto('/login', { replaceState: true })");
 		expect(hooksSource).toContain("const PUBLIC_PATHS = ['/', '/login', '/auth/gitlab/callback'];");
 		expect(callbackSource).toContain('href="/login"');
 		expect(layoutCssSource).toContain('font-family: "MaruBuri";');

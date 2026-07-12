@@ -5,7 +5,7 @@
 	import { get } from 'svelte/store';
 	import { auth, authReady, isLoggedIn, isAdmin, clearAuth, logoutInProgress, enterMockAuth, exitMockAuth, getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
-	import { api, getBaseUrl } from '$lib/api/client';
+	import { api, getBaseUrl, refreshSession, beginSessionRevocation, endSessionRevocation } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig } from '$lib/config/site';
 	import { resolveFaviconPath } from '$lib/config/brandAssets';
@@ -29,6 +29,7 @@
 	const initialSiteConfig = untrack(() => data.siteConfig);
 	const initialMockup = untrack(() => data.mockup);
 	let themeReady = $state(false);
+	let logoutConfirming = $state(false);
 	let mockupClientReady = $state(false);
 	let clientMockProfile = $state<MockupProfileId | null>(null);
 	let enteredMockProfile: MockupProfileId | null = null;
@@ -64,9 +65,9 @@
 				}
 				enteredMockProfile = mockup.profile;
 			}
-		} else if (explicitMockupOff && isMockAuthActive()) {
+		} else if (explicitMockupOff) {
 			lastVerifiedToken = null;
-			exitMockAuth();
+			if (isMockAuthActive()) exitMockAuth();
 			void refreshPublicSiteConfig();
 			enteredMockProfile = null;
 			explicitMockupOff = false;
@@ -127,7 +128,7 @@
 	$effect(() => {
 		if (!mockupClientReady) return;
 		if (!$logoutInProgress && !$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
-			goto('/login');
+			goto('/login', { replaceState: true });
 		}
 	});
 
@@ -201,19 +202,7 @@
 			const remaining = expiresAt - Math.floor(Date.now() / 1000);
 			if (remaining < 120) {
 				try {
-					const data = await api.post<{
-						token: string;
-						refresh_token?: string;
-						expires_at?: string;
-					}>('/api/v1/auth/refresh', { refresh_token: $auth.refreshToken });
-					auth.update((s) => ({
-						...s,
-						token: data.token,
-						refreshToken: data.refresh_token ?? s.refreshToken,
-						accessExpiresAt: data.expires_at
-							? Math.floor(new Date(data.expires_at).getTime() / 1000)
-							: s.accessExpiresAt,
-					}));
+					await refreshSession();
 				} catch {
 					// refresh 실패 시 client.ts의 401 흐름이 처리
 				}
@@ -230,22 +219,37 @@
 	});
 
 	async function logout() {
-		if ($logoutInProgress) return;
+		if ($logoutInProgress || logoutConfirming) return;
+		logoutConfirming = true;
+		let confirmed: boolean;
+		try {
+			confirmed = await confirmDialog('로그아웃하시겠습니까?');
+		} finally {
+			logoutConfirming = false;
+		}
+		if (!confirmed) return;
+
 		logoutInProgress.set(true);
 		try {
-			const confirmed = await confirmDialog('로그아웃하시겠습니까?');
-			if (!confirmed) return;
-
-			// best-effort 서버 토큰 폐기
-			if ($auth.token) {
+			const pendingRefresh = beginSessionRevocation();
+			await pendingRefresh;
+			const logoutToken = $auth.token;
+			if (logoutToken) {
 				try {
-					await api.post('/api/v1/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
+					await api.post('/api/v1/auth/logout', {}, logoutToken, $auth.projectId ?? undefined);
 				} catch { /* 실패해도 로컬 정리는 진행 */ }
 			}
+			const mockLogout = isMockAuthActive();
+			if (mockLogout) {
+				exitMockAuth();
+				clientMockProfile = null;
+				enteredMockProfile = null;
+			}
 			clearAuth();
-			await goto('/', { replaceState: true });
+			await goto(mockLogout ? '/login?mockup=off' : '/login', { replaceState: true });
 			toast.success('정상적으로 로그아웃 되었습니다.');
 		} finally {
+			endSessionRevocation();
 			logoutInProgress.set(false);
 		}
 	}

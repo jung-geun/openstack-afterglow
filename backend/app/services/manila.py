@@ -116,37 +116,58 @@ def get_client(conn) -> ManilaClient:
 # ---------------------------------------------------------------------------
 
 
-def get_file_storage_quota(conn) -> dict:
+def get_file_storage_quota(conn, *, strict: bool = False) -> dict:
     """프로젝트의 Manila 할당량 (limit + in_use) 조회."""
     try:
         client = get_client(conn)
         project_id = getattr(conn, "_afterglow_project_id", None) or conn.current_project_id
-        data = client.get(f"quota-sets/{project_id}", params={"usage": "true"})
+        quota_path = f"quota-sets/{project_id}/detail" if strict else f"quota-sets/{project_id}"
+        data = client.get(quota_path, params={"usage": "true"})
         quota = data.get("quota_set", {})
 
         def _q(key):
-            v = quota.get(key, {})
-            if isinstance(v, dict):
-                return {"limit": v.get("limit", -1), "in_use": v.get("in_use", 0)}
-            return {"limit": int(v) if v is not None else -1, "in_use": 0}
+            value = quota.get(key, {})
+            if isinstance(value, dict):
+                return {"limit": value.get("limit", -1), "in_use": value.get("in_use", 0)}
+            return {"limit": int(value) if value is not None else -1, "in_use": 0}
 
-        result = {
-            "shares": _q("shares"),
-            "gigabytes": _q("gigabytes"),
-            "share_networks": _q("share_networks"),
-            "share_groups": _q("share_groups"),
-            "snapshot_gigabytes": _q("snapshot_gigabytes"),
-        }
+        def _strict_entry(key: str) -> dict:
+            value = quota.get(key)
+            if not isinstance(value, dict) or "limit" not in value or "in_use" not in value:
+                raise ValueError(f"Manila quota usage is missing for {key}")
+            limit, in_use = value["limit"], value["in_use"]
+            if (
+                not isinstance(limit, (int, float))
+                or isinstance(limit, bool)
+                or not isinstance(in_use, (int, float))
+                or isinstance(in_use, bool)
+            ):
+                raise ValueError(f"Manila quota data is malformed for {key}")
+            return {"limit": limit, "in_use": in_use}
 
-        # Manila quota-sets가 in_use=0을 반환하더라도 실제 share가 있을 수 있음
-        # (CephFS 백엔드나 quota enforcement 미활성 시 발생)
+        if strict:
+            result = {
+                "shares": _strict_entry("shares"),
+                "gigabytes": _strict_entry("gigabytes"),
+            }
+        else:
+            result = {
+                "shares": _q("shares"),
+                "gigabytes": _q("gigabytes"),
+                "share_networks": _q("share_networks"),
+                "share_groups": _q("share_groups"),
+                "snapshot_gigabytes": _q("snapshot_gigabytes"),
+            }
+
+        # The supplemental share-count probe remains soft in strict mode:
+        # only failure of the primary quota response is authoritative.
         if result["shares"]["in_use"] == 0:
             try:
                 shares_data = client.get("shares/detail")
                 actual_shares = shares_data.get("shares", [])
                 if actual_shares:
                     result["shares"]["in_use"] = len(actual_shares)
-                    total_gb = sum(int(s.get("size", 0)) for s in actual_shares)
+                    total_gb = sum(int(share.get("size", 0)) for share in actual_shares)
                     if total_gb > 0 and result["gigabytes"]["in_use"] == 0:
                         result["gigabytes"]["in_use"] = total_gb
                     logger.debug(
@@ -159,12 +180,14 @@ def get_file_storage_quota(conn) -> dict:
 
         return result
     except Exception:
+        if strict:
+            raise
         import logging as _logging
 
         _logging.getLogger(__name__).warning("Manila 파일 스토리지 quota 조회 실패", exc_info=True)
         return {
-            k: {"limit": -1, "in_use": 0}
-            for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]
+            key: {"limit": -1, "in_use": 0}
+            for key in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]
         }
 
 

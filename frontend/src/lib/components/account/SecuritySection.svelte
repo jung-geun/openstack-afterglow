@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { auth, clearAuth } from '$lib/stores/auth';
-  import { api, ApiError } from '$lib/api/client';
+  import { auth, clearAuth, logoutInProgress } from '$lib/stores/auth';
+  import { api, ApiError, beginSessionRevocation, endSessionRevocation } from '$lib/api/client';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
@@ -64,8 +64,13 @@
       await api.delete(`/api/v1/auth/sessions/${jti}`, token, projectId);
       await loadSessions();
       if (sessions.length === 0) {
+        logoutInProgress.set(true);
         clearAuth();
-        goto('/');
+        try {
+          await goto('/login', { replaceState: true });
+        } finally {
+          logoutInProgress.set(false);
+        }
       }
     } catch (e) {
       error = e instanceof ApiError ? e.message : '세션 삭제 실패';
@@ -79,14 +84,23 @@
     revoking = true;
     error = '';
     success = '';
+    logoutInProgress.set(true);
     try {
-      await api.post('/api/v1/auth/logout-all', {}, token, projectId);
+      const pendingRefresh = beginSessionRevocation();
+      await pendingRefresh;
+      const logoutToken = $auth.token;
+      await api.post('/api/v1/auth/logout-all', {}, logoutToken ?? undefined, projectId);
       success = '모든 세션이 폐기되었습니다. 다시 로그인해 주세요.';
       clearAuth();
-      setTimeout(() => goto('/'), 1500);
+      setTimeout(() => {
+        void goto('/login', { replaceState: true }).finally(() => logoutInProgress.set(false));
+      }, 1500);
     } catch (e) {
       error = e instanceof ApiError ? e.message : '세션 폐기 실패';
+      logoutInProgress.set(false);
       revoking = false;
+    } finally {
+      endSessionRevocation();
     }
   }
 

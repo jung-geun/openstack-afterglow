@@ -32,7 +32,7 @@ from app.rate_limit import limiter
 from app.services import neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_static
 from app.services.octavia import get_lb_stats, get_topology_lbs, lb_rate_from_snapshot, list_load_balancers
-from app.services.prom_query import PromBadQuery, PromUnavailable, query_instant_multi
+from app.services.prom_query import PromBadQuery, PromUnavailable, is_safe_label_value, query_instant_multi
 
 _logger = logging.getLogger(__name__)
 
@@ -475,7 +475,9 @@ async def get_topology_traffic(
     mac_idx: dict[str, dict] = {
         v["mac_address"]: {"port_id": pid, **v} for pid, v in port_map.items() if v.get("mac_address")
     }
-    instance_ids = list({v["instance_id"] for v in port_map.values() if v.get("instance_id")})
+    instance_ids = list(
+        {instance_id for v in port_map.values() if is_safe_label_value(instance_id := v.get("instance_id"))}
+    )
     # instance → [port_id] 맵 (단일NIC 판별용)
     instance_ports: dict[str, list[str]] = {}
     for pid, v in port_map.items():
@@ -500,9 +502,9 @@ async def get_topology_traffic(
         lv_rx_q = (
             f"sum by (instance_id, mac_address) ("
             f"(rate(libvirt_domain_interface_stats_receive_bytes_total[2m])"
-            f" * on (domain, target_device) group_left(mac_address)"
+            f" * on (instance, domain, target_device) group_left(mac_address)"
             f"   libvirt_domain_interface_stats_info)"
-            f" * on (domain) group_left(instance_id)"
+            f" * on (instance, domain) group_left(instance_id)"
             f' libvirt_domain_openstack_info{{instance_id=~"{regex}"}})'
         )
         lv_tx_q = lv_rx_q.replace("receive", "transmit")

@@ -84,14 +84,59 @@ function metricSeries(scale: number): { ts: number; value: number }[] {
 	return [0, 1, 2, 3, 4, 5].map((step) => ({ ts: 1783551600 + step * 600, value: scale + step * 3 }));
 }
 
-function dashboardTrend(range: string | null): Record<string, unknown> {
+function dashboardTrend(range: string | null, includeNetwork: boolean): Record<string, unknown> {
 	return {
 		vcpu: { data: [24, 27, 31, 29, 33, 36], points: 6, available: true },
 		memory: { data: [38, 41, 44, 43, 45, 47], points: 6, available: true },
 		storage: { data: [16, 18, 19, 20, 21, 23], points: 6, available: true },
-		network: { data: [1.2, 1.5, 1.7, 1.4, 1.9, 2.1], points: 6, available: true, unit: 'Gbps' },
+		network: includeNetwork
+			? { data: [120, 150, 170, 140, 190, 210], points: 6, available: true, unit: 'KiB/s' }
+			: { data: [], points: 0, available: false, unit: 'KiB/s' },
 		prometheus_available: true,
 		range: range ?? '14d',
+	};
+}
+
+function dashboardOverviewSummary(): Record<string, unknown> {
+	const state = getMockupState();
+	const instances = [...state.instances]
+		.sort((a, b) => {
+			const aTime = a.created_at ? Date.parse(a.created_at) : Number.NaN;
+			const bTime = b.created_at ? Date.parse(b.created_at) : Number.NaN;
+			const aValid = Number.isFinite(aTime);
+			const bValid = Number.isFinite(bTime);
+			if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+			if (aValid !== bValid) return aValid ? -1 : 1;
+			return a.id.localeCompare(b.id);
+		})
+		.slice(0, 5)
+		.map(({ id, name, status, flavor_name, ip_addresses, created_at }) => ({
+			id,
+			name,
+			status,
+			flavor_name: flavor_name ?? null,
+			ip_addresses: ip_addresses ?? [],
+			created_at: created_at ?? null,
+		}));
+	return {
+		instances: {
+			total: state.instances.length,
+			active: state.instances.filter((item) => item.status === 'ACTIVE').length,
+			shutoff: state.instances.filter((item) => item.status === 'SHUTOFF').length,
+			error: state.instances.filter((item) => item.status === 'ERROR').length,
+		},
+		recent_instances: instances,
+	};
+}
+
+function dashboardOverviewQuotas(): Record<string, unknown> {
+	const state = getMockupState();
+	return {
+		compute: structuredClone(state.quotas.compute),
+		storage: structuredClone(state.quotas.storage),
+		network: structuredClone(state.quotas.network),
+		file_storage: structuredClone(state.quotas.file_storage),
+		alerts: [],
 	};
 }
 
@@ -143,11 +188,19 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'POST' && pathname === '/api/v1/networks/ensure-default') return ok204();
 
 	if (method === 'GET' && pathname === '/api/v1/dashboard/summary') {
+		if (params.get('view') === 'overview') return dashboardOverviewSummary();
 		return { instances: { total: state.instances.length, active: state.instances.filter((item) => item.status === 'ACTIVE').length, shutoff: state.instances.filter((item) => item.status === 'SHUTOFF').length, error: state.instances.filter((item) => item.status === 'ERROR').length }, gpu_used: state.instances.filter((item) => item.flavor_name?.startsWith('gpu.')).length };
 	}
-	if (method === 'GET' && pathname === '/api/v1/dashboard/quotas') return state.quotas;
+	if (method === 'GET' && pathname === '/api/v1/dashboard/quotas') {
+		if (params.get('view') === 'overview') return dashboardOverviewQuotas();
+		return state.quotas;
+	}
+	if (method === 'GET' && pathname === '/api/v1/dashboard/k3s-stats') {
+		const clusters = state.k3sClusters.filter((cluster) => !cluster.deleted_at);
+		return { total: clusters.length, active: clusters.filter((cluster) => cluster.status === 'ACTIVE').length };
+	}
 	if (method === 'GET' && pathname === '/api/v1/dashboard/notifications') return { notifications: [{ type: 'quota', severity: 'warning', message: 'GPU quota 사용률이 70%를 넘었습니다.', count: 1 }, { type: 'backup', severity: 'info', message: '오늘 3개의 스냅샷 검증이 완료되었습니다.', count: 3 }] };
-	if (method === 'GET' && pathname === '/api/v1/dashboard/metrics/trend') return dashboardTrend(params.get('range'));
+	if (method === 'GET' && pathname === '/api/v1/dashboard/metrics/trend') return dashboardTrend(params.get('range'), params.get('include_network') !== 'false');
 
 	if (method === 'GET' && pathname === '/api/v1/instances') return state.instances;
 	if (method === 'GET' && pathname === '/api/v1/instances/metrics-summary-batch') return { prometheus_available: true, instances: instanceMetrics(state.instances.map((item) => item.id)) };

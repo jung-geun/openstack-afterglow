@@ -260,7 +260,8 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             request.url.path,
             exc.detail,
         )
-        return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
+        detail = exc.detail if getattr(exc, "_afterglow_safe_public_detail", False) else "내부 서버 오류"
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail})
     if exc.status_code == 400:
         cause = getattr(exc, "__cause__", None)
         _logger.warning(
@@ -309,7 +310,10 @@ async def k3s_api_error_handler(request: Request, exc: K3sApiError) -> JSONRespo
             request.url.path,
             exc.detail,
         )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        detail = exc.detail if getattr(exc, "_afterglow_safe_public_detail", False) else "내부 서버 오류"
+    else:
+        detail = exc.detail
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
 @app.exception_handler(Exception)

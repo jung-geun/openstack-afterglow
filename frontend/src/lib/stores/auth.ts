@@ -6,6 +6,7 @@ import type { MockupProfileId } from '$lib/mockup/contracts';
 export const authReady = writable(false);
 export const logoutInProgress = writable(false);
 
+
 export interface Project {
 	id: string;
 	name: string;

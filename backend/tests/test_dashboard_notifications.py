@@ -60,3 +60,78 @@ async def test_notifications_project_scoped(client, mock_conn):
 
     assert resp.status_code == 200
     assert resp.json()["notifications"] == []
+
+
+@pytest.mark.asyncio
+async def test_notifications_preserve_ordered_nested_quota_wire_types(client, mock_conn):
+    from app.services import cinder as cinder_svc
+    from app.services import nova as nova_svc
+
+    compute_limits = {
+        "instances": {"limit": 10, "in_use": 10},
+        "cores": {"limit": 10, "in_use": 9},
+        "ram": {"limit": -1, "in_use": 0},
+    }
+    volume_limits = {"gigabytes": {"limit": 20, "in_use": 20}}
+
+    with (
+        _patch_redis(),
+        patch.object(nova_svc, "list_servers", return_value=[]),
+        patch.object(nova_svc, "get_project_limits", return_value=compute_limits),
+        patch.object(cinder_svc, "get_volume_limits", return_value=volume_limits),
+    ):
+        resp = await client.get("/api/v1/dashboard/notifications")
+
+    assert resp.status_code == 200
+    assert resp.json()["notifications"] == [
+        {
+            "type": "quota_full_instances",
+            "severity": "danger",
+            "message": "인스턴스 쿼터 가득 참 (10/10)",
+            "count": 1,
+        },
+        {
+            "type": "quota_warn_cores",
+            "severity": "warning",
+            "message": "vCPU 쿼터 90% 사용 (9/10)",
+            "count": 1,
+        },
+        {
+            "type": "quota_full_gigabytes",
+            "severity": "danger",
+            "message": "스토리지(GB) 쿼터 가득 참 (20/20)",
+            "count": 1,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_notifications_keep_real_flat_quota_sources_alert_free(client, mock_conn):
+    from app.services import cinder as cinder_svc
+    from app.services import nova as nova_svc
+
+    with (
+        _patch_redis(),
+        patch.object(nova_svc, "list_servers", return_value=[]),
+        patch.object(
+            nova_svc,
+            "get_project_limits",
+            return_value={
+                "instances_used": 10,
+                "instances_limit": 10,
+                "vcpus_used": 10,
+                "vcpus_limit": 10,
+                "ram_used_mb": 10,
+                "ram_limit_mb": 10,
+            },
+        ),
+        patch.object(
+            cinder_svc,
+            "get_volume_limits",
+            return_value={"gigabytes_used": 20, "gigabytes_limit": 20},
+        ),
+    ):
+        resp = await client.get("/api/v1/dashboard/notifications")
+
+    assert resp.status_code == 200
+    assert resp.json()["notifications"] == []
