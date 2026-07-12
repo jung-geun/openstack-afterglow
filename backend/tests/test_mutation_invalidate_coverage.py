@@ -109,6 +109,14 @@ EXEMPT_HANDLERS: set[str] = {
     # per-project OpenStack resource cache tracked by mutation counts.
     "upload_site_branding_asset",
     "reset_site_branding_asset",
+    # Announcements (admin CRUD + user read-receipt) mutate a DB-backed
+    # resource read straight from the DB on every request (no cached_call /
+    # app cache layer involved), not a per-project OpenStack resource cache
+    # tracked by mutation counts — mirrors the site branding exemption above.
+    "create_announcement_endpoint",
+    "update_announcement_endpoint",
+    "delete_announcement_endpoint",
+    "mark_announcement_read",
 }
 
 # ---------------------------------------------------------------------------

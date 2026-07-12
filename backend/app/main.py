@@ -114,6 +114,7 @@ _mark("fastapi")
 # app.api.common
 # ---------------------------------------------------------------------------
 from app.api.common import (
+    announcements_router,
     dashboard_router,
     grafana_auth_router,
     libraries_router,
@@ -152,6 +153,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router, gitlab_auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
+from app.api.identity.admin_announcements import router as admin_announcements_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
@@ -331,6 +333,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/volumes/backups", "volume_backup"),
+    ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
     ("/api/v1/share-snapshots", "share_snapshot"),
     ("/api/v1/share-networks", "share_network"),
@@ -521,6 +524,7 @@ app.include_router(profile_activity_router, prefix="/api/v1/profile/activity", t
 app.include_router(admin_activity_router, prefix="/api/v1/admin", tags=["admin-activity"])
 app.include_router(admin_orphans_router, prefix="/api/v1/admin", tags=["admin-orphans"])
 app.include_router(admin_dashboard_router, prefix="/api/v1/admin", tags=["admin-dashboard"])
+app.include_router(admin_announcements_router, prefix="/api/v1/admin/announcements", tags=["admin-announcements"])
 app.include_router(projects_router, prefix="/api/v1/projects", tags=["projects"])
 app.include_router(invitations_router, prefix="/api/v1/invitations", tags=["invitations"])
 # Compute
@@ -597,6 +601,7 @@ if _svc_cfg.service_barbican_enabled:
     app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
     app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
 # Common
+app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/v1/metrics", tags=["metrics"])
 app.include_router(squashfs_libraries_router, prefix="/api/v1/libraries/squashfs", tags=["squashfs-libraries"])

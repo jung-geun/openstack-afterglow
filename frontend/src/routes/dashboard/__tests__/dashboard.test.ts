@@ -77,6 +77,7 @@ const trend = {
 	prometheus_available: true,
 	range: '14d' as const,
 };
+const announcements: unknown[] = [];
 
 beforeEach(() => {
 	mocks.auth.set({ token: 'token-a', username: 'tester', projectId: 'project-a', projectName: 'Project A' });
@@ -90,7 +91,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('dashboard overview loading', () => {
-	it('starts four independent overview requests and renders the summary before slow domains settle', async () => {
+	it('starts five independent overview requests and renders the summary before slow domains settle', async () => {
 		const requests = new Map<string, Deferred<unknown>>();
 		mocks.apiGet.mockImplementation((path: string) => {
 			const pending = deferred<unknown>();
@@ -101,13 +102,14 @@ describe('dashboard overview loading', () => {
 		const rendered = render(Page);
 		expect(screen.queryByText('인스턴스가 없습니다')).toBeNull();
 		expect(screen.queryByText('메트릭 수집 미설정')).toBeNull();
-		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(4));
+		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(5));
 		const paths = mocks.apiGet.mock.calls.map(([path]) => path);
 		expect(paths).toEqual(expect.arrayContaining([
 			'/api/v1/dashboard/summary?view=overview',
 			'/api/v1/dashboard/quotas?view=overview',
 			'/api/v1/dashboard/k3s-stats',
 			'/api/v1/dashboard/metrics/trend?range=14d&include_network=false',
+			'/api/v1/announcements',
 		]));
 		expect(paths.join(' ')).not.toContain('/api/v1/instances');
 		expect(paths.join(' ')).not.toContain('/api/v1/dashboard/notifications');
@@ -120,22 +122,24 @@ describe('dashboard overview loading', () => {
 		requests.get('/api/v1/dashboard/quotas?view=overview')!.resolve(quotas);
 		requests.get('/api/v1/dashboard/k3s-stats')!.resolve({ total: 1, active: 1 });
 		requests.get('/api/v1/dashboard/metrics/trend?range=14d&include_network=false')!.resolve(trend);
+		requests.get('/api/v1/announcements')!.resolve(announcements);
 		await waitFor(() => expect(screen.getByText('최근 동기화', { exact: false })).toBeTruthy());
 		expect([...rendered.container.querySelectorAll('.stat-unit')].some((node) => node.textContent === '/ 0')).toBe(true);
 		expect(screen.queryByText('Manila Shares')).toBeNull();
 		rendered.unmount();
 	});
 
-	it('skips K3s when disabled and requests exactly three domains', async () => {
+	it('skips K3s when disabled and requests exactly four domains', async () => {
 		mocks.siteConfig.set({ services: { k3s: false } });
 		mocks.apiGet.mockImplementation((path: string) => {
 			if (path.includes('/summary')) return Promise.resolve(summary);
 			if (path.includes('/quotas')) return Promise.resolve(quotas);
+			if (path.includes('/announcements')) return Promise.resolve(announcements);
 			return Promise.resolve(trend);
 		});
 
 		render(Page);
-		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(3));
+		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(4));
 		expect(mocks.apiGet.mock.calls.map(([path]) => path)).not.toContain('/api/v1/dashboard/k3s-stats');
 		expect(screen.getByText('N/A')).toBeTruthy();
 	});
@@ -146,6 +150,7 @@ describe('dashboard overview loading', () => {
 			if (path.includes('/summary')) return Promise.resolve(summary);
 			if (path.includes('/quotas')) return Promise.resolve(quotas);
 			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+			if (path.includes('/announcements')) return Promise.resolve(announcements);
 			return Promise.resolve(trend);
 		});
 
@@ -156,7 +161,7 @@ describe('dashboard overview loading', () => {
 		expect(screen.queryByText('메트릭 수집 미설정')).toBeNull();
 
 		mocks.authReady.set(true);
-		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(4));
+		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(5));
 		await screen.findByText('newest');
 	});
 
@@ -180,12 +185,12 @@ describe('dashboard overview loading', () => {
 		});
 
 		render(Page);
-		await waitFor(() => expect(requests).toHaveLength(4));
+		await waitFor(() => expect(requests).toHaveLength(5));
 		const oldRequests = [...requests];
 		mocks.auth.set({ token: 'token-b', username: 'tester', projectId: 'project-b', projectName: 'Project B' });
-		await waitFor(() => expect(requests).toHaveLength(8));
+		await waitFor(() => expect(requests).toHaveLength(10));
 		expect(oldRequests.every((request) => request.signal?.aborted)).toBe(true);
-		expect(requests.slice(4).every((request) => request.projectId === 'project-b')).toBe(true);
+		expect(requests.slice(5).every((request) => request.projectId === 'project-b')).toBe(true);
 
 		oldRequests.find((request) => request.path.includes('/summary'))!.pending.resolve({
 			...summary,
@@ -194,13 +199,14 @@ describe('dashboard overview loading', () => {
 		await Promise.resolve();
 		expect(screen.queryByText('old-project-instance')).toBeNull();
 
-		for (const request of requests.slice(4)) {
+		for (const request of requests.slice(5)) {
 			if (request.path.includes('/summary')) request.pending.resolve({
 				...summary,
 				recent_instances: [{ ...summary.recent_instances[0], name: 'new-project-instance' }],
 			});
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
 			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1 });
+			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
 			else request.pending.resolve(trend);
 		}
 		await screen.findByText('new-project-instance');
@@ -212,10 +218,11 @@ describe('dashboard overview loading', () => {
 		let callCount = 0;
 		mocks.apiGet.mockImplementation((path: string, _token: string | undefined, _project: string | undefined, options: Request['options']) => {
 			callCount += 1;
-			if (callCount <= 4) {
+			if (callCount <= 5) {
 				if (path.includes('/summary')) return Promise.resolve(summary);
 				if (path.includes('/quotas')) return Promise.resolve(quotas);
 				if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+				if (path.includes('/announcements')) return Promise.resolve(announcements);
 				return Promise.resolve(trend);
 			}
 			const pending = deferred<unknown>();
@@ -224,16 +231,16 @@ describe('dashboard overview loading', () => {
 		});
 
 		render(Page);
-		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(4));
+		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(5));
 		await screen.findByText('최근 동기화', { exact: false });
 		await fireEvent.click(screen.getByTitle('지금 새로고침'));
-		await waitFor(() => expect(manualRequests).toHaveLength(4));
+		await waitFor(() => expect(manualRequests).toHaveLength(5));
 		expect(manualRequests.every((request) => request.options.refresh === true)).toBe(true);
 		expect(screen.getByTitle('로딩 중…')).toBeTruthy();
 
 		const originalTrend = manualRequests.find((request) => request.path.includes('/metrics/trend'))!;
 		await fireEvent.click(screen.getByRole('button', { name: '24h' }));
-		await waitFor(() => expect(manualRequests).toHaveLength(5));
+		await waitFor(() => expect(manualRequests).toHaveLength(6));
 		const replacementTrend = manualRequests.at(-1)!;
 		expect(originalTrend.options.signal?.aborted).toBe(true);
 		expect(replacementTrend.path).toContain('range=24h');
@@ -241,12 +248,13 @@ describe('dashboard overview loading', () => {
 
 		const auto = mocks.autoCallback!();
 		await Promise.resolve();
-		expect(manualRequests).toHaveLength(5);
+		expect(manualRequests).toHaveLength(6);
 		for (const request of manualRequests) {
 			if (request === originalTrend) continue;
 			if (request.path.includes('/summary')) request.pending.resolve(summary);
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
 			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1 });
+			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
 			else request.pending.resolve({ ...trend, range: '24h' });
 		}
 		await auto;
@@ -269,15 +277,16 @@ describe('dashboard overview loading', () => {
 		});
 
 		render(Page);
-		await waitFor(() => expect(requests).toHaveLength(4));
+		await waitFor(() => expect(requests).toHaveLength(5));
 		const originalTrend = requests.find((request) => request.path.includes('/metrics/trend'))!;
 		await fireEvent.click(screen.getByRole('button', { name: '24h' }));
-		await waitFor(() => expect(requests).toHaveLength(5));
+		await waitFor(() => expect(requests).toHaveLength(6));
 		expect(originalTrend.signal?.aborted).toBe(true);
-		for (const request of requests.slice(0, 4)) {
+		for (const request of requests.slice(0, 5)) {
 			if (request === originalTrend) continue;
 			if (request.path.includes('/summary')) request.pending.resolve(summary);
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
+			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
 			else request.pending.resolve({ total: 1, active: 1 });
 		}
 		requests.at(-1)!.pending.reject(new Error('range failed'));
@@ -287,10 +296,11 @@ describe('dashboard overview loading', () => {
 		let callCount = 0;
 		mocks.apiGet.mockImplementation((path: string) => {
 			callCount += 1;
-			if (callCount > 4) return Promise.reject(new Error(`failed ${path}`));
+			if (callCount > 5) return Promise.reject(new Error(`failed ${path}`));
 			if (path.includes('/summary')) return Promise.resolve(summary);
 			if (path.includes('/quotas')) return Promise.resolve(quotas);
 			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+			if (path.includes('/announcements')) return Promise.resolve(announcements);
 			return Promise.resolve(trend);
 		});
 
@@ -298,7 +308,7 @@ describe('dashboard overview loading', () => {
 		await screen.findByText('newest');
 		await screen.findByText('최근 동기화', { exact: false });
 		await fireEvent.click(screen.getByTitle('지금 새로고침'));
-		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(8));
+		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(10));
 		expect(screen.getByText('newest')).toBeTruthy();
 		expect(screen.getByText('최근 동기화', { exact: false })).toBeTruthy();
 		await waitFor(() => expect(screen.getByTitle('지금 새로고침')).toBeTruthy());
@@ -318,7 +328,7 @@ describe('dashboard overview loading', () => {
 		});
 
 		const rendered = render(Page);
-		await waitFor(() => expect(requests).toHaveLength(4));
+		await waitFor(() => expect(requests).toHaveLength(5));
 		rendered.unmount();
 		expect(requests.every((request) => request.signal?.aborted)).toBe(true);
 	});

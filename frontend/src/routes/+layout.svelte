@@ -10,6 +10,7 @@
 	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig } from '$lib/config/site';
 	import { resolveFaviconPath } from '$lib/config/brandAssets';
 	import type { PublicSiteConfig } from '$lib/types/siteConfig';
+	import type { UnreadCountResponse } from '$lib/types/announcements';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
@@ -30,6 +31,7 @@
 	const initialMockup = untrack(() => data.mockup);
 	let themeReady = $state(false);
 	let logoutConfirming = $state(false);
+	let unreadAnnouncementCount = $state(0);
 	let mockupClientReady = $state(false);
 	let clientMockProfile = $state<MockupProfileId | null>(null);
 	let enteredMockProfile: MockupProfileId | null = null;
@@ -51,6 +53,18 @@
 			initSiteConfig(qualifyBackendAssetPaths(config, getBaseUrl()));
 		} catch {
 			// Branding refresh is best effort; the server-provided config remains visible.
+		}
+	}
+
+	async function refreshUnreadAnnouncementCount() {
+		const token = $auth.token;
+		const projectId = $auth.projectId;
+		if (mockup.active || isMockAuthActive() || !token) return;
+		try {
+			const res = await api.get<UnreadCountResponse>('/api/v1/announcements/unread-count', token, projectId ?? undefined);
+			unreadAnnouncementCount = res.unread_count;
+		} catch {
+			// 배지 갱신은 best-effort — 실패해도 헤더 렌더링을 막지 않는다.
 		}
 	}
 
@@ -209,7 +223,14 @@
 			}
 		}, 60_000);
 
-		return () => clearInterval(interval);
+		// 헤더 종 아이콘 미읽음 배지 — 60초 주기 폴링 (SSE 도입 전까지)
+		void refreshUnreadAnnouncementCount();
+		const announcementInterval = setInterval(() => void refreshUnreadAnnouncementCount(), 60_000);
+
+		return () => {
+			clearInterval(interval);
+			clearInterval(announcementInterval);
+		};
 	});
 
 	// 테마 변경 시 <html> 클래스 업데이트
@@ -327,9 +348,19 @@
 			</button>
 
 			<!-- 알림 아이콘 -->
-			<button class="p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-gray-800" title="알림">
+			<a
+				href="/dashboard/notifications"
+				class="relative p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-gray-800"
+				title="알림"
+			>
 				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-			</button>
+				{#if unreadAnnouncementCount > 0}
+					<span
+						class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[9px] font-semibold flex items-center justify-center leading-none"
+						style="background: var(--color-state-danger);"
+					>{unreadAnnouncementCount > 99 ? '99+' : unreadAnnouncementCount}</span>
+				{/if}
+			</a>
 
 			<!-- 유저 아바타 -->
 			<a

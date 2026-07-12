@@ -731,3 +731,6 @@ class SiteBrandingAsset(Base):
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.activity import ActivityLog  # noqa: E402,F401
+
+# Announcement/AnnouncementRead 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
+from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402,F401

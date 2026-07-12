@@ -8,6 +8,7 @@
 	} from '$lib/types/compute';
 	import type { DashboardAlert, DashboardOverviewQuotas } from '$lib/types/quotas';
 	import type { DashboardK3sStats } from '$lib/types/k3s';
+	import type { AnnouncementUser } from '$lib/types/announcements';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import { Alert, Spark, SectionHeader } from '$lib/components/ui';
 	import DashboardGreetingHeader from '$lib/components/dashboard/overview/DashboardGreetingHeader.svelte';
@@ -19,7 +20,7 @@
 	type Range = '24h' | '7d' | '14d';
 	type SyncStatus = 'waiting' | 'partial' | 'complete';
 	type BatchMode = 'initial' | 'auto' | 'manual';
-	type Domain = 'summary' | 'quotas' | 'k3s' | 'trend';
+	type Domain = 'summary' | 'quotas' | 'k3s' | 'trend' | 'announcements';
 
 	interface TrendSeries {
 		data: number[];
@@ -81,6 +82,7 @@
 	let quotasState = $state<ResourceState<DashboardOverviewQuotas>>(newResource());
 	let k3sState = $state<ResourceState<DashboardK3sStats>>(newResource());
 	let trendState = $state<ResourceState<TrendData>>(newResource());
+	let announcementsState = $state<ResourceState<AnnouncementUser[]>>(newResource());
 	let range = $state<Range>(savedRange && VALID_RANGES.includes(savedRange) ? savedRange : '14d');
 	let visibleProjectId = $state<string | null>(null);
 	let refreshing = $state(false);
@@ -92,6 +94,7 @@
 		quotas: { generation: 0, controller: null, batchId: null },
 		k3s: { generation: 0, controller: null, batchId: null },
 		trend: { generation: 0, controller: null, batchId: null },
+		announcements: { generation: 0, controller: null, batchId: null },
 	};
 
 	let projectEpoch = 0;
@@ -115,14 +118,20 @@
 		result.push(...(quotasState.data?.alerts ?? []));
 		return result;
 	});
-	const alertsPending = $derived(authLoading || initialLoadPending || summaryState.pending || quotasState.pending);
-	const alertsFailed = $derived(Boolean(summaryState.error || quotasState.error));
+	// 관리자 공지(영속·읽음추적) — 쿼터 경고(파생·일시적)와 같은 카드에서 병합 표시.
+	const announcements = $derived(announcementsState.data ?? []);
+	const alertsPending = $derived(
+		authLoading || initialLoadPending || summaryState.pending || quotasState.pending || announcementsState.pending,
+	);
+	const alertsFailed = $derived(Boolean(summaryState.error || quotasState.error || announcementsState.error));
 	const alertsCompleteEmpty = $derived(
 		!alertsPending
 			&& !alertsFailed
 			&& summaryState.data !== null
 			&& quotasState.data !== null
-			&& alerts.length === 0,
+			&& announcementsState.data !== null
+			&& alerts.length === 0
+			&& announcements.length === 0,
 	);
 
 	function newBatch(mode: BatchMode, enabled: Domain[]): BatchState {
@@ -169,6 +178,7 @@
 		quotasState = newResource();
 		k3sState = newResource(k3sDisabled);
 		trendState = newResource();
+		announcementsState = newResource();
 		syncStatus = 'waiting';
 		lastSuccessfulSyncAt = null;
 	}
@@ -219,6 +229,7 @@
 			quotas: '쿼터를 불러오지 못했습니다',
 			k3s: 'Drover 클러스터 현황을 불러오지 못했습니다',
 			trend: '메트릭을 불러오지 못했습니다',
+			announcements: '공지를 불러오지 못했습니다',
 		}[domain];
 	}
 
@@ -292,6 +303,10 @@
 		await loadResource('k3s', k3sState, '/api/v1/dashboard/k3s-stats', batch);
 	}
 
+	async function loadAnnouncements(batch: BatchState | null): Promise<void> {
+		await loadResource('announcements', announcementsState, '/api/v1/announcements', batch);
+	}
+
 	async function loadTrend(batch: BatchState | null, requestedRange = range): Promise<void> {
 		await loadResource(
 			'trend',
@@ -313,7 +328,7 @@
 		}
 		if (!$authReady || !token || !projectId || projectId !== visibleProjectId) return;
 
-		const enabled: Domain[] = ['summary', 'quotas', 'trend'];
+		const enabled: Domain[] = ['summary', 'quotas', 'trend', 'announcements'];
 		if (!k3sDisabled) enabled.push('k3s');
 		const batch = newBatch(mode, enabled);
 		currentBatch = batch;
@@ -328,6 +343,7 @@
 		if (!k3sDisabled) void loadK3s(batch);
 		else k3sState.disabled = true;
 		void loadTrend(batch);
+		void loadAnnouncements(batch);
 		await batch.done;
 	}
 
@@ -380,8 +396,10 @@
 		abortAllSlots();
 	});
 
-	function severityDotColor(severity: DashboardAlert['severity']): string {
-		return severity === 'danger' ? 'var(--color-state-danger)' : 'var(--color-state-warning)';
+	function severityDotColor(severity: DashboardAlert['severity'] | AnnouncementUser['severity']): string {
+		if (severity === 'danger') return 'var(--color-state-danger)';
+		if (severity === 'warning') return 'var(--color-state-warning)';
+		return 'var(--color-accent)';
 	}
 </script>
 
@@ -467,8 +485,12 @@
 
 		<div class="flex flex-col gap-3.5">
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-				<SectionHeader title="시스템 알림" />
-				{#if alertsPending && alerts.length === 0}
+				<SectionHeader title="시스템 알림">
+					{#snippet right()}
+						<a href="/dashboard/notifications" class="text-[13px] text-[var(--color-ink-3)] hover:text-[var(--color-ink-1)] transition-colors">모두 보기 →</a>
+					{/snippet}
+				</SectionHeader>
+				{#if alertsPending && alerts.length === 0 && announcements.length === 0}
 					<ul class="mt-3 flex flex-col gap-2 animate-pulse">
 						<li class="h-4 bg-gray-800/60 rounded"></li>
 						<li class="h-4 bg-gray-800/60 rounded w-3/4"></li>
@@ -487,6 +509,20 @@
 								{#if alert.count > 1}
 									<span class="text-[10px] text-[var(--color-ink-3)] tabular-nums flex-shrink-0">×{alert.count}</span>
 								{/if}
+							</li>
+						{/each}
+						{#each announcements as announcement}
+							<li class="flex items-start gap-2.5 text-sm">
+								<span
+									class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
+									style="background: {severityDotColor(announcement.severity)};"
+								></span>
+								<span class="flex-1 text-[var(--color-ink-0)] text-xs leading-snug">
+									{announcement.title}
+									{#if !announcement.is_read}
+										<span class="ml-1 text-[9px] uppercase tracking-wide text-[var(--color-accent)]">new</span>
+									{/if}
+								</span>
 							</li>
 						{/each}
 						{#if alertsFailed}

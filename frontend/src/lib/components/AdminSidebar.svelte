@@ -109,6 +109,7 @@
 				{ label: '서비스 상태', href: '/admin/services', service: null },
 				{ label: '고아 리소스', href: '/admin/orphans', service: null },
 				{ label: 'Notion 연동', href: '/admin/notion', service: null },
+				{ label: '공지 관리', href: '/admin/announcements', service: null },
 				{ label: '기본 설정', href: '/admin/settings', service: null },
 			],
 		},
