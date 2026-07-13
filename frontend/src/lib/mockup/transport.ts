@@ -281,6 +281,72 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && pathname === '/api/v1/networks/default') return { network_id: 'mock-net-private' };
 	if (method === 'GET' && pathname === '/api/v1/dashboard/gpu-available') return { gpu_types: [] };
 
+	// 튜토리얼에서 실제 콘솔과 동일한 내비게이션을 제공하기 위한 페이지 픽스처들 (빈/샘플 상태)
+	if (method === 'GET' && pathname === '/api/v1/loadbalancers') return state.topology.load_balancers;
+	if (method === 'GET' && pathname === '/api/v1/clusters') return [];
+	if (method === 'GET' && pathname === '/api/v1/clusters/templates') return [];
+	if (method === 'GET' && pathname === '/api/v1/containers') return [];
+	if (method === 'GET' && pathname === '/api/v1/database-instances') return [];
+	if (method === 'GET' && pathname === '/api/v1/database-instances/backups') return [];
+	if (method === 'GET' && pathname === '/api/v1/database-instances/flavors') return [];
+	if (method === 'GET' && pathname === '/api/v1/object-storage') return [{ name: 'sample-artifacts', count: 12, bytes: 734003200 }];
+	if (method === 'GET' && pathname === '/api/v1/object-storage/account') return { container_count: 1, object_count: 12, bytes_used: 734003200 };
+	if (method === 'GET' && pathname === '/api/v1/object-storage/trash/containers') return [];
+	if (method === 'GET' && pathname === '/api/v1/file-storage') {
+		return [{
+			id: 'mock-share-1', name: 'demo-dataset', status: 'available', size: 200, share_proto: 'CEPHFS',
+			export_locations: ['192.0.2.10:6789:/volumes/demo-dataset'], metadata: {}, project_id: state.selectedProjectId,
+			created_at: NOW_ISO, is_public: false, library_name: null, library_version: null, built_at: null,
+			progress: '100%', user_id: 'mock-user-1', user_name: 'demo-user', access_rules_status: 'active',
+			host: 'sample-manila-host', availability_zone: 'nova', share_type_name: 'cephfs', share_network_id: null,
+			export_location_details: [{ path: '192.0.2.10:6789:/volumes/demo-dataset', preferred: true, share_instance_id: null }],
+		}];
+	}
+	if (method === 'GET' && pathname === '/api/v1/share-networks') return [];
+	if (method === 'GET' && pathname === '/api/v1/share-snapshots') return [];
+	if (method === 'GET' && pathname === '/api/v1/security-services') return [];
+	if (method === 'GET' && /^\/api\/v1\/projects\/[^/]+\/members$/.test(pathname)) {
+		return { items: [
+			{ user_id: 'mock-user-1', username: 'demo-user', email: 'demo@example.com', is_manager: true, source: 'direct' },
+			{ user_id: 'mock-user-2', username: 'sample-researcher', email: 'researcher@example.com', is_manager: false, source: 'direct' },
+		] };
+	}
+	if (method === 'GET' && /^\/api\/v1\/projects\/[^/]+\/invitations$/.test(pathname)) return { items: [] };
+	if (method === 'GET' && pathname === '/api/v1/announcements') return [];
+	if (method === 'GET' && pathname === '/api/v1/announcements/unread-count') return { unread_count: 0 };
+	if (method === 'GET' && pathname === '/api/v1/chat/usage') return { found: false, total_raw_amount: 0, total_token_value: 0, transaction_count: 0 };
+	if (method === 'GET' && pathname === '/api/v1/dashboard/usage-stats') {
+		return {
+			range: params.get('range') ?? '7d',
+			top_instances: state.instances.slice(0, 5).map((item, index) => ({
+				id: item.id, name: item.name, flavor_name: item.flavor_name ?? 'cpu.4c_8g',
+				vcpus: 4, ram_mb: 8192, disk_gb: 80, status: item.status, usage_hours: 96 - index * 12,
+			})),
+		};
+	}
+	if (method === 'GET' && pathname === '/api/v1/dashboard/activity') {
+		return {
+			range: params.get('range') ?? '7d',
+			kpi: { total: 42, success: 39, failed: 3, last_24h: 6, unique_users: 3 },
+			hour_distribution: [0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 4, 3, 4, 5, 3, 2, 2, 2, 1, 1, 0, 0, 0, 0],
+			recent_actions: [],
+			db_status: 'ok',
+		};
+	}
+	if (method === 'GET' && pathname === '/api/v1/dashboard/usage-report') {
+		return {
+			range: params.get('range') ?? '30d',
+			start: '2026-06-09T00:00:00Z',
+			end: NOW_ISO,
+			stats: { instance_hours: 4320, vcpu_hours: 17280, active_instances: 6, total_instances: 8 },
+			flavor_hours: [
+				{ flavor: 'cpu.4c_8g', instance_count: 4, usage_hours: 2160 },
+				{ flavor: 'gpu.8c_64g_a10', instance_count: 1, usage_hours: 720 },
+			],
+			forecast: { vcpu_pct: 31 },
+		};
+	}
+
 	if (method === 'GET' && pathname === '/api/v1/networks') return state.topology.networks.map((net) => ({ id: net.id, name: net.name, status: net.status, subnets: net.subnet_details.map((subnet) => subnet.id), is_external: net.is_external, is_shared: net.is_shared }));
 	if (method === 'GET' && pathname === '/api/v1/networks/floating-ips') return state.topology.floating_ips;
 	if (method === 'GET' && pathname === '/api/v1/networks/topology') return state.topology;

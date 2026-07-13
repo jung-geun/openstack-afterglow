@@ -106,7 +106,7 @@ describe('hooks.server mockup gating', () => {
 
 	it('redirects unsupported tutorial paths to a query-bearing home route', async () => {
 		const { handle } = await loadHandle();
-		const request = createRequest('http://frontend.example.com/dashboard/file-storage?mockup=tutorial');
+		const request = createRequest('http://frontend.example.com/admin?mockup=tutorial');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
@@ -130,7 +130,7 @@ describe('hooks.server mockup gating', () => {
 	it('keeps the profile allowlist active when a real session cookie is also present', async () => {
 		const { handle } = await loadHandle();
 		const request = createRequest(
-			'http://frontend.example.com/dashboard/file-storage?mockup=tutorial',
+			'http://frontend.example.com/admin?mockup=tutorial',
 			{ afterglow_session: 'active-session' },
 		);
 

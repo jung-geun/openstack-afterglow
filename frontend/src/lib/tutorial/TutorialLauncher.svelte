@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import 'driver.js/dist/driver.css';
-	import { isTourActive, readPersistedTour, startTour } from './engine';
+	import { isTourActive, readPersistedTour, refreshTourAnchor, startTour } from './engine';
+	import { tutorialLauncherOpen } from './launcher';
 	import { isTourId, tours, TOUR_QUERY_KEY } from './tours';
 
-	let open = $state(false);
 	let lastParam: string | null = null;
 	let resumeChecked = false;
 
@@ -13,11 +14,11 @@
 		if (param !== lastParam) {
 			lastParam = param;
 			if (param === 'intro') {
-				open = true;
+				tutorialLauncherOpen.set(true);
 				return;
 			}
 			if (isTourId(param)) {
-				open = false;
+				tutorialLauncherOpen.set(false);
 				void startTour(param);
 				return;
 			}
@@ -32,17 +33,22 @@
 		}
 	});
 
+	// 라우트가 바뀌면 진행 중인 투어를 현재 화면에 다시 앵커링한다.
+	afterNavigate(() => {
+		if (isTourActive()) refreshTourAnchor();
+	});
+
 	function begin(tourId: (typeof tours)[number]['id']) {
-		open = false;
+		tutorialLauncherOpen.set(false);
 		void startTour(tourId);
 	}
 
 	function close() {
-		open = false;
+		tutorialLauncherOpen.set(false);
 	}
 </script>
 
-{#if open}
+{#if $tutorialLauncherOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div

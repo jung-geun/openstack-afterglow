@@ -28,7 +28,7 @@
 </script>
 
 <SlidePanel onClose={closeWizard} width="w-full md:w-[75vw] max-w-4xl">
-	<div class="p-4 md:p-8">
+	<div class="p-4 md:p-8" data-tour="wizard-panel">
 		{#if s.needsProjectSelect}
 			<AdminProjectSelector />
 		{:else if s.loading}

@@ -14,10 +14,6 @@
 
 	let dashboardOpen = $state(false);
 
-	const mockup = $derived($page.data.mockup);
-	const mockupTutorialActive = $derived(mockup?.active === true && mockup.profile === 'tutorial');
-	const mockupAllowedHrefs = new Set(['/dashboard', '/dashboard/compute/instances', '/dashboard/volumes', '/dashboard/drover', '/dashboard/network/topology']);
-
 	const sections = $state([
 		{
 			label: 'Compute',
@@ -155,14 +151,12 @@
 	}
 
 	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { href: string; beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
-		if (mockupTutorialActive) return section.items.some(item => isItemVisible(item));
 		if (!isBetaVisible(section.beta)) return false;
 		if (!isSectionServiceVisible(section)) return false;
 		return section.items.some(item => isItemVisible(item));
 	}
 
 	function isItemVisible(item: { href?: string; beta?: BetaFeatureKey; service?: string | null }): boolean {
-		if (mockupTutorialActive) return !!item.href && mockupAllowedHrefs.has(item.href);
 		if (!isBetaVisible(item.beta)) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!item.service) return true;
@@ -230,11 +224,9 @@
 			{#if dashboardOpen}
 				<div class="ml-3 mt-0.5 space-y-0.5">
 					<a href="/dashboard" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname === '/dashboard'}>개요</a>
-					{#if !mockupTutorialActive}
-						<a href="/dashboard/usage" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage') && !$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량</a>
-						<a href="/dashboard/usage-report" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량 리포트</a>
-						<a href="/dashboard/activity" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/activity')}>활동</a>
-					{/if}
+					<a href="/dashboard/usage" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage') && !$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량</a>
+					<a href="/dashboard/usage-report" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량 리포트</a>
+					<a href="/dashboard/activity" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/activity')}>활동</a>
 				</div>
 			{/if}
 		</div>

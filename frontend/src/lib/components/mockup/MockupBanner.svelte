@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { MOCKUP_COOKIE } from '$lib/mockup/contracts';
+	import { tutorialLauncherOpen } from '$lib/tutorial/launcher';
 
 	import Button from '$lib/components/ui/Button.svelte';
 	import Pill from '$lib/components/ui/Pill.svelte';
 
-	let { label = 'MOCKUP' }: { label?: string } = $props();
+	let {
+		label = 'MOCKUP',
+		message = '실제 API 호출 없이 가상 데이터로 렌더링 중입니다.',
+		tutorial = false,
+	}: { label?: string; message?: string; tutorial?: boolean } = $props();
+
 	async function exitMockup() {
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		document.cookie = `${MOCKUP_COOKIE}=; path=/; SameSite=Strict${secure}; max-age=0`;
@@ -16,9 +22,14 @@
 <div class="mockup-banner" role="status" aria-live="polite">
 	<div class="mockup-copy">
 		<Pill tone="warning" dot>{label || 'MOCKUP'}</Pill>
-		<span class="mockup-message">실제 API 호출 없이 가상 데이터로 렌더링 중입니다.</span>
+		<span class="mockup-message">{message}</span>
 	</div>
-	<Button variant="outline" size="xs" onclick={exitMockup}>Mockup 종료</Button>
+	<div class="mockup-actions">
+		{#if tutorial}
+			<Button variant="primary" size="xs" onclick={() => tutorialLauncherOpen.set(true)}>튜토리얼 메뉴</Button>
+		{/if}
+		<Button variant="outline" size="xs" onclick={exitMockup}>종료</Button>
+	</div>
 </div>
 
 <style>
@@ -46,6 +57,13 @@
 		min-width: 0;
 		align-items: center;
 		gap: 0.625rem;
+	}
+
+	.mockup-actions {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 0.5rem;
 	}
 
 	.mockup-message {

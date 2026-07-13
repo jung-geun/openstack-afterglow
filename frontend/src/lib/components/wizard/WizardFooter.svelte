@@ -46,9 +46,9 @@
 			>← 이전</button>
 		{/if}
 		{#if !isLast}
-			<Button onclick={onNext} disabled={!canNext}>다음 →</Button>
+			<span data-tour="wizard-next"><Button onclick={onNext} disabled={!canNext}>다음 →</Button></span>
 		{:else}
-			<Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button>
+			<span data-tour="wizard-next"><Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button></span>
 		{/if}
 	</div>
 </div>

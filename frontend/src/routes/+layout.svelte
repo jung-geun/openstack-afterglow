@@ -501,7 +501,7 @@
 	<ConfirmDialog />
 {/if}
 {#if mockup.active}
-	<MockupBanner />
+	<MockupBanner label={mockup.bannerLabel} message={mockup.bannerMessage} tutorial={mockup.profile === 'tutorial'} />
 {/if}
 {#if $isLoggedIn}
 	<TutorialLauncher />
