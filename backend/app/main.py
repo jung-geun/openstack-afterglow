@@ -609,6 +609,10 @@ if _svc_cfg.service_vpn_enabled:
     app.include_router(vpn_servers_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
     app.include_router(vpn_clients_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
     app.include_router(vpn_agent_router, prefix="/api/v1/vpn/servers", tags=["vpn-agent"])
+if _svc_cfg.service_chat_enabled:
+    from app.api.chat import chat_usage_router
+
+    app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])

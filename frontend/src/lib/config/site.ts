@@ -11,11 +11,13 @@ const DEFAULTS: SiteConfig = {
 	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
-	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false, vpn: false },
+	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false, vpn: false, chat: false },
 	runtime: {
 		api_base: '',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 

@@ -53,11 +53,20 @@ function buildImgSrc(siteConfig: PublicSiteConfig): string {
 	return [...parts].join(' ');
 }
 
-// frame-src에 Grafana origin 추가 (iframe 임베드 허용)
+// frame-src에 Grafana/LibreChat/GitLab origin 추가 (iframe 임베드 허용).
+// GitLab은 LibreChat이 임베드된 프레임 안에서 GitLab OIDC 로그인으로 자체
+// 리다이렉트할 때 필요 — frame-src는 프레임의 최초 로드뿐 아니라 그 프레임의
+// 이후 내비게이션(리다이렉트)까지 통제하므로 목적지인 GitLab도 허용해야 한다.
 function buildFrameSrc(siteConfig: PublicSiteConfig): string {
 	const parts = ["'self'"];
 	if (siteConfig.runtime.grafana_base) {
 		parts.push(siteConfig.runtime.grafana_base);
+	}
+	if (siteConfig.runtime.librechat_base) {
+		parts.push(siteConfig.runtime.librechat_base);
+	}
+	if (siteConfig.runtime.gitlab_base) {
+		parts.push(siteConfig.runtime.gitlab_base);
 	}
 	return parts.join(' ');
 }

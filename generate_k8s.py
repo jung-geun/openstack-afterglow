@@ -265,6 +265,7 @@ def render_secret(cfg: dict) -> str:
     k3s = cfg.get("k3s", {})
     db = cfg.get("database", {})
     mon = cfg.get("monitoring", {})
+    chat = cfg.get("chat", {})
     notion = cfg.get("notion", {})
     builder = cfg.get("builder", {})
 
@@ -323,6 +324,16 @@ def render_secret(cfg: dict) -> str:
             f"  PROMETHEUS_PASSWORD: {_yaml_str(prometheus_password)}",
         ]
     )
+
+    librechat_mongo_url = chat.get("mongo_url", "")
+    if librechat_mongo_url:
+        lines.extend(
+            [
+                "",
+                "  # LibreChat MongoDB 읽기 전용 접속 URL",
+                f"  LIBRECHAT_MONGO_URL: {_yaml_str(librechat_mongo_url)}",
+            ]
+        )
 
     sd_token = mon.get("sd_token", "")
     if sd_token:
@@ -395,6 +406,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     oidc = cfg.get("gitlab_oidc", {})
     logging_cfg = cfg.get("logging", {})
     mon = cfg.get("monitoring", {})
+    chat = cfg.get("chat", {})
     notion = cfg.get("notion", {})
     smtp = cfg.get("smtp", {})
     worker_runtime = cfg.get("worker_runtime", {})
@@ -640,7 +652,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [services]
     lines.append("[services]")
-    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "vpn"):
+    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "vpn", "chat"):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
     lines.append("")
@@ -890,6 +902,13 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
 
+    # [chat] — 기존 LibreChat 인스턴스 임베드 + 사용량 읽기 전용 미러링
+    if chat.get("base_url") or chat.get("mongo_url"):
+        lines.append("[chat]")
+        lines.append(f"base_url = {_toml_str(chat.get('base_url', ''))}")
+        lines.append("# mongo_url은 secret.yaml의 LIBRECHAT_MONGO_URL 환경변수로 주입됩니다")
+        lines.append("")
+
     # [notion]
     if notion.get("config_encryption_key"):
         lines.append("[notion]")
@@ -965,6 +984,9 @@ def render_configmap(cfg: dict) -> str:
     # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
     app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
 
+    # APP_LIBRECHAT_BASE: chat.base_url (CSP frame-src 및 frontend 임베드용)
+    app_librechat_base = cfg.get("chat", {}).get("base_url", "")
+
     # afterglow.conf 인라인 (4칸 들여쓰기). config.toml 키도 하위호환용으로 함께 출력.
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -981,6 +1003,7 @@ def render_configmap(cfg: dict) -> str:
         f'  PUBLIC_API_BASE: "{public_api_base}"',
         f'  PUBLIC_S3_BASE: "{public_s3_base}"',
         f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
+        f'  APP_LIBRECHAT_BASE: "{app_librechat_base}"',
         "  afterglow.conf: |",
         indented_toml,
         "  config.toml: |",

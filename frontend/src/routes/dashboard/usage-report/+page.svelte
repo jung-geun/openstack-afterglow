@@ -8,6 +8,7 @@
 		SectionHeader,
 		Pill,
 		CapacityBar,
+		Card,
 	} from '$lib/components/ui';
 
 	interface FlavorHour {
@@ -32,10 +33,19 @@
 		};
 	}
 
+	interface ChatUsage {
+		found: boolean;
+		total_raw_amount: number;
+		total_token_value: number;
+		transaction_count: number;
+	}
+
 	let data = $state<UsageReport | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let period = $state<'7d' | '30d' | '90d'>('30d');
+
+	let chatUsage = $state<ChatUsage | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -54,9 +64,23 @@
 		}
 	}
 
+	async function fetchChatUsage() {
+		if (!token || !projectId) return;
+		try {
+			chatUsage = await api.get<ChatUsage>('/api/v1/chat/usage', token, projectId);
+		} catch {
+			chatUsage = null;
+		}
+	}
+
 	$effect(() => {
 		void [token, projectId, period];
 		untrack(() => fetchData());
+	});
+
+	$effect(() => {
+		void [token, projectId];
+		untrack(() => fetchChatUsage());
 	});
 
 	const ar = createAutoRefresh(fetchData, {
@@ -250,6 +274,48 @@
 				<p class="text-[11px] text-gray-500 mt-auto">선형 예측 (7일 추세 기반)</p>
 			</div>
 		</div>
+
+		<!-- LLM 채팅 토큰 사용량 (LibreChat 미러링) -->
+		{#if chatUsage?.found}
+			<Card padding="lg">
+				<SectionHeader title="AI 채팅 토큰 사용량" meta="LibreChat 연동" />
+				<div class="grid grid-cols-2 lg:grid-cols-3 gap-3.5 mt-4">
+					<StatTile
+						label="누계 토큰"
+						value={Math.abs(chatUsage.total_raw_amount).toLocaleString()}
+						accent="blue"
+					>
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+							</svg>
+						{/snippet}
+					</StatTile>
+					<StatTile
+						label="크레딧 소모"
+						value={Math.abs(chatUsage.total_token_value).toLocaleString()}
+						accent="violet"
+					>
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="10"/>
+							</svg>
+						{/snippet}
+					</StatTile>
+					<StatTile
+						label="대화 트랜잭션"
+						value={chatUsage.transaction_count}
+						accent="cyan"
+					>
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+							</svg>
+						{/snippet}
+					</StatTile>
+				</div>
+			</Card>
+		{/if}
 	{:else}
 		<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
 	{/if}

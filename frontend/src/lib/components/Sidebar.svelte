@@ -100,6 +100,17 @@
 			],
 		},
 		{
+			label: 'AI 채팅',
+			prefix: '/dashboard/chat',
+			extraPrefixes: [] as string[],
+			icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+			open: false,
+			service: 'chat' as const,
+			items: [
+				{ label: 'AI 채팅', href: '/dashboard/chat', service: 'chat' as const },
+			],
+		},
+		{
 			label: '네트워크',
 			prefix: '/dashboard/network',
 			extraPrefixes: [] as string[],
@@ -147,6 +158,8 @@
 		if (!section.service) return true;
 		if (section.service === 'manila') return svcs?.manila ?? false;
 		if (section.service === 'containers') return (svcs?.magnum ?? false) || (svcs?.zun ?? false) || (svcs?.k3s ?? false);
+		// AI 채팅은 services.chat([services] chat = true + [chat] base_url 설정)일 때만 노출
+		if (section.service === 'chat') return svcs?.chat ?? false;
 		return svcs?.[section.service] ?? false;
 	}
 
@@ -164,6 +177,7 @@
 		if (item.service === 'zun') return svcs?.zun ?? false;
 		if (item.service === 'k3s') return svcs?.k3s ?? false;
 		if (item.service === 'vpn') return svcs?.vpn ?? false;
+		if (item.service === 'chat') return svcs?.chat ?? false;
 		return true;
 	}
 </script>

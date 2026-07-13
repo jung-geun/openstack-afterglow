@@ -45,6 +45,8 @@ const baseSiteConfig: PublicSiteConfig = {
 		api_base: 'https://api.example.com',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 

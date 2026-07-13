@@ -73,6 +73,8 @@ describe('frontend CSP branding origins', () => {
 					api_base: apiOrigin,
 					s3_base: s3Origin,
 					grafana_base: '',
+					librechat_base: '',
+					gitlab_base: '',
 				},
 			}),
 		}));
@@ -106,5 +108,47 @@ describe('frontend CSP branding origins', () => {
 			expect.arrayContaining(["'self'", 'data:', 'https://api.example.com', 'https://uploads.example.com', 'https://cdn.example.com']),
 		);
 		expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+	});
+
+	it('includes librechat_base and gitlab_base in frame-src (LibreChat embed + its own OIDC redirect)', async () => {
+		const librechatOrigin = 'https://chat.dmslab.re.kr';
+		const gitlabOrigin = 'https://git.dmslab.re.kr';
+
+		vi.resetModules();
+		vi.doMock('$lib/server/config', () => ({
+			loadPublicSiteConfig: () => ({
+				site_name: 'Afterglow',
+				site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
+				logo_path: '/logo.png',
+				logo_dark_path: '/logo-white.png',
+				logo_light_path: '/logo-dark.png',
+				favicon_path: '/favicon.ico',
+				refresh_interval_ms: 5000,
+				services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+				runtime: {
+					api_base: 'https://api.example.com',
+					s3_base: '',
+					grafana_base: '',
+					librechat_base: librechatOrigin,
+					gitlab_base: gitlabOrigin,
+				},
+			}),
+		}));
+
+		const { handle } = await import('../../hooks.server');
+		const response = await handle({
+			event: {
+				url: new URL('https://cloud.dmslab.re.kr/'),
+				locals: {},
+				cookies: { get: vi.fn() },
+			} as never,
+			resolve: vi.fn(async () => new Response('ok', { headers: new Headers() })),
+		});
+
+		const csp = response.headers.get('Content-Security-Policy');
+		const frameSrcDirective = csp!.split(';').map((d) => d.trim()).find((d) => d.startsWith('frame-src'));
+
+		expect(frameSrcDirective).toContain(librechatOrigin);
+		expect(frameSrcDirective).toContain(gitlabOrigin);
 	});
 });

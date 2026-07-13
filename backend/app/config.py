@@ -149,6 +149,7 @@ def _load_toml() -> dict:
     flat["service_swift_enabled"] = svc.get("swift", False)
     flat["service_barbican_enabled"] = svc.get("barbican", False)
     flat["service_vpn_enabled"] = svc.get("vpn", False)
+    flat["service_chat_enabled"] = svc.get("chat", False)
 
     k3s = data.get("k3s", {})
     flat["k3s_version"] = k3s.get("version", "v1.34.6+k3s1")
@@ -336,6 +337,10 @@ def _load_toml() -> dict:
     flat["grafana_dashboard_instance_cpu_uid"] = dashboards.get("instance_cpu_uid", "afterglow-instance-cpu")
     flat["grafana_dashboard_instance_gpu_uid"] = dashboards.get("instance_gpu_uid", "afterglow-instance-gpu")
 
+    chat = data.get("chat", {})
+    flat["librechat_mongo_url"] = chat.get("mongo_url", "")
+    flat["librechat_base_url"] = chat.get("base_url", "")
+
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
@@ -484,6 +489,7 @@ class Settings(BaseSettings):
     service_swift_enabled: bool = False
     service_barbican_enabled: bool = False
     service_vpn_enabled: bool = False  # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정도 필요)
+    service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
 
     # k3s 설정
     k3s_version: str = "v1.34.6+k3s1"
@@ -628,6 +634,10 @@ class Settings(BaseSettings):
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
+
+    # LibreChat 임베드 연동 (기존 인스턴스 읽기 전용 조회)
+    librechat_mongo_url: str = ""  # LibreChat MongoDB 읽기 전용 접속 URL (secret.yaml에서 주입)
+    librechat_base_url: str = ""  # LibreChat 외부 URL (예: https://chat.dmslab.re.kr)
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

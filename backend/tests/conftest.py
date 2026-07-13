@@ -15,6 +15,7 @@ os.environ.setdefault("SERVICE_K3S_ENABLED", "true")
 os.environ.setdefault("SERVICE_TROVE_ENABLED", "true")
 os.environ.setdefault("SERVICE_SWIFT_ENABLED", "true")
 os.environ.setdefault("SERVICE_VPN_ENABLED", "true")
+os.environ.setdefault("SERVICE_CHAT_ENABLED", "true")
 
 from unittest.mock import MagicMock
 
