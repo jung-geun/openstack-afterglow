@@ -137,6 +137,21 @@ async function showStep(index: number): Promise<void> {
 
 	const isLast = index === tour.steps.length - 1;
 	const clickDriven = step.advanceOn === 'click';
+
+	if (clickDriven) {
+		// 진행 트리거는 하이라이트 요소와 다를 수 있다(예: 폼 전체 하이라이트 + 생성 버튼 클릭).
+		// document 캡처 위임: 하이라이트 표시 전에 무장되고, 대상 노드가 리렌더로 교체돼도 동작한다.
+		const triggerSelector = step.advanceElement ?? step.element;
+		const handler = (event: Event) => {
+			const target = event.target as Element | null;
+			if (!target?.closest?.(triggerSelector)) return;
+			cleanupClickListener();
+			void moveTo(index + 1);
+		};
+		document.addEventListener('click', handler, { capture: true });
+		clickCleanup = () => document.removeEventListener('click', handler, { capture: true });
+	}
+
 	d.highlight({
 		element: step.element,
 		popover: {
@@ -150,20 +165,6 @@ async function showStep(index: number): Promise<void> {
 			nextBtnText: isLast ? '완료' : '다음',
 		},
 	});
-
-	if (clickDriven) {
-		// 진행 트리거는 하이라이트 요소와 다를 수 있다(예: 폼 전체 하이라이트 + 생성 버튼 클릭).
-		const triggerSelector = step.advanceElement ?? step.element;
-		const trigger = await waitForElement(triggerSelector, 3000);
-		if (d !== driverInstance || serial !== showSerial) return;
-		if (!trigger) return;
-		const handler = () => {
-			cleanupClickListener();
-			void moveTo(index + 1);
-		};
-		trigger.addEventListener('click', handler, { once: true, capture: true });
-		clickCleanup = () => trigger.removeEventListener('click', handler, { capture: true });
-	}
 }
 
 function cleanupClickListener(): void {

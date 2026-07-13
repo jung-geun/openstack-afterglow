@@ -477,11 +477,13 @@
 	</div>
 
 	<div class="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3.5">
-		<RecentInstancesCard
-			instances={summaryState.data?.recent_instances ?? []}
-			pending={authLoading || initialLoadPending || summaryState.pending}
-			error={summaryState.error}
-		/>
+		<div data-tour="dashboard-recent">
+			<RecentInstancesCard
+				instances={summaryState.data?.recent_instances ?? []}
+				pending={authLoading || initialLoadPending || summaryState.pending}
+				error={summaryState.error}
+			/>
+		</div>
 
 		<div class="flex flex-col gap-3.5">
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">

@@ -39,17 +39,41 @@ export const tours: TourDefinition[] = [
 			},
 			{
 				element: '[data-tour="wizard-panel"]',
-				title: '부팅 소스 선택',
-				description:
-					'OS 이미지를 하나 선택하고 아래 "다음 →" 버튼을 눌러보세요. 위저드는 부팅 소스 → 플레이버 → 라이브러리 → 전략 → 설정 → 리뷰 순서로 진행됩니다.',
+				title: '이미지 선택',
+				description: 'VM을 부팅할 OS 이미지를 하나 선택하고 아래 "다음 →" 버튼을 누르세요.',
 				advanceOn: 'click',
 				advanceElement: '[data-tour="wizard-next"]',
 			},
 			{
-				element: '[data-tour="wizard-nav"]',
-				title: '단계 진행과 배포',
+				element: '[data-tour="wizard-panel"]',
+				title: '플레이버 선택',
 				description:
-					'남은 단계도 같은 방식으로 채우며 진행하세요. 마지막 리뷰 단계에서 "VM 생성"을 누르면 배포가 시작되고, 완료되면 대시보드에서 새 인스턴스를 확인할 수 있습니다.',
+					'플레이버는 VM의 vCPU · 메모리 · 디스크 스펙입니다. 프로젝트 남은 쿼터 안에서 생성 가능한 플레이버만 표시되고, GPU 플레이버는 스케줄러가 가용 호스트를 자동 선택합니다. 하나 선택하고 "다음 →"을 누르세요.',
+				advanceOn: 'click',
+				advanceElement: '[data-tour="wizard-next"]',
+			},
+			{
+				element: '[data-tour="wizard-panel"]',
+				title: '기본 설정 확인',
+				description:
+					'VM 이름(비우면 자동 생성), 네트워크, SSH 키페어, 보안 그룹, 가용 영역, 루트 디스크 크기를 확인하세요. 기본값 그대로도 생성할 수 있습니다. 확인했으면 "다음 →"을 누르세요.',
+				advanceOn: 'click',
+				advanceElement: '[data-tour="wizard-next"]',
+			},
+			{
+				element: '[data-tour="wizard-panel"]',
+				title: '배포',
+				description:
+					'선택한 구성 요약을 마지막으로 확인하세요. "VM 생성" 버튼을 누르면 부트 볼륨 생성 → 인스턴스 생성 순으로 배포가 시작됩니다.',
+				advanceOn: 'click',
+				advanceElement: '[data-tour="wizard-next"]',
+			},
+			{
+				element: '[data-tour="dashboard-recent"]',
+				title: '배포 완료',
+				description:
+					'배포가 끝나면 대시보드로 돌아옵니다. 최근 인스턴스 목록 맨 위에 방금 만든 VM이 추가된 것을 확인하세요. 이름을 클릭하면 상세 화면으로 이동합니다.',
+				waitTimeoutMs: 20000,
 			},
 		],
 	},
