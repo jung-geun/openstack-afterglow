@@ -11,6 +11,13 @@ import type { K3sSseProgressMessage } from '$lib/api/k3sSseStream';
 export const symbolNoMatch = Symbol('mockup-no-match');
 const UNSUPPORTED = 'mockup mode에서는 이 작업을 아직 지원하지 않습니다.';
 const MOCK_EXPIRES_AT_ISO = '2026-12-31T23:59:59Z';
+const NOW_ISO = '2026-07-09T00:00:00Z';
+
+function nextMockId(existingIds: string[], prefix: string): string {
+	let n = existingIds.length + 1;
+	while (existingIds.includes(`${prefix}-${n}`)) n += 1;
+	return `${prefix}-${n}`;
+}
 function activeProfile(): MockupProfileId | null {
 	if (typeof window !== 'undefined' && typeof window.location?.search === 'string') {
 		const params = new URLSearchParams(window.location.search);
@@ -203,6 +210,7 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && pathname === '/api/v1/dashboard/metrics/trend') return dashboardTrend(params.get('range'), params.get('include_network') !== 'false');
 
 	if (method === 'GET' && pathname === '/api/v1/instances') return state.instances;
+	if (method === 'GET' && pathname === '/api/v1/instances/availability-zones') return [{ name: 'nova', available: true }];
 	if (method === 'GET' && pathname === '/api/v1/instances/metrics-summary-batch') return { prometheus_available: true, instances: instanceMetrics(state.instances.map((item) => item.id)) };
 	const instanceAction = pathname.match(/^\/api\/v1\/instances\/([^/]+)\/(start|stop|shelve|unshelve)$/);
 	if (method === 'POST' && instanceAction) {
@@ -238,7 +246,40 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && /^\/api\/v1\/instances\/[^/]+\/owner$/.test(pathname)) return { display: 'Sample Cloud Demo / demo-user' };
 	if (method === 'GET' && /^\/api\/v1\/instances\/[^/]+\/storage-attachments$/.test(pathname)) return [{ file_storage_id: 'mock-share-1', name: 'demo-dataset', share_proto: 'CEPHFS', status: 'available' }];
 	if (method === 'GET' && pathname === '/api/v1/storage/file-storages') return [{ id: 'mock-share-2', name: 'training-output', status: 'available', share_proto: 'CEPHFS' }];
-	if (method === 'GET' && pathname === '/api/v1/volumes') return [{ id: 'mock-volume-2', name: 'scratch', status: 'available', size: 200, volume_type: 'ceph-ssd', attachments: [] }];
+
+	if (method === 'GET' && pathname === '/api/v1/volumes') return state.volumes;
+	if (method === 'POST' && pathname === '/api/v1/volumes') {
+		const payload = body as { name?: string; size_gb?: number } | null;
+		const volume = {
+			id: nextMockId(state.volumes.map((item) => item.id), 'mock-volume'),
+			name: payload?.name?.trim() || 'mock-volume',
+			status: 'available',
+			size: payload?.size_gb ?? 10,
+			volume_type: 'ceph-ssd',
+			attachments: [],
+			bootable: false,
+		};
+		state.volumes.push(volume);
+		return volume;
+	}
+	const volumeId = pathname.match(/^\/api\/v1\/volumes\/([^/]+)$/)?.[1];
+	if (method === 'DELETE' && volumeId) {
+		state.volumes = state.volumes.filter((item) => item.id !== volumeId);
+		return ok204();
+	}
+	if (method === 'GET' && pathname === '/api/v1/volume-snapshots') return [];
+	if (method === 'POST' && pathname === '/api/v1/volumes/backups/auto-backup/configs') return [];
+
+	if (method === 'GET' && pathname === '/api/v1/images') {
+		return [
+			{ id: 'fixture-image-ubuntu', name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 2361393152, min_disk: 10, min_ram: 1024, os_distro: 'ubuntu', os_version: '24.04', created_at: NOW_ISO },
+			{ id: 'fixture-image-rocky', name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1932735283, min_disk: 10, min_ram: 1024, os_distro: 'rocky', created_at: NOW_ISO },
+		];
+	}
+	if (method === 'GET' && pathname === '/api/v1/libraries') return [];
+	if (method === 'GET' && pathname === '/api/v1/security-groups') return [{ id: 'mock-sg-default', name: 'default', description: 'Mock default SG', rules: [] }];
+	if (method === 'GET' && pathname === '/api/v1/networks/default') return { network_id: 'mock-net-private' };
+	if (method === 'GET' && pathname === '/api/v1/dashboard/gpu-available') return { gpu_types: [] };
 
 	if (method === 'GET' && pathname === '/api/v1/networks') return state.topology.networks.map((net) => ({ id: net.id, name: net.name, status: net.status, subnets: net.subnet_details.map((subnet) => subnet.id), is_external: net.is_external, is_shared: net.is_shared }));
 	if (method === 'GET' && pathname === '/api/v1/networks/floating-ips') return state.topology.floating_ips;
@@ -330,10 +371,50 @@ export async function maybeMockHead(path: string, _token?: string, _projectId?: 
 	return symbolNoMatch;
 }
 
-async function* progress(messages: K3sSseProgressMessage[]): AsyncGenerator<K3sSseProgressMessage> {
+async function* progress<T>(messages: T[]): AsyncGenerator<T> {
 	for (const message of messages) {
 		yield message;
 	}
+}
+
+export interface MockInstanceProgressMessage {
+	step: string;
+	progress: number;
+	message: string;
+	instance_id?: string;
+	error?: string;
+}
+
+export function maybeMockInstanceCreateStream(path: string, body: unknown): AsyncGenerator<MockInstanceProgressMessage> | null {
+	if (!activeProfile()) return null;
+	const normalized = normalizePath(path);
+	if (normalized !== '/api/v1/instances/async' && normalized !== '/api/v1/admin/instances/async') return null;
+	const state = getMockupState();
+	const payload = body as { name?: string | null; flavor_id?: string; image_id?: string; network_id?: string; key_name?: string | null } | null;
+	const id = nextMockId(state.instances.map((item) => item.id), 'mock-instance');
+	const flavorName = payload?.flavor_id === 'mock-flavor-gpu' ? 'gpu.8c_64g_a10' : 'cpu.4c_8g';
+	const octet = 100 + state.instances.length;
+	state.instances.unshift({
+		id,
+		name: payload?.name || `mockup-vm-${state.instances.length + 1}`,
+		status: 'ACTIVE',
+		image_name: payload?.image_id === 'fixture-image-rocky' ? 'Rocky Linux 9' : 'Ubuntu 24.04 LTS',
+		flavor_name: flavorName,
+		ip_addresses: [{ addr: `192.0.2.${octet}`, type: 'fixed', network_name: 'sample-private' }],
+		created_at: '2026-07-09T00:30:00Z',
+		union_libraries: [],
+		union_strategy: null,
+		metadata: { role: 'sample' },
+		image_id: payload?.image_id ?? 'fixture-image-ubuntu',
+		flavor_id: payload?.flavor_id ?? 'mock-flavor-cpu4',
+		key_name: payload?.key_name ?? 'demo-keypair',
+		host: 'sample-hypervisor-a',
+	});
+	return progress([
+		{ step: 'boot_volume_creating', progress: 20, message: 'mock 부트 볼륨 생성 완료', instance_id: id },
+		{ step: 'server_creating', progress: 60, message: 'mock Nova 인스턴스 생성 완료', instance_id: id },
+		{ step: 'completed', progress: 100, message: 'mock 배포 완료', instance_id: id },
+	]);
 }
 
 export function maybeMockK3sStream(path: string, body: unknown, token?: string, projectId?: string): AsyncGenerator<K3sSseProgressMessage> | null {

@@ -1,4 +1,5 @@
 import type { Instance } from '$lib/types/compute';
+import type { Volume } from '$lib/types/volume';
 import type { DashboardQuotas } from '$lib/types/quotas';
 import type { TopologyData, TopologyTraffic } from '$lib/types/topology';
 import type { K3sCluster } from '$lib/types/k3s';
@@ -12,6 +13,7 @@ interface MockupState {
 	projects: Project[];
 	selectedProjectId: string;
 	instances: Instance[];
+	volumes: Volume[];
 	k3sClusters: K3sCluster[];
 	topology: TopologyData;
 	traffic: TopologyTraffic;
@@ -85,6 +87,10 @@ function seedState(): MockupState {
 		],
 		selectedProjectId: PROJECT_ID,
 		instances,
+		volumes: [
+			{ id: 'mock-volume-1', name: 'root-disk', status: 'in-use', size: 80, volume_type: 'ceph-ssd', attachments: [{ server_id: 'mock-instance-1', device: '/dev/vda' }], bootable: true },
+			{ id: 'mock-volume-2', name: 'scratch', status: 'available', size: 200, volume_type: 'ceph-ssd', attachments: [], bootable: false },
+		],
 		k3sClusters: [
 			{ id: 'mock-k3s-1', name: 'sample-cluster-alpha', status: 'ACTIVE', status_reason: null, server_vm_id: 'mock-instance-1', agent_vm_ids: ['mock-instance-2', 'mock-instance-3'], agent_count: 2, api_address: 'https://192.0.2.24:6443', server_ip: '192.0.2.24', network_id: 'mock-net-private', key_name: 'sample-keypair', k3s_version: 'v1.30.4+k3s1', created_at: NOW, updated_at: NOW, deleted_at: null, deleted_by_user_id: null, deleted_reason: null, master_count: 1, stampede_enabled: true },
 			{ id: 'mock-k3s-2', name: 'sample-cluster-pending', status: 'CREATE_IN_PROGRESS', status_reason: 'Installing sample agents', server_vm_id: 'mock-instance-4', agent_vm_ids: [], agent_count: 1, api_address: null, server_ip: '192.0.2.41', network_id: 'mock-net-private', key_name: 'sample-keypair', k3s_version: 'v1.30.4+k3s1', created_at: NOW, updated_at: NOW, deleted_at: null, deleted_by_user_id: null, deleted_reason: null, master_count: 1 },

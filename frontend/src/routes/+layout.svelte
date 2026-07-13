@@ -21,6 +21,7 @@
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
 	import MockupBanner from '$lib/components/mockup/MockupBanner.svelte';
+	import TutorialLauncher from '$lib/tutorial/TutorialLauncher.svelte';
 	import { buildMockAuth } from '$lib/mockup/auth';
 	import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId, isMockupPathAllowed, getMockupHomePath } from '$lib/mockup/contracts';
 	import type { MockupProfileId } from '$lib/mockup/contracts';
@@ -392,6 +393,9 @@
 {/if}
 {#if mockup.active}
 	<MockupBanner />
+{/if}
+{#if $isLoggedIn}
+	<TutorialLauncher />
 {/if}
 <Toast />
 

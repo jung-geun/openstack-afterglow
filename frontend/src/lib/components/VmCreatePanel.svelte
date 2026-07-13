@@ -54,9 +54,11 @@
 				</div>
 			{/if}
 
-			<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
+			<div data-tour="wizard-stepper">
+				<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
+			</div>
 
-			<div class="mb-8">
+			<div class="mb-8" data-tour="wizard-body">
 				{#if $wizard.step === 1}
 					<WizardStep1Boot />
 				{:else if $wizard.step === 2}

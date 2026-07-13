@@ -94,9 +94,19 @@ describe('hooks.server mockup gating', () => {
 		});
 	});
 
-	it('redirects unsupported tutorial paths to a query-bearing home route', async () => {
+	it('serves the tutorial volumes page without redirecting', async () => {
 		const { handle } = await loadHandle();
 		const request = createRequest('http://frontend.example.com/dashboard/volumes?mockup=tutorial');
+
+		const response = await handle({ event: request.event, resolve: request.resolve });
+
+		expect(response.status).toBe(200);
+		expect(request.resolve).toHaveBeenCalledOnce();
+	});
+
+	it('redirects unsupported tutorial paths to a query-bearing home route', async () => {
+		const { handle } = await loadHandle();
+		const request = createRequest('http://frontend.example.com/dashboard/file-storage?mockup=tutorial');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
@@ -120,7 +130,7 @@ describe('hooks.server mockup gating', () => {
 	it('keeps the profile allowlist active when a real session cookie is also present', async () => {
 		const { handle } = await loadHandle();
 		const request = createRequest(
-			'http://frontend.example.com/dashboard/volumes?mockup=tutorial',
+			'http://frontend.example.com/dashboard/file-storage?mockup=tutorial',
 			{ afterglow_session: 'active-session' },
 		);
 

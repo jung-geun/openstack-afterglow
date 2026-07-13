@@ -78,7 +78,7 @@
 		onclick={() => { open = false; }}
 		role="dialog" aria-modal="true" tabindex="-1"
 		onkeydown={(e) => e.key === 'Escape' && (open = false)}>
-		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl"
+		<div data-tour="drover-create-form" class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl"
 			onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
 			<h2 class="text-lg font-semibold text-white mb-5">Drover 클러스터 생성</h2>
 			<div class="space-y-4">
@@ -238,7 +238,7 @@
 			<div class="flex justify-end gap-3 mt-6">
 				<button onclick={() => open = false}
 					class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-				<button onclick={() => { open = false; onCreate({...form, template_id: form.template_id || undefined}); }} disabled={creating}
+				<button data-tour="drover-create-submit" onclick={() => { open = false; onCreate({...form, template_id: form.template_id || undefined}); }} disabled={creating}
 					class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
 					생성
 				</button>

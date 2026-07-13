@@ -253,6 +253,7 @@
 					<p class="lead">Afterglow는 교수, 연구원, 실습팀이 필요한 컴퓨팅 자원과 공유 스토리지, Kubernetes 환경, AI/ML 라이브러리 레이어를 한 곳에서 신청하고 운영하도록 설계된 클라우드 포털입니다.</p>
 					<div class="hero-actions">
 						<Button variant="primary" size="lg" class="landing-btn" href={consoleHref}>콘솔 접속</Button>
+						<Button variant="outline" size="lg" class="landing-btn" href="/dashboard?mockup=tutorial&tour=intro">튜토리얼 체험</Button>
 						<Button variant="outline" size="lg" class="landing-btn" href="#capabilities">기능 보기</Button>
 					</div>
 					<div class="stat-rings">

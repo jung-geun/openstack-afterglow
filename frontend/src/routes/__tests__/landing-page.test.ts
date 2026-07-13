@@ -128,4 +128,12 @@ describe('public landing and login route source contracts', () => {
 		expect(layoutCssSource).toContain('--font-sans: "MaruBuri", "Geist", Inter, system-ui, sans-serif;');
 		expect(layoutCssSource).toContain('font-family: var(--font-sans);');
 	});
+
+	it('exposes the tutorial entry CTA and mounts the tour launcher', () => {
+		expect(landingComponentSource).toContain('href="/dashboard?mockup=tutorial&tour=intro"');
+		expect(landingComponentSource).toContain('튜토리얼 체험');
+		expect(layoutSource).toContain("import TutorialLauncher from '$lib/tutorial/TutorialLauncher.svelte';");
+		expect(layoutSource).toContain('<TutorialLauncher />');
+		expect(layoutCssSource).toContain('.driver-popover.afterglow-tour');
+	});
 });

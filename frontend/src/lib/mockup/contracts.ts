@@ -20,6 +20,7 @@ const TUTORIAL_ALLOWED_PATHS = [
 	'/select-project',
 	'/dashboard',
 	'/dashboard/compute/instances',
+	'/dashboard/volumes',
 	'/dashboard/drover',
 	'/dashboard/network/topology',
 ] as const;

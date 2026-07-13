@@ -34,7 +34,7 @@
 	</div>
 
 	<!-- nav buttons -->
-	<div class="flex items-center gap-2 ml-auto flex-shrink-0">
+	<div class="flex items-center gap-2 ml-auto flex-shrink-0" data-tour="wizard-nav">
 		<button
 			onclick={onCancel}
 			class="px-4 py-2 text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-900/60 hover:bg-red-950/20 rounded-lg transition-all"

@@ -16,7 +16,7 @@
 
 	const mockup = $derived($page.data.mockup);
 	const mockupTutorialActive = $derived(mockup?.active === true && mockup.profile === 'tutorial');
-	const mockupAllowedHrefs = new Set(['/dashboard', '/dashboard/compute/instances', '/dashboard/drover', '/dashboard/network/topology']);
+	const mockupAllowedHrefs = new Set(['/dashboard', '/dashboard/compute/instances', '/dashboard/volumes', '/dashboard/drover', '/dashboard/network/topology']);
 
 	const sections = $state([
 		{
@@ -207,14 +207,12 @@
 	</div>
 
 	<!-- VM 생성 버튼 -->
-	{#if !mockupTutorialActive}
-		<div class="px-3 pb-3 pt-2 lg:pt-0">
-			<Button onclick={() => openWizard()} class="w-full">
-				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
-				VM 생성
-			</Button>
-		</div>
-	{/if}
+	<div class="px-3 pb-3 pt-2 lg:pt-0" data-tour="vm-create-open">
+		<Button onclick={() => openWizard()} class="w-full">
+			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+			VM 생성
+		</Button>
+	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
 		<!-- 대시보드 섹션 -->

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
 	import { wizardOpen } from '$lib/stores/wizard';
@@ -18,6 +17,6 @@
 	</main>
 </div>
 
-{#if $wizardOpen && !$page.data.mockup?.active}
+{#if $wizardOpen}
 	<VmCreatePanel />
 {/if}

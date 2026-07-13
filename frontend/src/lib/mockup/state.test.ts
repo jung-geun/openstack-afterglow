@@ -41,4 +41,10 @@ describe('mockup fixture privacy', () => {
 		expect(state.topology.floating_ips.every((floatingIp) => floatingIp.floating_ip_address.startsWith('203.0.113.') && floatingIp.fixed_ip_address?.startsWith('192.0.2.'))).toBe(true);
 		expect((state.topology.load_balancers ?? []).every((loadBalancer) => loadBalancer.vip_address?.startsWith('192.0.2.') && loadBalancer.vip_network_id === 'mock-net-private')).toBe(true);
 	});
+
+	it('seeds tutorial volumes with an attached root disk and an available volume', () => {
+		const state = getMockupState();
+		expect(state.volumes.some((volume) => volume.status === 'in-use' && volume.attachments.length > 0)).toBe(true);
+		expect(state.volumes.some((volume) => volume.status === 'available' && volume.attachments.length === 0)).toBe(true);
+	});
 });

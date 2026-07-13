@@ -3,6 +3,7 @@ import { goto } from '$app/navigation';
 import { setContext, getContext } from 'svelte';
 import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
+import { maybeMockInstanceCreateStream } from '$lib/mockup/transport';
 import { auth } from '$lib/stores/auth';
 import { betaFeatures } from '$lib/stores/betaFeatures';
 import type { BetaFeatures } from '$lib/stores/betaFeatures';
@@ -836,6 +837,28 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		};
 		if (opts.adminMode() && adminSelectedProjectId) {
 			body.project_id = adminSelectedProjectId;
+		}
+
+		// mockup 모드: 실제 API 대신 가상 SSE 스트림으로 배포 흐름 재현
+		const mockStream = maybeMockInstanceCreateStream(
+			opts.adminMode() ? '/api/v1/admin/instances/async' : '/api/v1/instances/async',
+			body,
+		);
+		if (mockStream) {
+			for await (const data of mockStream) {
+				currentStep = data.step;
+				progress = data.progress;
+				progressMessage = data.message;
+			}
+			toast.success('인스턴스 생성 완료');
+			setTimeout(() => {
+				resetWizard();
+				adminSelectedProjectId = null;
+				adminSelectedProjectName = null;
+				closeWizard();
+				goto(opts.adminMode() ? '/admin/instances' : '/dashboard');
+			}, 1000);
+			return;
 		}
 
 		try {

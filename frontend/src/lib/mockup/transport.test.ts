@@ -307,4 +307,82 @@ describe('mockup transport', () => {
 			message: 'mockup mode에서는 이 작업을 아직 지원하지 않습니다.',
 		});
 	});
+
+	it('supports the volume tutorial flow: list, create, delete', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockJson } = await import('./transport');
+		const list = (await maybeMockJson<Array<{ id: string; status: string }>>(
+			'GET', '/api/v1/volumes', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string; status: string }>;
+		expect(list.some((volume) => volume.id === 'mock-volume-1' && volume.status === 'in-use')).toBe(true);
+
+		const created = (await maybeMockJson<{ id: string; name: string; status: string; size: number }>(
+			'POST', '/api/v1/volumes', { name: 'tour-volume', size_gb: 20 }, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as { id: string; name: string; status: string; size: number };
+		expect(created.name).toBe('tour-volume');
+		expect(created.status).toBe('available');
+		expect(created.size).toBe(20);
+
+		const afterCreate = (await maybeMockJson<Array<{ id: string }>>(
+			'GET', '/api/v1/volumes', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string }>;
+		expect(afterCreate.some((volume) => volume.id === created.id)).toBe(true);
+
+		await maybeMockJson('DELETE', `/api/v1/volumes/${created.id}`, undefined, 'mock-token-tutorial-scoped', 'mock-project-1');
+		const afterDelete = (await maybeMockJson<Array<{ id: string }>>(
+			'GET', '/api/v1/volumes', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string }>;
+		expect(afterDelete.some((volume) => volume.id === created.id)).toBe(false);
+
+		// 볼륨 페이지가 항상 호출하는 부속 엔드포인트도 빈 값으로 응답한다
+		expect(await maybeMockJson('GET', '/api/v1/volume-snapshots', undefined, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual([]);
+		expect(await maybeMockJson('POST', '/api/v1/volumes/backups/auto-backup/configs', {}, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual([]);
+	});
+
+	it('serves the VM creation wizard data fixtures', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockJson } = await import('./transport');
+		const images = (await maybeMockJson<Array<{ id: string; os_distro: string }>>(
+			'GET', '/api/v1/images', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string; os_distro: string }>;
+		expect(images.some((image) => image.id === 'fixture-image-ubuntu' && image.os_distro === 'ubuntu')).toBe(true);
+
+		expect(await maybeMockJson('GET', '/api/v1/libraries', undefined, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual([]);
+		expect(await maybeMockJson('GET', '/api/v1/instances/availability-zones', undefined, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual([
+			{ name: 'nova', available: true },
+		]);
+		expect(await maybeMockJson('GET', '/api/v1/networks/default', undefined, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual({
+			network_id: 'mock-net-private',
+		});
+		expect(await maybeMockJson('GET', '/api/v1/dashboard/gpu-available', undefined, 'mock-token-tutorial-scoped', 'mock-project-1')).toEqual({ gpu_types: [] });
+		const securityGroups = (await maybeMockJson<Array<{ id: string }>>(
+			'GET', '/api/v1/security-groups', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string }>;
+		expect(securityGroups[0]?.id).toBe('mock-sg-default');
+	});
+
+	it('streams mocked instance creation progress and appends the instance', async () => {
+		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
+		const { maybeMockInstanceCreateStream, maybeMockJson } = await import('./transport');
+		const stream = maybeMockInstanceCreateStream('/api/v1/instances/async', {
+			name: 'tour-vm',
+			flavor_id: 'mock-flavor-cpu4',
+			image_id: 'fixture-image-ubuntu',
+		});
+		expect(stream).not.toBeNull();
+
+		const messages: Array<{ step: string; progress: number; instance_id?: string }> = [];
+		for await (const message of stream!) messages.push(message);
+		expect(messages.at(-1)?.step).toBe('completed');
+		expect(messages.at(-1)?.progress).toBe(100);
+
+		const instances = (await maybeMockJson<Array<{ id: string; name: string; ip_addresses: Array<{ addr: string }> }>>(
+			'GET', '/api/v1/instances', undefined, 'mock-token-tutorial-scoped', 'mock-project-1',
+		)) as Array<{ id: string; name: string; ip_addresses: Array<{ addr: string }> }>;
+		const created = instances.find((instance) => instance.name === 'tour-vm');
+		expect(created).toBeTruthy();
+		expect(created!.id).toBe(messages.at(-1)?.instance_id);
+		// 픽스처 주소 대역(RFC 5737) 준수
+		expect(created!.ip_addresses.every((address) => address.addr.startsWith('192.0.2.'))).toBe(true);
+	});
 });

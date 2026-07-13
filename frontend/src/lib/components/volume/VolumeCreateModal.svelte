@@ -50,6 +50,7 @@
 		onkeydown={(e) => e.key === 'Escape' && close()}
 	>
 		<div
+			data-tour="volume-create-form"
 			class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
 			onclick={(e) => e.stopPropagation()}
 			role="none"
@@ -74,6 +75,7 @@
 			<div class="flex justify-end gap-3 mt-6">
 				<button onclick={close} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
 				<button
+					data-tour="volume-create-submit"
 					onclick={createVolume}
 					disabled={creating || !form.name.trim() || form.size_gb < 1}
 					class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"

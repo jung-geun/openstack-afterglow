@@ -490,3 +490,47 @@ body {
 :root.light button.bg-red-700,
 :root.light a.bg-red-700 { color: #ffffff !important; }
 :root.light .bg-red-700.text-white { color: #ffffff !important; }
+
+/* ============================================================
+   튜토리얼 투어 팝오버 (driver.js) — 디자인 토큰 정합
+   ============================================================ */
+.driver-popover.afterglow-tour {
+	background: var(--color-surface-raised);
+	color: var(--color-ink-0);
+	border: 1px solid var(--color-line);
+	border-radius: 0.75rem;
+	box-shadow: var(--glow-warm);
+	max-width: 22rem;
+}
+.driver-popover.afterglow-tour .driver-popover-title {
+	color: var(--color-ink-0);
+	font-size: 0.9375rem;
+	font-weight: 600;
+}
+.driver-popover.afterglow-tour .driver-popover-description {
+	color: var(--color-ink-1);
+	font-size: 0.8125rem;
+	line-height: 1.55;
+}
+.driver-popover.afterglow-tour .driver-popover-footer button {
+	background: var(--color-surface-sunken);
+	color: var(--color-ink-1);
+	border: 1px solid var(--color-line);
+	border-radius: 0.5rem;
+	padding: 0.25rem 0.75rem;
+	font-size: 0.75rem;
+	text-shadow: none;
+}
+.driver-popover.afterglow-tour .driver-popover-footer button:hover {
+	color: var(--color-ink-0);
+	background: color-mix(in oklab, var(--color-surface-sunken) 78%, var(--color-ink-0));
+}
+.driver-popover.afterglow-tour .driver-popover-footer .driver-popover-next-btn {
+	background: var(--gradient-warm);
+	color: var(--color-action-on-warm);
+	border-color: transparent;
+}
+.driver-popover.afterglow-tour .driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: var(--color-surface-raised); }

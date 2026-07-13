@@ -58,7 +58,7 @@
         refreshing={ctrl.refreshing}
         onManualRefresh={() => ctrl.fetchAll()}
       />
-      <button onclick={() => ctrl.showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
+      <button data-tour="volume-create-open" onclick={() => ctrl.showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
     {/snippet}
   </PageHeader>
 
@@ -73,6 +73,7 @@
     <VolumesTabs bind:tab={ctrl.tab} volumeCount={ctrl.volumes.length} snapshotCount={ctrl.snapshots.length} showSnapshots={$betaFeatures.volumeSnapshots} />
 
     {#if ctrl.tab === 'volumes'}
+      <div data-tour="volume-list">
       <VolumeListTable
         volumes={ctrl.volumes}
         selectedVolumeId={ctrl.selectedVolumeId}
@@ -95,6 +96,7 @@
         volumeBackupsEnabled={$betaFeatures.volumeBackups}
         volumeSnapshotsEnabled={$betaFeatures.volumeSnapshots}
       />
+      </div>
     {:else}
       <SnapshotListTable
         snapshots={ctrl.snapshots}

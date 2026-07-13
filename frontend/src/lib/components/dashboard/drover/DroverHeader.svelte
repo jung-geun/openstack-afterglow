@@ -38,6 +38,7 @@
 			onManualRefresh={onForceRefresh}
 		/>
 		<button
+			data-tour="drover-create-open"
 			onclick={onOpenCreate}
 			class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
 		>
