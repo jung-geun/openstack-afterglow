@@ -77,6 +77,15 @@ EXEMPT_ROUTERS: set[str] = {
     "storage/file_storage.py",  # TODO: Phase C/D — access rule sub-resources
     "storage/volumes.py",  # TODO: Phase C/D — volume transfer sub-resources
     "storage/volume_backups.py",  # TODO: Phase C/D — backup / restore
+    # VPN 서버/클라이언트는 vpn_db.py가 SQLAlchemy select()로 DB를 직접 읽고
+    # cached_call 등 app 캐시 레이어를 전혀 거치지 않는다(announcements/site
+    # branding과 동일 사유 — "TODO Phase C/D 캐시 미연동"이 아니라 애초에
+    # 무효화할 캐시가 없음).
+    "vpn/servers.py",
+    "vpn/clients.py",
+    # 에이전트(VM 내부) 대면 — 사용자 캐시가 아닌 Redis 상태 캐시(vpn_agent_auth)를
+    # 직접 갱신하며, 이 파일의 mutation invalidation 검사 대상(app 캐시)과는 무관.
+    "vpn/agent.py",
 }
 
 # ---------------------------------------------------------------------------

@@ -115,6 +115,7 @@
 				{ label: '라우터', href: '/dashboard/network/routers', service: null },
 				{ label: '로드밸런서', href: '/dashboard/network/loadbalancers', service: null },
 				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
+				{ label: 'VPN', href: '/dashboard/network/vpn', service: 'vpn' },
 			],
 		},
 	]);
@@ -168,6 +169,7 @@
 		if (item.service === 'magnum') return svcs?.magnum ?? false;
 		if (item.service === 'zun') return svcs?.zun ?? false;
 		if (item.service === 'k3s') return svcs?.k3s ?? false;
+		if (item.service === 'vpn') return svcs?.vpn ?? false;
 		return true;
 	}
 </script>

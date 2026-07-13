@@ -388,6 +388,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     k3s = cfg.get("k3s", {})
     builder = cfg.get("builder", {})
     union = cfg.get("union", {})
+    vpn = cfg.get("vpn", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
     public_api_base = _derive_public_api_base_for_k8s(cfg)
@@ -611,6 +612,24 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         f"manifest_store_share_id = {_toml_str(union.get('manifest_store_share_id', ''))}"
     )
     lines.append("")
+
+    # [vpn] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
+    if vpn:
+        lines.append("[vpn]")
+        lines.append(f"provider_network_id = {_toml_str(vpn.get('provider_network_id', ''))}")
+        lines.append(f"flavor_name = {_toml_str(vpn.get('flavor_name', 'cpu.1c_2g'))}")
+        if "flavor_id" in vpn:
+            lines.append(f"flavor_id = {_toml_str(vpn['flavor_id'])}")
+        lines.append(f"image_id = {_toml_str(vpn.get('image_id', ''))}")
+        lines.append(f"floating_network_id = {_toml_str(vpn.get('floating_network_id', ''))}")
+        lines.append(f"callback_base_url = {_toml_str(vpn.get('callback_base_url', ''))}")
+        if "key_name" in vpn:
+            lines.append(f"key_name = {_toml_str(vpn['key_name'])}")
+        lines.append(
+            f"default_tunnel_cidr = {_toml_str(vpn.get('default_tunnel_cidr', '10.8.0.0/24'))}"
+        )
+        lines.append(f"default_listen_port = {vpn.get('default_listen_port', 51820)}")
+        lines.append("")
 
     # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
     lines.append("[gpu]")

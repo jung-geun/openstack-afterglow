@@ -14,6 +14,7 @@ export interface PublicSiteConfig {
 		trove: boolean;
 		swift: boolean;
 		barbican: boolean;
+		vpn: boolean;
 	};
 	runtime: {
 		api_base: string;

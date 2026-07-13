@@ -297,6 +297,17 @@ def _load_toml() -> dict:
     flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
     flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
 
+    vpn = data.get("vpn", {})
+    flat["vpn_provider_network_id"] = vpn.get("provider_network_id", "")
+    flat["vpn_flavor_name"] = vpn.get("flavor_name", "cpu.1c_2g")
+    flat["vpn_flavor_id"] = vpn.get("flavor_id", "")
+    flat["vpn_image_id"] = vpn.get("image_id", "")
+    flat["vpn_floating_network_id"] = vpn.get("floating_network_id", "")
+    flat["vpn_callback_base_url"] = vpn.get("callback_base_url", "")
+    flat["vpn_key_name"] = vpn.get("key_name", "")
+    flat["vpn_default_tunnel_cidr"] = vpn.get("default_tunnel_cidr", "10.8.0.0/24")
+    flat["vpn_default_listen_port"] = vpn.get("default_listen_port", 51820)
+
     mon = data.get("monitoring", {})
     flat["prometheus_base_url"] = mon.get("prometheus_base_url", "http://prometheus:9090")
     flat["prometheus_username"] = mon.get("prometheus_username", "")
@@ -577,6 +588,17 @@ class Settings(BaseSettings):
     union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
+
+    # WireGuard VPN 게이트웨이 (Phase 1)
+    vpn_provider_network_id: str = ""  # VPN VM이 부팅될 provider 네트워크 ID
+    vpn_flavor_name: str = "cpu.1c_2g"  # flavor 이름으로 해석 (flavor_id override 가능)
+    vpn_flavor_id: str = ""  # 설정 시 이름 조회 없이 바로 사용
+    vpn_image_id: str = ""  # VPN VM 부팅 이미지 ID (Ubuntu 22.04+)
+    vpn_floating_network_id: str = ""  # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
+    vpn_callback_base_url: str = ""  # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
+    vpn_key_name: str = ""  # VPN VM에 연결할 Nova keypair 이름 (옵션)
+    vpn_default_tunnel_cidr: str = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값
+    vpn_default_listen_port: int = 51820  # WireGuard UDP 리슨 포트 기본값
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach

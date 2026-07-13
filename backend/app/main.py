@@ -206,6 +206,7 @@ from app.api.storage import (
     volume_snapshots_router,
     volumes_router,
 )
+from app.api.vpn import vpn_agent_router, vpn_clients_router, vpn_servers_router
 
 _mark("api.k3s_network_storage")
 
@@ -347,6 +348,7 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/libraries/squashfs", "union_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
+    ("/api/v1/vpn/servers", "vpn_server"),
     ("/api/v1/loadbalancers", "load_balancer"),
     ("/api/v1/k3s/clusters", "container_cluster"),
     ("/api/v1/file-storage", "file_storage"),
@@ -546,6 +548,11 @@ app.include_router(networks_router, prefix="/api/v1/networks", tags=["networks"]
 app.include_router(routers_router, prefix="/api/v1/routers", tags=["routers"])
 app.include_router(loadbalancers_router, prefix="/api/v1/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups_router, prefix="/api/v1/security-groups", tags=["security-groups"])
+# VPN — servers/clients(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
+# 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/agent/register 등) 충돌 없음.
+app.include_router(vpn_servers_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
+app.include_router(vpn_clients_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
+app.include_router(vpn_agent_router, prefix="/api/v1/vpn/servers", tags=["vpn-agent"])
 # Optional services — afterglow.conf/config.toml [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
