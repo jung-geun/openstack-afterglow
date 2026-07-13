@@ -517,12 +517,15 @@
 									class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
 									style="background: {severityDotColor(announcement.severity)};"
 								></span>
-								<span class="flex-1 text-[var(--color-ink-0)] text-xs leading-snug">
+								<a
+									href="/dashboard/notifications?focus={announcement.id}"
+									class="flex-1 text-[var(--color-ink-0)] text-xs leading-snug hover:text-[var(--color-accent)] hover:underline underline-offset-2 transition-colors"
+								>
 									{announcement.title}
 									{#if !announcement.is_read}
 										<span class="ml-1 text-[9px] uppercase tracking-wide text-[var(--color-accent)]">new</span>
 									{/if}
-								</span>
+								</a>
 							</li>
 						{/each}
 						{#if alertsFailed}

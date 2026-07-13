@@ -23,9 +23,12 @@ router = APIRouter()
 class AnnouncementUserResponse(BaseModel):
     id: int
     created_at: str
+    created_by_username: str
     title: str
     body: str
     severity: str
+    starts_at: str | None = None
+    ends_at: str | None = None
     is_read: bool
 
 

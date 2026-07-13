@@ -108,12 +108,19 @@ def _serialize_admin(a: Announcement) -> dict[str, Any]:
 
 
 def _serialize_user(a: Announcement, *, is_read: bool) -> dict[str, Any]:
+    # 알림함 상세 보기에서 발송자·게시/만료 시각을 표시하기 위해 노출한다.
+    # 타겟 정보(target_type/target_id)는 다른 수신자 추론에 쓰일 수 있고,
+    # created_by_user_id(Keystone 내부 UUID)는 일반 사용자에게 불필요한
+    # 내부 식별자라 노출하지 않는다 — 발송자는 username으로 충분.
     return {
         "id": a.id,
         "created_at": a.created_at.isoformat(),
+        "created_by_username": a.created_by_username,
         "title": a.title,
         "body": a.body,
         "severity": a.severity,
+        "starts_at": a.starts_at.isoformat() if a.starts_at else None,
+        "ends_at": a.ends_at.isoformat() if a.ends_at else None,
         "is_read": is_read,
     }
 

@@ -5,9 +5,12 @@ export type AnnouncementTargetType = 'all' | 'project' | 'user';
 export interface AnnouncementUser {
 	id: number;
 	created_at: string;
+	created_by_username: string;
 	title: string;
 	body: string;
 	severity: AnnouncementSeverity;
+	starts_at: string | null;
+	ends_at: string | null;
 	is_read: boolean;
 }
 

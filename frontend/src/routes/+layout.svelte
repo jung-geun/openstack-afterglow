@@ -10,7 +10,8 @@
 	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig } from '$lib/config/site';
 	import { resolveFaviconPath } from '$lib/config/brandAssets';
 	import type { PublicSiteConfig } from '$lib/types/siteConfig';
-	import type { UnreadCountResponse } from '$lib/types/announcements';
+	import type { AnnouncementUser, UnreadCountResponse } from '$lib/types/announcements';
+	import { formatIsoDateTime } from '$lib/utils/format';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
@@ -68,6 +69,67 @@
 			// 배지 갱신은 best-effort — 실패해도 헤더 렌더링을 막지 않는다.
 		}
 	}
+
+	// 종 아이콘 드롭다운 — 최근 공지를 즉시 보여주고, 전체 목록은 알림함으로 이동
+	let bellOpen = $state(false);
+	let bellItems = $state<AnnouncementUser[] | null>(null);
+	let bellError = $state(false);
+	let bellContainer = $state<HTMLDivElement | null>(null);
+	let bellButton = $state<HTMLButtonElement | null>(null);
+	let bellFetchSerial = 0;
+
+	function bellDotColor(severity: AnnouncementUser['severity']): string {
+		if (severity === 'danger') return 'var(--color-state-danger)';
+		if (severity === 'warning') return 'var(--color-state-warning)';
+		return 'var(--color-accent)';
+	}
+
+	async function toggleBellDropdown() {
+		bellOpen = !bellOpen;
+		if (!bellOpen) return;
+		bellError = false;
+		bellItems = null;
+		const serial = ++bellFetchSerial;
+		const token = $auth.token;
+		if (mockup.active || isMockAuthActive() || !token) {
+			bellItems = [];
+			return;
+		}
+		try {
+			const items = await api.get<AnnouncementUser[]>('/api/v1/announcements', token, $auth.projectId ?? undefined);
+			if (serial !== bellFetchSerial) return;
+			bellItems = items.slice(0, 6);
+			void refreshUnreadAnnouncementCount();
+		} catch {
+			if (serial !== bellFetchSerial) return;
+			bellItems = [];
+			bellError = true;
+		}
+	}
+
+	function closeBellAndGo(id?: number) {
+		bellOpen = false;
+		void goto(id != null ? `/dashboard/notifications?focus=${id}` : '/dashboard/notifications');
+	}
+
+	$effect(() => {
+		if (!bellOpen || typeof document === 'undefined') return;
+		const onPointerDown = (event: MouseEvent) => {
+			if (bellContainer && !bellContainer.contains(event.target as Node)) bellOpen = false;
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape') return;
+			bellOpen = false;
+			// 드롭다운 내부에 있던 키보드 포커스가 body로 떨어지지 않게 트리거로 복귀
+			bellButton?.focus();
+		};
+		document.addEventListener('mousedown', onPointerDown);
+		document.addEventListener('keydown', onKeyDown);
+		return () => {
+			document.removeEventListener('mousedown', onPointerDown);
+			document.removeEventListener('keydown', onKeyDown);
+		};
+	});
 
 	$effect.pre(() => {
 		const active = mockup.active;
@@ -348,20 +410,67 @@
 				{/if}
 			</button>
 
-			<!-- 알림 아이콘 -->
-			<a
-				href="/dashboard/notifications"
-				class="relative p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-gray-800"
-				title="알림"
-			>
-				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-				{#if unreadAnnouncementCount > 0}
-					<span
-						class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[9px] font-semibold flex items-center justify-center leading-none"
-						style="background: var(--color-state-danger);"
-					>{unreadAnnouncementCount > 99 ? '99+' : unreadAnnouncementCount}</span>
+			<!-- 알림 아이콘 + 드롭다운 -->
+			<div class="relative" bind:this={bellContainer}>
+				<button
+					bind:this={bellButton}
+					onclick={toggleBellDropdown}
+					class="relative p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-gray-800"
+					title="알림"
+					aria-haspopup="true"
+					aria-expanded={bellOpen}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+					{#if unreadAnnouncementCount > 0}
+						<span
+							class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[9px] font-semibold flex items-center justify-center leading-none"
+							style="background: var(--color-state-danger);"
+						>{unreadAnnouncementCount > 99 ? '99+' : unreadAnnouncementCount}</span>
+					{/if}
+				</button>
+				{#if bellOpen}
+					<!-- 모바일: 바텀 시트 / sm 이상: 종 아이콘 기준 드롭다운 (ProjectSelector 패턴 준용) -->
+					<div
+						class="fixed left-0 bottom-0 w-full rounded-t-xl sm:absolute sm:left-auto sm:right-0 sm:bottom-auto sm:top-full sm:mt-2 sm:w-80 sm:rounded-xl border shadow-xl z-50 overflow-hidden"
+						style="background: var(--color-surface-raised); border-color: var(--color-line);"
+					>
+						<p class="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">알림</p>
+						{#if bellItems === null}
+							<p class="px-4 pb-3 text-xs text-[var(--color-ink-3)]">불러오는 중…</p>
+						{:else if bellError}
+							<p class="px-4 pb-3 text-xs text-[var(--color-state-danger)]">알림을 불러오지 못했습니다</p>
+						{:else if bellItems.length === 0}
+							<p class="px-4 pb-3 text-xs text-[var(--color-ink-3)]">받은 공지가 없습니다</p>
+						{:else}
+							<ul class="max-h-80 overflow-y-auto">
+								{#each bellItems as item (item.id)}
+									<li>
+										<button
+											onclick={() => closeBellAndGo(item.id)}
+											class="w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-[var(--color-surface-sunken)] transition-colors"
+										>
+											<span class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style="background: {bellDotColor(item.severity)};"></span>
+											<span class="flex-1 min-w-0">
+												<span class="block text-xs text-[var(--color-ink-0)] truncate {item.is_read ? '' : 'font-semibold'}">{item.title}</span>
+												<span class="block text-[10px] text-[var(--color-ink-3)] mt-0.5 tabular-nums">{formatIsoDateTime(item.created_at)}</span>
+											</span>
+											{#if !item.is_read}
+												<span class="mt-1 text-[9px] uppercase tracking-wide text-[var(--color-accent)] flex-shrink-0">new</span>
+											{/if}
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+						<div class="border-t" style="border-color: var(--color-line);">
+							<button
+								onclick={() => closeBellAndGo()}
+								class="w-full px-4 py-2.5 text-xs text-center text-[var(--color-accent)] hover:bg-[var(--color-surface-sunken)] transition-colors"
+							>전체 알림 보기</button>
+						</div>
+					</div>
 				{/if}
-			</a>
+			</div>
 
 			<!-- 유저 아바타 -->
 			<a

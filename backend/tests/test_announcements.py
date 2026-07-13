@@ -120,3 +120,48 @@ async def test_user_cannot_reach_admin_announcements_endpoint(client):
     """일반 유저는 관리자 공지 CRUD 엔드포인트에 접근할 수 없다."""
     resp = await client.get("/api/v1/admin/announcements")
     assert resp.status_code == 403
+
+
+def test_serialize_user_payload_contract():
+    """알림함 상세 보기가 의존하는 사용자 페이로드 계약을 고정한다.
+
+    발송자(created_by_username)와 게시/만료 시각(starts_at/ends_at)은 노출하되,
+    타겟 정보(target_type/target_id)는 다른 수신자 추론에 쓰일 수 있어 제외하고,
+    created_by_user_id(Keystone 내부 UUID)도 일반 사용자에게 노출하지 않는다.
+    """
+    from datetime import UTC, datetime
+
+    from app.models.announcement import Announcement
+    from app.services.announcements import _serialize_user
+
+    created = datetime(2026, 7, 13, 6, 0, 0, tzinfo=UTC)
+    ends = datetime(2026, 7, 20, 6, 0, 0, tzinfo=UTC)
+    row = Announcement(
+        id=1,
+        created_at=created,
+        updated_at=created,
+        created_by_user_id="admin-1",
+        created_by_username="admin",
+        title="정기 점검",
+        body="본문",
+        severity="info",
+        target_type="all",
+        target_id=None,
+        starts_at=None,
+        ends_at=ends,
+        is_active=True,
+    )
+
+    payload = _serialize_user(row, is_read=False)
+
+    assert payload == {
+        "id": 1,
+        "created_at": created.isoformat(),
+        "created_by_username": "admin",
+        "title": "정기 점검",
+        "body": "본문",
+        "severity": "info",
+        "starts_at": None,
+        "ends_at": ends.isoformat(),
+        "is_read": False,
+    }

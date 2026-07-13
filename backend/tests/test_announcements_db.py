@@ -95,6 +95,12 @@ async def test_all_target_visible_to_any_authenticated_user(live_db):
 
     assert [a["id"] for a in visible] == [created["id"]]
     assert visible[0]["is_read"] is False
+    # 알림함 상세 보기 계약 — 발송자/게시·만료 시각이 실 DB 경로에서도 노출된다.
+    # (created_by_user_id는 내부 UUID라 사용자 페이로드에서 의도적으로 제외)
+    assert "created_by_user_id" not in visible[0]
+    assert visible[0]["created_by_username"] == "admin"
+    assert visible[0]["starts_at"] is None
+    assert visible[0]["ends_at"] is None
 
 
 async def test_project_target_only_visible_to_matching_project(live_db):
