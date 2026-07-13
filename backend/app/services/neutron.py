@@ -189,7 +189,9 @@ def create_port(
     """
     kwargs: dict = {"network_id": network_id, "name": name}
     if security_group_ids:
-        kwargs["security_groups"] = [{"id": sg} for sg in security_group_ids]
+        # Neutron 포트 API의 security_groups는 UUID 문자열 리스트를 요구한다.
+        # dict({"id": ...}) 형식은 400 "is not a valid UUID"로 거부됨.
+        kwargs["security_groups"] = list(security_group_ids)
     port = conn.network.create_port(**kwargs)
     fixed_ip = ""
     if port.fixed_ips:
