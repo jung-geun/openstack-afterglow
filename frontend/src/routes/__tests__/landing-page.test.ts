@@ -130,10 +130,10 @@ describe('public landing and login route source contracts', () => {
 	});
 
 	it('exposes the tutorial entry CTA and mounts the tour launcher', () => {
-		expect(landingComponentSource).toContain('href="/dashboard?mockup=tutorial&tour=intro"');
+		expect(landingComponentSource).toContain('href="/dashboard?tutorial=on"');
 		expect(landingComponentSource).toContain('튜토리얼 체험');
-		expect(layoutSource).toContain("import TutorialLauncher from '$lib/tutorial/TutorialLauncher.svelte';");
-		expect(layoutSource).toContain('<TutorialLauncher />');
+		expect(layoutSource).toContain("import TutorialController from '$lib/tutorial/TutorialController.svelte';");
+		expect(layoutSource).toContain('<TutorialController />');
 		expect(layoutCssSource).toContain('.driver-popover.afterglow-tour');
 	});
 });

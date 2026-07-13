@@ -22,7 +22,7 @@
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
 	import MockupBanner from '$lib/components/mockup/MockupBanner.svelte';
-	import TutorialLauncher from '$lib/tutorial/TutorialLauncher.svelte';
+	import TutorialController from '$lib/tutorial/TutorialController.svelte';
 	import { buildMockAuth } from '$lib/mockup/auth';
 	import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId, isMockupPathAllowed, getMockupHomePath } from '$lib/mockup/contracts';
 	import type { MockupProfileId } from '$lib/mockup/contracts';
@@ -330,7 +330,7 @@
 				enteredMockProfile = null;
 			}
 			clearAuth();
-			await goto(mockLogout ? '/login?mockup=off' : '/login', { replaceState: true });
+			await goto(mockLogout ? '/login?tutorial=off' : '/login', { replaceState: true });
 			toast.success('정상적으로 로그아웃 되었습니다.');
 		} finally {
 			endSessionRevocation();
@@ -501,10 +501,10 @@
 	<ConfirmDialog />
 {/if}
 {#if mockup.active}
-	<MockupBanner label={mockup.bannerLabel} message={mockup.bannerMessage} tutorial={mockup.profile === 'tutorial'} />
+	<MockupBanner label={mockup.bannerLabel} message={mockup.bannerMessage} />
 {/if}
 {#if $isLoggedIn}
-	<TutorialLauncher />
+	<TutorialController />
 {/if}
 <Toast />
 

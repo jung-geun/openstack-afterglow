@@ -16,7 +16,7 @@ describe('logout flow source contracts', () => {
 	it('keeps confirmed real-session logout on the login page with history replacement in both logged-in exit points', () => {
 		for (const source of [layoutSource, selectProjectSource]) {
 			expect(source).toContain("confirmDialog('로그아웃하시겠습니까?')");
-			expect(source).toContain("mockLogout ? '/login?mockup=off' : '/login'");
+			expect(source).toContain("mockLogout ? '/login?tutorial=off' : '/login'");
 			expect(source).toContain("toast.success('정상적으로 로그아웃 되었습니다.')");
 		}
 	});
@@ -39,7 +39,7 @@ describe('logout flow source contracts', () => {
 			expect(source).toContain('const mockLogout = isMockAuthActive();');
 			expect(source).toContain('exitMockAuth();');
 			expect(source).toContain('clearAuth();');
-			expect(source).toContain("mockLogout ? '/login?mockup=off' : '/login'");
+			expect(source).toContain("mockLogout ? '/login?tutorial=off' : '/login'");
 		}
 	});
 

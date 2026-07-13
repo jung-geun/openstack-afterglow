@@ -104,7 +104,7 @@ describe('auth mockup persistence', () => {
 		storage[`session:${MOCKUP_STORAGE_KEY}`] = JSON.stringify(
 			makeState({ token: 'mock-token', refreshToken: 'mock-refresh', projectId: 'mock-project' }),
 		);
-		storage[`session:${MOCKUP_SESSION_KEY}`] = 'tutorial';
+		storage[`session:${MOCKUP_SESSION_KEY}`] = 'on';
 
 		// Dynamic import re-evaluates auth.ts after the tab-local session fixture is installed.
 		const mod = await import('../auth');
@@ -123,24 +123,24 @@ describe('auth mockup persistence', () => {
 		storage.afterglow_auth = JSON.stringify(
 			makeState({ token: 'real-token', refreshToken: 'real-refresh', projectId: 'real-project' }),
 		);
-		Object.assign(globalThis.window, { location: { search: '?mockup=tutorial' } });
+		Object.assign(globalThis.window, { location: { search: '?tutorial=on' } });
 
 		// Dynamic import evaluates initial auth persistence against the activation query.
 		const mod = await import('../auth');
 
 		expect(get(mod.auth).token).toBeNull();
-		expect(mod.getMockupProfile()).toBe('tutorial');
-		expect(storage[`session:${MOCKUP_SESSION_KEY}`]).toBe('tutorial');
+		expect(mod.getMockupProfile()).toBe('on');
+		expect(storage[`session:${MOCKUP_SESSION_KEY}`]).toBe('on');
 		expect(storage.afterglow_auth).toContain('real-token');
 		expect(localStorageMock.setItem).not.toHaveBeenCalled();
 		expect(cookieWrites).toEqual([]);
 	});
 
-	it('lets explicit mockup=off clear a stored mock snapshot before auth initialization', async () => {
+	it('lets explicit tutorial=off clear a stored mock snapshot before auth initialization', async () => {
 		storage[`session:${MOCKUP_STORAGE_KEY}`] = JSON.stringify(makeState({ token: 'mock-token' }));
-		storage[`session:${MOCKUP_SESSION_KEY}`] = 'tutorial';
+		storage[`session:${MOCKUP_SESSION_KEY}`] = 'on';
 		storage.afterglow_auth = JSON.stringify(makeState({ token: 'real-token' }));
-		Object.assign(globalThis.window, { location: { search: '?mockup=off' } });
+		Object.assign(globalThis.window, { location: { search: '?tutorial=off' } });
 
 		// Dynamic import verifies the explicit exit wins over tab-scoped restoration.
 		const mod = await import('../auth');
@@ -153,9 +153,9 @@ describe('auth mockup persistence', () => {
 
 	it('clears a stored mock before invalid query initialization can fall through to live APIs', async () => {
 		storage[`session:${MOCKUP_STORAGE_KEY}`] = JSON.stringify(makeState({ token: 'mock-token' }));
-		storage[`session:${MOCKUP_SESSION_KEY}`] = 'tutorial';
+		storage[`session:${MOCKUP_SESSION_KEY}`] = 'on';
 		storage.afterglow_auth = JSON.stringify(makeState({ token: 'real-token' }));
-		Object.assign(globalThis.window, { location: { search: '?mockup=bogus' } });
+		Object.assign(globalThis.window, { location: { search: '?tutorial=bogus' } });
 
 		// Dynamic import verifies malformed explicit activation never reuses the mock bearer.
 		const mod = await import('../auth');
@@ -167,12 +167,12 @@ describe('auth mockup persistence', () => {
 	});
 
 	it.each([
-		{ storedProfile: 'tutorial', queryProfile: 'admin' },
-		{ storedProfile: 'admin', queryProfile: 'tutorial' },
+		{ storedProfile: 'on', queryProfile: 'admin' },
+		{ storedProfile: 'admin', queryProfile: 'on' },
 	] as const)('clears a stale $storedProfile snapshot before query bootstraps $queryProfile', async ({ storedProfile, queryProfile }) => {
 		storage[`session:${MOCKUP_STORAGE_KEY}`] = JSON.stringify(makeState({ token: `${storedProfile}-token` }));
 		storage[`session:${MOCKUP_SESSION_KEY}`] = storedProfile;
-		Object.assign(globalThis.window, { location: { search: `?mockup=${queryProfile}` } });
+		Object.assign(globalThis.window, { location: { search: `?tutorial=${queryProfile}` } });
 
 		// Dynamic import verifies a query profile never inherits another profile's identity.
 		const mod = await import('../auth');
@@ -186,13 +186,13 @@ describe('auth mockup persistence', () => {
 		storage[`session:${MOCKUP_STORAGE_KEY}`] = JSON.stringify(
 			makeState({ token: 'tutorial-token', projectId: 'mock-project-2', projectName: 'Research Project' }),
 		);
-		storage[`session:${MOCKUP_SESSION_KEY}`] = 'tutorial';
-		Object.assign(globalThis.window, { location: { search: '?mockup=tutorial' } });
+		storage[`session:${MOCKUP_SESSION_KEY}`] = 'on';
+		Object.assign(globalThis.window, { location: { search: '?tutorial=on' } });
 
 		// Dynamic import verifies a tab refresh preserves both ready state and project selection.
 		const mod = await import('../auth');
 
-		expect(mod.getMockupProfile()).toBe('tutorial');
+		expect(mod.getMockupProfile()).toBe('on');
 		expect(get(mod.auth)).toMatchObject({ token: 'tutorial-token', projectId: 'mock-project-2' });
 		expect(get(mod.authReady)).toBe(true);
 	});
@@ -218,7 +218,7 @@ describe('auth mockup persistence', () => {
 				projectName: 'Sample Cloud Demo',
 				roles: ['member'],
 			}),
-			'tutorial',
+			'on',
 		);
 
 		expect(storage.afterglow_auth).toBe(realPersisted);
@@ -227,7 +227,7 @@ describe('auth mockup persistence', () => {
 			projectId: 'mock-project-1',
 		});
 		expect(cookieWrites).toEqual([]);
-		expect(storage[`session:${MOCKUP_SESSION_KEY}`]).toBe('tutorial');
+		expect(storage[`session:${MOCKUP_SESSION_KEY}`]).toBe('on');
 		expect(get(mod.authReady)).toBe(true);
 	});
 
@@ -252,7 +252,7 @@ describe('auth mockup persistence', () => {
 				projectId: 'mock-project-1',
 				projectName: 'Mock Project',
 			}),
-			'tutorial',
+			'on',
 		);
 
 		mod.exitMockAuth();

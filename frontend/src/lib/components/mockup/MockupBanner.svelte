@@ -1,34 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { MOCKUP_COOKIE } from '$lib/mockup/contracts';
-	import { tutorialLauncherOpen } from '$lib/tutorial/launcher';
+	import { MOCKUP_COOKIE, MOCKUP_QUERY_KEY } from '$lib/mockup/contracts';
 
 	import Button from '$lib/components/ui/Button.svelte';
 	import Pill from '$lib/components/ui/Pill.svelte';
 
 	let {
-		label = 'MOCKUP',
-		message = '실제 API 호출 없이 가상 데이터로 렌더링 중입니다.',
-		tutorial = false,
-	}: { label?: string; message?: string; tutorial?: boolean } = $props();
+		label = '튜토리얼',
+		message = '체험 모드입니다. 실제 리소스는 생성되지 않습니다.',
+	}: { label?: string; message?: string } = $props();
 
-	async function exitMockup() {
+	async function exitTutorialMode() {
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		document.cookie = `${MOCKUP_COOKIE}=; path=/; SameSite=Strict${secure}; max-age=0`;
-		await goto('/?mockup=off', { replaceState: true, invalidateAll: true });
+		await goto(`/?${MOCKUP_QUERY_KEY}=off`, { replaceState: true, invalidateAll: true });
 	}
 </script>
 
 <div class="mockup-banner" role="status" aria-live="polite">
 	<div class="mockup-copy">
-		<Pill tone="warning" dot>{label || 'MOCKUP'}</Pill>
+		<Pill tone="warning" dot>{label || '튜토리얼'}</Pill>
 		<span class="mockup-message">{message}</span>
 	</div>
 	<div class="mockup-actions">
-		{#if tutorial}
-			<Button variant="primary" size="xs" onclick={() => tutorialLauncherOpen.set(true)}>튜토리얼 메뉴</Button>
-		{/if}
-		<Button variant="outline" size="xs" onclick={exitMockup}>종료</Button>
+		<Button variant="outline" size="xs" onclick={exitTutorialMode}>종료</Button>
 	</div>
 </div>
 

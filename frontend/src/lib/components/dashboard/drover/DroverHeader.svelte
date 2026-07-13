@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 	import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 
 	let {
@@ -22,6 +23,7 @@
 
 <PageHeader breadcrumb="CONTAINERS / K3S" title="Drover 클러스터">
 	{#snippet actions()}
+		<TutorialStartButton tour="drover" />
 		<button
 			onclick={onToggleDeleted}
 			class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded border transition-colors {showDeleted

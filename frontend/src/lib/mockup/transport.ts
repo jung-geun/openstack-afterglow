@@ -3,13 +3,13 @@ import { ApiError } from '$lib/api/errors';
 import { getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 import { siteConfig } from '$lib/config/site';
 import { buildMockAuth } from '$lib/mockup/auth';
-import { MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
+import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
 import type { MockupProfileId } from '$lib/mockup/contracts';
 import { cloneMockup, getMockupState } from '$lib/mockup/state';
 import type { K3sSseProgressMessage } from '$lib/api/k3sSseStream';
 
 export const symbolNoMatch = Symbol('mockup-no-match');
-const UNSUPPORTED = 'mockup mode에서는 이 작업을 아직 지원하지 않습니다.';
+const UNSUPPORTED = '튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.';
 const MOCK_EXPIRES_AT_ISO = '2026-12-31T23:59:59Z';
 const NOW_ISO = '2026-07-09T00:00:00Z';
 
@@ -21,8 +21,8 @@ function nextMockId(existingIds: string[], prefix: string): string {
 function activeProfile(): MockupProfileId | null {
 	if (typeof window !== 'undefined' && typeof window.location?.search === 'string') {
 		const params = new URLSearchParams(window.location.search);
-		const requested = params.get('mockup');
-		if (params.has('mockup')) return isMockupProfileId(requested) ? requested : null;
+		const requested = params.get(MOCKUP_QUERY_KEY);
+		if (params.has(MOCKUP_QUERY_KEY)) return isMockupProfileId(requested) ? requested : null;
 	}
 	if (!isMockAuthActive()) return null;
 	const profile = getMockupProfile() ?? (
@@ -187,7 +187,7 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	}
 	if (method === 'GET' && pathname === '/api/v1/auth/me') {
 		const auth = buildMockAuth(profile, profile === 'admin' ? '/admin' : '/dashboard');
-		return { user_id: auth.userId, username: auth.username, project_id: auth.projectId, project_name: auth.projectName, roles: auth.roles, is_system_admin: auth.isSystemAdmin, auth_method: 'mockup' };
+		return { user_id: auth.userId, username: auth.username, project_id: auth.projectId, project_name: auth.projectName, roles: auth.roles, is_system_admin: auth.isSystemAdmin, auth_method: 'tutorial' };
 	}
 	if (method === 'GET' && (pathname === '/api/v1/auth/projects/recent' || pathname === '/api/v1/auth/projects')) return state.projects;
 	if (method === 'GET' && pathname === '/api/v1/profile') return { id: 'mock-user-1', name: 'Demo User', email: 'demo@example.com', default_project_id: null };
@@ -462,7 +462,7 @@ export function maybeMockInstanceCreateStream(path: string, body: unknown): Asyn
 	const octet = 100 + state.instances.length;
 	state.instances.unshift({
 		id,
-		name: payload?.name || `mockup-vm-${state.instances.length + 1}`,
+		name: payload?.name || `tutorial-vm-${state.instances.length + 1}`,
 		status: 'ACTIVE',
 		image_name: payload?.image_id === 'fixture-image-rocky' ? 'Rocky Linux 9' : 'Ubuntu 24.04 LTS',
 		flavor_name: flavorName,
@@ -477,9 +477,9 @@ export function maybeMockInstanceCreateStream(path: string, body: unknown): Asyn
 		host: 'sample-hypervisor-a',
 	});
 	return progress([
-		{ step: 'boot_volume_creating', progress: 20, message: 'mock 부트 볼륨 생성 완료', instance_id: id },
-		{ step: 'server_creating', progress: 60, message: 'mock Nova 인스턴스 생성 완료', instance_id: id },
-		{ step: 'completed', progress: 100, message: 'mock 배포 완료', instance_id: id },
+		{ step: 'boot_volume_creating', progress: 20, message: '부트 볼륨 생성 완료', instance_id: id },
+		{ step: 'server_creating', progress: 60, message: 'Nova 인스턴스 생성 완료', instance_id: id },
+		{ step: 'completed', progress: 100, message: '배포 완료', instance_id: id },
 	]);
 }
 
@@ -490,11 +490,11 @@ export function maybeMockK3sStream(path: string, body: unknown, token?: string, 
 	if (normalized === '/api/v1/k3s/clusters/async') {
 		const payload = body as { name?: string; agent_count?: number; network_id?: string; key_name?: string; master_count?: number } | null;
 		const id = `mock-k3s-${state.k3sClusters.length + 1}`;
-		state.k3sClusters.push({ id, name: payload?.name || 'mockup-new-cluster', status: 'ACTIVE', status_reason: null, server_vm_id: 'mock-instance-1', agent_vm_ids: [], agent_count: payload?.agent_count ?? 1, api_address: 'https://192.0.2.90:6443', server_ip: '192.0.2.90', network_id: payload?.network_id ?? 'mock-net-private', key_name: payload?.key_name ?? 'demo-keypair', k3s_version: 'v1.30.4+k3s1', created_at: '2026-07-09T00:10:00Z', updated_at: '2026-07-09T00:10:00Z', deleted_at: null, deleted_by_user_id: null, deleted_reason: null, master_count: payload?.master_count ?? 1 });
+		state.k3sClusters.push({ id, name: payload?.name || 'tutorial-cluster', status: 'ACTIVE', status_reason: null, server_vm_id: 'mock-instance-1', agent_vm_ids: [], agent_count: payload?.agent_count ?? 1, api_address: 'https://192.0.2.90:6443', server_ip: '192.0.2.90', network_id: payload?.network_id ?? 'mock-net-private', key_name: payload?.key_name ?? 'demo-keypair', k3s_version: 'v1.30.4+k3s1', created_at: '2026-07-09T00:10:00Z', updated_at: '2026-07-09T00:10:00Z', deleted_at: null, deleted_by_user_id: null, deleted_reason: null, master_count: payload?.master_count ?? 1 });
 		return progress([
-			{ step: 'create_vm', progress: 25, message: 'mock VM 생성 완료', cluster_id: id },
-			{ step: 'install_k3s', progress: 70, message: 'mock k3s 설치 완료', cluster_id: id },
-			{ step: 'completed', progress: 100, message: 'mock 클러스터 준비 완료', cluster_id: id },
+			{ step: 'create_vm', progress: 25, message: 'VM 생성 완료', cluster_id: id },
+			{ step: 'install_k3s', progress: 70, message: 'k3s 설치 완료', cluster_id: id },
+			{ step: 'completed', progress: 100, message: '클러스터 준비 완료', cluster_id: id },
 		]);
 	}
 	const deleteMatch = normalized.match(/^\/api\/v1\/k3s\/clusters\/([^/]+)\/delete-async$/);
@@ -503,12 +503,12 @@ export function maybeMockK3sStream(path: string, body: unknown, token?: string, 
 		if (cluster) {
 			cluster.status = 'DELETED';
 			cluster.deleted_at = '2026-07-09T00:20:00Z';
-			cluster.deleted_reason = 'mockup delete';
+			cluster.deleted_reason = 'tutorial delete';
 		}
 		return progress([
-			{ step: 'cordon', progress: 35, message: 'mock 노드 cordon 완료', cluster_id: deleteMatch[1] },
-			{ step: 'delete', progress: 80, message: 'mock 리소스 정리 완료', cluster_id: deleteMatch[1] },
-			{ step: 'completed', progress: 100, message: 'mock 클러스터 삭제 완료', cluster_id: deleteMatch[1] },
+			{ step: 'cordon', progress: 35, message: '노드 cordon 완료', cluster_id: deleteMatch[1] },
+			{ step: 'delete', progress: 80, message: '리소스 정리 완료', cluster_id: deleteMatch[1] },
+			{ step: 'completed', progress: 100, message: '클러스터 삭제 완료', cluster_id: deleteMatch[1] },
 		]);
 	}
 	if (normalized.startsWith('/api/v1/')) mockUnsupported();

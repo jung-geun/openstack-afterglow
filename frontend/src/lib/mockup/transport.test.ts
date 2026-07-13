@@ -13,7 +13,7 @@ beforeEach(() => {
 	vi.stubGlobal('fetch', fetchMock);
 	localStorage.clear();
 	sessionStorage.clear();
-	sessionStorage.setItem(MOCKUP_SESSION_KEY, 'tutorial');
+	sessionStorage.setItem(MOCKUP_SESSION_KEY, 'on');
 });
 
 afterEach(() => {
@@ -161,7 +161,7 @@ describe('mockup transport', () => {
 
 	it('intercepts a query-activated mock before auth hydration can reach fetch', async () => {
 		sessionStorage.clear();
-		window.history.replaceState({}, '', '/dashboard?mockup=tutorial');
+		window.history.replaceState({}, '', '/dashboard?tutorial=on');
 		vi.resetModules();
 		// Dynamic import proves query bootstrap works before auth has a stored mock snapshot.
 		const { maybeMockJson } = await import('./transport');
@@ -304,7 +304,7 @@ describe('mockup transport', () => {
 			),
 		).rejects.toMatchObject({
 			status: 409,
-			message: 'mockup mode에서는 이 작업을 아직 지원하지 않습니다.',
+			message: '튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.',
 		});
 	});
 

@@ -15,6 +15,7 @@
   import VolumesLoadingState from '$lib/components/volume/VolumesLoadingState.svelte';
   import VolumesEmptyState from '$lib/components/volume/VolumesEmptyState.svelte';
   import VolumesModalStack from '$lib/components/volume/VolumesModalStack.svelte';
+  import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
   import { betaFeatures } from '$lib/stores/betaFeatures';
 
   const ctrl = createVolumesController({
@@ -51,6 +52,7 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="VOLUMES / BLOCK VOLUMES" title="블록 볼륨">
     {#snippet actions()}
+      <TutorialStartButton tour="volume" />
       <AutoRefreshControl
         bind:active={ar.active}
         bind:intervalSeconds={ar.intervalSeconds}

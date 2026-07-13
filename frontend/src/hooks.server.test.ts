@@ -78,7 +78,7 @@ describe('hooks.server mockup gating', () => {
 
 	it('bootstraps tutorial mockup from the query without persisting a browser-wide cookie', async () => {
 		const { handle } = await loadHandle();
-		const request = createRequest('http://frontend.example.com/dashboard?mockup=tutorial');
+		const request = createRequest('http://frontend.example.com/dashboard?tutorial=on');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
@@ -88,7 +88,7 @@ describe('hooks.server mockup gating', () => {
 		expect(request.event.locals).toMatchObject({
 			mockup: {
 				active: true,
-				profile: 'tutorial',
+				profile: 'on',
 				homePath: '/dashboard',
 			},
 		});
@@ -96,7 +96,7 @@ describe('hooks.server mockup gating', () => {
 
 	it('serves the tutorial volumes page without redirecting', async () => {
 		const { handle } = await loadHandle();
-		const request = createRequest('http://frontend.example.com/dashboard/volumes?mockup=tutorial');
+		const request = createRequest('http://frontend.example.com/dashboard/volumes?tutorial=on');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
@@ -106,38 +106,38 @@ describe('hooks.server mockup gating', () => {
 
 	it('redirects unsupported tutorial paths to a query-bearing home route', async () => {
 		const { handle } = await loadHandle();
-		const request = createRequest('http://frontend.example.com/admin?mockup=tutorial');
+		const request = createRequest('http://frontend.example.com/admin?tutorial=on');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
 		expect(response.status).toBe(302);
-		expect(response.headers.get('Location')).toBe('/dashboard?mockup=tutorial');
+		expect(response.headers.get('Location')).toBe('/dashboard?tutorial=on');
 		expect(request.resolve).not.toHaveBeenCalled();
 		expect(request.cookies.set).not.toHaveBeenCalled();
 	});
 
 	it('blocks an admin dynamic route even when its parameter looks like a static asset', async () => {
 		const { handle } = await loadHandle();
-		const request = createRequest('http://frontend.example.com/dashboard/compute/instances/not-allowed.png?mockup=admin');
+		const request = createRequest('http://frontend.example.com/dashboard/compute/instances/not-allowed.png?tutorial=admin');
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
 		expect(response.status).toBe(302);
-		expect(response.headers.get('Location')).toBe('/admin?mockup=admin');
+		expect(response.headers.get('Location')).toBe('/admin?tutorial=admin');
 		expect(request.resolve).not.toHaveBeenCalled();
 	});
 
 	it('keeps the profile allowlist active when a real session cookie is also present', async () => {
 		const { handle } = await loadHandle();
 		const request = createRequest(
-			'http://frontend.example.com/admin?mockup=tutorial',
+			'http://frontend.example.com/admin?tutorial=on',
 			{ afterglow_session: 'active-session' },
 		);
 
 		const response = await handle({ event: request.event, resolve: request.resolve });
 
 		expect(response.status).toBe(302);
-		expect(response.headers.get('Location')).toBe('/dashboard?mockup=tutorial');
+		expect(response.headers.get('Location')).toBe('/dashboard?tutorial=on');
 		expect(request.resolve).not.toHaveBeenCalled();
 	});
 });

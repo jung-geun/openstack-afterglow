@@ -1,5 +1,5 @@
 import { writable, derived } from 'svelte/store';
-import { MOCKUP_STORAGE_KEY, MOCKUP_SESSION_KEY, isMockupProfileId } from '$lib/mockup/contracts';
+import { MOCKUP_QUERY_KEY, MOCKUP_STORAGE_KEY, MOCKUP_SESSION_KEY, isMockupProfileId } from '$lib/mockup/contracts';
 import type { MockupProfileId } from '$lib/mockup/contracts';
 
 // /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
@@ -83,8 +83,8 @@ function readMockupProfile(): MockupProfileId | null {
 function readMockupQuery(): MockupQueryProfile {
 	if (typeof window === 'undefined' || typeof window.location?.search !== 'string') return null;
 	const params = new URLSearchParams(window.location.search);
-	if (!params.has('mockup')) return null;
-	const value = params.get('mockup');
+	if (!params.has(MOCKUP_QUERY_KEY)) return null;
+	const value = params.get(MOCKUP_QUERY_KEY);
 	if (value === 'off' || isMockupProfileId(value)) return value;
 	return 'invalid';
 }

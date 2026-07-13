@@ -14,6 +14,7 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { openWizard } from '$lib/stores/wizard';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 	import InstancesTable from '$lib/components/instance/list/InstancesTable.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { isTransitional } from '$lib/utils/instanceStatus';
@@ -213,6 +214,7 @@
 <div class="p-4 md:p-8 pb-28 md:pb-32">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
 		{#snippet actions()}
+			<TutorialStartButton tour="vm-create" />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}

@@ -92,7 +92,7 @@
 
 	function openCreateProject() {
 		if (mockupActive) {
-			toast.info('mockup mode에서는 프로젝트 생성을 제외합니다.');
+			toast.info('튜토리얼 모드에서는 프로젝트 생성을 제외합니다.');
 			return;
 		}
 		showCreateModal = true;
@@ -122,7 +122,7 @@
 			const mockLogout = isMockAuthActive();
 			if (mockLogout) exitMockAuth();
 			clearAuth();
-			await goto(mockLogout ? '/login?mockup=off' : '/login', { replaceState: true });
+			await goto(mockLogout ? '/login?tutorial=off' : '/login', { replaceState: true });
 			toast.success('정상적으로 로그아웃 되었습니다.');
 		} finally {
 			endSessionRevocation();

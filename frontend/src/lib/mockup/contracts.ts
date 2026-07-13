@@ -1,6 +1,8 @@
-export type MockupProfileId = 'tutorial' | 'admin';
+// 사용자에게 노출되는 이름은 "튜토리얼"이다: URL은 ?tutorial=on|admin|off.
+// (내부 심볼의 Mockup 접두어는 가상 데이터 레이어를 가리키는 구현 용어로 유지한다.)
+export type MockupProfileId = 'on' | 'admin';
 
-export const MOCKUP_QUERY_KEY = 'mockup';
+export const MOCKUP_QUERY_KEY = 'tutorial';
 export const MOCKUP_COOKIE = 'afterglow_mockup';
 export const MOCKUP_STORAGE_KEY = 'afterglow_mock_auth';
 // sessionStorage keeps the client activation scoped to one browser tab.
@@ -27,22 +29,22 @@ const TUTORIAL_ALLOWED_PATHS = [
 const ADMIN_ALLOWED_PATHS = ['/', '/login', '/admin'] as const;
 
 const PROFILE_ALLOWED_PATHS: Record<MockupProfileId, readonly string[]> = {
-	tutorial: TUTORIAL_ALLOWED_PATHS,
+	on: TUTORIAL_ALLOWED_PATHS,
 	admin: ADMIN_ALLOWED_PATHS,
 };
 
 const PROFILE_HOME_PATH: Record<MockupProfileId, MockupSession['homePath']> = {
-	tutorial: '/dashboard',
+	on: '/dashboard',
 	admin: '/admin',
 };
 
 const PROFILE_BANNER_LABEL: Record<MockupProfileId, string> = {
-	tutorial: '튜토리얼',
+	on: '튜토리얼',
 	admin: '관리자 미리보기',
 };
 
 const PROFILE_BANNER_MESSAGE: Record<MockupProfileId, string> = {
-	tutorial: '체험 모드입니다. 실제 리소스는 생성되지 않습니다.',
+	on: '체험 모드입니다. 실제 리소스는 생성되지 않습니다.',
 	admin: '실제 API 호출 없이 가상 데이터로 렌더링 중입니다.',
 };
 
@@ -57,7 +59,7 @@ export const MOCKUP_SERVICE_OVERRIDES = {
 } as const;
 
 export function isMockupProfileId(value: unknown): value is MockupProfileId {
-	return value === 'tutorial' || value === 'admin';
+	return value === 'on' || value === 'admin';
 }
 
 export function inactiveMockupSession(): MockupSession {
@@ -85,7 +87,7 @@ export function buildMockupSession(profile: MockupProfileId): MockupSession {
 export function isMockupPathAllowed(profile: MockupProfileId, pathname: string): boolean {
 	if (PROFILE_ALLOWED_PATHS[profile].includes(pathname)) return true;
 	// 튜토리얼은 대시보드 전체를 실제와 동일하게 탐색할 수 있다.
-	return profile === 'tutorial' && pathname.startsWith('/dashboard/');
+	return profile === 'on' && pathname.startsWith('/dashboard/');
 }
 
 export function getMockupHomePath(profile: MockupProfileId): '/dashboard' | '/admin' {
