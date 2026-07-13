@@ -5,7 +5,7 @@ Generated: 2026-05-15
 
 - [ ] **monitoring_scrape_cidr 확정** — Prometheus pod가 어느 CIDR에서 VM에 접근하는지
   (control plane management network? provider network?)
-  → 확정 후 `config.toml.example` + `backend/app/config.py` 기본값 업데이트
+  → 확정 후 `afterglow.conf.example` + `backend/app/config.py` 기본값 업데이트
 
 - [ ] **Kolla Ansible Prometheus/Grafana 재사용 여부** — §12.5 Q1
   → 재사용 시: K8s Prometheus configmap에 scrape job만 추가 (새 Prometheus 불필요)

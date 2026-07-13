@@ -294,6 +294,48 @@ stampede_scale_down_cooldown = 300              # scale-down 쿨다운 (초)
 stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부하 가중치 (0~1)
 
 
+[worker_runtime]
+# Background worker runtime manager.
+# Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests.
+# docker/kubernetes modes are explicit opt-in and never auto-detected.
+mode = "static"                  # static | docker | kubernetes
+reconcile_interval = 30           # seconds; 0 disables the backend reconcile loop
+fail_closed = true                # adapter errors report unavailable and do not mutate
+
+[worker_runtime.workers.drover]
+enabled = true
+desired_replicas = 1
+max_replicas = 1                  # raise only after verifying parallel drover safety
+module = "app.worker"
+
+[worker_runtime.workers.notion_worker]
+enabled = true
+desired_replicas = 1
+max_replicas = 1
+module = "app.notion_worker"
+
+[worker_runtime.docker]
+# Docker mode requires the backend container to have an explicit Docker socket mount
+# plus host-visible bind source paths. These are intentionally empty by default so
+# opt-in Docker mode reports unavailable instead of creating broken containers.
+socket_path = ""                  # e.g. /var/run/docker.sock
+image = ""                        # required when mode = "docker"
+network = ""                      # optional Docker network name
+config_mount = "/app/afterglow.conf"
+config_host_path = ""             # host path for afterglow.conf, not backend-container path
+gpu_config_mount = "/app/config.gpu.toml"
+gpu_config_host_path = ""         # optional host path for config.gpu.toml
+logs_mount = "/app/logs"
+logs_host_path = ""               # optional host path for worker logs
+env_allowlist = "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+
+[worker_runtime.kubernetes]
+namespace = "afterglow"
+service_account_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+service_account_ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+manage_deployments = false        # v1: must remain false; managed Deployment creation is not exposed
+
+
 [builder]
 # 라이브러리 빌드 전용 영구 VM 설정 (SSH 기반 빌드 파이프라인)
 # services.manila = true 환경에서 라이브러리 레이어를 미리 빌드할 때 사용
@@ -342,6 +384,22 @@ layer_share_size_gb = 20
 layer_store_rw_share_id = ""    # (레거시) 단일 layer-store-rw share ID (미설정 시 무시)
 layer_store_ro_share_id = ""    # (레거시) 단일 layer-store-ro share ID (미설정 시 무시)
 manifest_store_share_id = ""    # manifest-store Manila share ID
+
+
+[vpn]
+# WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
+# 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다.
+provider_network_id = ""       # VPN VM이 부팅될 provider 네트워크 ID (필수)
+flavor_name = "cpu.1c_2g"      # flavor 이름으로 해석 (flavor_id 설정 시 이름 조회 생략)
+flavor_id = ""                 # 설정 시 이름 조회 없이 바로 사용
+image_id = ""                  # VPN VM 부팅 이미지 ID (Ubuntu 22.04+, 필수)
+floating_network_id = ""       # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
+callback_base_url = ""         # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
+                               # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
+key_name = ""                  # VPN VM에 연결할 Nova keypair 이름 (옵션, SSH 디버깅용)
+default_tunnel_cidr = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값 (신규 서버 생성 시 사용)
+default_listen_port = 51820    # WireGuard UDP 리슨 포트 기본값
+# 클라이언트 private key 암호화 키는 k3s.kubeconfig_encryption_key 를 재사용합니다 (신규 시크릿 불필요)
 
 
 [notion]
