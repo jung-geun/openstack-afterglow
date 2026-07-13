@@ -51,6 +51,7 @@ let currentTour: TourDefinition | null = null;
 let currentIndex = 0;
 let stopping = false;
 let clickCleanup: (() => void) | null = null;
+let resizeCleanup: (() => void) | null = null;
 // 동시에 여러 showStep이 진행되지 않도록 최신 호출만 유효화한다.
 let showSerial = 0;
 
@@ -101,17 +102,30 @@ async function moveTo(index: number): Promise<void> {
 		stopTour();
 		return;
 	}
-	await showStep(index);
+	await showStep(index, index >= currentIndex ? 1 : -1);
 }
 
-async function showStep(index: number): Promise<void> {
+async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 	const tour = currentTour;
 	const d = driverInstance;
 	if (!tour || !d) return;
 	const serial = ++showSerial;
 	cleanupClickListener();
-	currentIndex = index;
 	const step = tour.steps[index];
+
+	// 조건부 step: 현재 화면 상태에 해당 단계가 없으면 진행 방향을 유지한 채 건너뛴다
+	if (step.skipIf?.()) {
+		const next = index + direction;
+		if (next < 0) return;
+		if (next >= tour.steps.length) {
+			stopTour();
+			return;
+		}
+		void showStep(next, direction);
+		return;
+	}
+
+	currentIndex = index;
 	persistTour(tour.id, index);
 
 	if (step.route && window.location.pathname !== step.route) {
@@ -122,13 +136,19 @@ async function showStep(index: number): Promise<void> {
 		}
 	}
 
-	const el = await waitForElement(step.element, step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000));
+	const timeout = step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000);
+	let el = await waitForElement(step.element, timeout);
+	// 로딩 스피너 등이 걷히고 실제 콘텐츠가 나타난 뒤에 하이라이트한다
+	if (el && step.readyElement) {
+		const ready = await waitForElement(step.readyElement, timeout);
+		if (!ready) el = null;
+	}
 	// 대기 중 사용자가 투어를 닫았거나 더 새로운 스텝 전환이 시작된 경우
 	if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
 	if (!el) {
 		// 요소가 사라졌으면(페이지 이동으로 모달이 닫힘 등) 이전 스텝으로 되감는다.
 		if (index > 0) {
-			void showStep(index - 1);
+			void showStep(index - 1, -1);
 		} else {
 			stopTour();
 		}
@@ -138,15 +158,24 @@ async function showStep(index: number): Promise<void> {
 	const isLast = index === tour.steps.length - 1;
 	const clickDriven = step.advanceOn === 'click';
 
-	if (clickDriven) {
-		// 진행 트리거는 하이라이트 요소와 다를 수 있다(예: 폼 전체 하이라이트 + 생성 버튼 클릭).
+	if (clickDriven || step.backElement || step.cancelElement) {
+		// 진행/후진/취소 트리거는 하이라이트 요소와 다를 수 있다(예: 폼 전체 하이라이트 + 생성/이전/취소 버튼).
 		// document 캡처 위임: 하이라이트 표시 전에 무장되고, 대상 노드가 리렌더로 교체돼도 동작한다.
-		const triggerSelector = step.advanceElement ?? step.element;
+		const advanceSelector = clickDriven ? (step.advanceElement ?? step.element) : null;
+		const backSelector = step.backElement ?? null;
+		const cancelSelector = step.cancelElement ?? null;
 		const handler = (event: Event) => {
 			const target = event.target as Element | null;
-			if (!target?.closest?.(triggerSelector)) return;
-			cleanupClickListener();
-			void moveTo(index + 1);
+			if (!target?.closest) return;
+			if (cancelSelector && target.closest(cancelSelector)) {
+				stopTour();
+			} else if (advanceSelector && target.closest(advanceSelector)) {
+				cleanupClickListener();
+				void moveTo(index + 1);
+			} else if (backSelector && target.closest(backSelector)) {
+				cleanupClickListener();
+				void moveTo(index - 1);
+			}
 		};
 		document.addEventListener('click', handler, { capture: true });
 		clickCleanup = () => document.removeEventListener('click', handler, { capture: true });
@@ -165,11 +194,40 @@ async function showStep(index: number): Promise<void> {
 			nextBtnText: isLast ? '완료' : '다음',
 		},
 	});
+
+	// 콘텐츠가 뒤늦게 로드되어 대상 크기가 바뀌면 하이라이트/팝오버 위치를 재계산하고,
+	// 대상이 DOM에서 사라지면(모달 취소/ESC 등) 유효한 이전 스텝으로 자동 되감는다.
+	const observers: Array<() => void> = [];
+	if (typeof ResizeObserver !== 'undefined') {
+		const ro = new ResizeObserver(() => {
+			if (d === driverInstance && serial === showSerial) d.refresh();
+		});
+		ro.observe(el);
+		observers.push(() => ro.disconnect());
+	}
+	if (typeof MutationObserver !== 'undefined') {
+		const target = el;
+		const mo = new MutationObserver(() => {
+			if (d !== driverInstance || serial !== showSerial) {
+				mo.disconnect();
+				return;
+			}
+			if (!target.isConnected) {
+				mo.disconnect();
+				void showStep(index, -1);
+			}
+		});
+		mo.observe(document.body, { childList: true, subtree: true });
+		observers.push(() => mo.disconnect());
+	}
+	resizeCleanup = () => observers.forEach((dispose) => dispose());
 }
 
 function cleanupClickListener(): void {
 	clickCleanup?.();
 	clickCleanup = null;
+	resizeCleanup?.();
+	resizeCleanup = null;
 }
 
 export function stopTour(): void {

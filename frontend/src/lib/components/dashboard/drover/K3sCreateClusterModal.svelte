@@ -98,13 +98,13 @@
 					</label>
 				</div>
 				{/if}
-				<div>
+				<div data-tour="drover-name">
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">클러스터 이름
 						<input bind:value={form.name} type="text" placeholder="미입력 시 자동 생성"
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
 					</label>
 				</div>
-				<div>
+				<div data-tour="drover-os">
 					<span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS 타입</span>
 					<div class="flex gap-2 mt-1.5">
 						<button type="button"
@@ -132,7 +132,7 @@
 						</div>
 					{/if}
 				</div>
-				<div>
+				<div data-tour="drover-masters">
 						<span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">마스터 수</span>
 						<div class="flex gap-2 mt-1.5">
 							<button type="button"
@@ -152,13 +152,13 @@
 							</p>
 						{/if}
 					</div>
-				<div>
+				<div data-tour="drover-agents">
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">에이전트 수 (0-10)
 						<input bind:value={form.agent_count} type="number" min="0" max="10"
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
 					</label>
 				</div>
-				<div>
+				<div data-tour="drover-flavor">
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">에이전트 플레이버 (선택)
 						<select bind:value={form.agent_flavor_id}
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
