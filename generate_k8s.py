@@ -640,7 +640,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [services]
     lines.append("[services]")
-    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican"):
+    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "vpn"):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
     lines.append("")

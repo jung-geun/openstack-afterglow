@@ -154,6 +154,7 @@ k3s = false         # k3s 자체 관리 Kubernetes 클러스터
 swift = false       # 오브젝트 스토리지
 trove = false       # DBaaS (Database as a Service)
 barbican = false    # Key Manager (시크릿/인증서 관리)
+vpn = false         # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정 필수)
 
 [k3s]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -389,6 +390,7 @@ manifest_store_share_id = ""    # manifest-store Manila share ID
 [vpn]
 # WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
 # 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다.
+# services.vpn = true 여야 라우터가 등록되고 사이드바에 노출된다.
 provider_network_id = ""       # VPN VM이 부팅될 provider 네트워크 ID (필수)
 flavor_name = "cpu.1c_2g"      # flavor 이름으로 해석 (flavor_id 설정 시 이름 조회 생략)
 flavor_id = ""                 # 설정 시 이름 조회 없이 바로 사용

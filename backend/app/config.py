@@ -148,6 +148,7 @@ def _load_toml() -> dict:
     flat["service_trove_enabled"] = svc.get("trove", False)
     flat["service_swift_enabled"] = svc.get("swift", False)
     flat["service_barbican_enabled"] = svc.get("barbican", False)
+    flat["service_vpn_enabled"] = svc.get("vpn", False)
 
     k3s = data.get("k3s", {})
     flat["k3s_version"] = k3s.get("version", "v1.34.6+k3s1")
@@ -482,6 +483,7 @@ class Settings(BaseSettings):
     service_trove_enabled: bool = False
     service_swift_enabled: bool = False
     service_barbican_enabled: bool = False
+    service_vpn_enabled: bool = False  # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정도 필요)
 
     # k3s 설정
     k3s_version: str = "v1.34.6+k3s1"

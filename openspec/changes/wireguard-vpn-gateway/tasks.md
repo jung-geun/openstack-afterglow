@@ -24,6 +24,7 @@
 - [x] `backend/tests/test_vpn_security.py` — 인젝션 회귀(개행/쉘 메타문자 거부, shlex_quote 적용 확인)
 - [x] `backend/tests/test_vpn_crypto.py` — X25519 왕복, AES-GCM 도메인 분리
 - [x] `app/services/neutron.py` `create_port` — security_groups를 UUID 문자열 리스트로 전달하도록 수정 (실환경 프로비저닝 400 회귀, 기존 잠복 버그)
+- [x] `[services] vpn` 피처 플래그 — 관리자가 VPN 기능을 켜고 끌 수 있음 (라우터 조건부 마운트, services.vpn = 플래그 AND 설정 완료, 회귀 테스트 `test_vpn_feature_flag.py`)
 - [x] `npm run test:all` + `npm run lint:backend` 모두 통과 확인
 
 ### Phase 2 — 다중 테넌트 네트워크 연결
