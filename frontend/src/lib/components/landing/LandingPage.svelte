@@ -4,6 +4,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import ToggleGroup from '$lib/components/ui/ToggleGroup.svelte';
 	import LandingFigure from './LandingFigure.svelte';
+	import PlateGraphic from './PlateGraphic.svelte';
+	import type { PlateName } from './plateGraphics';
 
 	interface Props {
 		siteName: string;
@@ -28,11 +30,18 @@
 		{ num: '04', title: '재사용', body: '라이브러리 레이어와 스냅샷으로 다음 연구자의 환경 준비 시간을 줄입니다.' },
 	];
 
-	const capabilities = [
+	const capabilities: Array<{
+		num: string;
+		tag: string;
+		name: PlateName;
+		alt: string;
+		title: string;
+		body: string;
+	}> = [
 		{
 			num: '01',
 			tag: 'Compute',
-			src: '/landing/plate-compute-allocation.svg',
+			name: 'compute-allocation',
 			alt: 'VM 서버, GPU 칩, vCPU, 스토리지 자원 배정 콜라주',
 			title: 'VM·GPU·vCPU·스토리지 자원 배정',
 			body: 'GPU 가속 VM에 필요한 GPU, vCPU, 메모리, 스토리지를 프로젝트 쿼터 안에서 배정해 개별 실험 환경을 바로 준비합니다.',
@@ -40,7 +49,7 @@
 		{
 			num: '02',
 			tag: 'Cluster',
-			src: '/landing/plate-kubernetes.svg',
+			name: 'kubernetes',
 			alt: 'K8s 클러스터 프로비저닝 콜라주',
 			title: 'Kubernetes 실습과 실험 환경',
 			body: 'K8s 클러스터 노드를 구성한 뒤 수업·연구 프로젝트의 Pod와 워크로드를 배포하고 상태를 콘솔에서 추적합니다.',
@@ -48,7 +57,7 @@
 		{
 			num: '03',
 			tag: 'Library',
-			src: '/landing/plate-layer.svg',
+			name: 'layer',
 			alt: 'AI ML 라이브러리 레이어 콜라주',
 			title: 'AI/ML 라이브러리 레이어',
 			body: '반복 설치가 필요한 프레임워크와 데이터 처리 도구를 불변 레이어로 관리해 팀별 환경을 재사용하고 포크합니다.',
@@ -56,7 +65,7 @@
 		{
 			num: '04',
 			tag: 'Governance',
-			src: '/landing/plate-security.svg',
+			name: 'security',
 			alt: '보안과 거버넌스 콜라주',
 			title: '교수자와 관리자용 운영 제어',
 			body: '프로젝트, 사용자, 역할, 쿼터, 모니터링, 감사 로그를 묶어 연구실 단위 운영 기준을 유지합니다.',
@@ -75,42 +84,42 @@
 
 	const workflowCards: Array<{
 		kind: WorkflowKind;
-		src: string;
+		name: PlateName;
 		alt: string;
 		title: string;
 		body: string;
 	}> = [
 		{
 			kind: 'compute',
-			src: '/landing/plate-api.svg',
+			name: 'api',
 			alt: 'API 자동화 콜라주',
 			title: '컴퓨팅 자원 신청',
 			body: '연구원이 필요한 이미지, flavor, 네트워크, 키를 선택해 실험 인스턴스를 준비합니다.',
 		},
 		{
 			kind: 'data',
-			src: '/landing/plate-shared-data.svg',
+			name: 'shared-data',
 			alt: '공유 데이터 공간과 스냅샷 흐름 콜라주',
 			title: '공유 데이터 공간',
 			body: '파일 스토리지와 스냅샷으로 팀 데이터와 실험 산출물을 안전하게 이어갑니다.',
 		},
 		{
 			kind: 'compute',
-			src: '/landing/plate-kubernetes.svg',
+			name: 'kubernetes',
 			alt: 'K8s 클러스터 프로비저닝 콜라주',
 			title: '클러스터 실습',
 			body: '수업이나 프로젝트별 Kubernetes 클러스터를 만들고 노드 구성을 추적합니다.',
 		},
 		{
 			kind: 'ops',
-			src: '/landing/plate-monitoring.svg',
+			name: 'monitoring',
 			alt: '모니터링과 관측성 콜라주',
 			title: '관측 가능한 운영',
 			body: '지표 기반 화면을 통해 사용량과 병목을 빠르게 확인합니다.',
 		},
 		{
 			kind: 'ops',
-			src: '/landing/plate-release.svg',
+			name: 'release',
 			alt: '클라우드 배포 흐름 콜라주',
 			title: '보안과 감사',
 			body: '권한 경계, 키 분리 암호화, 작업 로그로 멀티테넌트 위험을 줄입니다.',
@@ -121,13 +130,13 @@
 		step: string;
 		title: string;
 		alt: string;
-		src?: string;
+		name?: PlateName;
 		icon?: 'observability' | 'reuse';
 	};
 
 	const methodSteps: MethodStep[] = [
-		{ step: 'STEP 01', title: '연구 목적에 맞는 프로젝트를 만든다', src: '/landing/plate-professor.svg', alt: '연구팀별 클라우드 제공 콜라주' },
-		{ step: 'STEP 02', title: '컴퓨팅과 데이터 자원을 배정한다', src: '/landing/plate-quota.svg', alt: '쿼터와 자원 배분 콜라주' },
+		{ step: 'STEP 01', title: '연구 목적에 맞는 프로젝트를 만든다', name: 'professor', alt: '연구팀별 클라우드 제공 콜라주' },
+		{ step: 'STEP 02', title: '컴퓨팅과 데이터 자원을 배정한다', name: 'quota', alt: '쿼터와 자원 배분 콜라주' },
 		{ step: 'STEP 03', title: '실험 환경을 실행하고 관측한다', icon: 'observability', alt: '실험 실행, 지표, 로그 관측 아이콘' },
 		{ step: 'STEP 04', title: '레이어와 스냅샷으로 다시 쓴다', icon: 'reuse', alt: '레이어와 스냅샷 재사용 아이콘' },
 	];
@@ -262,9 +271,9 @@
 					</div>
 				</div>
 				<div class="collage" data-reveal>
-					<LandingFigure class="plate hero-main" src="/landing/plate-lab-cloud.svg" alt="연구실 클라우드 콜라주" lazy={false} />
-					<LandingFigure class="plate hero-side" src="/landing/plate-quota.svg" alt="쿼터와 자원 배분 콜라주" lazy={false} />
-					<LandingFigure class="plate hero-wide" src="/landing/plate-console.svg" alt="Afterglow 프로젝트 대시보드 화면" lazy={false} />
+					<LandingFigure class="plate hero-main" name="lab-cloud" alt="연구실 클라우드 콜라주" />
+					<LandingFigure class="plate hero-side" name="quota" alt="쿼터와 자원 배분 콜라주" />
+					<LandingFigure class="plate hero-wide" name="console" alt="Afterglow 프로젝트 대시보드 화면" />
 				</div>
 			</div>
 		</section>
@@ -288,8 +297,8 @@
 						{/each}
 					</Card>
 					<div class="about-collage">
-						<LandingFigure class="plate" src="/landing/plate-professor.svg" alt="교수와 연구원 협업 콜라주" />
-						<LandingFigure class="plate" src="/landing/plate-console.svg" alt="클라우드 콘솔 콜라주" />
+						<LandingFigure class="plate" name="professor" alt="교수와 연구원 협업 콜라주" />
+						<LandingFigure class="plate" name="console" alt="클라우드 콘솔 콜라주" />
 					</div>
 				</div>
 			</div>
@@ -308,7 +317,7 @@
 					{#each capabilities as card}
 						<article class="cap-card">
 							<Card surface="subtle" padding="none" class="cap-card-surface">
-								<img src={card.src} alt={card.alt} loading="lazy" decoding="async" />
+								<PlateGraphic name={card.name} alt={card.alt} fit="cover" class="cap-card-media" />
 								<div class="cap-body">
 									<div class="cap-meta"><span>{card.num}</span><span>{card.tag}</span></div>
 									<h3>{card.title}</h3>
@@ -343,7 +352,7 @@
 							{@const matches = selectedFilter === 'all' || card.kind === selectedFilter}
 							<article class="lab-card" class:is-muted={!matches} data-kind={card.kind}>
 								<Card surface="subtle" padding="none" class="lab-card-surface">
-									<img src={card.src} alt={card.alt} loading="lazy" decoding="async" />
+									<PlateGraphic name={card.name} alt={card.alt} fit="cover" class="lab-card-media" />
 									<div><h3>{card.title}</h3><p>{card.body}</p></div>
 								</Card>
 							</article>
@@ -393,8 +402,8 @@
 										<rect x="222" y="150" width="56" height="36" rx="8" fill="none" stroke="currentColor" stroke-width="3" opacity=".68" />
 										<circle cx="238" cy="168" r="4" fill="currentColor" /><circle cx="254" cy="168" r="4" fill="currentColor" opacity=".55" /><circle cx="270" cy="168" r="4" fill="currentColor" opacity=".32" />
 									</svg>
-								{:else if step.src}
-									<img src={step.src} alt={step.alt} loading="lazy" decoding="async" />
+								{:else if step.name}
+									<PlateGraphic name={step.name} alt={step.alt} fit="cover" class="method-graphic" />
 								{/if}
 							</article>
 						{/each}
@@ -415,10 +424,10 @@
 				<div data-reveal>
 					<Card surface="subtle" padding="none" class="work-slab">
 						<div class="work-grid">
-							<LandingFigure class="screen-main" src="/landing/plate-kubernetes.svg" alt="Afterglow Kubernetes 클러스터 화면">Kubernetes 클러스터 / 노드와 워크로드</LandingFigure>
+							<LandingFigure class="screen-main" name="kubernetes" fit="cover" alt="Afterglow Kubernetes 클러스터 화면">Kubernetes 클러스터 / 노드와 워크로드</LandingFigure>
 							<div class="screen-stack">
-								<LandingFigure src="/landing/plate-security.svg" alt="Afterglow 관리자 개요 화면">관리자 개요 / 사용량과 서비스 상태</LandingFigure>
-								<LandingFigure src="/landing/plate-network-topology.svg" alt="Afterglow 네트워크 토폴로지 화면">네트워크 토폴로지 / 연결 관계</LandingFigure>
+								<LandingFigure name="security" fit="cover" alt="Afterglow 관리자 개요 화면">관리자 개요 / 사용량과 서비스 상태</LandingFigure>
+								<LandingFigure name="network-topology" fit="cover" alt="Afterglow 네트워크 토폴로지 화면">네트워크 토폴로지 / 연결 관계</LandingFigure>
 							</div>
 						</div>
 					</Card>
@@ -436,8 +445,8 @@
 					</ul>
 				</div>
 				<div class="quote-visual" data-reveal>
-					<LandingFigure class="plate" src="/landing/plate-kubernetes.svg" alt="Afterglow K8s 클러스터 목록 화면" />
-					<LandingFigure class="plate" src="/landing/plate-network-topology.svg" alt="프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주" />
+					<LandingFigure class="plate" name="kubernetes" alt="Afterglow K8s 클러스터 목록 화면" />
+					<LandingFigure class="plate" name="network-topology" alt="프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주" />
 				</div>
 			</div>
 		</section>
@@ -546,8 +555,7 @@
 	.landing-page .ring span { color: var(--color-ink-2); font-size: 12px; word-break: keep-all; }
 	.landing-page .collage { display: grid; grid-template-columns: .86fr 1fr; gap: 14px; align-items: end; }
 	.landing-page :global(.plate) { position: relative; overflow: hidden; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); background: var(--color-surface-editorial-media); box-shadow: 0 24px 70px color-mix(in oklab, var(--color-surface-canvas), transparent 58%); }
-	.landing-page :global(.plate img) { width: 100%; height: 100%; object-fit: cover; }
-	.landing-page :global(.plate img[src$='.svg']) { object-fit: contain; background: var(--color-surface-editorial-media); }
+	.landing-page :global(.plate .plate-graphic) { width: 100%; height: 100%; background: var(--color-surface-editorial-media); }
 	.landing-page :global(.plate.hero-main) { aspect-ratio: 4 / 5; border-radius: 28px 28px 4px 28px; transform: rotate(-2.5deg); }
 	.landing-page :global(.plate.hero-side) { aspect-ratio: 1 / 1; border-radius: 4px 26px 26px 26px; transform: rotate(3deg); margin-bottom: 34px; }
 	.landing-page :global(.plate.hero-wide) { grid-column: 1 / -1; aspect-ratio: 16 / 7; border-radius: 26px 4px 26px 26px; transform: rotate(.8deg); }
@@ -572,7 +580,7 @@
 	.landing-page .card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 	.landing-page .cap-card { min-height: 460px; display: block; }
 	.landing-page :global(.cap-card-surface) { display: grid; grid-template-rows: 190px auto; height: 100%; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); overflow: hidden; background: color-mix(in oklab, var(--color-surface-raised), transparent 10%); }
-	.landing-page :global(.cap-card-surface img) { height: 190px; width: 100%; object-fit: cover; border-bottom: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
+	.landing-page :global(.cap-card-surface .plate-graphic) { height: 190px; width: 100%; border-bottom: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
 	.landing-page .cap-body { padding: 18px; }
 	.landing-page .cap-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; color: var(--color-ink-2); font-family: var(--font-mono); font-size: 12px; }
 	.landing-page .cap-card h3 { font-family: var(--font-sans); font-size: 28px; line-height: 1.05; text-wrap: balance; word-break: keep-all; overflow-wrap: normal; }
@@ -593,7 +601,7 @@
 	.landing-page .lab-card { display: block; transition: opacity 180ms var(--landing-ease), transform 180ms var(--landing-ease), border-color 180ms var(--landing-ease); }
 	.landing-page .lab-card.is-muted { opacity: .38; transform: scale(.985); }
 	.landing-page :global(.lab-card-surface) { display: grid; grid-template-columns: 176px 1fr; gap: 18px; align-items: center; padding: 12px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); background: color-mix(in oklab, var(--color-surface-raised), transparent 14%); }
-	.landing-page :global(.lab-card-surface img) { aspect-ratio: 4 / 3; height: 132px; width: 176px; border-radius: 10px; object-fit: cover; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); }
+	.landing-page :global(.lab-card-surface .plate-graphic) { aspect-ratio: 4 / 3; height: 132px; width: 176px; border-radius: 10px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); }
 	.landing-page .lab-card h3 { font-size: 20px; }
 	.landing-page .lab-card p { color: var(--color-ink-1); word-break: keep-all; }
 	.landing-page .empty-state { margin: 0; padding: 18px; border: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); color: var(--color-ink-2); background: color-mix(in oklab, var(--color-surface-raised), transparent 18%); word-break: keep-all; }
@@ -602,6 +610,7 @@
 	.landing-page .method-step { min-height: 300px; padding: 22px; border-right: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); background: color-mix(in oklab, var(--color-surface-raised), transparent 14%); display: grid; align-content: space-between; gap: 28px; }
 	.landing-page .method-step:last-child { border-right: 0; }
 	.landing-page .method-icon { aspect-ratio: 4 / 3; width: 100%; display: block; padding: 16px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 10px; background: color-mix(in oklab, var(--color-surface-canvas), transparent 10%); color: var(--color-accent); }
+	.landing-page :global(.method-graphic) { aspect-ratio: 4 / 3; width: 100%; display: block; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 10px; overflow: hidden; }
 	.landing-page .method-step b { color: var(--color-warm); font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; }
 	.landing-page .method-step h3 { margin-top: 10px; font-family: var(--font-sans); font-size: 25px; line-height: 1.05; }
 
@@ -609,11 +618,11 @@
 	.landing-page .work-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 18px; align-items: center; }
 	.landing-page :global(.screen-main), .landing-page :global(.screen-stack figure) { margin: 0; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); background: var(--color-surface-canvas); overflow: hidden; position: relative; box-shadow: 0 28px 70px color-mix(in oklab, var(--color-surface-canvas), transparent 48%); }
 	.landing-page :global(.screen-main) { border-radius: 18px; transform: rotate(-1.1deg); }
-	.landing-page :global(.screen-main img) { aspect-ratio: 16 / 9; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+	.landing-page :global(.screen-main .plate-graphic) { aspect-ratio: 16 / 9; width: 100%; height: 100%; }
 	.landing-page .screen-stack { display: grid; gap: 16px; }
 	.landing-page :global(.screen-stack figure) { border-radius: 18px; transform: rotate(2deg); }
 	.landing-page :global(.screen-stack figure:nth-child(2)) { transform: rotate(-2.2deg); }
-	.landing-page :global(.screen-stack img) { aspect-ratio: 16 / 10; width: 100%; object-fit: cover; object-position: left top; }
+	.landing-page :global(.screen-stack .plate-graphic) { aspect-ratio: 16 / 10; width: 100%; }
 	.landing-page :global(figcaption) { padding: 10px 12px; color: var(--color-ink-2); font-family: var(--font-mono); font-size: 12px; border-top: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
 
 	.landing-page .quote-panel { display: grid; grid-template-columns: minmax(0, .9fr) minmax(320px, 1.1fr); gap: 24px; align-items: center; }
@@ -668,7 +677,7 @@
 		.landing-page :global(.plate.hero-wide) { grid-column: auto; }
 		.landing-page .section-kicker { grid-template-columns: 1fr; }
 		.landing-page :global(.lab-card-surface) { grid-template-columns: 128px 1fr; }
-		.landing-page :global(.lab-card-surface img) { width: 128px; height: 106px; }
+		.landing-page :global(.lab-card-surface .plate-graphic) { width: 128px; height: 106px; }
 		.landing-page .cta { grid-template-columns: 1fr; }
 		.landing-page h1 { font-size: 64px; }
 		.landing-page .lead { font-size: 19px; }
@@ -695,7 +704,7 @@
 		.landing-page .collage, .landing-page .about-collage, .landing-page .quote-visual { grid-template-columns: 1fr; }
 		.landing-page .about-collage :global(.plate:nth-child(2)), .landing-page .quote-visual :global(.plate:nth-child(2)) { transform: none; }
 		.landing-page :global(.lab-card-surface) { grid-template-columns: 1fr; }
-		.landing-page :global(.lab-card-surface img) { width: 100%; height: auto; }
+		.landing-page :global(.lab-card-surface .plate-graphic) { width: 100%; height: auto; aspect-ratio: 4 / 3; }
 		.landing-page :global(.screen-main), .landing-page :global(.screen-stack figure) { transform: none; }
 	}
 </style>

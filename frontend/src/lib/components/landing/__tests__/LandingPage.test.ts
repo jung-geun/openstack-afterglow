@@ -311,43 +311,41 @@ describe('LandingPage', () => {
 	it('keeps refined compute, Kubernetes, method-visual, and footer contracts', () => {
 		const { container } = renderLanding();
 		const computeCard = container.querySelector<HTMLElement>('.cap-card');
-		const computeImage = computeCard?.querySelector<HTMLImageElement>('img');
-		expect(computeImage?.getAttribute('src')).toBe('/landing/plate-compute-allocation.svg');
-		expect(computeImage?.getAttribute('alt')).toBe('VM 서버, GPU 칩, vCPU, 스토리지 자원 배정 콜라주');
+		const computeImage = computeCard?.querySelector<SVGElement>('svg.plate-graphic');
+		expect(computeImage?.getAttribute('data-plate')).toBe('compute-allocation');
+		expect(computeImage?.getAttribute('aria-label')).toBe('VM 서버, GPU 칩, vCPU, 스토리지 자원 배정 콜라주');
 		expect(computeCard?.textContent).toContain('GPU 가속 VM');
 		expect(computeCard?.textContent).toContain('GPU, vCPU, 메모리, 스토리지');
 
 		const kubernetesCard = container.querySelectorAll<HTMLElement>('.cap-card')[1];
 		expect(kubernetesCard.querySelector('h3')?.textContent).toContain('Kubernetes');
-		expect(kubernetesCard.querySelector('img')?.getAttribute('alt')).toContain('K8s');
+		expect(kubernetesCard.querySelector('svg.plate-graphic')?.getAttribute('aria-label')).toContain('K8s');
 		expect(kubernetesCard.textContent).toContain('K8s 클러스터 노드');
 		expect(kubernetesCard.textContent).toContain('Pod와 워크로드를 배포');
 		const clusterCard = Array.from(container.querySelectorAll<HTMLElement>('.lab-card')).find(
 			(card) => card.querySelector('h3')?.textContent?.trim() === '클러스터 실습',
 		);
 		expect(clusterCard).toBeTruthy();
-		expect(clusterCard?.querySelector('img')?.getAttribute('alt')).toContain('K8s');
+		expect(clusterCard?.querySelector('svg.plate-graphic')?.getAttribute('aria-label')).toContain('K8s');
 		expect(clusterCard?.textContent).toContain('Kubernetes');
 		expect(container.textContent?.toLowerCase()).not.toContain('k3s');
 
 		const dataCard = Array.from(container.querySelectorAll<HTMLElement>('.lab-card')).find(
 			(card) => card.querySelector('h3')?.textContent?.trim() === '공유 데이터 공간',
 		);
-		const dataImage = dataCard?.querySelector<HTMLImageElement>('img');
-		expect(dataImage?.getAttribute('src')).toBe('/landing/plate-shared-data.svg');
-		expect(dataImage?.getAttribute('alt')).toBe('공유 데이터 공간과 스냅샷 흐름 콜라주');
-		expect(dataImage?.getAttribute('loading')).toBe('lazy');
-		expect(dataImage?.getAttribute('decoding')).toBe('async');
+		const dataImage = dataCard?.querySelector<SVGElement>('svg.plate-graphic');
+		expect(dataImage?.getAttribute('data-plate')).toBe('shared-data');
+		expect(dataImage?.getAttribute('aria-label')).toBe('공유 데이터 공간과 스냅샷 흐름 콜라주');
+		expect(dataImage?.getAttribute('role')).toBe('img');
 
-		const quoteImages = Array.from(container.querySelectorAll<HTMLImageElement>('.quote-visual .plate img'));
-		expect(quoteImages.map((image) => image.getAttribute('src'))).toEqual([
-			'/landing/plate-kubernetes.svg',
-			'/landing/plate-network-topology.svg',
+		const quoteImages = Array.from(container.querySelectorAll<SVGElement>('.quote-visual .plate svg.plate-graphic'));
+		expect(quoteImages.map((image) => image.getAttribute('data-plate'))).toEqual([
+			'kubernetes',
+			'network-topology',
 		]);
-		expect(quoteImages[1]?.getAttribute('alt')).toBe('프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주');
+		expect(quoteImages[1]?.getAttribute('aria-label')).toBe('프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주');
 		quoteImages.forEach((image) => {
-			expect(image.getAttribute('loading')).toBe('lazy');
-			expect(image.getAttribute('decoding')).toBe('async');
+			expect(image.getAttribute('role')).toBe('img');
 		});
 
 		const methodVisuals = Array.from(container.querySelectorAll<SVGElement>('.method-icon'));
@@ -395,18 +393,25 @@ describe('LandingPage', () => {
 		expect(footer?.textContent).not.toContain('연구 환경');
 	});
 
-	it('uses only safe local artwork for the product-proof image slots', () => {
+	it('uses only theme-aware inline artwork for the product-proof image slots', () => {
 		const { container } = renderLanding();
-		const proofImages = Array.from(container.querySelectorAll<HTMLImageElement>('.hero-wide img, #work img'));
-		expect(proofImages.map((image) => image.getAttribute('src'))).toEqual([
-			'/landing/plate-console.svg',
-			'/landing/plate-kubernetes.svg',
-			'/landing/plate-security.svg',
-			'/landing/plate-network-topology.svg',
+		const proofImages = Array.from(
+			container.querySelectorAll<SVGElement>('.hero-wide svg.plate-graphic, #work svg.plate-graphic'),
+		);
+		expect(proofImages.map((image) => image.getAttribute('data-plate'))).toEqual([
+			'console',
+			'kubernetes',
+			'security',
+			'network-topology',
 		]);
-		expect(new Set(proofImages.map((image) => image.getAttribute('src'))).size).toBe(4);
-		expect(proofImages.every((image) => image.getAttribute('src')?.endsWith('.svg'))).toBe(true);
-		expect(Array.from(container.querySelectorAll<HTMLImageElement>('img')).some((image) => image.getAttribute('src')?.endsWith('.png'))).toBe(false);
+		expect(new Set(proofImages.map((image) => image.getAttribute('data-plate'))).size).toBe(4);
+		expect(proofImages.every((image) => image.tagName.toLowerCase() === 'svg')).toBe(true);
+		// No raster artwork anywhere: the only <img> is the brand logo (an SVG asset).
+		expect(
+			Array.from(container.querySelectorAll<HTMLImageElement>('img')).some((image) =>
+				/\.(png|jpe?g|webp|gif)$/.test(image.getAttribute('src') ?? ''),
+			),
+		).toBe(false);
 	});
 	it('leaves reveal content visible without an observer and restores scroll behavior on cleanup', () => {
 		document.documentElement.style.scrollBehavior = 'instant';
@@ -487,20 +492,20 @@ describe('LandingPage', () => {
 	});
 
 
-	it('keeps the three hero images eager while content images remain lazy and async decoded', () => {
+	it('renders all artwork slots as theme-aware inline plate graphics', () => {
 		const { container } = renderLanding();
-		const heroImages = Array.from(container.querySelectorAll<HTMLImageElement>('.collage figure img'));
-		expect(heroImages).toHaveLength(3);
-		heroImages.forEach((image) => {
-			expect(image.hasAttribute('loading')).toBe(false);
-			expect(image.getAttribute('decoding')).toBe('async');
+		const heroGraphics = Array.from(
+			container.querySelectorAll<SVGElement>('.collage figure svg.plate-graphic'),
+		);
+		expect(heroGraphics).toHaveLength(3);
+		heroGraphics.forEach((graphic) => {
+			expect(graphic.getAttribute('role')).toBe('img');
+			expect(graphic.getAttribute('data-plate')).toBeTruthy();
 		});
 
-		const representativeFigureImage = container.querySelector<HTMLImageElement>('#overview figure img');
-		expect(representativeFigureImage?.getAttribute('loading')).toBe('lazy');
-		expect(representativeFigureImage?.getAttribute('decoding')).toBe('async');
-		const workflowImage = container.querySelector<HTMLImageElement>('.lab-card-surface img');
-		expect(workflowImage?.getAttribute('loading')).toBe('lazy');
-		expect(workflowImage?.getAttribute('decoding')).toBe('async');
+		const overviewGraphic = container.querySelector<SVGElement>('#overview figure svg.plate-graphic');
+		expect(overviewGraphic?.getAttribute('role')).toBe('img');
+		const workflowGraphic = container.querySelector<SVGElement>('.lab-card-surface svg.plate-graphic');
+		expect(workflowGraphic?.getAttribute('data-plate')).toBeTruthy();
 	});
 });
