@@ -13,13 +13,16 @@ metadata:
   labels:
     app: backend
     afterglow.worker-runtime: "true"
+# 최소권한: 매니저는 deployment 를 조회하고 /scale 서브리소스만 patch 한다.
+# deployments 전체 patch/update 를 주지 않으므로 image/command 등 스펙은 변경할 수 없고,
+# pods 권한은 어댑터가 사용하지 않으므로 부여하지 않는다(SA 토큰 유출 시 노출 최소화).
 rules:
   - apiGroups: ["apps"]
-    resources: ["deployments", "deployments/scale"]
-    verbs: ["get", "list", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list"]
+    resources: ["deployments"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

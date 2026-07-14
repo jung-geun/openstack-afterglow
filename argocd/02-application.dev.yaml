@@ -29,6 +29,9 @@ spec:
     jsonPointers:
     - /spec/rules
     - /spec/tls
+  # 참고: worker_runtime kubernetes 모드를 이 kustomize 경로에서 활성화할 때에만
+  # drover/notion-worker 의 /spec/replicas 를 여기에 추가한다(static 모드에서는 추가 금지 —
+  # ArgoCD 의 replica drift 복구를 유지해야 함). 실 배포(Helm)는 생성기가 mode 에 따라 자동 처리한다.
 
   syncPolicy:
     automated:

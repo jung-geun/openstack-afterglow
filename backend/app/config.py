@@ -787,6 +787,16 @@ class Settings(BaseSettings):
                 "Provide a real SECRET_KEY (and other secrets) instead of bypassing the check."
             )
 
+        # docker 모드는 백엔드 컨테이너에 /var/run/docker.sock(호스트 root 등가)을 마운트해야
+        # 동작한다. 멀티테넌트 프로덕션에서 백엔드 침해 시 호스트 전체 탈취로 이어지므로,
+        # 운영 부팅 시점에 fail-closed 로 거부한다. 프로덕션에서는 mode='kubernetes' 를 쓴다.
+        if is_production and self.worker_runtime_mode == "docker":
+            raise ValueError(
+                "worker_runtime.mode='docker' mounts the host Docker socket "
+                "(root-equivalent) and must NOT be used when AFTERGLOW_ENV=production. "
+                "Use mode='kubernetes' for production worker management."
+            )
+
         if self.secret_key == "change-me-in-production":
             if is_production:
                 raise ValueError(

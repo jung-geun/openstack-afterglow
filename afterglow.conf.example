@@ -28,7 +28,7 @@ trash_retention_days = 30   # 휴지통 보관 기간 (일). 이 기간 이후 �
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
 manila_share_network_id = ""
 manila_share_type = "cephfs"
-manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
+manila_nfs_share_type = "cephfsnfstype"  # NFS 프로토콜용 share type
 manila_nfs_root_squash = true      # NFS access rule root_squash 강제 (보안 기본값)
 manila_nfs_sec_flavor = "sys"      # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
 manila_cephx_key_timeout_seconds = 300  # CephX key 발급 폴링 최대 대기(초). devstack 환경에선 300 이상 권장.
@@ -298,11 +298,19 @@ stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부�
 
 [worker_runtime]
 # Background worker runtime manager.
-# Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests.
+# Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests
+# (the [worker_runtime] block is inert; workers run from those manifests).
 # docker/kubernetes modes are explicit opt-in and never auto-detected.
+#
+# Activation:
+#   docker mode     -> use docker-compose.worker-runtime.yml overlay (fills the [worker_runtime.docker] block below)
+#   kubernetes mode -> set mode via Helm values-<env>.yaml (workerRuntime.mode + kubernetes.rbac.create=true)
+# At the default max_replicas = 1 the manager can only toggle 0<->1 (pause/resume) via
+#   PATCH /api/v1/admin/worker-runtime/desired; true multi-replica scaling needs a higher
+#   max_replicas AND verified worker concurrency-safety.
 mode = "static"                  # static | docker | kubernetes
 reconcile_interval = 30           # seconds; 0 disables the backend reconcile loop
-fail_closed = true                # adapter errors report unavailable and do not mutate
+fail_closed = true                # reserved: parsed but not yet consumed by adapters
 
 [worker_runtime.workers.drover]
 enabled = true

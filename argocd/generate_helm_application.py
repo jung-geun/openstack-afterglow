@@ -71,6 +71,39 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+# worker_runtime kubernetes 모드가 활성화되면 백엔드 매니저가 drover/notion-worker
+# Deployment의 /scale 을 PATCH 한다(일시정지=replicas 0, 재개=1). 이 값은 Helm이 선언한
+# replicaCount 와 달라지므로, selfHeal 이 켜진 ArgoCD가 즉시 되돌리지 않도록 무시한다.
+# 이름은 backend/app/services/worker_runtime.py 의 _deployment_name 과 일치해야 한다.
+_WORKER_DEPLOYMENT_NAMES = ("drover", "notion-worker")
+
+
+def _worker_replica_ignore_differences(namespace: str) -> list[dict]:
+    return [
+        {
+            "group": "apps",
+            "kind": "Deployment",
+            "name": name,
+            "namespace": namespace,
+            "jsonPointers": ["/spec/replicas"],
+        }
+        for name in _WORKER_DEPLOYMENT_NAMES
+    ]
+
+
+def _ignore_differences_for(values_object: dict, namespace: str) -> list[dict]:
+    """kubernetes 모드일 때만 worker replicas 를 무시한다.
+
+    static 모드(기본)에서는 매니저가 replicas 를 건드리지 않으므로, ArgoCD 가 계속 drift 를
+    감지·복구(누군가 워커를 0으로 줄여도 자동 복원)하도록 무시 목록을 비워 둔다. kubernetes
+    모드에서만 pause(=0)/resume(=1) 를 selfHeal 과 충돌 없이 유지하기 위해 무시한다.
+    """
+    mode = (values_object.get("workerRuntime") or {}).get("mode", "static")
+    if mode != "kubernetes":
+        return []
+    return _worker_replica_ignore_differences(namespace)
+
+
 def build_application(env: str) -> dict:
     cfg = ENVS[env]
     chart_dir = REPO_ROOT / CHART_PATH
@@ -81,7 +114,7 @@ def build_application(env: str) -> dict:
         env_values: dict = yaml.safe_load(values_path.read_text()) or {}
     else:
         print(f"경고: {values_path.name} 없음 — base values.yaml만 적용됩니다")
-        print(f"  템플릿: deploy/values-dev-example.yaml 참조")
+        print("  템플릿: deploy/values-dev-example.yaml 참조")
         env_values = {}
 
     # 시크릿 (배포 서버 로컬, gitignore)
@@ -104,13 +137,36 @@ def build_application(env: str) -> dict:
         "argocd-image-updater.argoproj.io/write-back-method": "argocd",
     }
     for alias in IMAGES:
-        annotations[f"argocd-image-updater.argoproj.io/{alias}.update-strategy"] = "digest"
+        annotations[f"argocd-image-updater.argoproj.io/{alias}.update-strategy"] = (
+            "digest"
+        )
         annotations[f"argocd-image-updater.argoproj.io/{alias}.helm.image-name"] = (
             f"image.{alias}.repository"
         )
         annotations[f"argocd-image-updater.argoproj.io/{alias}.helm.image-tag"] = (
             f"image.{alias}.tag"
         )
+
+    spec: dict = {
+        "project": "afterglow",
+        "source": {
+            "repoURL": REPO_URL,
+            "targetRevision": cfg["target_revision"],
+            "path": CHART_PATH,
+            "helm": {
+                # valueFiles 없음 — git의 values.yaml(base)만 자동 로드
+                # env config + secrets 는 valuesObject로 ArgoCD CR에 저장
+                "valuesObject": values_object,
+            },
+        },
+        "destination": {
+            "server": "https://kubernetes.default.svc",
+            "namespace": cfg["dest_namespace"],
+        },
+    }
+    ignore_differences = _ignore_differences_for(values_object, cfg["dest_namespace"])
+    if ignore_differences:
+        spec["ignoreDifferences"] = ignore_differences
 
     return {
         "apiVersion": "argoproj.io/v1alpha1",
@@ -121,21 +177,7 @@ def build_application(env: str) -> dict:
             "annotations": annotations,
         },
         "spec": {
-            "project": "afterglow",
-            "source": {
-                "repoURL": REPO_URL,
-                "targetRevision": cfg["target_revision"],
-                "path": CHART_PATH,
-                "helm": {
-                    # valueFiles 없음 — git의 values.yaml(base)만 자동 로드
-                    # env config + secrets 는 valuesObject로 ArgoCD CR에 저장
-                    "valuesObject": values_object,
-                },
-            },
-            "destination": {
-                "server": "https://kubernetes.default.svc",
-                "namespace": cfg["dest_namespace"],
-            },
+            **spec,
             "syncPolicy": {
                 "automated": {
                     "prune": True,
@@ -173,7 +215,9 @@ def main() -> None:
         "# 이 파일은 generate_helm_application.py가 생성합니다.\n"
         "# 시크릿이 포함되어 있으므로 git에 커밋하지 마세요 (gitignore 처리됨).\n"
     )
-    out_path.write_text(header + yaml.safe_dump(app, allow_unicode=True, sort_keys=False))
+    out_path.write_text(
+        header + yaml.safe_dump(app, allow_unicode=True, sort_keys=False)
+    )
     print(f"생성 완료: {out_path}")
     print(f"적용: kubectl apply -f {out_path.relative_to(REPO_ROOT)}")
 

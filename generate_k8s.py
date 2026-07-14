@@ -1006,8 +1006,8 @@ def render_configmap(cfg: dict) -> str:
         f'  APP_LIBRECHAT_BASE: "{app_librechat_base}"',
         "  afterglow.conf: |",
         indented_toml,
-        "  config.toml: |",
-        indented_toml,
+        # "  config.toml: |",
+        # indented_toml,
     ]
 
     # config.gpu.toml (GPU 디바이스 맵이 있는 경우에만)

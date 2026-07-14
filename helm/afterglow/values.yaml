@@ -34,6 +34,10 @@ replicaCount:
 
 # -----------------------------------------------------------------------------
 # Background worker runtime manager (disabled/static by default)
+# static 이면 이 블록은 선언적 설정일 뿐이며, 워커는 templates/worker/*.yaml 의 고정
+# Deployment 로 실행된다. kubernetes 모드로 켜려면 환경별 values-<env>.yaml 에서
+# mode: kubernetes + kubernetes.rbac.create: true 로 override 한다(deploy/values-dev-example.yaml 참조).
+# 그러면 백엔드 SA 에 deployments/scale 권한이 부여되고 매니저가 replicas 를 조정한다.
 # -----------------------------------------------------------------------------
 workerRuntime:
   mode: static
