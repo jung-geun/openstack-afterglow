@@ -1,7 +1,8 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
+	import type { AutoRefreshController } from '$lib/utils/autoRefresh.svelte';
 
 	let {
 		showDeleted = $bindable(),
@@ -12,7 +13,7 @@
 		onToggleDeleted,
 	}: {
 		showDeleted: boolean;
-		ar: ReturnType<typeof createAutoRefresh>;
+		ar: AutoRefreshController;
 		refreshing: boolean;
 		onForceRefresh: () => void;
 		onOpenCreate: () => void;
@@ -22,6 +23,7 @@
 
 <PageHeader breadcrumb="CONTAINERS / K3S" title="Drover 클러스터">
 	{#snippet actions()}
+		<TutorialStartButton tour="drover" />
 		<button
 			onclick={onToggleDeleted}
 			class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded border transition-colors {showDeleted
@@ -38,6 +40,7 @@
 			onManualRefresh={onForceRefresh}
 		/>
 		<button
+			data-tour="drover-create-open"
 			onclick={onOpenCreate}
 			class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
 		>

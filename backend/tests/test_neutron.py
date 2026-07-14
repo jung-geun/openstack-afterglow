@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _make_sg(sg_id: str = "sg-1", name: str = "union-egress-default", rules: list | None = None) -> dict:
     return {
@@ -226,3 +228,59 @@ def test_ensure_dcgm_exporter_sg_calls_generic(mock_generic):
     _, call_kwargs = mock_generic.call_args[0], mock_generic.call_args[1]
     assert call_kwargs["port"] == 9400
     assert mock_generic.call_args[0][2] == "dcgm_exporter"
+
+
+def test_strict_network_quota_requires_detailed_floatingip_usage():
+    from app.services.neutron import get_network_quota
+
+    conn = MagicMock()
+    quota = MagicMock()
+    quota.to_dict.return_value = {"floatingip": {"limit": 3}}
+    conn.network.get_quota.return_value = quota
+
+    with pytest.raises(ValueError):
+        get_network_quota(conn, "project-a", strict=True)
+
+
+def test_strict_network_quota_does_not_use_limit_only_fallback():
+    from app.services.neutron import get_network_quota
+
+    conn = MagicMock()
+    conn.network.get_quota.side_effect = RuntimeError("details unavailable")
+
+    with pytest.raises(RuntimeError):
+        get_network_quota(conn, "project-a", strict=True)
+    conn.network.get_quota.assert_called_once_with("project-a", details=True)
+
+
+def test_strict_network_quota_preserves_openstacksdk_original_floatingip_key():
+    from openstack.network.v2.quota import QuotaDetails
+
+    from app.services.neutron import get_network_quota
+
+    conn = MagicMock()
+    conn.network.get_quota.return_value = QuotaDetails.new(floatingip={"limit": 4, "used": 1})
+
+    result = get_network_quota(conn, "project-a", strict=True)
+
+    assert result["floatingip"] == {"limit": 4, "in_use": 1}
+    conn.network.get_quota.assert_called_once_with("project-a", details=True)
+
+
+def test_network_quota_preserves_openstacksdk_original_keys_outside_strict_mode():
+    from openstack.network.v2.quota import QuotaDetails
+
+    from app.services.neutron import get_network_quota
+
+    conn = MagicMock()
+    conn.network.get_quota.return_value = QuotaDetails.new(
+        floatingip={"limit": 5, "used": 2},
+        security_group={"limit": 3, "used": 1},
+    )
+    conn.network.ips.return_value = []
+    conn.network.ports.return_value = []
+
+    result = get_network_quota(conn, "project-a")
+
+    assert result["floatingip"] == {"limit": 5, "in_use": 2}
+    assert result["security_group"] == {"limit": 3, "in_use": 1}

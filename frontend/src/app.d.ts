@@ -1,10 +1,14 @@
+import type { MockupSession } from '$lib/mockup/contracts';
+import type { PublicSiteConfig } from '$lib/types/siteConfig';
+
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 declare global {
 	namespace App {
 		// interface Error {}
 		interface Locals {
-			siteConfig: import('$lib/types/siteConfig').PublicSiteConfig;
+			mockup: MockupSession;
+			siteConfig: PublicSiteConfig;
 		}
 		// interface PageData {}
 		// interface PageState {}

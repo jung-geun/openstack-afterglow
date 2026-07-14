@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-	import { auth, setAuth } from '$lib/stores/auth';
+	import { auth, logoutInProgress, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSpinner from './LoadingSpinner.svelte';
 	import CreateProjectModal from './projects/CreateProjectModal.svelte';
@@ -21,6 +22,8 @@
 	let isOpen = $state(false);
 	let dropdownRef: HTMLDivElement | null = $state(null);
 	let showCreateModal = $state(false);
+	const mockupActive = $derived($page.data.mockup?.active === true);
+
 
 	async function fetchProjects() {
 		if (!$auth.token) return;
@@ -36,7 +39,8 @@
 	}
 
 	async function selectProject(project: Project) {
-		if (!$auth.token || switching) return;
+		const token = $auth.token;
+		if (!token || switching) return;
 		if (project.id === $auth.projectId) { isOpen = false; return; }
 
 		switching = true;
@@ -51,7 +55,9 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/v1/auth/token/project', { project_id: project.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: project.id }, token);
+
+			if ($logoutInProgress || !$auth.token) return;
 
 			setAuth({
 				token: resp.token,
@@ -74,6 +80,12 @@
 		} finally {
 			switching = false;
 		}
+	}
+
+	function openCreateProject() {
+		if (mockupActive) return;
+		isOpen = false;
+		showCreateModal = true;
 	}
 
 	function handleClickOutside(event: MouseEvent) {
@@ -139,28 +151,30 @@
 					{/each}
 				</div>
 			{/if}
-			<div class="border-t border-gray-800">
-				<button
-					onclick={() => { isOpen = false; showCreateModal = true; }}
-					class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-				>
-					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
-					새 프로젝트
-				</button>
-				<a
-					href="/dashboard/project-settings"
-					onclick={() => { isOpen = false; }}
-					class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
-				>
-					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-					프로젝트 설정
-				</a>
-			</div>
+			{#if !mockupActive}
+				<div class="border-t border-gray-800">
+					<button
+						onclick={openCreateProject}
+						class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+					>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+						새 프로젝트
+					</button>
+					<a
+						href="/dashboard/project-settings"
+						onclick={() => { isOpen = false; }}
+						class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+					>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+						프로젝트 설정
+					</a>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
 
-{#if showCreateModal}
+{#if showCreateModal && !mockupActive}
 	<CreateProjectModal
 		onClose={() => (showCreateModal = false)}
 		onSuccess={(proj) => {

@@ -68,6 +68,16 @@ def is_db_available() -> bool:
     return True
 
 
+def is_db_configured() -> bool:
+    """Return whether this process has a configured database engine.
+
+    Unlike ``is_db_available``, this deliberately ignores the temporary
+    unhealthy circuit state so callers can fail closed rather than silently
+    falling back to an unrelated storage backend.
+    """
+    return _engine is not None
+
+
 def mark_db_unhealthy(seconds: int | None = None) -> None:
     """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환.
 

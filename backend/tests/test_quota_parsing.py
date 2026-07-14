@@ -6,6 +6,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.services.cinder import get_volume_quota
 from app.services.nova import get_project_quota
 
@@ -119,3 +121,98 @@ def test_nova_quota_rest_failure_falls_back_to_limits_api():
     assert q["instances"] == {"limit": 20, "in_use": 5}
     assert q["cores"] == {"limit": 120, "in_use": 78}
     assert q["ram"] == {"limit": 393216, "in_use": 215040}
+
+
+def test_strict_quota_mode_preserves_unlimited_and_zero_usage():
+    nova_conn = _nova_conn(
+        {
+            "instances": {"limit": -1, "in_use": 0},
+            "cores": {"limit": 0, "in_use": 0},
+            "ram": {"limit": 32, "in_use": 0},
+        }
+    )
+    cinder_conn = _cinder_conn(
+        {
+            "volumes": {"limit": -1, "in_use": 0},
+            "gigabytes": {"limit": 0, "in_use": 0},
+        }
+    )
+
+    assert get_project_quota(nova_conn, "proj-1", strict=True)["instances"] == {"limit": -1, "in_use": 0}
+    assert get_project_quota(nova_conn, "proj-1", strict=True)["cores"] == {"limit": 0, "in_use": 0}
+    assert get_volume_quota(cinder_conn, "proj-1", strict=True)["gigabytes"] == {"limit": 0, "in_use": 0}
+
+
+def test_strict_quota_mode_rejects_malformed_data_but_legacy_falls_back():
+    nova_conn = _nova_conn(
+        {
+            "instances": {"limit": "invalid", "in_use": 0},
+            "cores": {"limit": 1, "in_use": 0},
+            "ram": {"limit": 1, "in_use": 0},
+        }
+    )
+    absolute = MagicMock(
+        max_total_instances=9,
+        total_instances_used=2,
+        max_total_cores=9,
+        total_cores_used=2,
+        max_total_ram_size=9,
+        total_ram_used=2,
+        max_total_keypairs=1,
+        max_server_groups=1,
+    )
+    nova_conn.compute.get_limits.return_value = MagicMock(absolute=absolute)
+
+    with pytest.raises(ValueError):
+        get_project_quota(nova_conn, "proj-1", strict=True)
+    assert get_project_quota(nova_conn, "proj-1")["instances"] == {"limit": 9, "in_use": 2}
+
+
+def test_legacy_quota_mode_falls_back_for_runtime_errors():
+    nova_conn = MagicMock()
+    nova_conn.compute.get_endpoint.return_value = "http://nova:8774/v2.1"
+    nova_conn.session.get.side_effect = RuntimeError("down")
+    nova_absolute = MagicMock(
+        max_total_instances=4,
+        total_instances_used=1,
+        max_total_cores=4,
+        total_cores_used=1,
+        max_total_ram_size=4,
+        total_ram_used=1,
+        max_total_keypairs=1,
+        max_server_groups=1,
+    )
+    nova_conn.compute.get_limits.return_value = MagicMock(absolute=nova_absolute)
+
+    cinder_conn = MagicMock()
+    cinder_conn.block_storage.get_endpoint.return_value = "http://cinder:8776/v3/proj"
+    cinder_conn.session.get.side_effect = RuntimeError("down")
+    cinder_absolute = MagicMock(
+        max_total_volumes=4,
+        total_volumes_used=1,
+        max_total_snapshots=1,
+        total_snapshots_used=0,
+        max_total_volume_gigabytes=4,
+        total_gigabytes_used=1,
+        max_total_backups=1,
+        total_backups_used=0,
+        max_total_backup_gigabytes=1,
+        total_backup_gigabytes_used=0,
+    )
+    cinder_conn.block_storage.get_limits.return_value = MagicMock(absolute=cinder_absolute)
+
+    assert get_project_quota(nova_conn, "proj-1")["instances"] == {"limit": 4, "in_use": 1}
+    assert get_volume_quota(cinder_conn, "proj-1")["volumes"] == {"limit": 4, "in_use": 1}
+
+
+@pytest.mark.parametrize("payload", [None, [], {"quota_set": None}])
+def test_strict_quota_mode_rejects_malformed_top_level_payloads(payload):
+    nova_conn = _nova_conn({})
+    cinder_conn = _cinder_conn({})
+    nova_conn.session.get.return_value.json.return_value = payload
+    cinder_conn.session.get.return_value.json.return_value = payload
+
+    with pytest.raises(ValueError):
+        get_project_quota(nova_conn, "proj-1", strict=True)
+    with pytest.raises(ValueError):
+        get_volume_quota(cinder_conn, "proj-1", strict=True)

@@ -97,6 +97,12 @@ EXPECTED_PUBLIC = frozenset(
         ("GET", "/api/v1/sd/prometheus/libvirt-targets"),
         # refresh 토큰으로 자체 인증 (만료된 access token 갱신용)
         ("POST", "/api/v1/auth/refresh"),
+        # VPN 에이전트(VM 내부) — Bearer report_token(vpn_agent_auth)으로 자체 인증
+        # (Keystone X-Auth-Token 불가). instance_health.report 패턴과 동일하게
+        # FastAPI Depends()가 아닌 핸들러 내부 _verify_and_bind()로 fail-closed 검증.
+        ("POST", "/api/v1/vpn/servers/{server_id}/agent/register"),
+        ("GET", "/api/v1/vpn/servers/{server_id}/agent/desired-state"),
+        ("POST", "/api/v1/vpn/servers/{server_id}/agent/status"),
     }
 )
 

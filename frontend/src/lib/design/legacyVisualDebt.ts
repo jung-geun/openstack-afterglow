@@ -837,25 +837,9 @@ export const LEGACY_VISUAL_DEBT: VisualDebtBaseline = {
 		count: 59,
 		tokens: ["bg-blue-500","bg-blue-600","bg-gray-700","bg-gray-800","bg-gray-900","bg-green-900/30","border-blue-500","border-blue-700","border-blue-900","border-gray-600","border-gray-800","border-gray-800/50","border-red-700","border-red-900","text-blue-300","text-blue-400","text-gray-200","text-gray-300","text-gray-400","text-gray-500","text-gray-600","text-green-400","text-red-300","text-red-400"],
 	},
-	"frontend/src/lib/components/dashboard/overview/DashboardGreetingHeader.svelte": {
-		count: 2,
-		tokens: ["text-gray-400","text-gray-500"],
-	},
-	"frontend/src/lib/components/dashboard/overview/DashboardStatTiles.svelte": {
-		count: 2,
-		tokens: ["bg-gray-900","border-gray-800"],
-	},
-	"frontend/src/lib/components/dashboard/overview/QuotaUsageCard.svelte": {
-		count: 8,
-		tokens: ["bg-amber-400","bg-blue-500","bg-cyan-400","bg-gray-800","bg-gray-900","bg-teal-400","bg-violet-400","border-gray-800"],
-	},
 	"frontend/src/lib/components/dashboard/overview/RangeToggle.svelte": {
 		count: 2,
 		tokens: ["bg-gray-700","bg-gray-800"],
-	},
-	"frontend/src/lib/components/dashboard/overview/RecentInstancesCard.svelte": {
-		count: 14,
-		tokens: ["bg-[#0B1220]","bg-gray-800","bg-gray-800/30","bg-gray-900","border-gray-800","text-gray-200","text-gray-300","text-gray-400","text-gray-500","text-gray-600"],
 	},
 	"frontend/src/lib/components/dashboard/routers/id/RouterDetailHeader.svelte": {
 		count: 13,

@@ -342,10 +342,10 @@ async def test_traffic_libvirt_query_uses_openstack_info_join(client, mock_conn)
     assert len(lv_calls) == 2
     for q in lv_calls:
         # 1단계 join: target_device 기준 mac_address 붙이기
-        assert "* on (domain, target_device) group_left(mac_address)" in q
+        assert "* on (instance, domain, target_device) group_left(mac_address)" in q
         assert "libvirt_domain_interface_stats_info" in q
         # 2단계 join: domain 기준 instance_id 붙이기
-        assert "* on (domain) group_left(instance_id)" in q
+        assert "* on (instance, domain) group_left(instance_id)" in q
         assert "libvirt_domain_openstack_info" in q
 
 
@@ -506,8 +506,8 @@ async def test_traffic_libvirt_promql_uses_double_group_left(client, mock_conn):
     ]
     assert len(lv_calls) == 2
     for q in lv_calls:
-        assert "* on (domain, target_device) group_left(mac_address)" in q
-        assert "* on (domain) group_left(instance_id)" in q
+        assert "* on (instance, domain, target_device) group_left(mac_address)" in q
+        assert "* on (instance, domain) group_left(instance_id)" in q
 
 
 # ── 테스트: all_projects 파라미터 ─────────────────────────────────────────────

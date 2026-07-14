@@ -9,6 +9,8 @@
 	import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
 
 	type BetaFeatureKey = keyof BetaFeatures;
+	const mockupAdminActive = $derived($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin');
+
 
 	const sections = $state([
 		{
@@ -107,6 +109,7 @@
 				{ label: '서비스 상태', href: '/admin/services', service: null },
 				{ label: '고아 리소스', href: '/admin/orphans', service: null },
 				{ label: 'Notion 연동', href: '/admin/notion', service: null },
+				{ label: '공지 관리', href: '/admin/announcements', service: null },
 				{ label: '기본 설정', href: '/admin/settings', service: null },
 			],
 		},
@@ -153,6 +156,7 @@
 	}
 
 	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+		if (mockupAdminActive) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!isBetaVisible(section.beta)) return false;
 		if (section.service && !(svcs?.[section.service] ?? false)) return false;

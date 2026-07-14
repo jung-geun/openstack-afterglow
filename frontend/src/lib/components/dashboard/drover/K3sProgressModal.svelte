@@ -15,7 +15,7 @@
 </script>
 
 <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-	<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+	<div data-tour="drover-progress" class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
 		<h2 class="text-lg font-semibold text-white mb-4">
 			{controller.mode === 'delete' ? 'Drover 클러스터 삭제' : 'Drover 클러스터 생성'}
 		</h2>

@@ -26,6 +26,7 @@ Afterglow는 OpenStack 클라우드 환경을 위한 오픈소스 웹 대시보�
 | [아키텍처](architecture.md) | 시스템 설계 및 플로우 |
 | [API 레퍼런스](api-reference.md) | REST API 전체 명세 |
 | [국소 기능테스트](testing.md) | 개발 중 빠르게 실행할 테스트 타깃 선택 가이드 |
+| [클래스·workflow 다이어그램](class-diagrams/) | 모듈 관계와 주요 resource 작업 흐름 |
 
 ---
 

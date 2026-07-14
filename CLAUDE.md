@@ -151,17 +151,21 @@ git push origin dev
 
 ### 설정 파일 동기화 의무
 
-**`config.toml` 항목 추가·변경 시 반드시 함께 갱신:**
+> `afterglow.conf`가 신규 기본 설정 파일명이다(TOML 문법 유지). `config.toml`/`afterglow.toml`은 기존 배포
+> 호환을 위해 `backend/app/config.py`가 계속 읽어들이지만, 예시/문서화 파일은 `afterglow.conf.example`
+> 하나만 유지한다(`config.toml.example`은 제거됨 — 재생성 금지).
+
+**`afterglow.conf` 항목 추가·변경 시 반드시 함께 갱신:**
 - `backend/app/config.py` — `_load_toml()` flat dict + `Settings` 클래스 필드
 - `generate_k8s.py` — 비밀 값은 `render_secret()`, 일반 값은 `_render_toml_for_k8s()`
-- `config.toml.example` — 새 항목을 예시/주석과 함께 문서화
+- `afterglow.conf.example` — 새 항목을 예시/주석과 함께 문서화
 
 **`backend/app/config.py` 필드 추가·변경 시 반드시 함께 갱신:**
 - `generate_k8s.py` — K8s 배포 시 configmap 또는 secret에 포함되도록
-- `config.toml.example` — 해당 TOML 키가 예시 파일에 존재하도록
+- `afterglow.conf.example` — 해당 TOML 키가 예시 파일에 존재하도록
 
 > 비밀 값(password, secret, token, key) 기준: `render_secret()` → secret.yaml 환경변수로 주입.
-> 나머지는 `_render_toml_for_k8s()` → configmap의 config.toml 인라인에 포함.
+> 나머지는 `_render_toml_for_k8s()` → configmap의 afterglow.conf 인라인에 포함.
 
 ### API 버전 규칙
 

@@ -9,6 +9,16 @@ const readmeSource = readFileSync(resolve(repoRoot, 'README.md'), 'utf8');
 const agentsPath = resolve(repoRoot, '../AGENTS.md');
 const agentsSource = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : '';
 const uiIndexSource = readFileSync(resolve(repoRoot, 'src/lib/components/ui/index.ts'), 'utf8');
+const tokenSource = readFileSync(resolve(repoRoot, 'src/lib/design/tokens.ts'), 'utf8');
+
+const editorialTokenNames = [
+	'--gradient-editorial-canvas',
+	'--pattern-editorial-grid',
+	'--gradient-editorial-grid-mask',
+	'--gradient-editorial-cta',
+	'--color-surface-editorial-media',
+];
+
 
 const designTokenNames = [
 	'--color-surface-canvas',
@@ -59,6 +69,18 @@ describe('design system source contracts', () => {
 		expect(designSource).toContain('새 색상·gradient·badge tone·table density·form control·card treatment가 필요하면');
 		expect(designSource).toContain('새 route/component file은 raw hex');
 		for (const token of designTokenNames) expect(designSource).toContain(token);
+	});
+
+	it('keeps editorial public-surface tokens and panel composition documented', () => {
+		for (const token of editorialTokenNames) {
+			expect(layoutSource).toContain(token);
+			expect(tokenSource).toContain(token);
+			expect(designSource).toContain(token);
+		}
+		expect(tokenSource).toContain('EDITORIAL_CSS_VAR');
+		expect(designSource).toContain('Approved panel composition');
+		expect(designSource).toContain('Card surface="subtle"');
+		expect(designSource).toContain('method matrix is one Card');
 	});
 
 	it('links tracked frontend docs and optional local agent instructions to the canonical design system', () => {

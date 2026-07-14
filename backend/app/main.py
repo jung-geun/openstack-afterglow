@@ -114,12 +114,14 @@ _mark("fastapi")
 # app.api.common
 # ---------------------------------------------------------------------------
 from app.api.common import (
+    announcements_router,
     dashboard_router,
     grafana_auth_router,
     libraries_router,
     metrics_router,
     sd_targets_router,
     site_router,
+    tutorial_status_router,
     user_dashboard_router,
 )
 from app.api.common.metrics import record_request as _record_request
@@ -152,6 +154,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router, gitlab_auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
+from app.api.identity.admin_announcements import router as admin_announcements_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
@@ -260,7 +263,8 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             request.url.path,
             exc.detail,
         )
-        return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
+        detail = exc.detail if getattr(exc, "_afterglow_safe_public_detail", False) else "내부 서버 오류"
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail})
     if exc.status_code == 400:
         cause = getattr(exc, "__cause__", None)
         _logger.warning(
@@ -309,7 +313,10 @@ async def k3s_api_error_handler(request: Request, exc: K3sApiError) -> JSONRespo
             request.url.path,
             exc.detail,
         )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        detail = exc.detail if getattr(exc, "_afterglow_safe_public_detail", False) else "내부 서버 오류"
+    else:
+        detail = exc.detail
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
 @app.exception_handler(Exception)
@@ -327,6 +334,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/volumes/backups", "volume_backup"),
+    ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
     ("/api/v1/share-snapshots", "share_snapshot"),
     ("/api/v1/share-networks", "share_network"),
@@ -340,6 +348,7 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/libraries/squashfs", "union_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
+    ("/api/v1/vpn/servers", "vpn_server"),
     ("/api/v1/loadbalancers", "load_balancer"),
     ("/api/v1/k3s/clusters", "container_cluster"),
     ("/api/v1/file-storage", "file_storage"),
@@ -517,6 +526,7 @@ app.include_router(profile_activity_router, prefix="/api/v1/profile/activity", t
 app.include_router(admin_activity_router, prefix="/api/v1/admin", tags=["admin-activity"])
 app.include_router(admin_orphans_router, prefix="/api/v1/admin", tags=["admin-orphans"])
 app.include_router(admin_dashboard_router, prefix="/api/v1/admin", tags=["admin-dashboard"])
+app.include_router(admin_announcements_router, prefix="/api/v1/admin/announcements", tags=["admin-announcements"])
 app.include_router(projects_router, prefix="/api/v1/projects", tags=["projects"])
 app.include_router(invitations_router, prefix="/api/v1/invitations", tags=["invitations"])
 # Compute
@@ -592,7 +602,21 @@ if _svc_cfg.service_barbican_enabled:
     app.include_router(containers_router, prefix="/api/v1/secret-containers", tags=["secret-containers"])
     app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
     app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
+if _svc_cfg.service_vpn_enabled:
+    from app.api.vpn import vpn_agent_router, vpn_clients_router, vpn_servers_router
+
+    # VPN — servers/clients(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
+    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/agent/register 등) 충돌 없음.
+    app.include_router(vpn_servers_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
+    app.include_router(vpn_clients_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
+    app.include_router(vpn_agent_router, prefix="/api/v1/vpn/servers", tags=["vpn-agent"])
+if _svc_cfg.service_chat_enabled:
+    from app.api.chat import chat_usage_router
+
+    app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
+app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
+app.include_router(tutorial_status_router, prefix="/api/v1/tutorials", tags=["tutorials"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/v1/metrics", tags=["metrics"])
 app.include_router(squashfs_libraries_router, prefix="/api/v1/libraries/squashfs", tags=["squashfs-libraries"])

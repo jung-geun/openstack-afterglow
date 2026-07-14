@@ -1,5 +1,45 @@
 @import 'tailwindcss';
 
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-ExtraLight.ttf') format('truetype');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MaruBuri";
+  src: url('/fonts/maruburi/MaruBuri-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Design system theme tokens */
 @theme static {
   /* Surface */
@@ -28,7 +68,7 @@
   --color-state-info: #5ed4e4;
   --color-state-neutral: #8a93a4;
   /* Font */
-  --font-sans: "Geist", Inter, system-ui, sans-serif;
+  --font-sans: "MaruBuri", "Geist", Inter, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
@@ -47,6 +87,11 @@
   --gradient-usage: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-2) 45%, var(--color-warm) 100%);
   --gradient-usage-warning: linear-gradient(90deg, var(--color-state-warning) 0%, var(--color-warm) 100%);
   --gradient-usage-danger: linear-gradient(90deg, var(--color-state-danger) 0%, var(--color-warm) 100%);
+  --gradient-editorial-canvas: radial-gradient(circle at 18% 8%, color-mix(in oklab, var(--color-warm), transparent 78%), transparent 28rem), radial-gradient(circle at 88% 12%, color-mix(in oklab, var(--color-accent), transparent 82%), transparent 30rem), linear-gradient(180deg, var(--color-surface-canvas), color-mix(in oklab, var(--color-surface-canvas), black 10%) 52%, var(--color-surface-canvas));
+  --pattern-editorial-grid: linear-gradient(color-mix(in oklab, var(--color-line), transparent 34%) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--color-line), transparent 34%) 1px, transparent 1px);
+  --gradient-editorial-grid-mask: linear-gradient(180deg, black, transparent 82%);
+  --gradient-editorial-cta: linear-gradient(135deg, color-mix(in oklab, var(--color-warm), transparent 82%), transparent 58%);
+  --color-surface-editorial-media: oklch(13.4% 0.012 264.7);
   --glow-warm: 0 8px 24px color-mix(in oklab, var(--color-warm) 25%, transparent);
   --glow-accent: 0 8px 24px color-mix(in oklab, var(--color-accent) 25%, transparent);
   --focus-ring: 0 0 0 3px var(--accent-ring);
@@ -71,6 +116,7 @@
 html,
 body {
   background-color: var(--color-surface-canvas);
+  font-family: var(--font-sans);
 }
 
 /* Light theme token overrides */
@@ -108,6 +154,8 @@ body {
   --color-topology-internal: #2563eb;
   --color-topology-router: #64748b;
   --color-topology-link: #94a3b8;
+  /* 랜딩 플레이트(인라인 SVG) 레터박스 배경 — 라이트 모드에서 밝은 표면으로 전환 */
+  --color-surface-editorial-media: #eef2f8;
   /* 배경 색상 오버라이드 */
   --tw-bg-base: #ffffff;
 }
@@ -444,3 +492,69 @@ body {
 :root.light button.bg-red-700,
 :root.light a.bg-red-700 { color: #ffffff !important; }
 :root.light .bg-red-700.text-white { color: #ffffff !important; }
+
+/* ============================================================
+   튜토리얼 투어 팝오버 (driver.js) — 디자인 토큰 정합
+   ============================================================ */
+.driver-popover.afterglow-tour {
+	background: var(--color-surface-raised);
+	color: var(--color-ink-0);
+	border: 1px solid var(--color-line);
+	border-radius: 0.75rem;
+	box-shadow: var(--glow-warm);
+	max-width: 22rem;
+}
+.driver-popover.afterglow-tour .driver-popover-title {
+	color: var(--color-ink-0);
+	font-size: 0.9375rem;
+	font-weight: 600;
+}
+.driver-popover.afterglow-tour .driver-popover-description {
+	color: var(--color-ink-1);
+	font-size: 0.8125rem;
+	line-height: 1.55;
+}
+.driver-popover.afterglow-tour .driver-popover-footer button {
+	background: var(--color-surface-sunken);
+	color: var(--color-ink-1);
+	border: 1px solid var(--color-line);
+	border-radius: 0.5rem;
+	padding: 0.25rem 0.75rem;
+	font-size: 0.75rem;
+	text-shadow: none;
+}
+.driver-popover.afterglow-tour .driver-popover-footer button:hover {
+	color: var(--color-ink-0);
+	background: color-mix(in oklab, var(--color-surface-sunken) 78%, var(--color-ink-0));
+}
+.driver-popover.afterglow-tour .driver-popover-footer .driver-popover-next-btn {
+	background: var(--gradient-warm);
+	color: var(--color-action-on-warm);
+	border-color: transparent;
+}
+.driver-popover.afterglow-tour .driver-popover-arrow-side-left.driver-popover-arrow { border-left-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-right.driver-popover-arrow { border-right-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-top.driver-popover-arrow { border-top-color: var(--color-surface-raised); }
+.driver-popover.afterglow-tour .driver-popover-arrow-side-bottom.driver-popover-arrow { border-bottom-color: var(--color-surface-raised); }
+
+/* Landing plate graphics — theme-aware inline SVG palette.
+   Presentation attributes (fill=/stroke=) do not resolve var(), so colors are
+   applied via these fill/stroke classes. Global (not Svelte-scoped) because the
+   markup is injected with {@html}. Every color maps to a theme token that flips
+   between dark and light mode, so the plates follow the active theme. */
+.plate-graphic .pf-canvas { fill: var(--color-surface-canvas); }
+.plate-graphic .pf-surface { fill: var(--color-surface-raised); }
+.plate-graphic .pf-line { fill: var(--color-line-2); }
+.plate-graphic .pf-ink { fill: var(--color-ink-0); }
+.plate-graphic .pf-warm { fill: var(--color-warm); }
+.plate-graphic .pf-accent { fill: var(--color-accent); }
+.plate-graphic .pf-violet { fill: var(--color-accent-2); }
+.plate-graphic .pf-green { fill: var(--color-state-success); }
+.plate-graphic .ps-canvas { stroke: var(--color-surface-canvas); }
+.plate-graphic .ps-surface { stroke: var(--color-surface-raised); }
+.plate-graphic .ps-line { stroke: var(--color-line-2); }
+.plate-graphic .ps-ink { stroke: var(--color-ink-0); }
+.plate-graphic .ps-warm { stroke: var(--color-warm); }
+.plate-graphic .ps-accent { stroke: var(--color-accent); }
+.plate-graphic .ps-violet { stroke: var(--color-accent-2); }
+.plate-graphic .ps-green { stroke: var(--color-state-success); }

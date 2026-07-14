@@ -18,6 +18,8 @@ const baseConfig: PublicSiteConfig = {
 		api_base: '',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 

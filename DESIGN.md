@@ -26,11 +26,24 @@ Afterglow는 dark-first cloud operations UI다. 기본 감성은 고밀도 운�
 | `--color-state-info` | `#5ed4e4` | `#2563eb` | info/in-progress stable |
 | `--color-state-neutral` | `#8a93a4` | `#64748b` | neutral/unknown |
 
+## Typography tokens
+
+- `--font-sans`는 `MaruBuri`, `Geist`, `Inter`, `system-ui`, `sans-serif` 순서다. 한국어 본문과 제목은 사용자가 제공한 MaruBuri TTF를 `frontend/static/fonts/maruburi/` 경로로 서비스해 200/300/400/600/700 weight를 우선 사용하고, 라틴/미지원 글리프는 Geist/Inter로 fallback한다.
+- 전역 `html, body`는 `font-family: var(--font-sans)`를 사용한다. 새 화면에서 한국어 전용 폰트를 다시 선언하지 말고 토큰을 재사용한다.
+
 ## Gradient rules
 
 - `--gradient-brand: linear-gradient(135deg, var(--color-warm), var(--color-accent-2))`는 logo/brand text/highlight only.
 - `--gradient-warm: linear-gradient(135deg, var(--color-warm), var(--color-warm-2))`는 `Button variant="primary"`와 one-primary-CTA-per-surface only.
 - `--gradient-usage`, `--gradient-usage-warning`, `--gradient-usage-danger`는 quantitative usage bars only. Progress/usage 임계값 기본값은 warning `>=80`, danger `>=95`; 기존 특정 리소스가 다른 임계값을 쓰면 `UsageBar` props로 명시한다.
+
+### Editorial public surfaces
+
+- `--gradient-editorial-canvas`, `--pattern-editorial-grid`, and `--gradient-editorial-grid-mask` are public/editorial surfaces. They are dark-first but resolve through the standard color-token mapping under `html.light`.
+- `--color-surface-editorial-media` is the theme-invariant dark canvas behind static editorial SVG plates. It keeps `contain` media complete without exposing light letterbox bands.
+- `--gradient-editorial-cta` is limited to the single closing editorial panel; it never replaces `Button variant="primary"`.
+- Approved external SVG plates may retain their equivalent embedded palette only when loaded through `<img>`.
+- Approved panel composition: `Card surface="subtle"` is the visual surface around semantic outer capability/workflow articles; the method matrix is one Card around direct semantic step articles.
 
 ## New UI entity rules
 

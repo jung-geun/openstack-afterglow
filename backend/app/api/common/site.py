@@ -27,6 +27,8 @@ class SiteServicesResponse(BaseModel):
     trove: bool
     swift: bool
     barbican: bool
+    vpn: bool
+    chat: bool
 
 
 class PublicSiteConfigResponse(BaseModel):

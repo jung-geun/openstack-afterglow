@@ -11,11 +11,13 @@ const DEFAULTS: SiteConfig = {
 	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
-	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false, vpn: false, chat: false },
 	runtime: {
 		api_base: '',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 
@@ -28,6 +30,14 @@ export function initSiteConfig(config: Partial<PublicSiteConfig>): void {
 		services: { ...current.services, ...(config.services ?? {}) },
 		runtime: { ...current.runtime, ...(config.runtime ?? {}) },
 	}));
+}
+
+export function replaceSiteConfig(config: PublicSiteConfig): void {
+	siteConfig.set({
+		...config,
+		services: { ...config.services },
+		runtime: { ...config.runtime },
+	});
 }
 
 export function qualifyBackendAssetPaths(config: Partial<PublicSiteConfig>, apiBase: string): Partial<PublicSiteConfig> {

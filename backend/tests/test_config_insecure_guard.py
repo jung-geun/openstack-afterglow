@@ -114,3 +114,35 @@ def test_development_with_short_nondefault_key_succeeds():
         }
     )
     assert settings.secret_key == "dev-short-key"
+
+
+def test_production_with_docker_worker_runtime_fails_fast():
+    """production + worker_runtime.mode=docker → ValueError.
+
+    docker 모드는 호스트 Docker 소켓(root 등가) 마운트가 필요하므로 멀티테넌트 프로덕션
+    부팅을 fail-closed 로 거부한다. 강한 키를 줘 docker 가드만 격리 검증한다.
+    """
+    from app.config import Settings
+
+    # 전역 AFTERGLOW_ALLOW_INSECURE 를 비워 docker 가드만 격리(그렇지 않으면 insecure 검사가 먼저 걸림).
+    with patch.dict(os.environ, {"AFTERGLOW_ENV": "production", "AFTERGLOW_ALLOW_INSECURE": ""}, clear=False):
+        with pytest.raises(ValueError, match="worker_runtime.mode='docker'"):
+            Settings(secret_key="a" * 64, worker_runtime_mode="docker")
+
+
+def test_production_with_kubernetes_worker_runtime_succeeds():
+    """production + worker_runtime.mode=kubernetes → 부팅 허용 (docker 가드 오탐 없음)."""
+    from app.config import Settings
+
+    with patch.dict(os.environ, {"AFTERGLOW_ENV": "production", "AFTERGLOW_ALLOW_INSECURE": ""}, clear=False):
+        settings = Settings(secret_key="a" * 64, worker_runtime_mode="kubernetes")
+    assert settings.worker_runtime_mode == "kubernetes"
+
+
+def test_development_with_docker_worker_runtime_succeeds():
+    """dev 환경에서는 docker 모드가 허용된다(단일 신뢰 호스트 개발 경로)."""
+    from app.config import Settings
+
+    with patch.dict(os.environ, {"AFTERGLOW_ENV": "development", "AFTERGLOW_ALLOW_INSECURE": "1"}, clear=False):
+        settings = Settings(secret_key="a" * 64, worker_runtime_mode="docker")
+    assert settings.worker_runtime_mode == "docker"

@@ -15,6 +15,7 @@
   import VolumesLoadingState from '$lib/components/volume/VolumesLoadingState.svelte';
   import VolumesEmptyState from '$lib/components/volume/VolumesEmptyState.svelte';
   import VolumesModalStack from '$lib/components/volume/VolumesModalStack.svelte';
+  import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
   import { betaFeatures } from '$lib/stores/betaFeatures';
 
   const ctrl = createVolumesController({
@@ -51,6 +52,7 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="VOLUMES / BLOCK VOLUMES" title="블록 볼륨">
     {#snippet actions()}
+      <TutorialStartButton tour="volume" />
       <AutoRefreshControl
         bind:active={ar.active}
         bind:intervalSeconds={ar.intervalSeconds}
@@ -58,7 +60,7 @@
         refreshing={ctrl.refreshing}
         onManualRefresh={() => ctrl.fetchAll()}
       />
-      <button onclick={() => ctrl.showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
+      <button data-tour="volume-create-open" onclick={() => ctrl.showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
     {/snippet}
   </PageHeader>
 
@@ -73,6 +75,7 @@
     <VolumesTabs bind:tab={ctrl.tab} volumeCount={ctrl.volumes.length} snapshotCount={ctrl.snapshots.length} showSnapshots={$betaFeatures.volumeSnapshots} />
 
     {#if ctrl.tab === 'volumes'}
+      <div data-tour="volume-list">
       <VolumeListTable
         volumes={ctrl.volumes}
         selectedVolumeId={ctrl.selectedVolumeId}
@@ -95,6 +98,7 @@
         volumeBackupsEnabled={$betaFeatures.volumeBackups}
         volumeSnapshotsEnabled={$betaFeatures.volumeSnapshots}
       />
+      </div>
     {:else}
       <SnapshotListTable
         snapshots={ctrl.snapshots}

@@ -1,12 +1,14 @@
 """Common API routers — lazy import to reduce startup time."""
 
 _ROUTERS = {
+    "announcements_router": ".announcements",
     "dashboard_router": ".dashboard",
     "grafana_auth_router": ".grafana_auth",
     "libraries_router": ".libraries",
     "metrics_router": ".metrics",
     "sd_targets_router": ".sd_targets",
     "site_router": ".site",
+    "tutorial_status_router": ".tutorial_status",
     "user_dashboard_router": ".user_dashboard",
 }
 

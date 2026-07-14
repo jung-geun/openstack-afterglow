@@ -1,8 +1,18 @@
 <script lang="ts">
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
+	import { auth } from '$lib/stores/auth';
 	import { wizardOpen } from '$lib/stores/wizard';
+	import { loadTutorialStatuses } from '$lib/tutorial/status';
 	let { children } = $props();
+
+	// 로그인 사용자의 튜토리얼 이력을 조회해, 미체험 투어 버튼 강조 판정에 사용한다.
+	// 하드 새로고침 시 auth 토큰 복원은 비동기이므로 onMount 일회성이 아니라 토큰이
+	// 준비된 뒤 반응해 조회한다(loadTutorialStatuses 는 멱등 → 최초 1회만 실제 로드).
+	// (status 모듈 import 로 'afterglow:tour-complete' 완료 리스너도 등록된다.)
+	$effect(() => {
+		if ($auth.token) void loadTutorialStatuses();
+	});
 </script>
 
 <!--

@@ -28,7 +28,7 @@ trash_retention_days = 30   # 휴지통 보관 기간 (일). 이 기간 이후 �
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
 manila_share_network_id = ""
 manila_share_type = "cephfs"
-manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
+manila_nfs_share_type = "cephfsnfstype"  # NFS 프로토콜용 share type
 manila_nfs_root_squash = true      # NFS access rule root_squash 강제 (보안 기본값)
 manila_nfs_sec_flavor = "sys"      # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
 manila_cephx_key_timeout_seconds = 300  # CephX key 발급 폴링 최대 대기(초). devstack 환경에선 300 이상 권장.
@@ -154,6 +154,8 @@ k3s = false         # k3s 자체 관리 Kubernetes 클러스터
 swift = false       # 오브젝트 스토리지
 trove = false       # DBaaS (Database as a Service)
 barbican = false    # Key Manager (시크릿/인증서 관리)
+vpn = false         # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정 필수)
+chat = false        # AI 채팅 — LibreChat 임베드 (활성화 시 [chat] 섹션 설정 필수)
 
 [k3s]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,6 +296,56 @@ stampede_scale_down_cooldown = 300              # scale-down 쿨다운 (초)
 stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부하 가중치 (0~1)
 
 
+[worker_runtime]
+# Background worker runtime manager.
+# Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests
+# (the [worker_runtime] block is inert; workers run from those manifests).
+# docker/kubernetes modes are explicit opt-in and never auto-detected.
+#
+# Activation:
+#   docker mode     -> use docker-compose.worker-runtime.yml overlay (fills the [worker_runtime.docker] block below)
+#   kubernetes mode -> set mode via Helm values-<env>.yaml (workerRuntime.mode + kubernetes.rbac.create=true)
+# At the default max_replicas = 1 the manager can only toggle 0<->1 (pause/resume) via
+#   PATCH /api/v1/admin/worker-runtime/desired; true multi-replica scaling needs a higher
+#   max_replicas AND verified worker concurrency-safety.
+mode = "static"                  # static | docker | kubernetes
+reconcile_interval = 30           # seconds; 0 disables the backend reconcile loop
+fail_closed = true                # reserved: parsed but not yet consumed by adapters
+
+[worker_runtime.workers.drover]
+enabled = true
+desired_replicas = 1
+max_replicas = 1                  # raise only after verifying parallel drover safety
+module = "app.worker"
+
+[worker_runtime.workers.notion_worker]
+enabled = true
+desired_replicas = 1
+max_replicas = 1
+module = "app.notion_worker"
+
+[worker_runtime.docker]
+# Docker mode requires the backend container to have an explicit Docker socket mount
+# plus host-visible bind source paths. These are intentionally empty by default so
+# opt-in Docker mode reports unavailable instead of creating broken containers.
+socket_path = ""                  # e.g. /var/run/docker.sock
+image = ""                        # required when mode = "docker"
+network = ""                      # optional Docker network name
+config_mount = "/app/afterglow.conf"
+config_host_path = ""             # host path for afterglow.conf, not backend-container path
+gpu_config_mount = "/app/config.gpu.toml"
+gpu_config_host_path = ""         # optional host path for config.gpu.toml
+logs_mount = "/app/logs"
+logs_host_path = ""               # optional host path for worker logs
+env_allowlist = "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+
+[worker_runtime.kubernetes]
+namespace = "afterglow"
+service_account_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+service_account_ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+manage_deployments = false        # v1: must remain false; managed Deployment creation is not exposed
+
+
 [builder]
 # 라이브러리 빌드 전용 영구 VM 설정 (SSH 기반 빌드 파이프라인)
 # services.manila = true 환경에서 라이브러리 레이어를 미리 빌드할 때 사용
@@ -342,6 +394,23 @@ layer_share_size_gb = 20
 layer_store_rw_share_id = ""    # (레거시) 단일 layer-store-rw share ID (미설정 시 무시)
 layer_store_ro_share_id = ""    # (레거시) 단일 layer-store-ro share ID (미설정 시 무시)
 manifest_store_share_id = ""    # manifest-store Manila share ID
+
+
+[vpn]
+# WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
+# 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다.
+# services.vpn = true 여야 라우터가 등록되고 사이드바에 노출된다.
+provider_network_id = ""       # VPN VM이 부팅될 provider 네트워크 ID (필수)
+flavor_name = "cpu.1c_2g"      # flavor 이름으로 해석 (flavor_id 설정 시 이름 조회 생략)
+flavor_id = ""                 # 설정 시 이름 조회 없이 바로 사용
+image_id = ""                  # VPN VM 부팅 이미지 ID (Ubuntu 22.04+, 필수)
+floating_network_id = ""       # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
+callback_base_url = ""         # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
+                               # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
+key_name = ""                  # VPN VM에 연결할 Nova keypair 이름 (옵션, SSH 디버깅용)
+default_tunnel_cidr = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값 (신규 서버 생성 시 사용)
+default_listen_port = 51820    # WireGuard UDP 리슨 포트 기본값
+# 클라이언트 private key 암호화 키는 k3s.kubeconfig_encryption_key 를 재사용합니다 (신규 시크릿 불필요)
 
 
 [notion]
@@ -433,6 +502,15 @@ openstack_uid = "afterglow-openstack"
 ceph_uid = "afterglow-ceph"
 instance_cpu_uid = "afterglow-instance-cpu"   # CPU 전용 인스턴스 per-VM 대시보드
 instance_gpu_uid = "afterglow-instance-gpu"   # GPU 인스턴스 per-VM 대시보드
+
+
+[chat]
+# 기존에 운영 중인 LibreChat 인스턴스를 대시보드에 iframe으로 임베드하고,
+# 사용자별 토큰 사용량을 읽기 전용으로 미러링하기 위한 설정.
+# 신규 LibreChat/MongoDB 배포가 아니라 기존 인스턴스를 그대로 연동한다.
+base_url = ""    # LibreChat 외부 URL (예: https://chat.dmslab.re.kr)
+                 # 이 값은 frontend 의 PUBLIC_LIBRECHAT_BASE 로도 주입되어 CSP frame-src 에 포함됩니다
+mongo_url = ""   # LibreChat MongoDB 읽기 전용 접속 URL (secret.yaml에서 주입, 예: mongodb://readonly:pass@host:27017/LibreChat)
 
 
 [smtp]

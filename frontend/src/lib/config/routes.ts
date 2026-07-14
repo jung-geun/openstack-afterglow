@@ -9,6 +9,7 @@ export const ROUTE_LABELS: Record<string, string> = {
 
   // Overview
   'my-resources': '내 리소스',
+  notifications: '알림함',
 
   // Compute
   compute: 'COMPUTE',
@@ -42,6 +43,9 @@ export const ROUTE_LABELS: Record<string, string> = {
   'object-storage': 'OBJECT STORAGE',
   buckets: '버킷',
 
+  // Chat
+  chat: 'AI 채팅',
+
   // Network
   network: '네트워크',
   routers: '라우터',
@@ -70,6 +74,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   quotas: '쿼터',
   groups: '그룹',
   roles: '역할',
+  announcements: '공지 관리',
 };
 
 interface BreadcrumbResult {

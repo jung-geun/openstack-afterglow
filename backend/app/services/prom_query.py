@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
@@ -11,6 +12,13 @@ from app.config import get_settings
 _logger = logging.getLogger(__name__)
 
 _client: httpx.AsyncClient | None = None
+
+_SAFE_LABEL_VALUE = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+
+
+def is_safe_label_value(value: object) -> bool:
+    """Allow only plain identifier values before PromQL label interpolation."""
+    return isinstance(value, str) and _SAFE_LABEL_VALUE.fullmatch(value) is not None
 
 
 def _get_client() -> httpx.AsyncClient:

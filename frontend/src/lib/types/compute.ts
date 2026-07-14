@@ -29,6 +29,16 @@ export interface DashboardSummary {
   gpu_used: number;
 }
 
+export type DashboardRecentInstance = Pick<
+  Instance,
+  'id' | 'name' | 'status' | 'flavor_name' | 'ip_addresses' | 'created_at'
+>;
+
+export interface DashboardOverviewSummary {
+  instances: DashboardSummary['instances'];
+  recent_instances: DashboardRecentInstance[];
+}
+
 export interface ImageInfo {
   id: string;
   name: string;

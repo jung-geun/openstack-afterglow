@@ -139,14 +139,18 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(needs.changes.outputs.targets) }}
-        arch: [amd64, arm64]
+        # arm64 빌드 비활성화 — arm64 self-hosted(macOS) 러너가 상시 가동되지 않아
+        # 빌드 잡이 queued 로 정체되고 manifest 병합까지 막혀 :dev 태그가 갱신되지 않았다.
+        # arm64 가 다시 필요하면 아래 원본 2줄(arch 배열 + include 항목)의 주석을 되살린다.
+        # arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - arch: amd64
             runner: [self-hosted, linux, x64]
             platform: linux/amd64
-          - arch: arm64
-            runner: [self-hosted, linux, arm64]
-            platform: linux/arm64
+          # - arch: arm64
+          #   runner: [self-hosted, linux, arm64]
+          #   platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -347,17 +351,28 @@ jobs:
             echo "base=dev" >> $GITHUB_OUTPUT
           fi
 
+      # arm64 빌드 비활성화 상태 — amd64 단일 소스로 최종 태그를 만든다.
+      # arm64 를 되살리면 이 amd64 전용 블록을 주석 처리하고 아래 "원본(2-arch)" 블록을 되살린다.
       - name: Create multi-arch manifest
         run: |
           BASE="${{ steps.tags.outputs.base }}"
           IMG="${{ steps.img.outputs.name }}"
           docker buildx imagetools create \
             -t "${{ steps.tags.outputs.primary }}" \
-            "${IMG}:${BASE}-amd64" \
-            "${IMG}:${BASE}-arm64"
+            "${IMG}:${BASE}-amd64"
           if [ -n "${{ steps.tags.outputs.extra }}" ]; then
             docker buildx imagetools create \
               -t "${{ steps.tags.outputs.extra }}" \
-              "${IMG}:${BASE}-amd64" \
-              "${IMG}:${BASE}-arm64"
+              "${IMG}:${BASE}-amd64"
           fi
+          # ── 원본 (amd64 + arm64 멀티아치) — arm64 러너 복구 시 되살릴 것 ──
+          # docker buildx imagetools create \
+          #   -t "${{ steps.tags.outputs.primary }}" \
+          #   "${IMG}:${BASE}-amd64" \
+          #   "${IMG}:${BASE}-arm64"
+          # if [ -n "${{ steps.tags.outputs.extra }}" ]; then
+          #   docker buildx imagetools create \
+          #     -t "${{ steps.tags.outputs.extra }}" \
+          #     "${IMG}:${BASE}-amd64" \
+          #     "${IMG}:${BASE}-arm64"
+          # fi

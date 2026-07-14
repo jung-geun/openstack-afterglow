@@ -14,6 +14,8 @@ os.environ.setdefault("SERVICE_ZUN_ENABLED", "true")
 os.environ.setdefault("SERVICE_K3S_ENABLED", "true")
 os.environ.setdefault("SERVICE_TROVE_ENABLED", "true")
 os.environ.setdefault("SERVICE_SWIFT_ENABLED", "true")
+os.environ.setdefault("SERVICE_VPN_ENABLED", "true")
+os.environ.setdefault("SERVICE_CHAT_ENABLED", "true")
 
 from unittest.mock import MagicMock
 
@@ -117,48 +119,28 @@ def _reset_rate_limiter():
 
 @pytest.fixture(autouse=True)
 def _fake_redis_global(monkeypatch):
-    """CI 환경에서 Redis 없이 테스트 가능하도록 fakeredis 전역 패치.
-
-    session_store 는 `from app.services.cache import _get_redis` 로 참조를 복사하므로
-    cache 모듈 경로와 session_store 모듈 경로 두 곳을 모두 패치한다.
-    """
+    """Inject one fakeredis backend for every cache path used by unit tests."""
     import fakeredis.aioredis as _fakeredis
 
-    fake = _fakeredis.FakeRedis()
+    from app.services import cache as cache_mod
+    from app.services import k3s_cluster
+    from app.services.cache.redis_backend import RedisBackend
+
+    fake = _fakeredis.FakeRedis(decode_responses=True)
+    cache_mod.set_backend(None)
+    cache_mod.set_backend(RedisBackend(client=fake))
 
     async def _get_fake():
         return fake
 
-    monkeypatch.setattr("app.services.cache._get_redis", _get_fake, raising=False)
+    monkeypatch.setattr(cache_mod, "_get_redis", _get_fake, raising=False)
+    monkeypatch.setattr(cache_mod, "_get_client", lambda: fake, raising=False)
     monkeypatch.setattr("app.services.session_store._get_redis", _get_fake, raising=False)
-    return fake
-
-
-@pytest.fixture(autouse=True)
-async def _flush_afterglow_cache():
-    """각 테스트 시작과 종료 시 afterglow:* Redis 키를 flush.
-
-    cached_call() 캐시가 테스트 간 누수되어 다른 테스트의 cinder.list_snapshots
-    같은 mock 이 호출되지 않는 sequence-dependent flaky 회피. afterglow 자체
-    네임스페이스만 정리하므로 다른 시스템과 독립.
-    """
-
-    async def _flush():
-        try:
-            from app.services.cache import _get_client
-
-            client = _get_client()
-            keys: list = []
-            async for key in client.scan_iter(match="afterglow:*", count=100):
-                keys.append(key)
-            if keys:
-                await client.delete(*keys)
-        except Exception:
-            pass
-
-    await _flush()
-    yield
-    await _flush()
+    monkeypatch.setattr(k3s_cluster, "_get_client", lambda: fake, raising=False)
+    try:
+        yield fake
+    finally:
+        cache_mod.set_backend(None)
 
 
 @pytest.fixture

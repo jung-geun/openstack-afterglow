@@ -363,7 +363,7 @@ describe('getBaseUrl', () => {
 			favicon_path: '/favicon.ico',
 			refresh_interval_ms: 5000,
 			services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
-			runtime: { api_base: 'http://api.example.com', s3_base: '', grafana_base: '' },
+			runtime: { api_base: 'http://api.example.com', s3_base: '', grafana_base: '', librechat_base: '', gitlab_base: '' },
 		});
 		const { getBaseUrl } = await import('../client');
 		expect(getBaseUrl()).toBe('http://api.example.com');

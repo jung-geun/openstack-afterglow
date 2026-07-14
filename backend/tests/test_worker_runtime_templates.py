@@ -76,11 +76,22 @@ def _worker_runtime_rbac_docs(
     return matched
 
 
-def _deployment_rule(role: dict) -> dict:
+def _rule_for(role: dict, resources: list[str]) -> dict:
     for rule in role["rules"]:
-        if rule.get("resources") == ["deployments", "deployments/scale"]:
+        if rule.get("resources") == resources:
             return rule
-    raise AssertionError("missing deployments/deployments/scale rule")
+    raise AssertionError(f"missing rule for {resources}")
+
+
+def _assert_minimal_worker_rbac(role: dict) -> None:
+    """최소권한 확인: deployment 조회 + /scale patch 만, 전체 deployment patch/update·pods 권한 없음.
+
+    SA 토큰 유출 시 image/command 등 deployment 스펙 변경이나 pods 열람을 막기 위함.
+    """
+    assert _rule_for(role, ["deployments"])["verbs"] == ["get"]
+    assert _rule_for(role, ["deployments/scale"])["verbs"] == ["patch"]
+    all_resources = [rule.get("resources") for rule in role["rules"]]
+    assert ["pods"] not in all_resources, "pods 권한은 어댑터 미사용 — 부여 금지"
 
 
 def test_helm_static_render_has_no_worker_runtime_rbac_or_service_account_name():
@@ -122,11 +133,10 @@ def test_helm_kubernetes_mode_with_rbac_renders_worker_runtime_permissions():
     service_account = _find_doc(docs, "ServiceAccount", "custom-worker-runtime")
     role = _find_doc(docs, "Role", "custom-worker-runtime-role")
     role_binding = _find_doc(docs, "RoleBinding", "custom-worker-runtime-binding")
-    deployment_rule = _deployment_rule(role)
 
     assert backend["spec"]["template"]["spec"]["serviceAccountName"] == "custom-worker-runtime"
     assert service_account["metadata"]["labels"][_WORKER_RUNTIME_LABEL] == "true"
-    assert deployment_rule["verbs"] == ["get", "list", "patch", "update"]
+    _assert_minimal_worker_rbac(role)
     assert role_binding["subjects"] == [
         {
             "kind": "ServiceAccount",
@@ -148,11 +158,10 @@ def test_worker_runtime_kustomize_overlay_renders_rbac_and_backend_service_accou
     service_account = _find_doc(docs, "ServiceAccount", "afterglow-backend-worker-runtime")
     role = _find_doc(docs, "Role", "afterglow-backend-worker-runtime-role")
     role_binding = _find_doc(docs, "RoleBinding", "afterglow-backend-worker-runtime-binding")
-    deployment_rule = _deployment_rule(role)
 
     assert backend["spec"]["template"]["spec"]["serviceAccountName"] == "afterglow-backend-worker-runtime"
     assert service_account["metadata"]["labels"][_WORKER_RUNTIME_LABEL] == "true"
-    assert deployment_rule["verbs"] == ["get", "list", "patch", "update"]
+    _assert_minimal_worker_rbac(role)
     assert role_binding["subjects"] == [
         {
             "kind": "ServiceAccount",

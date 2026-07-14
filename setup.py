@@ -4,7 +4,7 @@
 사용법:
     python3 setup.py
 
-config.toml, k8s/secret.yaml, k8s/configmap.yaml을 대화형으로 생성합니다.
+afterglow.conf, k8s/secret.yaml, k8s/configmap.yaml을 대화형으로 생성합니다.
 Python 3.12+ 표준 라이브러리만 사용합니다.
 """
 
@@ -24,7 +24,7 @@ from pathlib import Path
 # ──────────────────────────────────────────────
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-CONFIG_EXAMPLE = SCRIPT_DIR / "config.toml.example"
+CONFIG_EXAMPLE = SCRIPT_DIR / "afterglow.conf.example"
 
 DEPLOY_DOCKER = 1
 DEPLOY_K8S = 2
@@ -185,12 +185,12 @@ def print_banner():
     print()
     print(cyan("╔" + "═" * 50 + "╗"))
     print(cyan("║") + bold("        afterglow 설정 마법사 v1.0              ") + cyan("║"))
-    print(cyan("║") + dim("  config.toml · secret.yaml · configmap.yaml") + cyan("  ║"))
+    print(cyan("║") + dim("  afterglow.conf · secret.yaml · configmap.yaml") + cyan("  ║"))
     print(cyan("╚" + "═" * 50 + "╝"))
     print()
     print("각 항목에서 Enter를 누르면 기본값이 사용됩니다.")
-    print(f"{yellow('주의')}: 비밀번호 등 민감 정보는 config.toml에 평문으로 저장됩니다.")
-    print(f"       config.toml을 .gitignore에 추가하세요.")
+    print(f"{yellow('주의')}: 비밀번호 등 민감 정보는 afterglow.conf에 평문으로 저장됩니다.")
+    print(f"       afterglow.conf를 .gitignore에 추가하세요.")
     print()
 
 
@@ -204,8 +204,8 @@ def collect_deploy_mode() -> int:
     return ask_choice(
         "배포 환경을 선택하세요",
         [
-            "Docker Compose  (config.toml 생성)",
-            "Kubernetes      (config.toml + k8s/secret.yaml + k8s/configmap.yaml 생성)",
+            "Docker Compose  (afterglow.conf 생성)",
+            "Kubernetes      (afterglow.conf + k8s/secret.yaml + k8s/configmap.yaml 생성)",
             "둘 다           (모든 파일 생성)",
         ],
         default=1,
@@ -316,9 +316,9 @@ def collect_cache(deploy_mode: int) -> dict:
         default_redis = REDIS_DOCKER
     elif deploy_mode == DEPLOY_K8S:
         default_redis = REDIS_K8S
-    else:  # BOTH — config.toml은 Docker용
+    else:  # BOTH — afterglow.conf는 Docker용
         default_redis = REDIS_DOCKER
-        print(f"  {dim('config.toml에는 Docker Redis URL, configmap에는 K8s Redis URL이 사용됩니다.')}")
+        print(f"  {dim('afterglow.conf에는 Docker Redis URL, configmap에는 K8s Redis URL이 사용됩니다.')}")
 
     redis_url = ask("Redis URL", default_redis, validator=validate_redis_url)
 
@@ -460,18 +460,18 @@ def collect_gpu_devices() -> list[dict]:
     section_header("GPU 디바이스 맵")
     print()
     if not CONFIG_EXAMPLE.exists():
-        print(f"  {yellow('경고')}: config.toml.example을 찾을 수 없습니다.")
+        print(f"  {yellow('경고')}: afterglow.conf.example을 찾을 수 없습니다.")
         print(f"  GPU 디바이스 맵은 빈 상태로 생성됩니다. 나중에 직접 수정하세요.")
         return []
 
     with open(CONFIG_EXAMPLE, "rb") as f:
         example = tomllib.load(f)
     devices = example.get("gpu", {}).get("devices", [])
-    print(f"  {green('✓')} config.toml.example에서 GPU {len(devices)}개 로드됨")
+    print(f"  {green('✓')} afterglow.conf.example에서 GPU {len(devices)}개 로드됨")
     use_default = ask_bool("기본 GPU 디바이스 맵을 사용하시겠습니까?", default=True)
     if use_default:
         return devices
-    print(f"  GPU 디바이스 맵을 비워둡니다. 나중에 config.toml에서 [[gpu.devices]] 항목을 직접 추가하세요.")
+    print(f"  GPU 디바이스 맵을 비워둡니다. 나중에 afterglow.conf에서 [[gpu.devices]] 항목을 직접 추가하세요.")
     return []
 
 
@@ -493,7 +493,7 @@ def _toml_list(items: list[str]) -> str:
 
 
 def render_config_toml(cfg: dict, for_k8s: bool = False) -> str:
-    """전체 config.toml 렌더링. for_k8s=True이면 비밀 값 제외."""
+    """전체 afterglow.conf 렌더링. for_k8s=True이면 비밀 값 제외."""
     os_cfg = cfg["openstack"]
     app = cfg["app"]
     manila = cfg["manila_ceph"]
@@ -526,7 +526,7 @@ def render_config_toml(cfg: dict, for_k8s: bool = False) -> str:
     lines = []
     lines.append("# afterglow 통합 설정 파일")
     lines.append("# 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.")
-    lines.append("# 우선순위: 환경변수 > config.toml > 기본값")
+    lines.append("# 우선순위: 환경변수 > afterglow.conf/config.toml (프로젝트 루트) > 기본값")
     lines.append("")
 
     # [openstack]
@@ -749,7 +749,7 @@ def print_summary(cfg: dict, deploy_mode: int):
     oidc = cfg["gitlab_oidc"]
 
     deploy_labels = {DEPLOY_DOCKER: "Docker Compose", DEPLOY_K8S: "Kubernetes", DEPLOY_BOTH: "둘 다"}
-    files = ["config.toml"]
+    files = ["afterglow.conf"]
     if deploy_mode in (DEPLOY_K8S, DEPLOY_BOTH):
         files += ["k8s/secret.yaml", "k8s/configmap.yaml"]
 
@@ -823,13 +823,13 @@ def write_files(cfg: dict, deploy_mode: int):
     secret_content = render_k8s_secret(cfg) if deploy_mode in (DEPLOY_K8S, DEPLOY_BOTH) else None
     configmap_content = render_k8s_configmap(cfg) if deploy_mode in (DEPLOY_K8S, DEPLOY_BOTH) else None
 
-    # config.toml
-    config_path = SCRIPT_DIR / "config.toml"
+    # afterglow.conf
+    config_path = SCRIPT_DIR / "afterglow.conf"
     backup = backup_file(config_path)
     if backup:
-        print(f"  {dim(f'기존 config.toml → {backup.name} 백업됨')}")
+        print(f"  {dim(f'기존 afterglow.conf → {backup.name} 백업됨')}")
     write_atomic(config_path, config_toml_content)
-    print(f"  {green('✓')} config.toml 생성됨")
+    print(f"  {green('✓')} afterglow.conf 생성됨")
 
     # k8s 파일
     if secret_content:
@@ -867,7 +867,7 @@ def print_completion(deploy_mode: int, app: dict):
         print("    kubectl apply -f k8s/")
     print()
     print(f"  {yellow('보안 주의사항')}:")
-    print("  · config.toml은 .gitignore에 추가하세요 (비밀번호 평문 포함)")
+    print("  · afterglow.conf는 .gitignore에 추가하세요 (비밀번호 평문 포함)")
     print("  · k8s/secret.yaml을 git에 커밋하지 마세요")
     print()
 

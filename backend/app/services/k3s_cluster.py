@@ -1,5 +1,6 @@
 """k3s 클러스터 상태 관리 — Redis CRUD + 콜백 토큰 처리."""
 
+import asyncio
 import json
 import logging
 import secrets
@@ -40,6 +41,132 @@ def _kubeconfig_key(project_id: str, cluster_id: str) -> str:
 
 def _callback_key(token: str) -> str:
     return f"afterglow:k3s:callback:{token}"
+
+
+# ---------------------------------------------------------------------------
+# Read-only dashboard statistics
+# ---------------------------------------------------------------------------
+
+_DASHBOARD_STATS_TIMEOUT_SECONDS = 0.5
+_DASHBOARD_STATS_SCAN_COUNT = 200
+_DASHBOARD_STATS_MAX_ITERATIONS = 32
+_DASHBOARD_STATS_MAX_IDS = 1000
+
+
+class K3sStatsUnavailable(RuntimeError):
+    """The bounded, read-only dashboard source could not be read completely."""
+
+
+def _decode_redis_value(value) -> str:
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+async def _read_set_cluster_ids(client, membership_key: str) -> set[str]:
+    cursor = 0
+    cluster_ids: set[str] = set()
+    for _ in range(_DASHBOARD_STATS_MAX_ITERATIONS):
+        cursor, values = await client.sscan(
+            membership_key,
+            cursor=cursor,
+            count=_DASHBOARD_STATS_SCAN_COUNT,
+        )
+        cluster_ids.update(_decode_redis_value(value) for value in values)
+        if len(cluster_ids) > _DASHBOARD_STATS_MAX_IDS:
+            raise K3sStatsUnavailable("K3s membership cap exceeded")
+        if int(cursor) == 0:
+            return cluster_ids
+    raise K3sStatsUnavailable("K3s membership cursor did not complete")
+
+
+async def _scan_cluster_hash_ids(client, project_id: str) -> set[str]:
+    cursor = 0
+    candidates = 0
+    candidate_keys: list[str] = []
+    pattern = f"afterglow:k3s:{project_id}:cluster:*"
+    for _ in range(_DASHBOARD_STATS_MAX_ITERATIONS):
+        cursor, values = await client.scan(
+            cursor=cursor,
+            match=pattern,
+            count=_DASHBOARD_STATS_SCAN_COUNT,
+        )
+        candidates += len(values)
+        if candidates > _DASHBOARD_STATS_MAX_IDS:
+            raise K3sStatsUnavailable("K3s cluster candidate cap exceeded")
+        for value in values:
+            key = _decode_redis_value(value)
+            parts = key.split(":")
+            if (
+                len(parts) == 5
+                and parts[0] == "afterglow"
+                and parts[1] == "k3s"
+                and parts[2] == project_id
+                and parts[3] == "cluster"
+                and parts[4]
+            ):
+                candidate_keys.append(key)
+        if int(cursor) != 0:
+            continue
+
+        cluster_ids: set[str] = set()
+        for start in range(0, len(candidate_keys), _DASHBOARD_STATS_SCAN_COUNT):
+            chunk = candidate_keys[start : start + _DASHBOARD_STATS_SCAN_COUNT]
+            pipeline = client.pipeline(transaction=False)
+            for key in chunk:
+                pipeline.type(key)
+            key_types = await pipeline.execute()
+            for key, key_type in zip(chunk, key_types, strict=True):
+                if _decode_redis_value(key_type) != "hash":
+                    continue
+                cluster_ids.add(key.rsplit(":", 1)[1])
+                if len(cluster_ids) > _DASHBOARD_STATS_MAX_IDS:
+                    raise K3sStatsUnavailable("K3s cluster ID cap exceeded")
+        return cluster_ids
+    raise K3sStatsUnavailable("K3s cluster cursor did not complete")
+
+
+async def dashboard_cluster_stats(project_id: str) -> dict[str, int]:
+    """Return bounded project counts without changing any K3s source key.
+
+    This is intentionally separate from ``list_clusters``.  It avoids the
+    existing HTTP-cache/source-key collision and must never repair, cache, or
+    invalidate Redis state.
+    """
+    try:
+        async with asyncio.timeout(_DASHBOARD_STATS_TIMEOUT_SECONDS):
+            client = _get_client()
+            membership_key = _clusters_set_key(project_id)
+            key_type = _decode_redis_value(await client.type(membership_key))
+            if key_type == "set":
+                cluster_ids = await _read_set_cluster_ids(client, membership_key)
+            else:
+                cluster_ids = await _scan_cluster_hash_ids(client, project_id)
+
+            total = 0
+            active = 0
+            ids = sorted(cluster_ids)
+            for start in range(0, len(ids), _DASHBOARD_STATS_SCAN_COUNT):
+                chunk = ids[start : start + _DASHBOARD_STATS_SCAN_COUNT]
+                pipeline = client.pipeline(transaction=False)
+                for cluster_id in chunk:
+                    pipeline.hmget(
+                        _cluster_key(project_id, cluster_id),
+                        "status",
+                        "provisioning_status",
+                        "deleted_at",
+                    )
+                rows = await pipeline.execute()
+                for row in rows:
+                    if not row or all(value is None for value in row):
+                        continue
+                    status, provisioning_status, deleted_at = (list(row) + [None, None, None])[:3]
+                    if deleted_at not in (None, "", b""):
+                        continue
+                    total += 1
+                    if status in ("ACTIVE", b"ACTIVE") or provisioning_status in ("ACTIVE", b"ACTIVE"):
+                        active += 1
+            return {"total": total, "active": active}
+    except TimeoutError as exc:
+        raise K3sStatsUnavailable("K3s dashboard stats timed out") from exc
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,18 @@ replicaCount:
   notionWorker: 1
   redis: 1
 
+# worker_runtime 동적 매니저 (기본 off = static).
+# 아래를 활성화하면 백엔드가 drover/notion-worker Deployment 의 replicas 를 런타임에 조정한다.
+# (기본 maxReplicas=1 → Admin API 로 0↔1 pause/resume. 실제 다중 스케일은 maxReplicas 상향 +
+#  워커 병렬 실행 안전성 검증 후에만.) rbac.create=true 는 backend SA 에 deployments/scale 권한을 부여한다.
+# 활성화 시 argocd/generate_helm_application.py 가 worker replicas 를 ignoreDifferences 로 처리하므로
+# selfHeal 과 충돌하지 않는다.
+# workerRuntime:
+#   mode: kubernetes
+#   kubernetes:
+#     rbac:
+#       create: true
+
 ingress:
   host: dev.cloud.example.com
   tlsSecretName: afterglow-tls

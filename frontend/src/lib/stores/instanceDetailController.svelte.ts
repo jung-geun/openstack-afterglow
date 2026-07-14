@@ -239,11 +239,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 				return;
 			}
 			consoleOpenMessage = '콘솔 창을 여는 중입니다...';
-			const opened = window.open(url, '_blank');
-			if (!opened) {
-				consoleOpenError = '브라우저가 콘솔 창 팝업을 차단했습니다. 팝업 허용 후 다시 시도하세요.';
-				toast.error(consoleOpenError);
-			}
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch {
 			consoleOpenError = '콘솔 URL을 가져올 수 없습니다. 잠시 후 다시 시도하세요.';
 			toast.error(consoleOpenError);

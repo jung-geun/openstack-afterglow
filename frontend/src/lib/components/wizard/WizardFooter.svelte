@@ -34,21 +34,23 @@
 	</div>
 
 	<!-- nav buttons -->
-	<div class="flex items-center gap-2 ml-auto flex-shrink-0">
+	<div class="flex items-center gap-2 ml-auto flex-shrink-0" data-tour="wizard-nav">
 		<button
+			data-tour="wizard-cancel"
 			onclick={onCancel}
 			class="px-4 py-2 text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-900/60 hover:bg-red-950/20 rounded-lg transition-all"
 		>취소</button>
 		{#if canPrev}
 			<button
+				data-tour="wizard-prev"
 				onclick={onPrev}
 				class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
 			>← 이전</button>
 		{/if}
 		{#if !isLast}
-			<Button onclick={onNext} disabled={!canNext}>다음 →</Button>
+			<span data-tour="wizard-next"><Button onclick={onNext} disabled={!canNext}>다음 →</Button></span>
 		{:else}
-			<Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button>
+			<span data-tour="wizard-next"><Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button></span>
 		{/if}
 	</div>
 </div>

@@ -28,7 +28,7 @@
 </script>
 
 <SlidePanel onClose={closeWizard} width="w-full md:w-[75vw] max-w-4xl">
-	<div class="p-4 md:p-8">
+	<div class="p-4 md:p-8" data-tour="wizard-panel">
 		{#if s.needsProjectSelect}
 			<AdminProjectSelector />
 		{:else if s.loading}
@@ -54,9 +54,11 @@
 				</div>
 			{/if}
 
-			<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
+			<div data-tour="wizard-stepper">
+				<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
+			</div>
 
-			<div class="mb-8">
+			<div class="mb-8" data-tour="wizard-body">
 				{#if $wizard.step === 1}
 					<WizardStep1Boot />
 				{:else if $wizard.step === 2}

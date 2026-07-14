@@ -1,6 +1,6 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { api, getBaseUrl } from '$lib/api/client';
+  import { api } from '$lib/api/client';
   import { downloadBlobAs } from '$lib/utils/downloadBlob';
   import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import K3sCertificateExpiryModal from '$lib/components/k3s/K3sCertificateExpiryModal.svelte';
@@ -16,15 +16,11 @@
     if (!s.cluster) return;
     downloadingCa = true;
     try {
-      const url = `${getBaseUrl()}/api/v1/k3s/clusters/${s.cluster.id}/ca-certificate`;
-      const res = await fetch(url, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(projectId ? { 'X-Project-Id': projectId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
+      const { blob } = await api.downloadBlob(
+        `/api/v1/k3s/clusters/${s.cluster.id}/ca-certificate`,
+        token,
+        projectId,
+      );
       downloadBlobAs(blob, `ca-${s.cluster.name}.pem`);
     } catch (e) {
       console.error('CA 다운로드 실패:', e);

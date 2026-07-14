@@ -1,3 +1,8 @@
+export interface DashboardK3sStats {
+  total: number;
+  active: number;
+}
+
 export interface K3sCluster {
 	id: string;
 	name: string;
@@ -22,6 +27,54 @@ export interface K3sCluster {
 export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; extra_specs?: Record<string, string>; gpu_count?: number; }
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }
 export interface K3sKeypair { name: string; }
+
+export interface K3sNodeHealth {
+	name: string;
+	role: 'server' | 'agent';
+	ready: boolean;
+	conditions: string[];
+	kubelet_version: string | null;
+}
+
+export interface K3sClusterHealth {
+	cluster_id: string;
+	cluster_name: string;
+	status: 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY' | 'UNREACHABLE' | 'UNKNOWN';
+	api_server_reachable: boolean;
+	healthz_ok: boolean;
+	nodes: K3sNodeHealth[];
+	checked_at: string;
+	error: string | null;
+	reachability: 'direct' | 'unreachable';
+}
+
+export interface K3sInterfaceInfo {
+	port_id: string;
+	net_id: string;
+	fixed_ips: { ip_address: string; subnet_id?: string }[];
+	vm_id: string;
+	node_role: 'server' | 'agent';
+}
+
+export interface ConfigMapInfo {
+	name: string;
+	namespace: string;
+	data: Record<string, string>;
+	binary_data: Record<string, string> | null;
+	labels: Record<string, string>;
+	annotations: Record<string, string>;
+	created_at: string;
+}
+
+export interface SecretInfo {
+	name: string;
+	namespace: string;
+	type: string;
+	data: Record<string, string>;
+	labels: Record<string, string>;
+	annotations: Record<string, string>;
+	created_at: string;
+}
 
 export interface K3sNodegroupVM {
 	vm_id: string;

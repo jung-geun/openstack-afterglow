@@ -35,7 +35,8 @@ def test_create_port_passes_security_groups():
     conn = _make_conn()
     create_port(conn, "net", "p", security_group_ids=["sg-1", "sg-2"])
     call_kwargs = conn.network.create_port.call_args[1]
-    assert call_kwargs["security_groups"] == [{"id": "sg-1"}, {"id": "sg-2"}]
+    # Neutron 포트 API는 UUID 문자열 리스트만 허용 — dict 형식은 400 거부 (실환경 회귀)
+    assert call_kwargs["security_groups"] == ["sg-1", "sg-2"]
 
 
 def test_create_port_no_security_groups_omits_field():

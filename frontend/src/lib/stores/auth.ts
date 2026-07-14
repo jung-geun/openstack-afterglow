@@ -1,8 +1,11 @@
 import { writable, derived } from 'svelte/store';
+import { MOCKUP_QUERY_KEY, MOCKUP_STORAGE_KEY, MOCKUP_SESSION_KEY, isMockupProfileId } from '$lib/mockup/contracts';
+import type { MockupProfileId } from '$lib/mockup/contracts';
 
 // /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
 export const authReady = writable(false);
 export const logoutInProgress = writable(false);
+
 
 export interface Project {
 	id: string;
@@ -40,22 +43,101 @@ const initial: AuthState = {
 	federated: false,
 };
 
-function loadPersistedAuth(): AuthState {
+export type AuthPersistenceMode = 'real' | 'mock';
+type MockupQueryProfile = MockupProfileId | 'off' | 'invalid' | null;
+
+function loadAuthFromStorage(key: string): AuthState {
 	if (typeof window === 'undefined') return initial;
 	try {
-		const raw = localStorage.getItem('afterglow_auth');
+		const raw = localStorage.getItem(key);
 		if (raw) return { ...initial, ...JSON.parse(raw) };
 	} catch { /* ignore */ }
 	return initial;
 }
 
-export const auth = writable<AuthState>(loadPersistedAuth());
+function loadPersistedAuth(): AuthState {
+	return loadAuthFromStorage('afterglow_auth');
+}
+
+function loadMockAuth(): AuthState {
+	if (typeof window === 'undefined') return initial;
+	try {
+		const raw = sessionStorage.getItem(MOCKUP_STORAGE_KEY);
+		if (raw) return { ...initial, ...JSON.parse(raw) };
+	} catch {
+		/* ignore */
+	}
+	return initial;
+}
+
+function readMockupProfile(): MockupProfileId | null {
+	if (typeof window === 'undefined') return null;
+	try {
+		const raw = sessionStorage.getItem(MOCKUP_SESSION_KEY);
+		return isMockupProfileId(raw) ? raw : null;
+	} catch {
+		return null;
+	}
+}
+
+function readMockupQuery(): MockupQueryProfile {
+	if (typeof window === 'undefined' || typeof window.location?.search !== 'string') return null;
+	const params = new URLSearchParams(window.location.search);
+	if (!params.has(MOCKUP_QUERY_KEY)) return null;
+	const value = params.get(MOCKUP_QUERY_KEY);
+	if (value === 'off' || isMockupProfileId(value)) return value;
+	return 'invalid';
+}
+
+function resolveInitialMockupProfile(): MockupProfileId | null {
+	const queryProfile = readMockupQuery();
+	if (queryProfile === 'off' || queryProfile === 'invalid') {
+		sessionStorage.removeItem(MOCKUP_STORAGE_KEY);
+		sessionStorage.removeItem(MOCKUP_SESSION_KEY);
+		return null;
+	}
+	if (queryProfile) {
+		if (readMockupProfile() !== queryProfile) {
+			sessionStorage.removeItem(MOCKUP_STORAGE_KEY);
+		}
+		sessionStorage.setItem(MOCKUP_SESSION_KEY, queryProfile);
+		return queryProfile;
+	}
+	return readMockupProfile();
+}
+
+export function detectInitialAuthContext(): { mode: AuthPersistenceMode; state: AuthState } {
+	if (resolveInitialMockupProfile()) {
+		return { mode: 'mock', state: loadMockAuth() };
+	}
+	return { mode: 'real', state: loadPersistedAuth() };
+}
+
+const initialContext = detectInitialAuthContext();
+let persistenceMode: AuthPersistenceMode = initialContext.mode;
+let mockupProfile: MockupProfileId | null = initialContext.mode === 'mock' ? readMockupProfile() : null;
+
+export const auth = writable<AuthState>(initialContext.state);
+if (initialContext.mode === 'mock' && initialContext.state.token) {
+	authReady.set(true);
+}
 
 // 자동 영속화
 if (typeof window !== 'undefined') {
 	auth.subscribe(($auth) => {
 		// Fix 5: Secure 속성은 HTTPS에서만 부착 — 비-localhost HTTP 배포에서 쿠키 드롭 방지
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
+		if (persistenceMode === 'mock') {
+			if ($auth.token) {
+				const serialized = JSON.stringify($auth);
+				if (sessionStorage.getItem(MOCKUP_STORAGE_KEY) !== serialized) {
+					sessionStorage.setItem(MOCKUP_STORAGE_KEY, serialized);
+				}
+			} else {
+				sessionStorage.removeItem(MOCKUP_STORAGE_KEY);
+			}
+			return;
+		}
 		if ($auth.token) {
 			const serialized = JSON.stringify($auth);
 			// 동일 값 재기록 방지 — storage 이벤트로 받은 상태를 그대로 되쓰는 왕복 차단
@@ -74,7 +156,7 @@ if (typeof window !== 'undefined') {
 	// 동기화가 없으면 두 번째 탭이 폐기된 토큰으로 갱신을 시도하다 세션 전체가 끊긴다.
 	// storage 이벤트는 변경을 일으킨 탭 자신에게는 발생하지 않으므로 루프가 생기지 않는다.
 	window.addEventListener?.('storage', (e) => {
-		if (e.key !== 'afterglow_auth') return;
+		if (persistenceMode === 'mock' || e.key !== 'afterglow_auth') return;
 		if (e.newValue === null) {
 			// 다른 탭에서 로그아웃
 			authReady.set(false);
@@ -88,6 +170,39 @@ if (typeof window !== 'undefined') {
 			/* 손상된 값 무시 */
 		}
 	});
+}
+
+export function enterMockAuth(snapshot: AuthState, profile?: MockupProfileId): void {
+	persistenceMode = 'mock';
+	mockupProfile = profile ?? mockupProfile;
+	if (mockupProfile && typeof sessionStorage !== 'undefined') {
+		sessionStorage.setItem(MOCKUP_SESSION_KEY, mockupProfile);
+	}
+	auth.set(snapshot);
+	authReady.set(true);
+}
+
+export function exitMockAuth(): void {
+	if (typeof localStorage !== 'undefined') {
+		// Clean a legacy cross-tab snapshot left by older mockup builds.
+		localStorage.removeItem(MOCKUP_STORAGE_KEY);
+	}
+	if (typeof sessionStorage !== 'undefined') {
+		sessionStorage.removeItem(MOCKUP_STORAGE_KEY);
+		sessionStorage.removeItem(MOCKUP_SESSION_KEY);
+	}
+	mockupProfile = null;
+	persistenceMode = 'real';
+	auth.set(loadPersistedAuth());
+	authReady.set(false);
+}
+
+export function isMockAuthActive(): boolean {
+	return persistenceMode === 'mock';
+}
+
+export function getMockupProfile(): MockupProfileId | null {
+	return mockupProfile;
 }
 
 export const isLoggedIn = derived(auth, ($auth) => $auth.token !== null);

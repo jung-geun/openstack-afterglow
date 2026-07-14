@@ -15,6 +15,8 @@ const DEFAULTS: PublicSiteConfig = {
 		api_base: 'http://localhost:8000',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 
@@ -95,6 +97,8 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 		const services = (toml.services ?? {}) as Record<string, unknown>;
 		const openstack = (toml.openstack ?? {}) as Record<string, unknown>;
 		const monitoring = (toml.monitoring ?? {}) as Record<string, unknown>;
+		const chat = (toml.chat ?? {}) as Record<string, unknown>;
+		const gitlabOidc = (toml.gitlab_oidc ?? {}) as Record<string, unknown>;
 
 		_cached = {
 			site_name: String(app.site_name ?? DEFAULTS.site_name),
@@ -117,6 +121,12 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 				api_base: deriveBrowserApiBase(app),
 				s3_base: originOf(stringOrEmpty(openstack.s3_endpoint)),
 				grafana_base: originOf(stringOrEmpty(monitoring.grafana_base_url)),
+				librechat_base: originOf(stringOrEmpty(chat.base_url)),
+				// GitLab OIDC 활성화 시에만 노출 — LibreChat이 임베드된 프레임 안에서
+				// GitLab로 자체 리다이렉트할 때 frame-src가 이를 막지 않도록 함.
+				gitlab_base: Boolean(gitlabOidc.enabled ?? false)
+					? originOf(stringOrEmpty(gitlabOidc.gitlab_url))
+					: '',
 			},
 		};
 	} catch {

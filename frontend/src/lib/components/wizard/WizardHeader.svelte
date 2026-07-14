@@ -28,6 +28,7 @@
 			class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
 		>↺ 새로 시작</button>
 		<button
+			data-tour="wizard-cancel"
 			onclick={onClose}
 			class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-800 transition-all"
 			aria-label="닫기"

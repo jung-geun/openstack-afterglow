@@ -182,13 +182,13 @@ def get_project_limits(conn: openstack.connection.Connection) -> dict:
 _NOVA_QUOTA_KEYS = ("instances", "cores", "ram", "key_pairs", "server_groups")
 
 
-def get_project_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+def get_project_quota(conn: openstack.connection.Connection, project_id: str, *, strict: bool = False) -> dict:
     """프로젝트의 상세 Nova 할당량 (usage 포함).
 
-    openstacksdk `compute.get_quota_set(usage=True)` 가 nested
-    `{limit, in_use, reserved}` dict 를 plain int 로 평탄화해서 in_use 정보를
-    잃는 케이스가 있어 — admin endpoint 와 동일하게 raw Nova REST API
-    `GET /os-quota-sets/{project_id}/detail` 을 직접 호출한다.
+    ``strict`` is reserved for dashboard overview callers.  It rejects
+    malformed usage-bearing raw quota data before legacy sentinel
+    normalization, while default callers retain the historic REST-to-limits
+    fallback behavior and complete wire shape.
     """
 
     def _normalize(q) -> dict:
@@ -198,25 +198,71 @@ def get_project_quota(conn: openstack.connection.Connection, project_id: str) ->
             return {"limit": q, "in_use": 0}
         return {"limit": -1, "in_use": 0}
 
+    def _strict_entry(q, key: str) -> dict:
+        if not isinstance(q, dict) or "limit" not in q or "in_use" not in q:
+            raise ValueError(f"Nova quota usage is missing for {key}")
+        limit, in_use = q["limit"], q["in_use"]
+        if (
+            not isinstance(limit, (int, float))
+            or isinstance(limit, bool)
+            or not isinstance(in_use, (int, float))
+            or isinstance(in_use, bool)
+        ):
+            raise ValueError(f"Nova quota data is malformed for {key}")
+        return {"limit": limit, "in_use": in_use}
+
+    def _strict_limits_entry(limits, limit_attr: str, used_attr: str, key: str) -> dict:
+        limit = getattr(limits, limit_attr, None)
+        in_use = getattr(limits, used_attr, None)
+        if limit is None or in_use is None:
+            raise ValueError(f"Nova limits usage is missing for {key}")
+        return _strict_entry({"limit": limit, "in_use": in_use}, key)
+
     try:
         compute_endpoint = conn.compute.get_endpoint()
         resp = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
-        qs = resp.json().get("quota_set", {})
+        if strict:
+            resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Nova quota payload is malformed")
+        qs = payload.get("quota_set", {})
+        if not isinstance(qs, dict):
+            raise ValueError("Nova quota_set is malformed")
+        if strict:
+            return {key: _strict_entry(qs.get(key), key) for key in ("instances", "cores", "ram")}
         return {k: _normalize(qs.get(k)) for k in _NOVA_QUOTA_KEYS}
-    except Exception:
+    except Exception as exc:
+        # A successful but incomplete/malformed detailed response is never
+        # converted into a fake zero for strict overview callers.  Legacy
+        # callers retain the established limits fallback; strict transport
+        # failures may use that usage-bearing fallback too.
+        if strict and isinstance(exc, ValueError):
+            raise
         _logger.warning("Nova quota_set 조회 실패 — limits API로 fallback", exc_info=True)
-        # fallback: limits API 사용
         limits = conn.compute.get_limits()
-        a = limits.absolute
+        absolute = limits.absolute
+        if strict:
+            return {
+                "instances": _strict_limits_entry(absolute, "max_total_instances", "total_instances_used", "instances"),
+                "cores": _strict_limits_entry(absolute, "max_total_cores", "total_cores_used", "cores"),
+                "ram": _strict_limits_entry(absolute, "max_total_ram_size", "total_ram_used", "ram"),
+            }
         return {
             "instances": {
-                "limit": getattr(a, "max_total_instances", -1),
-                "in_use": getattr(a, "total_instances_used", 0),
+                "limit": getattr(absolute, "max_total_instances", -1),
+                "in_use": getattr(absolute, "total_instances_used", 0),
             },
-            "cores": {"limit": getattr(a, "max_total_cores", -1), "in_use": getattr(a, "total_cores_used", 0)},
-            "ram": {"limit": getattr(a, "max_total_ram_size", -1), "in_use": getattr(a, "total_ram_used", 0)},
-            "key_pairs": {"limit": getattr(a, "max_total_keypairs", -1), "in_use": 0},
-            "server_groups": {"limit": getattr(a, "max_server_groups", -1), "in_use": 0},
+            "cores": {
+                "limit": getattr(absolute, "max_total_cores", -1),
+                "in_use": getattr(absolute, "total_cores_used", 0),
+            },
+            "ram": {
+                "limit": getattr(absolute, "max_total_ram_size", -1),
+                "in_use": getattr(absolute, "total_ram_used", 0),
+            },
+            "key_pairs": {"limit": getattr(absolute, "max_total_keypairs", -1), "in_use": 0},
+            "server_groups": {"limit": getattr(absolute, "max_server_groups", -1), "in_use": 0},
         }
 
 

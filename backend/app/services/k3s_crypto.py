@@ -30,6 +30,7 @@ _DOMAIN_KUBECONFIG = b"kubeconfig"
 _DOMAIN_NODE_TOKEN = b"node_token"
 _DOMAIN_NOTION = b"notion_config"
 _DOMAIN_MANAGER_PW = b"manager_password"
+_DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
 
 _LEGACY_WARNED: set[str] = set()
 
@@ -149,3 +150,17 @@ def encrypt_manager_password(plaintext: str) -> str:
 def decrypt_manager_password(ciphertext_b64: str) -> str:
     """Decrypt cluster manager user password — v3/v2/legacy 모두 처리."""
     return _aes_decrypt(_get_key(), _DOMAIN_MANAGER_PW, ciphertext_b64)
+
+
+def encrypt_wg_client_key(plaintext: str) -> str:
+    """Encrypt WireGuard 클라이언트 private/preshared key (v3).
+
+    마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
+    도메인 분리로 kubeconfig/node_token 등 다른 도메인 ciphertext와 교차 복호화되지 않는다.
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_WG_CLIENT_KEY, plaintext)
+
+
+def decrypt_wg_client_key(ciphertext_b64: str) -> str:
+    """Decrypt WireGuard 클라이언트 private/preshared key — v3/v2/legacy 모두 처리."""
+    return _aes_decrypt(_get_key(), _DOMAIN_WG_CLIENT_KEY, ciphertext_b64)

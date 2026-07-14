@@ -14,10 +14,14 @@ export interface PublicSiteConfig {
 		trove: boolean;
 		swift: boolean;
 		barbican: boolean;
+		vpn: boolean;
+		chat: boolean;
 	};
 	runtime: {
 		api_base: string;
 		s3_base: string;
 		grafana_base: string;
+		librechat_base: string;
+		gitlab_base: string;
 	};
 }

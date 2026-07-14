@@ -1,5 +1,6 @@
 """k3s/clusters.py 엔드포인트 단위 테스트 (6개, k3s 서비스 필요)."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -563,6 +564,188 @@ def test_keystone_auth_plugin_disabled_when_settings_disabled():
     plugin = KeystoneAuthPlugin()
     settings = _make_plugin_settings(k3s_keystone_auth_enabled=False)
     assert plugin.should_deploy(settings) is False
+
+
+class _DashboardStatsPipeline:
+    def __init__(self, redis: "_DashboardStatsRedis"):
+        self._redis = redis
+        self.keys: list[str] = []
+        self.type_keys: list[str] = []
+
+    def hmget(self, key: str, *_fields: str) -> None:
+        self.keys.append(key)
+
+    def type(self, key: str) -> None:
+        self.type_keys.append(key)
+
+    async def execute(self) -> list[list[object]] | list[bytes]:
+        if self.type_keys:
+            return [self._redis.key_types.get(key, self._redis.key_type) for key in self.type_keys]
+        return [self._redis.rows.get(key, [None, None, None]) for key in self.keys]
+
+
+class _DashboardStatsRedis:
+    def __init__(
+        self,
+        *,
+        key_type: bytes,
+        members: list[bytes] | None = None,
+        scan_keys: list[bytes] | None = None,
+        key_types: dict[str, bytes] | None = None,
+    ):
+        self.key_type = key_type
+        self.members = members or []
+        self.scan_keys = scan_keys or []
+        self.key_types = key_types or {}
+        self.rows: dict[str, list[object]] = {}
+        self.pipeline_calls = 0
+
+    async def type(self, key: str) -> bytes:
+        return self.key_types.get(key, self.key_type)
+
+    async def sscan(self, _key: str, *, cursor: int, count: int):
+        assert count == 200
+        return 0, self.members
+
+    async def scan(self, *, cursor: int, match: str, count: int):
+        assert match.endswith(":cluster:*")
+        assert count == 200
+        return 0, self.scan_keys
+
+    def pipeline(self, *, transaction: bool):
+        assert transaction is False
+        self.pipeline_calls += 1
+        return _DashboardStatsPipeline(self)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_reads_set_without_mutating_source():
+    from app.services import k3s_cluster
+
+    project_id = "project-a"
+    redis = _DashboardStatsRedis(key_type=b"set", members=[b"active", b"deleted", b"pending", b"stale"])
+    redis.rows = {
+        f"afterglow:k3s:{project_id}:cluster:active": [b"ACTIVE", None, b""],
+        f"afterglow:k3s:{project_id}:cluster:deleted": [b"ACTIVE", None, b"2026-01-01T00:00:00Z"],
+        f"afterglow:k3s:{project_id}:cluster:pending": [b"CREATING", b"ACTIVE", b""],
+    }
+    source_before = (redis.key_type, list(redis.members), dict(redis.rows))
+
+    with patch("app.services.k3s_cluster._get_client", return_value=redis):
+        stats = await k3s_cluster.dashboard_cluster_stats(project_id)
+
+    assert stats == {"total": 2, "active": 2}
+    assert (redis.key_type, list(redis.members), dict(redis.rows)) == source_before
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_scans_hashes_when_membership_type_collides():
+    from app.services import k3s_cluster
+
+    project_id = "project-a"
+    cluster_key = f"afterglow:k3s:{project_id}:cluster:from-scan"
+    non_hash_key = f"afterglow:k3s:{project_id}:cluster:non-hash"
+    redis = _DashboardStatsRedis(
+        key_type=b"string",
+        scan_keys=[cluster_key.encode(), non_hash_key.encode()],
+        key_types={cluster_key: b"hash", non_hash_key: b"string"},
+    )
+    redis.rows = {cluster_key: [b"ACTIVE", None, b""]}
+    source_before = (
+        redis.key_type,
+        list(redis.scan_keys),
+        dict(redis.key_types),
+        dict(redis.rows),
+    )
+
+    with patch("app.services.k3s_cluster._get_client", return_value=redis):
+        stats = await k3s_cluster.dashboard_cluster_stats(project_id)
+
+    assert stats == {"total": 1, "active": 1}
+    assert (
+        redis.key_type,
+        list(redis.scan_keys),
+        dict(redis.key_types),
+        dict(redis.rows),
+    ) == source_before
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_rejects_nonterminating_cursor_without_partial_data():
+    from app.services import k3s_cluster
+
+    class _NonTerminatingRedis(_DashboardStatsRedis):
+        async def sscan(self, _key: str, *, cursor: int, count: int):
+            return 1, [b"only-cluster"]
+
+    redis = _NonTerminatingRedis(key_type=b"set")
+    with patch("app.services.k3s_cluster._get_client", return_value=redis):
+        with pytest.raises(k3s_cluster.K3sStatsUnavailable):
+            await k3s_cluster.dashboard_cluster_stats("project-a")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_handles_empty_and_missing_membership_read_only():
+    from app.services import k3s_cluster
+
+    for redis in (
+        _DashboardStatsRedis(key_type=b"set"),
+        _DashboardStatsRedis(key_type=b"none"),
+    ):
+        source_before = (redis.key_type, list(redis.members), list(redis.scan_keys), dict(redis.rows))
+        with patch("app.services.k3s_cluster._get_client", return_value=redis):
+            assert await k3s_cluster.dashboard_cluster_stats("project-a") == {"total": 0, "active": 0}
+        assert (redis.key_type, list(redis.members), list(redis.scan_keys), dict(redis.rows)) == source_before
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_rejects_oversized_set_without_partial_count():
+    from app.services import k3s_cluster
+
+    redis = _DashboardStatsRedis(key_type=b"set")
+    redis.members = [f"cluster-{index}".encode() for index in range(1001)]
+    with patch("app.services.k3s_cluster._get_client", return_value=redis):
+        with pytest.raises(k3s_cluster.K3sStatsUnavailable):
+            await k3s_cluster.dashboard_cluster_stats("project-a")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_rejects_nonterminating_scan_and_candidate_cap():
+    from app.services import k3s_cluster
+
+    class _NonTerminatingScanRedis(_DashboardStatsRedis):
+        async def scan(self, *, cursor: int, match: str, count: int):
+            return 1, []
+
+    class _OversizedCandidateRedis(_DashboardStatsRedis):
+        async def scan(self, *, cursor: int, match: str, count: int):
+            return 0, [f"afterglow:k3s:project-a:cluster:{index}".encode() for index in range(1001)]
+
+    for redis in (_NonTerminatingScanRedis(key_type=b"none"), _OversizedCandidateRedis(key_type=b"none")):
+        with patch("app.services.k3s_cluster._get_client", return_value=redis):
+            with pytest.raises(k3s_cluster.K3sStatsUnavailable):
+                await k3s_cluster.dashboard_cluster_stats("project-a")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_cluster_stats_chunks_hmget_and_times_out_without_partial_count():
+    from app.services import k3s_cluster
+
+    project_id = "project-a"
+    redis = _DashboardStatsRedis(key_type=b"set", members=[f"cluster-{index}".encode() for index in range(201)])
+    redis.rows = {f"afterglow:k3s:{project_id}:cluster:cluster-{index}": [b"ACTIVE", None, b""] for index in range(201)}
+    with patch("app.services.k3s_cluster._get_client", return_value=redis):
+        assert await k3s_cluster.dashboard_cluster_stats(project_id) == {"total": 201, "active": 201}
+    assert redis.pipeline_calls == 2
+
+    class _SlowRedis(_DashboardStatsRedis):
+        async def sscan(self, _key: str, *, cursor: int, count: int):
+            await asyncio.sleep(0.6)
+            return 0, []
+
+    with patch("app.services.k3s_cluster._get_client", return_value=_SlowRedis(key_type=b"set")):
+        with pytest.raises(k3s_cluster.K3sStatsUnavailable):
+            await k3s_cluster.dashboard_cluster_stats(project_id)
 
 
 # ---------------------------------------------------------------------------

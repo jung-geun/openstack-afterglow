@@ -1,5 +1,9 @@
 import { get } from 'svelte/store';
 import { siteConfig } from '$lib/config/site';
+import { logoutInProgress } from '$lib/stores/auth';
+import { ApiError } from '$lib/api/errors';
+import { maybeMockBlob, maybeMockJson, maybeMockK3sStream, symbolNoMatch } from '$lib/mockup/transport';
+export { ApiError } from '$lib/api/errors';
 
 function stripTrailingSlash(value: string): string {
 	return value.replace(/\/+$/, '');
@@ -23,14 +27,6 @@ export function getWebSocketUrl(path: string): string {
 	return new URL(path, base).toString();
 }
 
-export class ApiError extends Error {
-	constructor(
-		public status: number,
-		message: string
-	) {
-		super(message);
-	}
-}
 
 function formatErrorDetail(body: unknown, fallback: string): string {
 	if (!body || typeof body !== 'object') return fallback;
@@ -57,6 +53,9 @@ let _redirectingTo401 = false;
 let _handling403Admin = false;
 // 동시 다수 요청이 토큰 refresh를 중복 호출하지 않도록 직렬화
 let _refreshPromise: Promise<string | null> | null = null;
+let _sessionRevocationInProgress = false;
+const AUTH_PUBLIC_PATHS = new Set(['/', '/login', '/auth/gitlab/callback']);
+
 
 /**
  * /api/admin/ 경로에서 403 응답 시 isSystemAdmin=false 강등 + /dashboard로 이동.
@@ -82,31 +81,31 @@ async function handleAdminForbidden(): Promise<void> {
 }
 
 /**
- * 401 응답 시 인증 상태 정리 + 로그인 페이지(/)로 자동 redirect.
+ * 401 응답 시 인증 상태 정리 + 로그인 페이지(/login)로 자동 redirect.
  */
 async function handleUnauthorized(): Promise<void> {
 	if (typeof window === 'undefined') return;
-	if (_redirectingTo401) return;
+	if (_redirectingTo401 || get(logoutInProgress)) return;
 
-	// Fix 4: refresh가 진행 중이면 완료를 기다린 뒤, 토큰이 복구됐으면 로그아웃 취소.
-	// clearAuth()와 tryRefresh()가 경쟁할 때 refresh 성공 후 세션이 부활하더라도
-	// stale 401이 다시 세션을 지우는 race를 막는다.
-	if (_refreshPromise) {
-		const recovered = await _refreshPromise;
-		if (recovered) return;
-	}
-
-	if (window.location.pathname === '/') return;
+	// Mark synchronously before any import or refresh wait so concurrent 401s
+	// cannot run a competing clear-and-redirect sequence.
 	_redirectingTo401 = true;
 	try {
+		if (_refreshPromise) {
+			const recovered = await _refreshPromise;
+			if (recovered) return;
+		}
+
+		if (get(logoutInProgress) || AUTH_PUBLIC_PATHS.has(window.location.pathname)) return;
 		const [{ clearAuth }, { goto }] = await Promise.all([
 			import('$lib/stores/auth'),
 			import('$app/navigation'),
 		]);
+		if (get(logoutInProgress)) return;
 		clearAuth();
-		await goto('/');
+		await goto('/login', { replaceState: true });
 	} catch {
-		window.location.href = '/';
+		if (!get(logoutInProgress)) window.location.replace('/login');
 	} finally {
 		setTimeout(() => { _redirectingTo401 = false; }, 1000);
 	}
@@ -127,7 +126,8 @@ function _readPersistedAuth(): { token?: string; refreshToken?: string; accessEx
 	}
 }
 
-async function tryRefresh(): Promise<string | null> {
+async function tryRefresh({ allowDuringRevocation = false }: { allowDuringRevocation?: boolean } = {}): Promise<string | null> {
+	if (_sessionRevocationInProgress && !allowDuringRevocation) return null;
 	if (_refreshPromise) return _refreshPromise;
 	_refreshPromise = (async () => {
 		try {
@@ -172,19 +172,42 @@ async function tryRefresh(): Promise<string | null> {
 			}
 
 			const data = await res.json();
+
+			const refreshedToken = data.token as string;
+			if (get(auth).token !== state.token) return null;
 			setAuth({
-				token: data.token,
+				token: refreshedToken,
 				refreshToken: data.refresh_token ?? refreshToken,
 				accessExpiresAt: data.expires_at
 					? Math.floor(new Date(data.expires_at).getTime() / 1000)
 					: null,
 			});
-			return data.token as string;
+			return refreshedToken;
 		} catch {
 			return null;
 		}
 	})().finally(() => { _refreshPromise = null; });
 	return _refreshPromise;
+}
+
+/** Refresh the current session through the shared, coalesced refresh flow. */
+export function refreshSession(): Promise<string | null> {
+	return tryRefresh();
+}
+
+/**
+ * Fence new refreshes while an explicit logout revokes the freshest token.
+ * A refresh already running keeps its normal state transition, so callers can
+ * await it and revoke the rotated access token without a mint-after-revoke gap.
+ */
+export function beginSessionRevocation(): Promise<string | null> {
+	const pendingRefresh = _refreshPromise;
+	_sessionRevocationInProgress = true;
+	return pendingRefresh ?? Promise.resolve(null);
+}
+
+export function endSessionRevocation(): void {
+	_sessionRevocationInProgress = false;
 }
 
 function _buildHeaders(token?: string, projectId?: string, extra?: Record<string, string>): Record<string, string> {
@@ -209,6 +232,17 @@ async function request<T>(
 	// Fix 3: caller가 401을 직접 처리하는 경우 전역 로그아웃 리다이렉트를 억제할 수 있음
 	reqOpts?: { suppressAuthRedirect?: boolean }
 ): Promise<T> {
+	const method = (options.method ?? 'GET').toString().toUpperCase();
+	let requestBody: unknown = options.body;
+	if (typeof options.body === 'string') {
+		try { requestBody = JSON.parse(options.body); } catch { /* non-JSON body */ }
+	}
+	const mock = await maybeMockJson<T>(method, path, requestBody, token, projectId);
+	if (mock !== symbolNoMatch) {
+		if (method === 'GET') memoryCache.set(path, { data: mock, timestamp: Date.now() });
+		return mock;
+	}
+
 	const headers = _buildHeaders(token, projectId, options.headers as Record<string, string>);
 
 	const res = await fetch(`${getBaseUrl()}${path}`, {
@@ -219,7 +253,8 @@ async function request<T>(
 
 	// 401: access JWT 만료 → refresh 후 1회 재시도
 	if (res.status === 401 && token) {
-		const newToken = await tryRefresh();
+		const allowDuringRevocation = path === '/api/v1/auth/logout' || path === '/api/v1/auth/logout-all';
+		const newToken = await tryRefresh({ allowDuringRevocation });
 		if (newToken && newToken !== token) {
 			const retryHeaders = _buildHeaders(newToken, projectId, options.headers as Record<string, string>);
 			const retry = await fetch(`${getBaseUrl()}${path}`, {
@@ -440,6 +475,8 @@ export const api = {
 	},
 
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
+		const mock = await maybeMockBlob('GET', path, token, projectId);
+		if (mock !== symbolNoMatch) return { blob: mock, filename: 'afterglow-mockup-kubeconfig.yaml' };
 		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
@@ -478,6 +515,17 @@ export const api = {
 		onMessage?: (data: T) => void,
 		onError?: (error: Error) => void
 	): void => {
+		const mockStream = maybeMockK3sStream(path, body, token, projectId);
+		if (mockStream) {
+			(async () => {
+				try {
+					for await (const message of mockStream) onMessage?.(message as T);
+				} catch (err) {
+					onError?.(err instanceof Error ? err : new Error(String(err)));
+				}
+			})();
+			return;
+		}
 		const baseUrl = getBaseUrl();
 		const url = new URL(`${baseUrl}${path}`);
 

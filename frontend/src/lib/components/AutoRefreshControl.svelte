@@ -5,7 +5,7 @@
 	interface Props {
 		active: boolean;
 		intervalSeconds: number;
-		intervalOptions?: number[];
+		intervalOptions?: readonly number[];
 		refreshing?: boolean;
 		onManualRefresh: () => void;
 	}

@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
+import { maybeMockHead, symbolNoMatch } from '$lib/mockup/transport';
 import { toast } from '$lib/stores/toast';
 import type { NetworkInfo } from '$lib/types/networks';
 import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, ConfigMapInfo, SecretInfo, PodInfo, ServiceInfo, DeploymentInfo, ReplicaSetInfo } from '$lib/types/k3s';
@@ -137,8 +138,13 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     const id = opts.clusterId();
     if (!id || !cluster || cluster.status !== 'ACTIVE') return;
     try {
-      const baseUrl = getBaseUrl();
-      const res = await fetch(`${baseUrl}${apiBase}/${id}/kubeconfig`, {
+      const path = `${apiBase}/${id}/kubeconfig`;
+      const mock = await maybeMockHead(path, opts.token(), opts.projectId());
+      if (mock !== symbolNoMatch) {
+        kubeconfigAvailable = mock.ok;
+        return;
+      }
+      const res = await fetch(`${getBaseUrl()}${path}`, {
         method: 'HEAD',
         headers: {
           ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()!}` } : {}),
@@ -154,20 +160,13 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
   async function downloadKubeconfig() {
     const id = opts.clusterId();
     if (!id || !cluster) return;
-    const baseUrl = getBaseUrl();
-    const res = await fetch(`${baseUrl}${apiBase}/${id}/kubeconfig`, {
-      headers: {
-        ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()!}` } : {}),
-        ...(opts.projectId() ? { 'X-Project-Id': opts.projectId()! } : {}),
-      },
-    });
-    if (!res.ok) {
-      if (res.status === 404) toast.warning('kubeconfig가 아직 준비되지 않았습니다.');
-      else toast.error(`다운로드 실패: HTTP ${res.status}`);
-      return;
+    try {
+      const { blob } = await api.downloadBlob(`${apiBase}/${id}/kubeconfig`, opts.token(), opts.projectId());
+      downloadBlobAs(blob, `kubeconfig-${cluster.name}.yaml`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) toast.warning('kubeconfig가 아직 준비되지 않았습니다.');
+      else toast.error(`다운로드 실패: ${e instanceof ApiError ? e.message : String(e)}`);
     }
-    const blob = await res.blob();
-    downloadBlobAs(blob, `kubeconfig-${cluster.name}.yaml`);
   }
 
   async function deleteCluster() {

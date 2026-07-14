@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const loginSource = readFileSync(resolve(__dirname, '../+page.svelte'), 'utf8');
+const loginRouteSource = readFileSync(resolve(__dirname, '../login/+page.svelte'), 'utf8');
+const loginComponentSource = readFileSync(resolve(__dirname, '../../lib/components/auth/LoginPage.svelte'), 'utf8');
+const loginSource = `${loginRouteSource}\n${loginComponentSource}`;
 const callbackSource = readFileSync(resolve(__dirname, '../auth/gitlab/callback/+page.svelte'), 'utf8');
 
 describe('GitLab auth route/API path contract', () => {
@@ -11,6 +13,7 @@ describe('GitLab auth route/API path contract', () => {
 		expect(loginSource).toContain("api.get<{ authorize_url: string }>('/api/v1/auth/gitlab/authorize')");
 		expect(callbackSource).toContain("history.replaceState(null, '', '/auth/gitlab/callback')");
 		expect(callbackSource).toContain("api.post<LoginResponse>('/api/v1/auth/gitlab/callback', { code, state })");
+		expect(callbackSource).toContain('href="/login"');
 	});
 
 	it('does not call the UI callback route as a backend API endpoint', () => {

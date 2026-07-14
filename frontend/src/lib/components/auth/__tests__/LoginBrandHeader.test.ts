@@ -20,6 +20,8 @@ const baseConfig: PublicSiteConfig = {
 		api_base: '',
 		s3_base: '',
 		grafana_base: '',
+		librechat_base: '',
+		gitlab_base: '',
 	},
 };
 
@@ -76,5 +78,11 @@ describe('LoginBrandHeader', () => {
 
 		const img = await screen.findByRole('img', { name: 'Afterglow' });
 		expect(img.getAttribute('src')).toBe(expectedSrc);
+	});
+
+	it('links back to the public homepage', () => {
+		render(LoginBrandHeader);
+
+		expect(screen.getByRole('link', { name: '메인 홈페이지로 돌아가기' }).getAttribute('href')).toBe('/');
 	});
 });
