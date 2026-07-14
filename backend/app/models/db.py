@@ -730,6 +730,23 @@ class SiteBrandingAsset(Base):
     updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
 
 
+class UserTutorialStatus(Base):
+    """사용자별 튜토리얼(투어) 진행 이력. (user_id, tour_id) 복합 PK.
+
+    status='completed'(완주) | 'dismissed'(무시/패스). 기록이 없으면 미체험 상태로,
+    프론트엔드가 해당 페이지의 튜토리얼 버튼을 강조한다. 완료·무시 어느 쪽이든 기록되면 강조 해제.
+    user_id 는 항상 서버가 token_info 로 계산하며 클라이언트 입력을 신뢰하지 않는다(IDOR 방지).
+    """
+
+    __tablename__ = "user_tutorial_statuses"
+
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    tour_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    status: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
 # ---------------------------------------------------------------------------
 # WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
 # ---------------------------------------------------------------------------

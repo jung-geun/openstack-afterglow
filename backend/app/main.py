@@ -121,6 +121,7 @@ from app.api.common import (
     metrics_router,
     sd_targets_router,
     site_router,
+    tutorial_status_router,
     user_dashboard_router,
 )
 from app.api.common.metrics import record_request as _record_request
@@ -615,6 +616,7 @@ if _svc_cfg.service_chat_enabled:
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
+app.include_router(tutorial_status_router, prefix="/api/v1/tutorials", tags=["tutorials"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/v1/metrics", tags=["metrics"])
 app.include_router(squashfs_libraries_router, prefix="/api/v1/libraries/squashfs", tags=["squashfs-libraries"])

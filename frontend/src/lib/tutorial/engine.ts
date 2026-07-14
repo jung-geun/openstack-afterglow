@@ -59,6 +59,15 @@ export function isTourActive(): boolean {
 	return driverInstance !== null;
 }
 
+/**
+ * 투어를 끝까지 완주했을 때만 발행한다(취소/× /ESC 로 인한 stopTour 에서는 발행 안 함).
+ * 상태 스토어가 이 이벤트를 수신해 서버에 'completed' 로 기록한다.
+ */
+function fireTourComplete(tourId: TourId): void {
+	if (typeof window === 'undefined') return;
+	window.dispatchEvent(new CustomEvent('afterglow:tour-complete', { detail: { tourId } }));
+}
+
 export async function startTour(tourId: TourId, fromStep = 0): Promise<boolean> {
 	if (typeof window === 'undefined') return false;
 	const tour = getTour(tourId);
@@ -99,7 +108,9 @@ async function moveTo(index: number): Promise<void> {
 	if (!currentTour) return;
 	if (index < 0) return;
 	if (index >= currentTour.steps.length) {
+		const finishedId = currentTour.id;
 		stopTour();
+		fireTourComplete(finishedId);
 		return;
 	}
 	await showStep(index, index >= currentIndex ? 1 : -1);
@@ -118,7 +129,9 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 		const next = index + direction;
 		if (next < 0) return;
 		if (next >= tour.steps.length) {
+			const finishedId = tour.id;
 			stopTour();
+			fireTourComplete(finishedId);
 			return;
 		}
 		void showStep(next, direction);

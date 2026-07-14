@@ -129,9 +129,12 @@ describe('public landing and login route source contracts', () => {
 		expect(layoutCssSource).toContain('font-family: var(--font-sans);');
 	});
 
-	it('exposes the tutorial entry CTA and mounts the tour launcher', () => {
-		expect(landingComponentSource).toContain('href="/dashboard?tutorial=on"');
-		expect(landingComponentSource).toContain('튜토리얼 체험');
+	it('removes the homepage tutorial CTA but keeps the tour launcher', () => {
+		// 홈 "튜토리얼 체험" 진입 버튼은 제거됨 — 투어는 이제 각 페이지(VM/볼륨/Drover)의
+		// TutorialStartButton 에서 시작하고 미체험 사용자에게 강조된다.
+		expect(landingComponentSource).not.toContain('href="/dashboard?tutorial=on"');
+		expect(landingComponentSource).not.toContain('튜토리얼 체험');
+		// 투어 런처 인프라(라우트 통합 컨트롤러 + 팝오버 스타일)는 그대로 유지된다.
 		expect(layoutSource).toContain("import TutorialController from '$lib/tutorial/TutorialController.svelte';");
 		expect(layoutSource).toContain('<TutorialController />');
 		expect(layoutCssSource).toContain('.driver-popover.afterglow-tour');

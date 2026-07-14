@@ -8,6 +8,7 @@ _ROUTERS = {
     "metrics_router": ".metrics",
     "sd_targets_router": ".sd_targets",
     "site_router": ".site",
+    "tutorial_status_router": ".tutorial_status",
     "user_dashboard_router": ".user_dashboard",
 }
 

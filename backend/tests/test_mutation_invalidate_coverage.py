@@ -126,6 +126,10 @@ EXEMPT_HANDLERS: set[str] = {
     "update_announcement_endpoint",
     "delete_announcement_endpoint",
     "mark_announcement_read",
+    # 사용자별 튜토리얼(투어) 진행 이력 upsert — DB에서 매 요청 직접 읽는 per-user 상태로,
+    # cached_call/app 캐시 레이어를 거치지 않으며 per-project OpenStack 리소스 캐시와도
+    # 무관하다(announcements 읽음표시와 동일 사유).
+    "set_my_tutorial_status",
 }
 
 # ---------------------------------------------------------------------------
