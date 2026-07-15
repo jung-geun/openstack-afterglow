@@ -654,8 +654,16 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		if (step) wizard.update(w => ({ ...w, step }));
 	}
 
-	function selectImage(id: string, name: string) { wizard.update(w => ({ ...w, imageId: id, imageName: name })); }
-	function selectFlavor(id: string, name: string) { wizard.update(w => ({ ...w, flavorId: id, flavorName: name })); }
+	function selectImage(id: string, name: string) {
+		wizard.update(w => ({ ...w, imageId: id, imageName: name }));
+		// 선택 즉시 다음 단계로 자동 진행("다음" 버튼 클릭과 동일). 이전으로 돌아와도 핸들러가 재발화하지 않아 강제 진행되지 않는다.
+		nextStep();
+	}
+	function selectFlavor(id: string, name: string) {
+		wizard.update(w => ({ ...w, flavorId: id, flavorName: name }));
+		// 선택 즉시 다음 단계로 자동 진행("다음" 버튼 클릭과 동일). 이전으로 돌아와도 핸들러가 재발화하지 않아 강제 진행되지 않는다.
+		nextStep();
+	}
 
 	function toggleLibrary(id: string, _deps: string[]) {
 		wizard.update(w => {

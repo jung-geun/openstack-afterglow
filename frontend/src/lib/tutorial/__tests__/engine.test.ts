@@ -1,17 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { get } from 'svelte/store';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setBetaFeature } from '$lib/stores/betaFeatures';
+import { sidebarOpen } from '$lib/stores/sidebar';
 import { clearPersistedTour, readPersistedTour, waitForElement } from '../engine';
 import { getTour, isTourId, tours, TOUR_STORAGE_KEY } from '../tours';
+
+const originalInnerWidth = window.innerWidth;
 
 beforeEach(() => {
 	sessionStorage.clear();
 	document.body.innerHTML = '';
+	sidebarOpen.close();
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	sessionStorage.clear();
 	document.body.innerHTML = '';
+	sidebarOpen.close();
+	Object.defineProperty(window, 'innerWidth', { value: originalInnerWidth, configurable: true });
 });
 
 describe('tour definitions', () => {
@@ -61,13 +69,54 @@ describe('tour definitions', () => {
 		}
 	});
 
-	it('위저드 단계들은 이전 버튼으로 투어 후진이 가능해야 한다', () => {
-		const tour = getTour('vm-create')!;
-		const wizardSteps = tour.steps.filter((step) => step.element === '[data-tour="wizard-panel"]');
-		expect(wizardSteps.length).toBeGreaterThan(0);
-		for (const step of wizardSteps) {
-			expect(step.backElement).toBe('[data-tour="wizard-prev"]');
+	it('vm-create 투어는 raw 위저드 단계와 팝오버 진행 방식을 매핑한다', () => {
+		try {
+			setBetaFeature('libraryConsume', true);
+			const tour = getTour('vm-create')!;
+			const expected = [
+				{ title: '이미지 선택', wizardStep: 1, advanceOn: 'wizard' },
+				{ title: '플레이버 선택', wizardStep: 2, advanceOn: 'wizard' },
+				{ title: '라이브러리 (베타)', wizardStep: 3, advanceOn: 'wizard' },
+				{ title: '기본 설정 확인', wizardStep: 5, advanceOn: 'wizard' },
+				{ title: '배포', wizardStep: 6, advanceOn: 'click' },
+			] as const;
+
+			for (const mapping of expected) {
+				const step = tour.steps.find((candidate) => candidate.title === mapping.title);
+				expect(step).toMatchObject({
+					wizardStep: mapping.wizardStep,
+					advanceOn: mapping.advanceOn,
+				});
+				expect(step?.backElement).toBeUndefined();
+			}
+
+			const imageStep = tour.steps.find((step) => step.title === '이미지 선택');
+			expect(imageStep?.cancelElement).toBe('[data-tour="wizard-cancel"]');
+			expect(imageStep?.readyElement).toBe('[data-tour="wizard-body"]');
+			const deployStep = tour.steps.find((step) => step.title === '배포');
+			expect(deployStep?.advanceElement).toBe('[data-tour="wizard-next"]');
+		} finally {
+			setBetaFeature('libraryConsume', false);
 		}
+	});
+
+	it('모바일에서 vm-create 첫 step 준비 시 사이드바를 연다', async () => {
+		vi.useFakeTimers();
+		Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true });
+		const prepare = getTour('vm-create')!.steps[0].prepare!;
+
+		const preparing = prepare();
+		expect(get(sidebarOpen)).toBe(true);
+		await vi.advanceTimersByTimeAsync(250);
+		await preparing;
+	});
+
+	it('데스크톱에서 vm-create 첫 step 준비 시 사이드바를 열지 않는다', async () => {
+		Object.defineProperty(window, 'innerWidth', { value: 1280, configurable: true });
+		const prepare = getTour('vm-create')!.steps[0].prepare!;
+
+		await prepare();
+		expect(get(sidebarOpen)).toBe(false);
 	});
 });
 

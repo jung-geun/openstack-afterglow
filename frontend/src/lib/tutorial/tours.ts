@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { betaFeatures } from '$lib/stores/betaFeatures';
+import { sidebarOpen } from '$lib/stores/sidebar';
 
 export type TourId = 'vm-create' | 'volume' | 'drover';
 
@@ -11,10 +12,17 @@ export interface TourStep {
 	element: string;
 	/** 이 step을 보여주기 전에 이동할 경로 */
 	route?: string;
+	/** 하이라이트 직전 실행. 모바일 드로어 열기 등 사전 준비용. route 이동/auto-close 이후에 실행된다. */
+	prepare?: () => void | Promise<void>;
 	title: string;
 	description: string;
-	/** 'click'이면 실제 클릭으로 다음 step 진행 (팝오버 '다음' 버튼 없음) */
-	advanceOn?: 'click';
+	/**
+	 * 'click'이면 실제 클릭으로 다음 step 진행 (팝오버 '다음' 버튼 없음).
+	 * 'wizard'이면 위저드 단계(wizardStep) 변화를 따라 팝오버가 이동한다(자체 '다음' 버튼 없음).
+	 */
+	advanceOn?: 'click' | 'wizard';
+	/** 이 팝오버가 대응하는 위저드 raw 단계 번호($wizard.step). 엔진이 afterglow:wizard-step 이벤트로 매핑한다. */
+	wizardStep?: number;
 	/** 진행 트리거 셀렉터 — 생략 시 element 자체 클릭으로 진행 */
 	advanceElement?: string;
 	/** 이 셀렉터 클릭 시 투어를 한 단계 뒤로 (예: 위저드 "← 이전" 버튼) */
@@ -52,6 +60,14 @@ function vmCreateSteps(): TourStep[] {
 		{
 			element: '[data-tour="vm-create-open"]',
 			route: '/dashboard',
+			prepare: async () => {
+				// 모바일(md 미만)에서 사이드바는 닫힌 off-canvas 드로어라 VM 생성 버튼이 화면 밖에 있다.
+				// 드로어를 열고 슬라이드 인 트랜지션(duration-200)이 끝난 뒤 하이라이트하도록 대기한다.
+				if (typeof window !== 'undefined' && window.innerWidth < 768) {
+					sidebarOpen.open();
+					await new Promise((resolve) => setTimeout(resolve, 250));
+				}
+			},
 			title: 'VM 생성 시작',
 			description: 'VM 생성 버튼을 눌러 인스턴스 생성 위저드를 열어보세요.',
 			advanceOn: 'click',
@@ -59,10 +75,9 @@ function vmCreateSteps(): TourStep[] {
 		{
 			element: '[data-tour="wizard-panel"]',
 			title: '이미지 선택',
-			description: 'VM을 부팅할 OS 이미지를 하나 선택하고 아래 "다음 →" 버튼을 누르세요.',
-			advanceOn: 'click',
-			advanceElement: '[data-tour="wizard-next"]',
-			backElement: '[data-tour="wizard-prev"]',
+			description: 'VM을 부팅할 OS 이미지를 하나 선택하세요. 선택하면 자동으로 다음 단계로 이동합니다.',
+			advanceOn: 'wizard',
+			wizardStep: 1,
 			cancelElement: '[data-tour="wizard-cancel"]',
 			// 위저드 데이터 로딩이 끝나 본문이 나타난 뒤에 하이라이트한다
 			readyElement: '[data-tour="wizard-body"]',
@@ -72,10 +87,9 @@ function vmCreateSteps(): TourStep[] {
 			element: '[data-tour="wizard-panel"]',
 			title: '플레이버 선택',
 			description:
-				'플레이버는 VM의 vCPU · 메모리 · 디스크 스펙입니다. 프로젝트 남은 쿼터 안에서 생성 가능한 플레이버만 표시되고, GPU 플레이버는 스케줄러가 가용 호스트를 자동 선택합니다. 하나 선택하고 "다음 →"을 누르세요.',
-			advanceOn: 'click',
-			advanceElement: '[data-tour="wizard-next"]',
-			backElement: '[data-tour="wizard-prev"]',
+				'플레이버는 VM의 vCPU · 메모리 · 디스크 스펙입니다. 프로젝트 남은 쿼터 안에서 생성 가능한 플레이버만 표시되고, GPU 플레이버는 스케줄러가 가용 호스트를 자동 선택합니다. 하나 선택하면 자동으로 다음 단계로 이동합니다.',
+			advanceOn: 'wizard',
+			wizardStep: 2,
 			cancelElement: '[data-tour="wizard-cancel"]',
 		},
 	];
@@ -85,9 +99,8 @@ function vmCreateSteps(): TourStep[] {
 			title: '라이브러리 (베타)',
 			description:
 				'AI/ML 라이브러리 레이어를 VM에 얹을 수 있는 베타 기능입니다. 필요한 레이어를 고르거나, 선택 없이 "다음 →"으로 건너뛸 수 있습니다.',
-			advanceOn: 'click',
-			advanceElement: '[data-tour="wizard-next"]',
-			backElement: '[data-tour="wizard-prev"]',
+			advanceOn: 'wizard',
+			wizardStep: 3,
 			cancelElement: '[data-tour="wizard-cancel"]',
 			// Ubuntu 계열 이미지가 아니면 위저드가 이 단계를 숨긴다 — 스텝퍼에 없으면 투어도 건너뛴다
 			skipIf: () =>
@@ -100,9 +113,8 @@ function vmCreateSteps(): TourStep[] {
 			title: '기본 설정 확인',
 			description:
 				'VM 이름(비우면 자동 생성), 네트워크, SSH 키페어, 보안 그룹, 가용 영역, 루트 디스크 크기를 확인하세요. 기본값 그대로도 생성할 수 있습니다. 확인했으면 "다음 →"을 누르세요.',
-			advanceOn: 'click',
-			advanceElement: '[data-tour="wizard-next"]',
-			backElement: '[data-tour="wizard-prev"]',
+			advanceOn: 'wizard',
+			wizardStep: 5,
 			cancelElement: '[data-tour="wizard-cancel"]',
 		},
 		{
@@ -110,9 +122,9 @@ function vmCreateSteps(): TourStep[] {
 			title: '배포',
 			description:
 				'선택한 구성 요약을 마지막으로 확인하세요. "VM 생성" 버튼을 누르면 부트 볼륨 생성 → 인스턴스 생성 순으로 배포가 시작됩니다.',
+			wizardStep: 6,
 			advanceOn: 'click',
 			advanceElement: '[data-tour="wizard-next"]',
-			backElement: '[data-tour="wizard-prev"]',
 			cancelElement: '[data-tour="wizard-cancel"]',
 		},
 		{

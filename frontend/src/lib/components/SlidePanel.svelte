@@ -7,6 +7,7 @@
     width?: string;
     resizable?: boolean;
     storageKey?: string;
+    dataTour?: string;
     children: Snippet;
   }
 
@@ -15,6 +16,7 @@
     width = 'w-full md:w-[75vw] max-w-5xl',
     resizable = true,
     storageKey,
+    dataTour,
     children,
   }: Props = $props();
 
@@ -94,6 +96,7 @@
   ></button>
   <div
     bind:this={panelEl}
+    data-tour={dataTour}
     class="@container/panel absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
     style={isDesktop && widthPx !== null ? `width: ${widthPx}px; max-width: none` : ''}
     transition:fly={{ x: 400, duration: 300, opacity: 1 }}

@@ -36,6 +36,13 @@ describe('SlidePanel', () => {
 		expect(screen.getByText('패널 내용')).toBeTruthy();
 	});
 
+	it('dataTour를 스크롤 컨테이너의 data-tour 속성으로 전달', () => {
+		const { container } = render(SlidePanelWrapper, { onClose: vi.fn(), dataTour: 'wizard-panel' });
+		flushSync();
+		const scrollContainer = container.querySelector('.overflow-y-auto');
+		expect(scrollContainer?.getAttribute('data-tour')).toBe('wizard-panel');
+	});
+
 	it('backdrop 버튼이 "패널 닫기" aria-label을 가짐', () => {
 		render(SlidePanelWrapper, { onClose: vi.fn() });
 		flushSync();

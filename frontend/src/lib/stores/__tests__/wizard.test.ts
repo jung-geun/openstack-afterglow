@@ -83,4 +83,20 @@ describe('wizard store', () => {
 		unsub();
 		expect(states).toEqual([false, true, false]);
 	});
+
+	it('wizard 단계 변경 이벤트를 detail.step과 함께 한 번만 발행', async () => {
+		const { wizard } = await import('../wizard');
+		const events: number[] = [];
+		const handler = (event: Event) => {
+			events.push((event as CustomEvent<{ step: number }>).detail.step);
+		};
+		window.addEventListener('afterglow:wizard-step', handler);
+		try {
+			wizard.update((w) => ({ ...w, step: 5 }));
+			wizard.update((w) => ({ ...w, step: 5 }));
+			expect(events).toEqual([5]);
+		} finally {
+			window.removeEventListener('afterglow:wizard-step', handler);
+		}
+	});
 });
