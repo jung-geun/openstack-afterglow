@@ -894,6 +894,8 @@ from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402
 # 빌트인 AI 채팅 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.chat_db import (  # noqa: E402,F401
     ChatConversation,
+    ChatCustomTool,
+    ChatMcpServer,
     ChatMessage,
     ChatUsageLog,
     LlmModel,

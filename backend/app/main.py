@@ -335,7 +335,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/providers", "llm_provider"),
     ("/api/v1/chat/admin/models", "llm_model"),
+    ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
+    ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
     ("/api/v1/chat/conversations", "chat_conversation"),
+    ("/api/v1/chat/mcp-servers", "chat_mcp_server"),
+    ("/api/v1/chat/custom-tools", "chat_custom_tool"),
     ("/api/v1/volumes/backups", "volume_backup"),
     ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
@@ -618,14 +622,20 @@ if _svc_cfg.service_chat_enabled:
         chat_admin_router,
         chat_completions_router,
         chat_conversations_router,
+        chat_extensions_admin_router,
+        chat_extensions_user_router,
         chat_usage_router,
     )
 
     # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
     app.include_router(chat_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 관리자 MCP/커스텀툴 (require_admin, global) — /admin/mcp-servers, /admin/custom-tools
+    app.include_router(chat_extensions_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
     # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)
     app.include_router(chat_conversations_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
+    app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])

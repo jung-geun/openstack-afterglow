@@ -153,3 +153,54 @@ class UserWallet(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class ChatMcpServer(Base):
+    """MCP 서버 (등록·관리 전용 — 실행은 langchain-mcp-adapters 핀 이동 후). scope: global|user."""
+
+    __tablename__ = "chat_mcp_servers"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
+    owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    transport: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="http")  # http|sse|stdio
+    url: Mapped[str | None] = mapped_column(VARCHAR(500))
+    command: Mapped[str | None] = mapped_column(VARCHAR(500))
+    headers: Mapped[dict | None] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_chat_mcp_scope", "scope"),
+        Index("idx_chat_mcp_owner", "owner_user_id"),
+    )
+
+
+class ChatCustomTool(Base):
+    """커스텀 HTTP 툴 (백엔드가 SSRF 가드 후 대리 호출). scope: global|user."""
+
+    __tablename__ = "chat_custom_tools"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
+    owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)  # 영숫자/언더스코어
+    description: Mapped[str] = mapped_column(VARCHAR(500), nullable=False)
+    method: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="GET")  # GET|POST
+    url: Mapped[str] = mapped_column(VARCHAR(500), nullable=False)
+    params_schema: Mapped[dict | None] = mapped_column(JSON)
+    timeout_seconds: Mapped[int] = mapped_column(INT, nullable=False, default=10)
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_chat_tool_scope", "scope"),
+        Index("idx_chat_tool_owner", "owner_user_id"),
+    )

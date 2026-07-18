@@ -93,6 +93,7 @@ EXEMPT_ROUTERS: set[str] = {
     "chat/models.py",  # 관리자 프로바이더/모델 CRUD
     "chat/conversations.py",  # 대화/메시지 (DB 직접)
     "chat/completions.py",  # 스트리밍 completions (사용량 원장 append-only)
+    "chat/extensions.py",  # MCP 서버/커스텀툴 CRUD (DB 직접, app 캐시 미사용)
 }
 
 # ---------------------------------------------------------------------------
