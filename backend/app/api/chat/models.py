@@ -18,6 +18,7 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 # --- 프로바이더 ---
 class ProviderCreateRequest(BaseModel):
     name: str = Field(..., max_length=100)
+    provider_type: str = Field(default="openai", max_length=40)  # litellm custom_llm_provider
     api_base: str | None = Field(default=None, max_length=255)
     api_key: str | None = Field(default=None, max_length=500)
     margin_multiplier: float = Field(default=1.0, ge=0)
@@ -26,6 +27,7 @@ class ProviderCreateRequest(BaseModel):
 
 class ProviderUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=100)
+    provider_type: str | None = Field(default=None, max_length=40)
     api_base: str | None = Field(default=None, max_length=255)
     api_key: str | None = Field(default=None, max_length=500)
     margin_multiplier: float | None = Field(default=None, ge=0)
@@ -35,6 +37,7 @@ class ProviderUpdateRequest(BaseModel):
 class ProviderResponse(BaseModel):
     id: int
     name: str
+    provider_type: str
     api_base: str | None
     has_api_key: bool
     is_active: bool

@@ -10,11 +10,31 @@
 	interface Provider {
 		id: number;
 		name: string;
+		provider_type: string;
 		api_base: string | null;
 		has_api_key: boolean;
 		is_active: boolean;
 		margin_multiplier: number;
 	}
+
+	// litellm custom_llm_provider — 내부에서 litellm 이 각 API 형식으로 중계한다.
+	// OpenAI 호환 엔드포인트는 'openai' + API Base 로 연결. 그 외는 각 provider 타입 선택.
+	const PROVIDER_TYPES: { value: string; label: string }[] = [
+		{ value: 'openai', label: 'OpenAI (및 OpenAI 호환 API)' },
+		{ value: 'anthropic', label: 'Anthropic (Claude)' },
+		{ value: 'gemini', label: 'Google Gemini (AI Studio)' },
+		{ value: 'vertex_ai', label: 'Google Vertex AI (GCP)' },
+		{ value: 'azure', label: 'Azure OpenAI' },
+		{ value: 'bedrock', label: 'AWS Bedrock' },
+		{ value: 'ollama', label: 'Ollama (로컬)' },
+		{ value: 'mistral', label: 'Mistral' },
+		{ value: 'cohere', label: 'Cohere' },
+		{ value: 'groq', label: 'Groq' },
+		{ value: 'deepseek', label: 'DeepSeek' },
+		{ value: 'together_ai', label: 'Together AI' },
+		{ value: 'openrouter', label: 'OpenRouter' },
+		{ value: 'xai', label: 'xAI (Grok)' }
+	];
 	interface Model {
 		id: number;
 		provider_id: number;
@@ -32,6 +52,7 @@
 	let error = $state('');
 
 	let pName = $state('');
+	let pType = $state('openai');
 	let pApiBase = $state('');
 	let pApiKey = $state('');
 	let addingProvider = $state(false);
@@ -68,11 +89,17 @@
 		try {
 			await api.post(
 				'/api/v1/chat/admin/providers',
-				{ name: pName.trim(), api_base: pApiBase.trim() || null, api_key: pApiKey.trim() || null },
+				{
+					name: pName.trim(),
+					provider_type: pType,
+					api_base: pApiBase.trim() || null,
+					api_key: pApiKey.trim() || null
+				},
 				token,
 				projectId
 			);
 			pName = '';
+			pType = 'openai';
 			pApiBase = '';
 			pApiKey = '';
 			await load();
@@ -191,11 +218,19 @@
 	<section class="mb-8">
 		<h3 class="mb-3 text-sm font-semibold text-[var(--color-ink-1)]">LLM 프로바이더</h3>
 		<div class="{cardCls} mb-4 p-5">
-			<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-				<input class={inputCls} placeholder="이름 (예: openai)" bind:value={pName} />
-				<input class={inputCls} placeholder="API Base (선택)" bind:value={pApiBase} />
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+				<input class={inputCls} placeholder="이름 (예: openai-prod)" bind:value={pName} />
+				<select class={inputCls} bind:value={pType}>
+					{#each PROVIDER_TYPES as pt (pt.value)}
+						<option value={pt.value}>{pt.label}</option>
+					{/each}
+				</select>
+				<input class={inputCls} placeholder="API Base (OpenAI 호환/커스텀 엔드포인트, 선택)" bind:value={pApiBase} />
 				<input class={inputCls} type="password" placeholder="API 키" bind:value={pApiKey} />
 			</div>
+			<p class="mt-2 text-xs text-[var(--color-ink-3)]">
+				타입은 내부 litellm 중계 형식입니다. OpenAI 호환 엔드포인트(vLLM·LM Studio 등)는 'OpenAI 호환' + API Base 로 연결하세요.
+			</p>
 			<div class="mt-3 flex justify-end">
 				<Button onclick={addProvider} disabled={addingProvider}>
 					{addingProvider ? '추가 중…' : '+ 프로바이더 추가'}
@@ -228,6 +263,7 @@
 								>
 									{p.has_api_key ? '키 설정됨' : '키 없음'}
 								</span>
+								<span class="rounded bg-[var(--color-line)] px-1.5 py-0.5 text-xs text-[var(--color-ink-2)]">{p.provider_type}</span>
 							</div>
 							{#if p.api_base}
 								<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{p.api_base}</div>

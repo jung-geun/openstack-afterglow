@@ -95,6 +95,27 @@ class TestGraphStream:
         assert any(e["type"] == "error" for e in events)
         assert not any(e["type"] == "token" for e in events)
 
+    async def test_passes_custom_llm_provider(self, monkeypatch):
+        captured = {}
+
+        async def fake_stream(**kwargs):
+            captured.update(kwargs)
+            return _aiter([_Chunk("x")])
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        _ = [
+            ev
+            async for ev in graph.stream(
+                model="claude-3-5-sonnet",
+                messages=_MSGS,
+                project_id="p1",
+                user_id="u1",
+                custom_llm_provider="anthropic",
+            )
+        ]
+        assert captured["custom_llm_provider"] == "anthropic"
+        assert captured["model"] == "claude-3-5-sonnet"
+
 
 class TestToolLoop:
     async def test_tool_call_executes_tenant_safe_then_streams_final(self, monkeypatch):

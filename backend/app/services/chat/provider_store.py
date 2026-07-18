@@ -59,6 +59,7 @@ def _provider_public(row: LlmProvider) -> dict:
     return {
         "id": row.id,
         "name": row.name,
+        "provider_type": row.provider_type,
         "api_base": row.api_base,
         "has_api_key": bool(row.encrypted_api_key),
         "is_active": row.is_active,
@@ -88,6 +89,7 @@ def _model_public(row: LlmModel) -> dict:
 async def create_provider(
     *,
     name: str,
+    provider_type: str = "openai",
     api_base: str | None = None,
     api_key: str | None = None,
     margin_multiplier=1.0,
@@ -98,6 +100,7 @@ async def create_provider(
         raise ProviderValidationError("name 은 필수입니다")
     row = LlmProvider(
         name=name.strip(),
+        provider_type=(provider_type or "openai").strip(),
         api_base=(api_base or None),
         encrypted_api_key=(encrypt_llm_provider_key(api_key) if api_key else None),
         margin_multiplier=_to_decimal(margin_multiplier, "margin_multiplier"),
@@ -135,6 +138,8 @@ async def update_provider(provider_id: int, patch: dict) -> dict:
                 raise ProviderNotFoundError(f"프로바이더 {provider_id} 를 찾을 수 없습니다")
             if patch.get("name"):
                 row.name = str(patch["name"]).strip()
+            if patch.get("provider_type"):
+                row.provider_type = str(patch["provider_type"]).strip()
             if "api_base" in patch:
                 row.api_base = patch["api_base"] or None
             if "api_key" in patch:
@@ -289,6 +294,7 @@ async def resolve_model(model_name: str) -> dict | None:
             return {
                 "model_name": model.model_name,
                 "provider_name": provider.name,
+                "provider_type": provider.provider_type,
                 "api_base": provider.api_base,
                 "api_key": api_key,
                 "margin_multiplier": float(provider.margin_multiplier),

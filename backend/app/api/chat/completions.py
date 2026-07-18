@@ -124,6 +124,7 @@ async def create_completion(
                 messages=messages,
                 project_id=project_id,
                 user_id=user_id,
+                custom_llm_provider=resolved.get("provider_type"),
                 api_base=resolved.get("api_base"),
                 api_key=resolved.get("api_key"),
                 max_tokens=max_tokens,

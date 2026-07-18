@@ -16,6 +16,7 @@ def _public_provider(**over) -> dict:
     base = {
         "id": 1,
         "name": "openai",
+        "provider_type": "openai",
         "api_base": None,
         "has_api_key": True,
         "is_active": True,

@@ -93,10 +93,13 @@ def _build_params(
     api_key: str | None,
     max_tokens: int | None,
     temperature: float | None,
+    custom_llm_provider: str | None = None,
     tools: list[dict] | None = None,
     extra: dict | None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"model": model, "messages": messages}
+    if custom_llm_provider:
+        params["custom_llm_provider"] = custom_llm_provider
     if api_base:
         params["api_base"] = api_base
     if api_key:
@@ -120,6 +123,7 @@ async def acompletion(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    custom_llm_provider: str | None = None,
     tools: list[dict] | None = None,
     extra: dict | None = None,
 ) -> Any:
@@ -133,6 +137,7 @@ async def acompletion(
         api_key=api_key,
         max_tokens=max_tokens,
         temperature=temperature,
+        custom_llm_provider=custom_llm_provider,
         tools=tools,
         extra=extra,
     )
@@ -147,6 +152,7 @@ async def acompletion_stream(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    custom_llm_provider: str | None = None,
     tools: list[dict] | None = None,
     extra: dict | None = None,
 ) -> Any:
@@ -164,6 +170,7 @@ async def acompletion_stream(
         api_key=api_key,
         max_tokens=max_tokens,
         temperature=temperature,
+        custom_llm_provider=custom_llm_provider,
         tools=tools,
         extra=extra,
     )

@@ -135,6 +135,7 @@ def _build_graph(params: dict, ctx: ToolContext):
                     model=params["model"],
                     messages=msgs,
                     tools=schemas,
+                    custom_llm_provider=params.get("custom_llm_provider"),
                     api_base=params.get("api_base"),
                     api_key=params.get("api_key"),
                     max_tokens=params.get("max_tokens"),
@@ -192,6 +193,7 @@ async def stream(
     messages: list[dict],
     project_id: str,
     user_id: str,
+    custom_llm_provider: str | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
     max_tokens: int | None = None,
@@ -203,6 +205,7 @@ async def stream(
     """
     params = {
         "model": model,
+        "custom_llm_provider": custom_llm_provider,
         "api_base": api_base,
         "api_key": api_key,
         "max_tokens": max_tokens,
