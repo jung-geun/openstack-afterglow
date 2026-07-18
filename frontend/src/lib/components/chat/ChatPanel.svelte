@@ -2,7 +2,6 @@
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
-	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
 	interface Conversation {
@@ -189,7 +188,7 @@
 	});
 </script>
 
-<Card padding="none" class="w-full h-[calc(100vh-8rem)] flex overflow-hidden">
+<div class="flex h-[calc(100vh-3.5rem)] w-full overflow-hidden bg-[var(--color-surface-base)]">
 	<!-- 사이드바: 모델 선택 + 대화 목록 -->
 	<aside class="w-64 shrink-0 border-r border-[var(--color-line)] flex flex-col bg-[var(--color-surface-sunken)]">
 		<div class="p-3 border-b border-[var(--color-line)] space-y-2">
@@ -277,4 +276,4 @@
 			</div>
 		</div>
 	</section>
-</Card>
+</div>
