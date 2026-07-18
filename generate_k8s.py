@@ -325,16 +325,6 @@ def render_secret(cfg: dict) -> str:
         ]
     )
 
-    librechat_mongo_url = chat.get("mongo_url", "")
-    if librechat_mongo_url:
-        lines.extend(
-            [
-                "",
-                "  # LibreChat MongoDB 읽기 전용 접속 URL",
-                f"  LIBRECHAT_MONGO_URL: {_yaml_str(librechat_mongo_url)}",
-            ]
-        )
-
     chat_checkpointer_url = chat.get("checkpointer_postgres_url", "")
     if chat_checkpointer_url:
         lines.extend(
@@ -912,11 +902,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
 
-    # [chat] — 빌트인 AI 채팅(litellm/크레딧/쿼터) + (전환 중) LibreChat 임베드
+    # [chat] — 빌트인 AI 채팅(litellm/크레딧/쿼터)
     if (
-        chat.get("base_url")
-        or chat.get("mongo_url")
-        or chat.get("default_model")
+        chat.get("default_model")
         or chat.get("credit_per_usd") is not None
         or chat.get("default_monthly_quota") is not None
         or chat.get("stream_enabled") is not None
@@ -928,9 +916,6 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
         lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
         # checkpointer_postgres_url(비밀)은 secret.yaml의 CHAT_CHECKPOINTER_POSTGRES_URL로 주입됩니다
-        # (전환 중) LibreChat 임베드 — Phase 3에서 제거 예정
-        lines.append(f"base_url = {_toml_str(chat.get('base_url', ''))}")
-        lines.append("# mongo_url은 secret.yaml의 LIBRECHAT_MONGO_URL 환경변수로 주입됩니다")
         lines.append("")
 
     # [notion]
@@ -1008,9 +993,6 @@ def render_configmap(cfg: dict) -> str:
     # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
     app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
 
-    # APP_LIBRECHAT_BASE: chat.base_url (CSP frame-src 및 frontend 임베드용)
-    app_librechat_base = cfg.get("chat", {}).get("base_url", "")
-
     # afterglow.conf 인라인 (4칸 들여쓰기). config.toml 키도 하위호환용으로 함께 출력.
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -1027,7 +1009,6 @@ def render_configmap(cfg: dict) -> str:
         f'  PUBLIC_API_BASE: "{public_api_base}"',
         f'  PUBLIC_S3_BASE: "{public_s3_base}"',
         f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
-        f'  APP_LIBRECHAT_BASE: "{app_librechat_base}"',
         "  afterglow.conf: |",
         indented_toml,
         # "  config.toml: |",

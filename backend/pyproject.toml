@@ -27,7 +27,6 @@ dependencies = [
     "idna>=3.15",
     "aiosmtplib>=3.0.0",
     "openpyxl>=3.1.5",
-    "motor>=3.6.0",
     "litellm==1.83.0",
     # 빌트인 AI 채팅 Phase 2 — LangGraph 오케스트레이션 + 전용 Postgres 체크포인터
     # (MCP: langchain-mcp-adapters↔mcp 런타임 버전 비호환 해결 후 별도 추가)

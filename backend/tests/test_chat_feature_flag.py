@@ -1,9 +1,9 @@
 """services.chat 피처 플래그 회귀 테스트.
 
 관리자가 afterglow.conf [services] chat 으로 빌트인 AI 채팅을 켜고 끌 수 있다.
-빌트인 채팅은 자체 백엔드(litellm 등)로 동작하므로 LibreChat base_url 이 필요 없다.
+빌트인 채팅은 자체 백엔드(litellm 등)로 동작하므로 service_chat_enabled 단독으로 켜진다.
 - 플래그 false → services.chat=false (사이드바/커맨드 팔레트 숨김)
-- 플래그 true → services.chat=true (librechat_base_url 유무와 무관)
+- 플래그 true → services.chat=true (프론트 메뉴/페이지 노출)
 """
 
 from app.config import Settings, get_settings
@@ -15,19 +15,13 @@ def _settings_with(**overrides) -> Settings:
 
 
 def test_services_chat_false_when_flag_disabled():
-    """플래그 false 면 (구 librechat_base_url이 남아 있어도) 비활성."""
-    s = _settings_with(service_chat_enabled=False, librechat_base_url="https://chat.example.com")
+    s = _settings_with(service_chat_enabled=False)
     assert configured_public_site_config(s)["services"]["chat"] is False
 
 
-def test_services_chat_true_when_flag_enabled_without_base_url():
-    """빌트인 채팅 — 플래그만 켜면 base_url 없이도 활성(핵심 회귀: 프론트 메뉴 노출)."""
-    s = _settings_with(service_chat_enabled=True, librechat_base_url="")
-    assert configured_public_site_config(s)["services"]["chat"] is True
-
-
 def test_services_chat_true_when_flag_enabled():
-    s = _settings_with(service_chat_enabled=True, librechat_base_url="https://chat.example.com")
+    """빌트인 채팅 — 플래그만 켜면 활성(핵심 회귀: 프론트 메뉴 노출)."""
+    s = _settings_with(service_chat_enabled=True)
     assert configured_public_site_config(s)["services"]["chat"] is True
 
 
