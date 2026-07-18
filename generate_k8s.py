@@ -902,9 +902,22 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
 
-    # [chat] — 기존 LibreChat 인스턴스 임베드 + 사용량 읽기 전용 미러링
-    if chat.get("base_url") or chat.get("mongo_url"):
+    # [chat] — 빌트인 AI 채팅(litellm/크레딧/쿼터) + (전환 중) LibreChat 임베드
+    if (
+        chat.get("base_url")
+        or chat.get("mongo_url")
+        or chat.get("default_model")
+        or chat.get("credit_per_usd") is not None
+        or chat.get("default_monthly_quota") is not None
+        or chat.get("stream_enabled") is not None
+    ):
         lines.append("[chat]")
+        # 빌트인 채팅 설정 (비밀 아님 — configmap 평문)
+        lines.append(f"default_model = {_toml_str(chat.get('default_model', ''))}")
+        lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
+        lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
+        lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
+        # (전환 중) LibreChat 임베드 — Phase 3에서 제거 예정
         lines.append(f"base_url = {_toml_str(chat.get('base_url', ''))}")
         lines.append("# mongo_url은 secret.yaml의 LIBRECHAT_MONGO_URL 환경변수로 주입됩니다")
         lines.append("")

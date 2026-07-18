@@ -333,6 +333,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 긴 prefix 를 먼저 두어 longest-prefix 매칭이 단순 순회로 동작하도록 정렬.
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
+    ("/api/v1/chat/admin/providers", "llm_provider"),
+    ("/api/v1/chat/admin/models", "llm_model"),
+    ("/api/v1/chat/conversations", "chat_conversation"),
     ("/api/v1/volumes/backups", "volume_backup"),
     ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
@@ -611,8 +614,18 @@ if _svc_cfg.service_vpn_enabled:
     app.include_router(vpn_clients_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
     app.include_router(vpn_agent_router, prefix="/api/v1/vpn/servers", tags=["vpn-agent"])
 if _svc_cfg.service_chat_enabled:
-    from app.api.chat import chat_usage_router
+    from app.api.chat import (
+        chat_admin_router,
+        chat_completions_router,
+        chat_conversations_router,
+        chat_usage_router,
+    )
 
+    # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
+    app.include_router(chat_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)
+    app.include_router(chat_conversations_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])

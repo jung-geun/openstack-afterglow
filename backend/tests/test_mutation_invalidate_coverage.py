@@ -86,6 +86,13 @@ EXEMPT_ROUTERS: set[str] = {
     # 에이전트(VM 내부) 대면 — 사용자 캐시가 아닌 Redis 상태 캐시(vpn_agent_auth)를
     # 직접 갱신하며, 이 파일의 mutation invalidation 검사 대상(app 캐시)과는 무관.
     "vpn/agent.py",
+    # 빌트인 AI 채팅(chat/*) — 프로바이더/모델/대화/메시지는 provider_store·
+    # conversation_store 가 SQLAlchemy select()로 DB를 매 요청 직접 읽으며
+    # cached_call/app 캐시 레이어를 전혀 거치지 않는다(announcements/site branding/
+    # VPN과 동일 사유 — 무효화할 per-project OpenStack 리소스 캐시가 애초에 없음).
+    "chat/models.py",  # 관리자 프로바이더/모델 CRUD
+    "chat/conversations.py",  # 대화/메시지 (DB 직접)
+    "chat/completions.py",  # 스트리밍 completions (사용량 원장 append-only)
 }
 
 # ---------------------------------------------------------------------------

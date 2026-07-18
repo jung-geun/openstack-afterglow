@@ -2,6 +2,9 @@
 
 _ROUTERS = {
     "chat_usage_router": ".usage",
+    "chat_admin_router": ".models",
+    "chat_conversations_router": ".conversations",
+    "chat_completions_router": ".completions",
 }
 
 

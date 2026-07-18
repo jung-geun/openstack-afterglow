@@ -340,6 +340,11 @@ def _load_toml() -> dict:
     chat = data.get("chat", {})
     flat["librechat_mongo_url"] = chat.get("mongo_url", "")
     flat["librechat_base_url"] = chat.get("base_url", "")
+    # 빌트인 AI 채팅 (litellm 라우팅 + 크레딧/쿼터)
+    flat["chat_default_model"] = chat.get("default_model", "")
+    flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
+    flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
+    flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -635,9 +640,15 @@ class Settings(BaseSettings):
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
 
-    # LibreChat 임베드 연동 (기존 인스턴스 읽기 전용 조회)
+    # LibreChat 임베드 연동 (기존 인스턴스 읽기 전용 조회) — Phase 3 빌트인 전환 시 제거 예정
     librechat_mongo_url: str = ""  # LibreChat MongoDB 읽기 전용 접속 URL (secret.yaml에서 주입)
     librechat_base_url: str = ""  # LibreChat 외부 URL (예: https://chat.dmslab.re.kr)
+
+    # 빌트인 AI 채팅 (litellm 라우팅 + 모델별 가중 크레딧 + 월 쿼터)
+    chat_default_model: str = ""  # 기본 모델명 (활성 llm_models 카탈로그의 model_name과 일치해야 함)
+    chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
+    chat_default_monthly_quota: float = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
+    chat_stream_enabled: bool = True  # SSE 스트리밍 응답 사용
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

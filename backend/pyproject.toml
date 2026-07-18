@@ -28,6 +28,7 @@ dependencies = [
     "aiosmtplib>=3.0.0",
     "openpyxl>=3.1.5",
     "motor>=3.6.0",
+    "litellm==1.83.0",
 ]
 
 [build-system]

@@ -1,0 +1,177 @@
+"""빌트인 AI 채팅 — MariaDB 실 SQL 통합 테스트 (마이그레이션/ORM/쿼리/암호화/쿼터 라운드트립).
+
+로컬에서 AFTERGLOW_TEST_DATABASE_URL 미설정 시 자동 skip, CI 의 test-backend-db 잡에서 실행된다.
+실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test \
+     pytest tests/test_chat_db_integration.py -v -m db
+
+단위 테스트(mock)가 커버하지 못하는 실 DB 경로를 한 번에 검증:
+- ORM DDL(create_all) ↔ 컬럼/타입, provider/model INSERT + UNIQUE
+- resolve_model 의 JOIN + api_key 암호화 저장(v3:) → 복호화 왕복
+- 대화/메시지 소유권, apply_usage 의 원자적 used_quota UPDATE + 원장 append
+- precheck 쿼터 차단
+"""
+
+import os
+from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import select, text
+
+import app.models.db  # noqa: F401 — side-effect: Base 에 ORM 모델 등록
+from app.models.chat_db import ChatUsageLog, LlmProvider, UserWallet
+
+pytestmark = [pytest.mark.db, pytest.mark.asyncio]
+
+_DB_URL_ENV = "AFTERGLOW_TEST_DATABASE_URL"
+_KEY_HEX = "a" * 64
+_CHAT_TABLES = (
+    "chat_usage_logs",
+    "chat_messages",
+    "chat_conversations",
+    "user_wallets",
+    "llm_models",
+    "llm_providers",
+)
+
+
+@pytest.fixture(scope="module")
+def db_url():
+    url = os.environ.get(_DB_URL_ENV)
+    if not url:
+        pytest.skip(f"{_DB_URL_ENV} 미설정 — MariaDB 통합 테스트 건너뜀")
+    return url
+
+
+@pytest_asyncio.fixture
+async def chat_db(db_url, monkeypatch):
+    """app.database 전역 엔진을 테스트 DB로 초기화하고 chat 테이블을 준비한다.
+
+    provider_store/credit 는 get_session_factory()·get_settings() 를 내부에서 쓰므로,
+    암호화 마스터키와 크레딧 설정을 여기서 주입한다.
+    """
+    from app import database
+
+    monkeypatch.setattr(
+        "app.services.k3s_crypto.get_settings",
+        lambda: SimpleNamespace(k3s_kubeconfig_encryption_key=_KEY_HEX),
+    )
+    monkeypatch.setattr(
+        "app.services.chat.credit.get_settings",
+        lambda: SimpleNamespace(chat_credit_per_usd=1000.0, chat_default_monthly_quota=100000.0),
+    )
+
+    database.init_db(db_url)
+    async with database._engine.begin() as conn:
+        await conn.run_sync(database.Base.metadata.create_all)
+    # 이전 실행 잔여 정리
+    async with database._engine.begin() as conn:
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        for t in _CHAT_TABLES:
+            await conn.execute(text(f"DELETE FROM {t}"))
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+
+    yield database
+
+    async with database._engine.begin() as conn:
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        for t in _CHAT_TABLES:
+            await conn.execute(text(f"DELETE FROM {t}"))
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+    await database._engine.dispose()
+    database._engine = None
+    database._session_factory = None
+
+
+async def test_provider_model_conversation_usage_roundtrip(chat_db):
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import credit
+    from app.services.chat import provider_store as ps
+
+    factory = chat_db.get_session_factory()
+
+    # 1. 프로바이더 + 모델 (api_key 암호화 저장)
+    prov = await ps.create_provider(name="openai", api_base=None, api_key="sk-secret-123", margin_multiplier=1.0)
+    assert prov["has_api_key"] is True
+    assert "api_key" not in prov  # 응답 마스킹
+    await ps.create_model(provider_id=prov["id"], model_name="gpt-4o", display_name="GPT-4o")
+
+    # 2. resolve_model — JOIN + 복호화 왕복
+    resolved = await ps.resolve_model("gpt-4o")
+    assert resolved is not None
+    assert resolved["api_key"] == "sk-secret-123"
+    assert resolved["provider_name"] == "openai"
+
+    # 3. 저장 시 ciphertext 는 v3:, 평문 미포함
+    async with factory() as s:
+        row = (await s.execute(select(LlmProvider).where(LlmProvider.id == prov["id"]))).scalar_one()
+        assert row.encrypted_api_key.startswith("v3:")
+        assert "sk-secret-123" not in row.encrypted_api_key
+
+    # 4. 미등록 모델 → resolve None (화이트리스트)
+    assert await ps.resolve_model("no-such-model") is None
+
+    # 5. 대화/메시지 + 소유권
+    conv = await cs.create_conversation(project_id="p1", user_id="u1", title="t", model_name="gpt-4o")
+    await cs.add_message(conv["id"], role="user", content="안녕하세요")
+    msgs = await cs.list_messages(conv["id"], project_id="p1", user_id="u1")
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "안녕하세요"
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.get_conversation(conv["id"], project_id="other-project", user_id="u1")
+
+    # 6. apply_usage — 원자적 used_quota UPDATE + 원장 append
+    credited = await credit.apply_usage(
+        user_id="u1",
+        project_id="p1",
+        model_name="gpt-4o",
+        provider="openai",
+        prompt_tokens=100,
+        completion_tokens=50,
+        raw_cost=0.002,
+        margin_multiplier=1.5,
+        conversation_id=conv["id"],
+        source="web",
+    )
+    assert credited == Decimal("3.00000000")  # 0.002 USD × 1.5 × 1000
+
+    async with factory() as s:
+        wallet = await s.get(UserWallet, "u1")
+        assert wallet.used_quota_this_month == Decimal("3.00000000")
+        logs = (await s.execute(select(ChatUsageLog).where(ChatUsageLog.user_id == "u1"))).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].credited_cost == Decimal("3.00000000")
+        assert logs[0].provider == "openai"
+
+    # 7. 두 번째 과금 → 누적(원자적 증가)
+    await credit.apply_usage(
+        user_id="u1",
+        project_id="p1",
+        model_name="gpt-4o",
+        provider="openai",
+        prompt_tokens=10,
+        completion_tokens=10,
+        raw_cost=0.001,
+        margin_multiplier=1.0,
+        conversation_id=conv["id"],
+        source="web",
+    )
+    async with factory() as s:
+        wallet = await s.get(UserWallet, "u1")
+        assert wallet.used_quota_this_month == Decimal("4.00000000")  # 3 + 1
+
+    # 8. 쿼터 상한을 사용량 아래로 낮추면 precheck 차단
+    async with factory() as s, s.begin():
+        w = await s.get(UserWallet, "u1")
+        w.max_quota_monthly = Decimal("1")
+    with pytest.raises(credit.QuotaExceeded):
+        await credit.precheck("u1", "p1")
+
+
+async def test_provider_name_unique(chat_db):
+    from app.services.chat import provider_store as ps
+
+    await ps.create_provider(name="dup", api_key=None)
+    with pytest.raises(ps.ProviderValidationError):
+        await ps.create_provider(name="dup", api_key=None)
