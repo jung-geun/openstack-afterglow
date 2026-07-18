@@ -35,9 +35,10 @@
 
 	interface ChatUsage {
 		found: boolean;
-		total_raw_amount: number;
-		total_token_value: number;
-		transaction_count: number;
+		total_credited_cost: number;
+		prompt_tokens: number;
+		completion_tokens: number;
+		request_count: number;
 	}
 
 	let data = $state<UsageReport | null>(null);
@@ -275,14 +276,14 @@
 			</div>
 		</div>
 
-		<!-- LLM 채팅 토큰 사용량 (LibreChat 미러링) -->
+		<!-- LLM 채팅 사용량 (빌트인) -->
 		{#if chatUsage?.found}
 			<Card padding="lg">
-				<SectionHeader title="AI 채팅 토큰 사용량" meta="LibreChat 연동" />
+				<SectionHeader title="AI 채팅 사용량" meta="빌트인 채팅" />
 				<div class="grid grid-cols-2 lg:grid-cols-3 gap-3.5 mt-4">
 					<StatTile
 						label="누계 토큰"
-						value={Math.abs(chatUsage.total_raw_amount).toLocaleString()}
+						value={(chatUsage.prompt_tokens + chatUsage.completion_tokens).toLocaleString()}
 						accent="blue"
 					>
 						{#snippet icon()}
@@ -293,7 +294,7 @@
 					</StatTile>
 					<StatTile
 						label="크레딧 소모"
-						value={Math.abs(chatUsage.total_token_value).toLocaleString()}
+						value={chatUsage.total_credited_cost.toLocaleString()}
 						accent="violet"
 					>
 						{#snippet icon()}
@@ -303,8 +304,8 @@
 						{/snippet}
 					</StatTile>
 					<StatTile
-						label="대화 트랜잭션"
-						value={chatUsage.transaction_count}
+						label="요청 수"
+						value={chatUsage.request_count}
 						accent="cyan"
 					>
 						{#snippet icon()}
