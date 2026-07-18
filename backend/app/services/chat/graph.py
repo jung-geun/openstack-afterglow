@@ -23,8 +23,8 @@ from typing import Any, TypedDict
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from app.services.chat import litellm_client
-from app.services.chat.tools import ToolContext, execute_tool, tool_schemas
+from app.services.chat import litellm_client, tool_runtime
+from app.services.chat.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def _build_graph(params: dict, ctx: ToolContext):
     async def agent(state: ChatState) -> dict:
         writer = get_stream_writer()
         msgs = list(state["messages"])
-        schemas = tool_schemas()
+        schemas = await tool_runtime.context_tool_schemas(ctx)  # 내장 + 동적 커스텀 툴
         total_pt = total_ct = 0
         final_text = ""
 
@@ -169,7 +169,7 @@ def _build_graph(params: dict, ctx: ToolContext):
                         args = json.loads(tc.get("args") or "{}")
                     except (json.JSONDecodeError, TypeError):
                         args = {}
-                    result = await execute_tool(tc["name"], args, ctx)
+                    result = await tool_runtime.context_execute(tc["name"], args, ctx)
                     msgs.append({"role": "tool", "tool_call_id": tc.get("id") or tc["name"], "content": result})
                 continue  # 다음 턴(툴 결과 반영)
 

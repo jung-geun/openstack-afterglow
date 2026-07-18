@@ -8,7 +8,7 @@ litellm_client.acompletion_stream 을 mock 해 네트워크 없이 검증:
 - engine.stream 이 graph.stream 에 위임하는지
 """
 
-from app.services.chat import engine, graph, litellm_client
+from app.services.chat import engine, graph, litellm_client, tool_runtime
 
 _MSGS = [{"role": "user", "content": "안녕하세요"}]
 
@@ -125,7 +125,7 @@ class TestToolLoop:
             return "대화 3개"
 
         monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
-        monkeypatch.setattr(graph, "execute_tool", fake_execute)
+        monkeypatch.setattr(tool_runtime, "context_execute", fake_execute)
 
         events = [ev async for ev in graph.stream(model="m", messages=_MSGS, project_id="p1", user_id="u1")]
 
