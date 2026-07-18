@@ -93,6 +93,7 @@ def _build_params(
     api_key: str | None,
     max_tokens: int | None,
     temperature: float | None,
+    tools: list[dict] | None = None,
     extra: dict | None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"model": model, "messages": messages}
@@ -104,6 +105,8 @@ def _build_params(
         params["max_tokens"] = max_tokens
     if temperature is not None:
         params["temperature"] = temperature
+    if tools:
+        params["tools"] = tools
     if extra:
         params.update(extra)
     return params
@@ -117,13 +120,21 @@ async def acompletion(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    tools: list[dict] | None = None,
     extra: dict | None = None,
 ) -> Any:
     """비스트리밍 litellm 호출."""
     import litellm
 
     params = _build_params(
-        model, messages, api_base=api_base, api_key=api_key, max_tokens=max_tokens, temperature=temperature, extra=extra
+        model,
+        messages,
+        api_base=api_base,
+        api_key=api_key,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tools=tools,
+        extra=extra,
     )
     return await litellm.acompletion(**params)
 
@@ -136,17 +147,25 @@ async def acompletion_stream(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    tools: list[dict] | None = None,
     extra: dict | None = None,
 ) -> Any:
     """스트리밍 litellm 호출. usage 계측을 위해 include_usage 를 강제한다.
 
     반환값은 async iterator(청크). 호출부가 청크 델타를 SSE 로 전달하고,
-    마지막 usage 청크를 extract_usage 에 넘겨 과금한다.
+    마지막 usage 청크를 extract_usage 에 넘겨 과금한다. tools 지정 시 tool_call 델타도 스트리밍된다.
     """
     import litellm
 
     params = _build_params(
-        model, messages, api_base=api_base, api_key=api_key, max_tokens=max_tokens, temperature=temperature, extra=extra
+        model,
+        messages,
+        api_base=api_base,
+        api_key=api_key,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tools=tools,
+        extra=extra,
     )
     params["stream"] = True
     params["stream_options"] = {"include_usage": True}

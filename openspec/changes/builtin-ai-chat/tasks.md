@@ -23,13 +23,14 @@
 
 ### Phase 2 — LangGraph + MCP 툴
 
-- [~] 의존성: `langgraph==1.2.2`/`langchain-core==1.4.9`/`langgraph-checkpoint-postgres==3.1.0`/`psycopg[binary]==3.3.4` 추가·**import 검증 OK**(그래프+체크포인터 사용 가능). ⚠️ **블로커**: `langchain-mcp-adapters==0.3.0` ↔ `mcp==1.12.4` 런타임 비호환(`streamable_http_client` import 실패) — 호환 버전쌍 확정 필요(MCP 툴 로딩 한정, 그래프 본체는 영향 없음). *미커밋*
+- [x] 의존성: `langgraph==1.2.2`/`langchain-core==1.4.9`/`langgraph-checkpoint-postgres==3.1.0`/`psycopg[binary]==3.3.4` 추가·검증 (커밋 `f03ad53a`).
+- [!] **외부 MCP 블로커(근본원인 규명)**: `langchain-mcp-adapters 0.3.0`은 모던 `mcp 1.28.1` 필요 → mcp 1.28.1이 하드핀 3개와 충돌(`pydantic>=2.11` vs 2.9.2, `uvicorn>=0.31.1` vs 0.30.6, `httpx>=0.28` vs 0.27.2). **외부 MCP = 백엔드 전역 pydantic/uvicorn/httpx 이동 강제 → pie_root 승인·전체 재검증 필요(미결정).** litellm은 mcp 무관. **대안**: 내부 플랫폼 툴(tools.py)은 MCP 라이브러리 불요 → 자체 tool 루프로 unblocked.
 - [x] Postgres 체크포인터 **설정 동기화**: `config.py` `chat_checkpointer_postgres_url`(secret) + `generate_k8s.py` render_secret + `afterglow.conf.example` — 설정 검증 OK. (checkpointer.py 선택 로직은 graph.py와 함께 구현)
-- [~] `services/chat/graph.py` StateGraph(START→agent→END) — litellm 커스텀 노드 + `get_stream_writer()`/`stream_mode="custom"` 토큰 스트리밍. `engine.stream`이 `graph.stream`에 위임(계약 불변). `tests/test_chat_graph.py` 5 + 전체 chat 64 passed. **잔여**: tools 노드+조건부 엣지(MCP), 체크포인터 wiring(MemorySaver/AsyncPostgresSaver), 메모리 truncation. (대화 전사는 이미 MySQL chat_messages 로드)
-- [ ] `services/chat/mcp_registry.py`(관리자 화이트리스트, SSRF 차단, graceful)
-- [ ] `services/chat/tools.py`(project_id 컨텍스트 강제 주입, 소유권 재검증, 화이트리스트, shlex_quote)
-- [ ] `completions` graph 경로 전환(astream_events) + 멀티스텝 사용량 합산
-- [ ] tests: 툴 바인딩·테넌트 격리·인젝션 방어·MCP 로드 실패 graceful·멀티스텝 과금
+- [x] `services/chat/graph.py` 에이전트 루프 — litellm 커스텀 노드 + `get_stream_writer()`/`stream_mode="custom"` 토큰 스트리밍 + **tool_call 델타 누적 → 테넌트 안전 실행 → 최종 답변 스트리밍 + 멀티스텝 usage 합산**. `engine.stream`이 위임. **잔여**: 체크포인터 wiring(MemorySaver/AsyncPostgresSaver), 메모리 truncation. (대화 전사는 이미 MySQL chat_messages 로드)
+- [x] `services/chat/tools.py`(내부 플랫폼 툴) — **project_id/user_id 컨텍스트 강제 주입(LLM 인자 무시)**, 소유권 재검증(IDOR), 화이트리스트, 예외 미전파. 스타터 툴: list_my_conversations / get_conversation_detail. `tools()` OpenAI 스키마 + `execute_tool` 디스패처.
+- [x] `completions` graph 경로(내부 툴 루프) + 멀티스텝 usage 합산 + `tool_call` SSE 중계. 사용자용 `GET /api/v1/chat/models` 추가. 프론트 tool 활동 표시.
+- [x] tests: 툴 스키마·**테넌트 격리(LLM의 project_id 주입 무시)**·소유권 거부·미등록 툴·에이전트 툴 루프·멀티스텝 과금 — `test_chat_tools.py` 7 + `test_chat_graph.py`. 전체 chat 72 passed / 백엔드 2979 passed.
+- [ ] 외부 MCP `mcp_registry.py`(관리자 화이트리스트·SSRF·graceful) — ⚠️ 상단 블로커(pydantic/uvicorn/httpx 핀 이동) 해결 후.
 
 ### Phase 3 — 과금/관리자/외부 키 + LibreChat 제거 + 프론트
 

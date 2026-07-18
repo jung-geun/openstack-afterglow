@@ -24,6 +24,7 @@
 		type: string;
 		text?: string;
 		message?: string;
+		name?: string;
 	}
 
 	const token = $derived($auth.token ?? undefined);
@@ -37,6 +38,7 @@
 	let input = $state('');
 	let sending = $state(false);
 	let error = $state<string | null>(null);
+	let toolActivity = $state<string | null>(null);
 
 	let scrollEl = $state<HTMLDivElement | null>(null);
 
@@ -135,12 +137,17 @@
 			projectId,
 			(evt) => {
 				if (evt.type === 'token' && evt.text) {
+					toolActivity = null;
 					messages[idx].content += evt.text;
+				} else if (evt.type === 'tool_call') {
+					toolActivity = evt.name ?? '도구';
 				} else if (evt.type === 'error') {
 					error = evt.message || '모델 응답 중 오류가 발생했습니다';
+					toolActivity = null;
 					messages[idx].streaming = false;
 					sending = false;
 				} else if (evt.type === 'done') {
+					toolActivity = null;
 					messages[idx].streaming = false;
 					sending = false;
 					void loadConversations();
@@ -148,6 +155,7 @@
 			},
 			(err) => {
 				error = err.message || '스트리밍 중 오류가 발생했습니다';
+				toolActivity = null;
 				messages[idx].streaming = false;
 				sending = false;
 			}
@@ -245,6 +253,10 @@
 				{/each}
 			{/if}
 		</div>
+
+		{#if toolActivity}
+			<div class="px-4 py-1.5 text-xs text-[var(--color-ink-3)]">🔧 도구 사용 중: {toolActivity}…</div>
+		{/if}
 
 		{#if error}
 			<div class="px-4 py-2 text-xs text-[var(--color-state-danger)]">{error}</div>

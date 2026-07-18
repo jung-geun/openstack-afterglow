@@ -122,6 +122,8 @@ async def create_completion(
             async for ev in engine.stream(
                 model=model_name,
                 messages=messages,
+                project_id=project_id,
+                user_id=user_id,
                 api_base=resolved.get("api_base"),
                 api_key=resolved.get("api_key"),
                 max_tokens=max_tokens,
@@ -131,6 +133,8 @@ async def create_completion(
                 if etype == "token":
                     parts.append(ev["text"])
                     yield _sse({"type": "token", "text": ev["text"]})
+                elif etype == "tool_call":
+                    yield _sse({"type": "tool_call", "name": ev.get("name")})
                 elif etype == "usage":
                     final_usage = ev.get("usage")
                 elif etype == "error":
