@@ -193,6 +193,12 @@
 	<aside class="w-64 shrink-0 border-r border-[var(--color-line)] flex flex-col bg-[var(--color-surface-sunken)]">
 		<div class="p-3 border-b border-[var(--color-line)] space-y-2">
 			<Button onclick={newConversation} class="w-full">+ 새 대화</Button>
+			<a
+				href="/dashboard/chat/tools"
+				class="block text-center text-xs text-[var(--color-ink-3)] transition-colors hover:text-[var(--color-ink-1)]"
+			>
+				⚙ 내 도구 관리 (MCP·툴)
+			</a>
 			<label class="block text-xs text-[var(--color-ink-3)]">
 				모델
 				<select

@@ -5,6 +5,7 @@
 	import { toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import ChatExtensionsManager from '$lib/components/chat/ChatExtensionsManager.svelte';
 
 	interface Provider {
 		id: number;
@@ -294,4 +295,9 @@
 			</div>
 		{/if}
 	</section>
+
+	<!-- MCP 서버 / 커스텀 툴 (전체 공용) -->
+	<div class="mt-10 border-t border-[var(--color-line)] pt-8">
+		<ChatExtensionsManager base="/api/v1/chat/admin" />
+	</div>
 </div>
