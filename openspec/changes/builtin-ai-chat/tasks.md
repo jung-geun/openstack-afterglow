@@ -23,9 +23,9 @@
 
 ### Phase 2 — LangGraph + MCP 툴
 
-- [ ] `langgraph`/`langchain-core`/`langchain-mcp-adapters`/`mcp` + `langgraph-checkpoint-postgres` 의존성 추가
-- [ ] 전용 Postgres 체크포인터 인프라(`chat_checkpointer_postgres_url` 설정 게이팅, 미설정 시 MemorySaver fallback) — 설정 동기화 + generate_k8s
-- [ ] `services/chat/graph.py` StateGraph(load_memory→agent→tools→persist) + `AsyncPostgresSaver`/MemorySaver + 메모리 truncation (전사는 MySQL chat_messages)
+- [~] 의존성: `langgraph==1.2.2`/`langchain-core==1.4.9`/`langgraph-checkpoint-postgres==3.1.0`/`psycopg[binary]==3.3.4` 추가·**import 검증 OK**(그래프+체크포인터 사용 가능). ⚠️ **블로커**: `langchain-mcp-adapters==0.3.0` ↔ `mcp==1.12.4` 런타임 비호환(`streamable_http_client` import 실패) — 호환 버전쌍 확정 필요(MCP 툴 로딩 한정, 그래프 본체는 영향 없음). *미커밋*
+- [x] Postgres 체크포인터 **설정 동기화**: `config.py` `chat_checkpointer_postgres_url`(secret) + `generate_k8s.py` render_secret + `afterglow.conf.example` — 설정 검증 OK. (checkpointer.py 선택 로직은 graph.py와 함께 구현)
+- [~] `services/chat/graph.py` StateGraph(START→agent→END) — litellm 커스텀 노드 + `get_stream_writer()`/`stream_mode="custom"` 토큰 스트리밍. `engine.stream`이 `graph.stream`에 위임(계약 불변). `tests/test_chat_graph.py` 5 + 전체 chat 64 passed. **잔여**: tools 노드+조건부 엣지(MCP), 체크포인터 wiring(MemorySaver/AsyncPostgresSaver), 메모리 truncation. (대화 전사는 이미 MySQL chat_messages 로드)
 - [ ] `services/chat/mcp_registry.py`(관리자 화이트리스트, SSRF 차단, graceful)
 - [ ] `services/chat/tools.py`(project_id 컨텍스트 강제 주입, 소유권 재검증, 화이트리스트, shlex_quote)
 - [ ] `completions` graph 경로 전환(astream_events) + 멀티스텝 사용량 합산

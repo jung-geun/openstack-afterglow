@@ -345,6 +345,8 @@ def _load_toml() -> dict:
     flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
     flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
     flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
+    # Phase 2: LangGraph 전용 Postgres 체크포인터(비밀 — secret.yaml 주입). 미설정 시 MemorySaver fallback.
+    flat["chat_checkpointer_postgres_url"] = chat.get("checkpointer_postgres_url", "")
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -649,6 +651,8 @@ class Settings(BaseSettings):
     chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
     chat_default_monthly_quota: float = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
     chat_stream_enabled: bool = True  # SSE 스트리밍 응답 사용
+    # Phase 2: LangGraph 전용 Postgres 체크포인터 접속 URL(secret.yaml 주입). 비면 MemorySaver 사용.
+    chat_checkpointer_postgres_url: str = ""
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

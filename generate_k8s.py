@@ -335,6 +335,16 @@ def render_secret(cfg: dict) -> str:
             ]
         )
 
+    chat_checkpointer_url = chat.get("checkpointer_postgres_url", "")
+    if chat_checkpointer_url:
+        lines.extend(
+            [
+                "",
+                "  # 빌트인 채팅 LangGraph 전용 Postgres 체크포인터 접속 URL",
+                f"  CHAT_CHECKPOINTER_POSTGRES_URL: {_yaml_str(chat_checkpointer_url)}",
+            ]
+        )
+
     sd_token = mon.get("sd_token", "")
     if sd_token:
         lines.extend(
@@ -917,6 +927,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
         lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
         lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
+        # checkpointer_postgres_url(비밀)은 secret.yaml의 CHAT_CHECKPOINTER_POSTGRES_URL로 주입됩니다
         # (전환 중) LibreChat 임베드 — Phase 3에서 제거 예정
         lines.append(f"base_url = {_toml_str(chat.get('base_url', ''))}")
         lines.append("# mongo_url은 secret.yaml의 LIBRECHAT_MONGO_URL 환경변수로 주입됩니다")

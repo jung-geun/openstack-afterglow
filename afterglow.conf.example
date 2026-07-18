@@ -512,6 +512,9 @@ default_model = ""              # 기본 모델명 (활성 llm_models 카탈로�
 credit_per_usd = 1000.0         # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
 default_monthly_quota = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
 stream_enabled = true           # SSE 스트리밍 응답 사용
+# Phase 2: LangGraph 전용 Postgres 체크포인터(대화 상태/메모리 영속화). 비밀값 — secret.yaml의
+# CHAT_CHECKPOINTER_POSTGRES_URL로 주입. 비워두면 MemorySaver(프로세스 메모리) fallback.
+checkpointer_postgres_url = ""   # 예: postgresql://afterglow:pass@postgres:5432/afterglow_chat
 
 # --- (전환 중) 기존 LibreChat 임베드 연동 — Phase 3에서 제거 예정 ---
 base_url = ""    # LibreChat 외부 URL (예: https://chat.dmslab.re.kr)

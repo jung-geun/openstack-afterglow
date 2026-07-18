@@ -7,6 +7,7 @@ DB 없이 conversation_store 를 monkeypatch 하여:
 """
 
 from app.services.chat import conversation_store as cs
+from app.services.chat import provider_store
 
 _URL = "/api/v1/chat/conversations"
 
@@ -96,3 +97,40 @@ class TestStorageUnavailable:
         monkeypatch.setattr(cs, "list_conversations", fake_list)
         resp = await client.get(_URL)
         assert resp.status_code == 503
+
+
+class TestAvailableModels:
+    async def test_returns_active_models_without_keys(self, client, monkeypatch):
+        async def fake_models(*, active_only=False):
+            assert active_only is True
+            return [
+                {
+                    "id": 1,
+                    "provider_id": 1,
+                    "model_name": "gpt-4o",
+                    "display_name": "GPT-4o",
+                    "is_active": True,
+                    "input_price": 0.0000025,
+                    "output_price": 0.00001,
+                    "created_at": None,
+                    "updated_at": None,
+                },
+            ]
+
+        monkeypatch.setattr(provider_store, "list_models", fake_models)
+        resp = await client.get("/api/v1/chat/models")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == [{"model_name": "gpt-4o", "display_name": "GPT-4o"}]
+        # 가격/내부 필드 미노출
+        assert "input_price" not in body[0]
+        assert "provider_id" not in body[0]
+
+    async def test_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
+        async def fake_models(*, active_only=False):
+            raise provider_store.ChatStorageUnavailable("DB down")
+
+        monkeypatch.setattr(provider_store, "list_models", fake_models)
+        resp = await client.get("/api/v1/chat/models")
+        assert resp.status_code == 200
+        assert resp.json() == []

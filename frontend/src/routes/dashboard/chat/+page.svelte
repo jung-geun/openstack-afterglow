@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { SectionHeader } from '$lib/components/ui';
-	import LibreChatEmbed from '$lib/components/LibreChatEmbed.svelte';
+	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
 </script>
 
 <div class="space-y-4">
-	<SectionHeader title="AI 채팅" meta="LibreChat 기반 LLM 채팅 서비스" />
-	<LibreChatEmbed />
+	<SectionHeader title="AI 채팅" meta="빌트인 LLM 채팅 (litellm 라우팅)" />
+	<ChatPanel />
 </div>

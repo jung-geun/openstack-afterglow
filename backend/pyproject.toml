@@ -29,6 +29,12 @@ dependencies = [
     "openpyxl>=3.1.5",
     "motor>=3.6.0",
     "litellm==1.83.0",
+    # 빌트인 AI 채팅 Phase 2 — LangGraph 오케스트레이션 + 전용 Postgres 체크포인터
+    # (MCP: langchain-mcp-adapters↔mcp 런타임 버전 비호환 해결 후 별도 추가)
+    "langgraph==1.2.2",
+    "langchain-core==1.4.9",
+    "langgraph-checkpoint-postgres==3.1.0",
+    "psycopg[binary]==3.3.4",  # AsyncPostgresSaver 용 — [binary]로 libpq 번들(시스템 의존 불요)
 ]
 
 [build-system]
