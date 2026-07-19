@@ -1,7 +1,9 @@
 """빌트인 AI 채팅 대화/메시지 저장소 (MySQL chat_conversations / chat_messages).
 
-⚠️ IDOR 방어: 모든 조회/수정 경로에서 대화의 (project_id, user_id) 가 호출자 token_info 와
-일치하는지 검증한다. 타 프로젝트 대화 접근은 ConversationForbidden(403), 미존재는 ConversationNotFound(404).
+⚠️ IDOR 방어: 모든 조회/수정 경로에서 대화의 user_id 가 호출자 token_info 의 user_id 와
+일치하는지 검증한다(프로젝트 무관 — 한 사용자의 대화는 프로젝트가 달라도 본인 것).
+타 사용자 대화 접근은 ConversationForbidden(403), 미존재는 ConversationNotFound(404).
+project_id 는 생성 시점 활성 프로젝트를 메타로 보존할 뿐 소유권 판정에는 쓰지 않는다.
 """
 
 from __future__ import annotations
@@ -98,12 +100,16 @@ def _msg_public(row: ChatMessage) -> dict:
     }
 
 
-async def _load_owned(session, conv_id: str, project_id: str, user_id: str) -> ChatConversation:
-    """대화를 로드하고 소유권을 검증. 미존재→NotFound, 소유자 불일치→Forbidden."""
+async def _load_owned(session, conv_id: str, user_id: str) -> ChatConversation:
+    """대화를 로드하고 소유권(user_id)을 검증. 프로젝트 무관 — 사용자 소유 기준.
+
+    미존재→NotFound, 소유자(user_id) 불일치→Forbidden. project_id 는 소유권 판정에서 제외한다
+    (한 사용자의 대화는 프로젝트가 달라도 본인 것). project_id 는 생성 시점 메타로만 보존된다.
+    """
     row = await session.get(ChatConversation, conv_id)
     if row is None:
         raise ConversationNotFound(f"대화 {conv_id} 를 찾을 수 없습니다")
-    if row.project_id != project_id or row.user_id != user_id:
+    if row.user_id != user_id:
         raise ConversationForbidden("대화에 접근할 권한이 없습니다")
     return row
 
@@ -127,13 +133,14 @@ async def create_conversation(*, project_id: str, user_id: str, title: str | Non
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_conversations(*, project_id: str, user_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
+async def list_conversations(*, user_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    """사용자 소유 대화 목록(프로젝트 무관). updated_at desc."""
     factory = _require_db()
     try:
         async with factory() as session:
             stmt = (
                 select(ChatConversation)
-                .where(ChatConversation.project_id == project_id, ChatConversation.user_id == user_id)
+                .where(ChatConversation.user_id == user_id)
                 .order_by(ChatConversation.updated_at.desc())
                 .limit(min(limit, 200))
                 .offset(max(offset, 0))
@@ -145,34 +152,34 @@ async def list_conversations(*, project_id: str, user_id: str, limit: int = 50, 
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def get_conversation(conv_id: str, *, project_id: str, user_id: str) -> dict:
+async def get_conversation(conv_id: str, *, user_id: str) -> dict:
     factory = _require_db()
     try:
         async with factory() as session:
-            row = await _load_owned(session, conv_id, project_id, user_id)
+            row = await _load_owned(session, conv_id, user_id)
             return _conv_public(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def delete_conversation(conv_id: str, *, project_id: str, user_id: str) -> None:
+async def delete_conversation(conv_id: str, *, user_id: str) -> None:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load_owned(session, conv_id, project_id, user_id)
+            row = await _load_owned(session, conv_id, user_id)
             await session.delete(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def update_title(conv_id: str, *, project_id: str, user_id: str, title: str | None) -> dict:
+async def update_title(conv_id: str, *, user_id: str, title: str | None) -> dict:
     """대화 제목 갱신(소유권 검증 + 암호화 저장). 제목 자동 요약 경로용."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load_owned(session, conv_id, project_id, user_id)
+            row = await _load_owned(session, conv_id, user_id)
             row.title = _enc(title or None)
             await session.flush()
             return _conv_public(row)
@@ -181,13 +188,11 @@ async def update_title(conv_id: str, *, project_id: str, user_id: str, title: st
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_messages(
-    conv_id: str, *, project_id: str, user_id: str, limit: int = 200, offset: int = 0
-) -> list[dict]:
+async def list_messages(conv_id: str, *, user_id: str, limit: int = 200, offset: int = 0) -> list[dict]:
     factory = _require_db()
     try:
         async with factory() as session:
-            await _load_owned(session, conv_id, project_id, user_id)  # 소유권 검증
+            await _load_owned(session, conv_id, user_id)  # 소유권 검증
             stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.conversation_id == conv_id)

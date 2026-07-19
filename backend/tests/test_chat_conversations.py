@@ -51,8 +51,9 @@ class TestCreateAndList:
         monkeypatch.setattr(cs, "list_conversations", fake_list)
         resp = await client.get(_URL)
         assert resp.status_code == 200
-        assert captured["project_id"] == "test-project-123"
+        # 프로젝트 무관 — user_id 단독 소유. project_id 는 소유권에서 제외됨.
         assert captured["user_id"] == "test-user-123"
+        assert "project_id" not in captured
 
 
 class TestOwnership:

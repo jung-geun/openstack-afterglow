@@ -84,7 +84,7 @@ async def create_completion(
 
     # 2. 대화 소유권
     try:
-        conv = await cs.get_conversation(conversation_id, project_id=project_id, user_id=user_id)
+        conv = await cs.get_conversation(conversation_id, user_id=user_id)
     except cs.ConversationNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except cs.ConversationForbidden as exc:
@@ -105,7 +105,7 @@ async def create_completion(
 
     # 4. 히스토리 로드 + 사용자 메시지 저장
     try:
-        history = await cs.list_messages(conversation_id, project_id=project_id, user_id=user_id, limit=_MAX_HISTORY)
+        history = await cs.list_messages(conversation_id, user_id=user_id, limit=_MAX_HISTORY)
         await cs.add_message(conversation_id, role="user", content=payload.message)
     except cs.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

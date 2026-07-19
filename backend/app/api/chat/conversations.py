@@ -1,7 +1,8 @@
 """빌트인 AI 채팅 대화/메시지 API (사용자 소유 리소스).
 
-전 엔드포인트 get_token_info 인증 + project_id/user_id 소유권 검증(IDOR 방어).
+전 엔드포인트 get_token_info 인증 + user_id 소유권 검증(IDOR 방어, 프로젝트 무관).
 서비스(conversation_store)가 소유권을 강제하고, 예외를 HTTP 상태로 매핑한다.
+project_id 는 생성 시점 메타로만 저장되고 소유권 판정에는 쓰지 않는다.
 """
 
 from __future__ import annotations
@@ -87,9 +88,7 @@ async def create_conversation(payload: ConversationCreateRequest, token_info: di
 @router.get("/conversations", response_model=list[ConversationResponse])
 async def list_conversations(limit: int = 50, offset: int = 0, token_info: dict = Depends(get_token_info)):
     try:
-        return await cs.list_conversations(
-            project_id=token_info["project_id"], user_id=token_info["user_id"], limit=limit, offset=offset
-        )
+        return await cs.list_conversations(user_id=token_info["user_id"], limit=limit, offset=offset)
     except cs.ChatStorageUnavailable as exc:
         raise _map_error(exc) from exc
 
@@ -97,9 +96,7 @@ async def list_conversations(limit: int = 50, offset: int = 0, token_info: dict 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: str, token_info: dict = Depends(get_token_info)):
     try:
-        return await cs.get_conversation(
-            conversation_id, project_id=token_info["project_id"], user_id=token_info["user_id"]
-        )
+        return await cs.get_conversation(conversation_id, user_id=token_info["user_id"])
     except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
@@ -107,9 +104,7 @@ async def get_conversation(conversation_id: str, token_info: dict = Depends(get_
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(conversation_id: str, token_info: dict = Depends(get_token_info)):
     try:
-        await cs.delete_conversation(
-            conversation_id, project_id=token_info["project_id"], user_id=token_info["user_id"]
-        )
+        await cs.delete_conversation(conversation_id, user_id=token_info["user_id"])
     except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
@@ -119,12 +114,6 @@ async def list_messages(
     conversation_id: str, limit: int = 200, offset: int = 0, token_info: dict = Depends(get_token_info)
 ):
     try:
-        return await cs.list_messages(
-            conversation_id,
-            project_id=token_info["project_id"],
-            user_id=token_info["user_id"],
-            limit=limit,
-            offset=offset,
-        )
+        return await cs.list_messages(conversation_id, user_id=token_info["user_id"], limit=limit, offset=offset)
     except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc

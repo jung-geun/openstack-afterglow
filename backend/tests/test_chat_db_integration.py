@@ -177,6 +177,29 @@ async def test_provider_name_unique(chat_db):
         await ps.create_provider(name="dup", api_key=None)
 
 
+async def test_conversation_user_scope_cross_project(chat_db):
+    """대화 소유는 user_id 기준(프로젝트 무관): 다른 project 로 만든 대화도 같은 user 는 조회, 타 user 는 403."""
+    from app.services.chat import conversation_store as cs
+
+    c1 = await cs.create_conversation(project_id="projA", user_id="u1", title="A", model_name="m")
+    c2 = await cs.create_conversation(project_id="projB", user_id="u1", title="B", model_name="m")
+    await cs.create_conversation(project_id="projA", user_id="u2", title="타인", model_name="m")
+
+    # u1 목록 → 프로젝트 무관하게 본인 대화 2개(타 user 것 제외)
+    ids = {c["id"] for c in await cs.list_conversations(user_id="u1")}
+    assert c1["id"] in ids and c2["id"] in ids
+    assert len(ids) == 2
+
+    # u1 은 projB 대화도 조회 가능(프로젝트 무관)
+    assert (await cs.get_conversation(c2["id"], user_id="u1"))["id"] == c2["id"]
+
+    # 타 user 는 소유권 없음 → Forbidden (IDOR 경계)
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.get_conversation(c1["id"], user_id="u2")
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.delete_conversation(c1["id"], user_id="u2")
+
+
 async def test_chat_content_encryption_at_rest(chat_db):
     """메시지 content/tool_calls, 대화 title 이 DB 에 v3: 암호문으로 저장되고 조회 시 평문 복원."""
     from app.models.chat_db import ChatConversation, ChatMessage

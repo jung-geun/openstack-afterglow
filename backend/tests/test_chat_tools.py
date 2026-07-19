@@ -54,8 +54,9 @@ class TestTenantSafety:
             {"project_id": "EVIL-PROJECT", "user_id": "EVIL-USER"},
             _CTX,
         )
-        assert captured["project_id"] == "proj-A"  # 컨텍스트 값
+        # user_id 는 컨텍스트 값(user-A) — LLM 이 주입한 EVIL-USER 는 무시. project_id 는 소유권에서 제외.
         assert captured["user_id"] == "user-A"
+        assert "project_id" not in captured
         assert "t" in out
 
     async def test_foreign_conversation_forbidden(self, monkeypatch):
@@ -80,8 +81,8 @@ class TestTenantSafety:
         monkeypatch.setattr(cs, "get_conversation", fake_get)
         monkeypatch.setattr(cs, "list_messages", fake_msgs)
         out = await execute_tool("get_conversation_detail", {"conversation_id": "c1"}, _CTX)
-        assert captured["project_id"] == "proj-A"
-        assert captured["user_id"] == "user-A"
+        assert captured["user_id"] == "user-A"  # 컨텍스트 값(프로젝트 무관 소유)
+        assert "project_id" not in captured
         assert "메시지 1개" in out
 
     async def test_missing_required_arg(self):

@@ -48,7 +48,7 @@ async def _list_my_conversations(args: dict, ctx: ToolContext) -> str:
     from app.services.chat import conversation_store as cs
 
     try:
-        convs = await cs.list_conversations(project_id=ctx.project_id, user_id=ctx.user_id, limit=20)
+        convs = await cs.list_conversations(user_id=ctx.user_id, limit=20)
     except cs.ChatStorageUnavailable:
         return "저장소를 일시적으로 사용할 수 없습니다."
     if not convs:
@@ -64,9 +64,9 @@ async def _get_conversation_detail(args: dict, ctx: ToolContext) -> str:
     if not conv_id or not isinstance(conv_id, str):
         return "conversation_id(문자열)가 필요합니다."
     try:
-        # 소유권 재검증 — 타 프로젝트/타 사용자 대화면 Forbidden.
-        conv = await cs.get_conversation(conv_id, project_id=ctx.project_id, user_id=ctx.user_id)
-        msgs = await cs.list_messages(conv_id, project_id=ctx.project_id, user_id=ctx.user_id)
+        # 소유권 재검증 — 타 사용자 대화면 Forbidden(프로젝트 무관, user_id 기준).
+        conv = await cs.get_conversation(conv_id, user_id=ctx.user_id)
+        msgs = await cs.list_messages(conv_id, user_id=ctx.user_id)
     except cs.ConversationForbidden:
         return "해당 대화에 접근할 권한이 없습니다."
     except cs.ConversationNotFound:
