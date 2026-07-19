@@ -304,3 +304,21 @@ async def resolve_model(model_name: str) -> dict | None:
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def get_provider_for_discovery(provider_id: int) -> dict | None:
+    """모델 discovery 용 — provider_type/api_base/복호화 api_key. 미존재 시 None.
+
+    ⚠️ 반환 api_key 는 복호화 평문 — 서버 내부 discovery 호출 전용, API 응답 노출 금지.
+    """
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            row = await session.get(LlmProvider, provider_id)
+            if row is None:
+                return None
+            api_key = decrypt_llm_provider_key(row.encrypted_api_key) if row.encrypted_api_key else None
+            return {"provider_type": row.provider_type, "api_base": row.api_base, "api_key": api_key}
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc

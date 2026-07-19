@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import require_admin
+from app.services.chat import model_discovery
 from app.services.chat import provider_store as ps
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -123,6 +124,17 @@ async def update_provider(provider_id: int, payload: ProviderUpdateRequest):
 async def delete_provider(provider_id: int):
     try:
         await ps.delete_provider(provider_id)
+    except ps.ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ChatStorageUnavailable as exc:
+        raise _map_storage(exc) from exc
+
+
+@router.get("/admin/providers/{provider_id}/available-models")
+async def available_models(provider_id: int):
+    """프로바이더 API(또는 litellm 정적 목록)에서 사용 가능한 모델 id 목록을 조회. 등록 전 선택/필터용."""
+    try:
+        return await model_discovery.discover_models(provider_id)
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:

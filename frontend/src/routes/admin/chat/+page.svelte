@@ -62,6 +62,26 @@
 	let mDisplay = $state('');
 	let addingModel = $state(false);
 
+	// 모델 discovery (프로바이더 API에서 목록 불러오기 → 필터 → 선택 등록)
+	let discoverId = $state<number | null>(null);
+	let available = $state<string[]>([]);
+	let availSource = $state('');
+	let availFilter = $state('');
+	let selectedAvail = $state<Record<string, boolean>>({});
+	let discovering = $state(false);
+	let registeringBulk = $state(false);
+
+	function registeredNames(providerId: number): Set<string> {
+		return new Set(models.filter((m) => m.provider_id === providerId).map((m) => m.model_name));
+	}
+
+	const filteredAvailable = $derived.by(() => {
+		if (discoverId === null) return [];
+		const reg = registeredNames(discoverId);
+		const f = availFilter.toLowerCase();
+		return available.filter((m) => m.toLowerCase().includes(f) && !reg.has(m));
+	});
+
 	async function load() {
 		if (!token) return;
 		loading = true;
@@ -166,6 +186,75 @@
 		}
 	}
 
+	async function discover(providerId: number) {
+		if (discoverId === providerId) {
+			discoverId = null;
+			return;
+		}
+		discoverId = providerId;
+		discovering = true;
+		available = [];
+		availSource = '';
+		availFilter = '';
+		selectedAvail = {};
+		try {
+			const res = await api.get<{ models: string[]; source: string }>(
+				`/api/v1/chat/admin/providers/${providerId}/available-models`,
+				token,
+				projectId
+			);
+			available = res.models;
+			availSource = res.source;
+			if (res.models.length === 0) {
+				toast.error('모델을 찾지 못했습니다 (API 키/Base URL 확인)');
+			}
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '모델 조회 실패');
+			discoverId = null;
+		} finally {
+			discovering = false;
+		}
+	}
+
+	async function registerSelected() {
+		if (discoverId === null) return;
+		const names = Object.keys(selectedAvail).filter((k) => selectedAvail[k]);
+		if (names.length === 0) {
+			toast.error('등록할 모델을 선택하세요');
+			return;
+		}
+		registeringBulk = true;
+		let ok = 0;
+		const failed: string[] = [];
+		try {
+			for (const name of names) {
+				try {
+					await api.post(
+						'/api/v1/chat/admin/models',
+						{ provider_id: discoverId, model_name: name },
+						token,
+						projectId
+					);
+					ok++;
+				} catch {
+					failed.push(name);
+				}
+			}
+			await load();
+			if (ok > 0) toast.success(`${ok}개 모델을 등록했습니다`);
+			if (failed.length > 0) toast.error(`${failed.length}개 등록 실패 (중복 등)`);
+			selectedAvail = {};
+		} finally {
+			registeringBulk = false;
+		}
+	}
+
+	function toggleAllFiltered(checked: boolean) {
+		const next = { ...selectedAvail };
+		for (const m of filteredAvailable) next[m] = checked;
+		selectedAvail = next;
+	}
+
 	async function deleteModel(id: number) {
 		if (!(await confirmDialog('모델을 삭제하시겠습니까?'))) return;
 		try {
@@ -245,35 +334,76 @@
 		{:else}
 			<div class="space-y-2">
 				{#each providers as p (p.id)}
-					<div class="{cardCls} flex items-center justify-between gap-3 px-4 py-3">
-						<div class="min-w-0">
-							<div class="flex items-center gap-2">
-								<span class="truncate text-sm font-medium text-[var(--color-ink-1)]">{p.name}</span>
-								<span
-									class="rounded px-1.5 py-0.5 text-xs {p.is_active
-										? 'bg-[var(--color-state-success)]/15 text-[var(--color-state-success)]'
-										: 'bg-[var(--color-line)] text-[var(--color-ink-3)]'}"
-								>
-									{p.is_active ? '활성' : '비활성'}
-								</span>
-								<span
-									class="rounded px-1.5 py-0.5 text-xs {p.has_api_key
-										? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-										: 'bg-[var(--color-state-warning)]/15 text-[var(--color-state-warning)]'}"
-								>
-									{p.has_api_key ? '키 설정됨' : '키 없음'}
-								</span>
-								<span class="rounded bg-[var(--color-line)] px-1.5 py-0.5 text-xs text-[var(--color-ink-2)]">{p.provider_type}</span>
+					<div class="space-y-0">
+						<div class="{cardCls} flex items-center justify-between gap-3 px-4 py-3">
+							<div class="min-w-0">
+								<div class="flex items-center gap-2">
+									<span class="truncate text-sm font-medium text-[var(--color-ink-1)]">{p.name}</span>
+									<span
+										class="rounded px-1.5 py-0.5 text-xs {p.is_active
+											? 'bg-[var(--color-state-success)]/15 text-[var(--color-state-success)]'
+											: 'bg-[var(--color-line)] text-[var(--color-ink-3)]'}"
+									>
+										{p.is_active ? '활성' : '비활성'}
+									</span>
+									<span
+										class="rounded px-1.5 py-0.5 text-xs {p.has_api_key
+											? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+											: 'bg-[var(--color-state-warning)]/15 text-[var(--color-state-warning)]'}"
+									>
+										{p.has_api_key ? '키 설정됨' : '키 없음'}
+									</span>
+									<span class="rounded bg-[var(--color-line)] px-1.5 py-0.5 text-xs text-[var(--color-ink-2)]">{p.provider_type}</span>
+								</div>
+								{#if p.api_base}
+									<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{p.api_base}</div>
+								{/if}
 							</div>
-							{#if p.api_base}
-								<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{p.api_base}</div>
-							{/if}
+							<div class="flex shrink-0 items-center gap-3 text-xs">
+								<button class={rowActionCls} onclick={() => discover(p.id)}>
+									{discoverId === p.id ? '닫기' : '모델 불러오기'}
+								</button>
+								<button class={rowActionCls} onclick={() => updateKey(p)}>키 변경</button>
+								<button class={rowActionCls} onclick={() => toggleProvider(p)}>{p.is_active ? '비활성화' : '활성화'}</button>
+								<button class="text-[var(--color-state-danger)] transition-opacity hover:opacity-80" onclick={() => deleteProvider(p.id)}>삭제</button>
+							</div>
 						</div>
-						<div class="flex shrink-0 items-center gap-3 text-xs">
-							<button class={rowActionCls} onclick={() => updateKey(p)}>키 변경</button>
-							<button class={rowActionCls} onclick={() => toggleProvider(p)}>{p.is_active ? '비활성화' : '활성화'}</button>
-							<button class="text-[var(--color-state-danger)] transition-opacity hover:opacity-80" onclick={() => deleteProvider(p.id)}>삭제</button>
-						</div>
+
+						{#if discoverId === p.id}
+							<div class="mt-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-sunken)] p-4">
+								{#if discovering}
+									<p class="text-sm text-[var(--color-ink-3)]">모델 목록을 불러오는 중…</p>
+								{:else if available.length === 0}
+									<p class="text-sm text-[var(--color-ink-3)]">불러온 모델이 없습니다. API 키/Base URL을 확인하거나 위에서 직접 추가하세요.</p>
+								{:else}
+									<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+										<span class="text-xs text-[var(--color-ink-3)]">
+											{availSource === 'api' ? '프로바이더 API' : 'litellm 정적 목록'} · 전체 {available.length}개 · 미등록 {filteredAvailable.length}개
+										</span>
+										<div class="flex items-center gap-2 text-xs">
+											<button class={rowActionCls} onclick={() => toggleAllFiltered(true)}>전체 선택</button>
+											<button class={rowActionCls} onclick={() => toggleAllFiltered(false)}>선택 해제</button>
+										</div>
+									</div>
+									<input class="{inputCls} mb-3" placeholder="모델 필터 (예: gpt-4)" bind:value={availFilter} />
+									<div class="max-h-64 space-y-1 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-surface-base)] p-2">
+										{#each filteredAvailable as mid (mid)}
+											<label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-[var(--color-ink-1)] hover:bg-[var(--color-line)]">
+												<input type="checkbox" bind:checked={selectedAvail[mid]} />
+												<span class="truncate">{mid}</span>
+											</label>
+										{:else}
+											<p class="px-2 py-1 text-sm text-[var(--color-ink-3)]">필터에 맞는 미등록 모델이 없습니다.</p>
+										{/each}
+									</div>
+									<div class="mt-3 flex justify-end">
+										<Button onclick={registerSelected} disabled={registeringBulk}>
+											{registeringBulk ? '등록 중…' : '선택 모델 등록'}
+										</Button>
+									</div>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				{/each}
 			</div>
