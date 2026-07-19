@@ -47,6 +47,9 @@ class ConversationResponse(BaseModel):
     user_id: str
     title: str | None
     model_name: str | None
+    active_leaf_id: int | None = None
+    parent_conversation_id: str | None = None
+    forked_from_message_id: int | None = None
     created_at: str | None
     updated_at: str | None
 
@@ -57,11 +60,30 @@ class MessageResponse(BaseModel):
     id: int
     conversation_id: str
     role: str
+    parent_id: int | None = None
     content: str | None
     tool_calls: list | None
     token_prompt: int
     token_completion: int
+    model_name: str | None = None
     created_at: str | None
+
+    model_config = {"protected_namespaces": ()}
+
+
+class MessageTreeResponse(BaseModel):
+    """버전 트리 전체 메시지 + 현재 활성 리프. 프론트가 활성 경로·형제 수를 계산한다."""
+
+    messages: list[MessageResponse]
+    active_leaf_id: int | None = None
+
+
+class ActiveLeafRequest(BaseModel):
+    message_id: int
+
+
+class ForkRequest(BaseModel):
+    message_id: int
 
 
 def _map_error(exc: Exception) -> HTTPException:
@@ -109,11 +131,28 @@ async def delete_conversation(conversation_id: str, token_info: dict = Depends(g
         raise _map_error(exc) from exc
 
 
-@router.get("/conversations/{conversation_id}/messages", response_model=list[MessageResponse])
-async def list_messages(
-    conversation_id: str, limit: int = 200, offset: int = 0, token_info: dict = Depends(get_token_info)
-):
+@router.get("/conversations/{conversation_id}/messages", response_model=MessageTreeResponse)
+async def list_messages(conversation_id: str, token_info: dict = Depends(get_token_info)):
+    """대화의 전체 메시지 트리(parent_id 포함) + 활성 리프. 프론트가 활성 경로·형제 버전을 계산."""
     try:
-        return await cs.list_messages(conversation_id, user_id=token_info["user_id"], limit=limit, offset=offset)
+        return await cs.list_message_tree(conversation_id, user_id=token_info["user_id"])
+    except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch("/conversations/{conversation_id}/active-leaf", response_model=ConversationResponse)
+async def set_active_leaf(conversation_id: str, payload: ActiveLeafRequest, token_info: dict = Depends(get_token_info)):
+    """형제 버전 전환 — 활성 리프를 지정 메시지로 이동."""
+    try:
+        return await cs.set_active_leaf(conversation_id, user_id=token_info["user_id"], message_id=payload.message_id)
+    except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post("/conversations/{conversation_id}/fork", response_model=ConversationResponse, status_code=201)
+async def fork_conversation(conversation_id: str, payload: ForkRequest, token_info: dict = Depends(get_token_info)):
+    """지정 메시지까지의 경로를 새 대화로 복사(분기). 소유자 동일, 원본 독립."""
+    try:
+        return await cs.fork_conversation(conversation_id, user_id=token_info["user_id"], message_id=payload.message_id)
     except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc

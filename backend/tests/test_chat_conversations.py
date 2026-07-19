@@ -85,7 +85,7 @@ class TestOwnership:
         async def fake_msgs(conv_id, **kwargs):
             raise cs.ConversationForbidden("접근 불가")
 
-        monkeypatch.setattr(cs, "list_messages", fake_msgs)
+        monkeypatch.setattr(cs, "list_message_tree", fake_msgs)
         resp = await client.get(f"{_URL}/other-project-conv/messages")
         assert resp.status_code == 403
 
@@ -135,3 +135,45 @@ class TestAvailableModels:
         resp = await client.get("/api/v1/chat/models")
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+class TestForkAndActiveLeaf:
+    async def test_set_active_leaf_delegates(self, client, monkeypatch):
+        captured = {}
+
+        async def fake_set(conv_id, **kwargs):
+            captured.update(kwargs)
+            captured["conv_id"] = conv_id
+            return _public_conv(active_leaf_id=kwargs["message_id"])
+
+        monkeypatch.setattr(cs, "set_active_leaf", fake_set)
+        resp = await client.patch(f"{_URL}/c1/active-leaf", json={"message_id": 7})
+        assert resp.status_code == 200
+        assert captured["message_id"] == 7
+        assert captured["user_id"] == "test-user-123"  # 소유자는 token_info 에서만
+        assert "project_id" not in captured
+
+    async def test_fork_delegates_and_returns_new(self, client, monkeypatch):
+        captured = {}
+
+        async def fake_fork(conv_id, **kwargs):
+            captured.update(kwargs)
+            return _public_conv(
+                id="forked-1", parent_conversation_id=conv_id, forked_from_message_id=kwargs["message_id"]
+            )
+
+        monkeypatch.setattr(cs, "fork_conversation", fake_fork)
+        resp = await client.post(f"{_URL}/c1/fork", json={"message_id": 5})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["id"] == "forked-1"
+        assert body["parent_conversation_id"] == "c1"
+        assert captured["message_id"] == 5 and captured["user_id"] == "test-user-123"
+
+    async def test_fork_not_found_404(self, client, monkeypatch):
+        async def fake_fork(conv_id, **kwargs):
+            raise cs.ConversationNotFound("없음")
+
+        monkeypatch.setattr(cs, "fork_conversation", fake_fork)
+        resp = await client.post(f"{_URL}/c1/fork", json={"message_id": 999})
+        assert resp.status_code == 404

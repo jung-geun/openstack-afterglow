@@ -88,7 +88,6 @@ class TestGenerateTitle:
 
         async def fake_update_title(conv_id, **kw):
             saved["title"] = kw.get("title")
-            saved["project_id"] = kw.get("project_id")
             saved["user_id"] = kw.get("user_id")
             return {"id": conv_id}
 
@@ -107,7 +106,6 @@ class TestGenerateTitle:
 
         # 제목 정리(따옴표/개행 제거) 후 저장, 소유자 컨텍스트 전달
         assert saved["title"] == "파드 기동 문제"
-        assert saved["project_id"] == "p1"
         assert saved["user_id"] == "u1"
         # 시스템 부담 — 사용자 지갑 미차감 + source=system 원장
         assert charged["source"] == "system"

@@ -200,6 +200,54 @@ async def test_conversation_user_scope_cross_project(chat_db):
         await cs.delete_conversation(c1["id"], user_id="u2")
 
 
+async def test_message_version_tree(chat_db):
+    """버전 트리 실 로직: 재생성 형제·active_leaf 이동·backtrack 경로·분기 복사 독립성."""
+    from app.services.chat import conversation_store as cs
+
+    conv = await cs.create_conversation(project_id="p", user_id="u", title="t", model_name="m")
+    cid = conv["id"]
+
+    u1 = await cs.add_message(cid, role="user", content="Q1", parent_id=None, set_leaf=True)
+    a1 = await cs.add_message(cid, role="assistant", content="A1", parent_id=u1["id"], model_name="m1", set_leaf=True)
+
+    # 활성 경로 = [Q1, A1], leaf=a1
+    path = await cs.get_active_path(cid, user_id="u")
+    assert [m["content"] for m in path["messages"]] == ["Q1", "A1"]
+    assert path["active_leaf_id"] == a1["id"]
+
+    # 재생성: 대상 A1 의 턴-시작 user = Q1
+    turn_user = await cs.find_turn_start_user(cid, user_id="u", message_id=a1["id"])
+    assert turn_user["id"] == u1["id"]
+    a2 = await cs.add_message(cid, role="assistant", content="A2", parent_id=u1["id"], model_name="m2", set_leaf=True)
+
+    # 활성 경로가 형제 A2 로 이동
+    path2 = await cs.get_active_path(cid, user_id="u")
+    assert [m["content"] for m in path2["messages"]] == ["Q1", "A2"]
+    assert path2["active_leaf_id"] == a2["id"]
+
+    # 버전 전환: active_leaf 를 A1 로
+    await cs.set_active_leaf(cid, user_id="u", message_id=a1["id"])
+    path3 = await cs.get_active_path(cid, user_id="u")
+    assert [m["content"] for m in path3["messages"]] == ["Q1", "A1"]
+
+    # 트리 전체 = 3 메시지(Q1, A1, A2 형제)
+    tree = await cs.list_message_tree(cid, user_id="u")
+    assert len(tree["messages"]) == 3
+
+    # 분기: A1 지점까지 새 대화로 복사(독립)
+    forked = await cs.fork_conversation(cid, user_id="u", message_id=a1["id"])
+    assert forked["parent_conversation_id"] == cid
+    assert forked["forked_from_message_id"] == a1["id"]
+    ftree = await cs.list_message_tree(forked["id"], user_id="u")
+    assert [m["content"] for m in ftree["messages"]] == ["Q1", "A1"]
+    assert forked["active_leaf_id"] == ftree["messages"][-1]["id"]
+    # 원본 불변(여전히 3 메시지)
+    assert len((await cs.list_message_tree(cid, user_id="u"))["messages"]) == 3
+
+    # 콘텐츠 복호화 왕복(복사본도 평문 복원)
+    assert ftree["messages"][0]["content"] == "Q1"
+
+
 async def test_chat_content_encryption_at_rest(chat_db):
     """메시지 content/tool_calls, 대화 title 이 DB 에 v3: 암호문으로 저장되고 조회 시 평문 복원."""
     from app.models.chat_db import ChatConversation, ChatMessage

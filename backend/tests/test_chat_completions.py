@@ -91,7 +91,7 @@ class TestStreamingHappyPath:
             return _resolved()
 
         async def fake_list(conv_id, **kwargs):
-            return []
+            return {"messages": [], "active_leaf_id": None}
 
         async def fake_add(conv_id, **kwargs):
             return {"id": 1}
@@ -108,7 +108,7 @@ class TestStreamingHappyPath:
             return Decimal("1.5")
 
         monkeypatch.setattr(cs, "get_conversation", fake_get)
-        monkeypatch.setattr(cs, "list_messages", fake_list)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
         monkeypatch.setattr(cs, "add_message", fake_add)
         monkeypatch.setattr(ps, "resolve_model", fake_resolve)
         monkeypatch.setattr(engine, "stream", fake_stream)
@@ -138,7 +138,7 @@ class TestToolRecordPersistence:
             return _resolved()
 
         async def fake_list(conv_id, **kwargs):
-            return []
+            return {"messages": [], "active_leaf_id": None}
 
         async def fake_add(conv_id, **kwargs):
             added.append((kwargs.get("role"), kwargs))
@@ -159,7 +159,7 @@ class TestToolRecordPersistence:
             return Decimal("1")
 
         monkeypatch.setattr(cs, "get_conversation", fake_get)
-        monkeypatch.setattr(cs, "list_messages", fake_list)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
         monkeypatch.setattr(cs, "add_message", fake_add)
         monkeypatch.setattr(ps, "resolve_model", fake_resolve)
         monkeypatch.setattr(engine, "stream", fake_stream)
@@ -198,13 +198,16 @@ class TestToolRecordPersistence:
             return _resolved()
 
         async def fake_list(conv_id, **kwargs):
-            # 이전 턴이 툴을 쓴 대화 이력(assistant tool_calls 스텝 + tool 결과 + 최종 답변)
-            return [
-                {"role": "user", "content": "인스턴스 몇 개야?"},
-                {"role": "assistant", "content": "확인할게요", "tool_calls": [{"name": "list_instances"}]},
-                {"role": "tool", "content": "3개", "tool_calls": [{"name": "list_instances"}]},
-                {"role": "assistant", "content": "결과는 3개입니다"},
-            ]
+            # 이전 턴이 툴을 쓴 활성 경로(assistant tool_calls 스텝 + tool 결과 + 최종 답변)
+            return {
+                "messages": [
+                    {"role": "user", "content": "인스턴스 몇 개야?"},
+                    {"role": "assistant", "content": "확인할게요", "tool_calls": [{"name": "list_instances"}]},
+                    {"role": "tool", "content": "3개", "tool_calls": [{"name": "list_instances"}]},
+                    {"role": "assistant", "content": "결과는 3개입니다"},
+                ],
+                "active_leaf_id": 99,
+            }
 
         async def fake_add(conv_id, **kwargs):
             return {"id": 1}
@@ -215,7 +218,7 @@ class TestToolRecordPersistence:
             yield {"type": "usage", "usage": None}
 
         monkeypatch.setattr(cs, "get_conversation", fake_get)
-        monkeypatch.setattr(cs, "list_messages", fake_list)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
         monkeypatch.setattr(cs, "add_message", fake_add)
         monkeypatch.setattr(ps, "resolve_model", fake_resolve)
         monkeypatch.setattr(engine, "stream", fake_stream)
@@ -249,7 +252,7 @@ class TestErrorPath:
             return _resolved()
 
         async def fake_list(conv_id, **kwargs):
-            return []
+            return {"messages": [], "active_leaf_id": None}
 
         async def fake_add(conv_id, **kwargs):
             return {"id": 1}
@@ -264,7 +267,7 @@ class TestErrorPath:
             return Decimal("1")
 
         monkeypatch.setattr(cs, "get_conversation", fake_get)
-        monkeypatch.setattr(cs, "list_messages", fake_list)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
         monkeypatch.setattr(cs, "add_message", fake_add)
         monkeypatch.setattr(ps, "resolve_model", fake_resolve)
         monkeypatch.setattr(engine, "stream", fake_stream)
@@ -276,3 +279,67 @@ class TestErrorPath:
         assert '"error"' in body
         assert '"done"' not in body
         assert called["apply"] is False  # 실패한 요청에 과금하지 않음
+
+
+class TestRegenerate:
+    async def test_regenerate_creates_sibling_under_turn_user(self, client, monkeypatch):
+        """재생성: 턴-시작 user 아래 새 assistant 형제(다른 모델), active_leaf 이동."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv(model_name="gpt-3.5-turbo")
+
+        async def fake_turn_user(conv_id, **kwargs):
+            return {"id": 10, "role": "user", "content": "질문"}
+
+        async def fake_path(conv_id, **kwargs):
+            return [{"role": "user", "content": "질문"}]
+
+        async def fake_resolve(model_name):
+            return _resolved(model_name=model_name, provider_name="openai")
+
+        async def fake_stream(**kwargs):
+            yield {"type": "token", "text": "새 답변"}
+            yield {"type": "usage", "usage": None}
+
+        added = []
+
+        async def fake_add(conv_id, **kwargs):
+            added.append(kwargs)
+            return {"id": 20 + len(added)}
+
+        captured = {}
+
+        async def fake_apply(**kwargs):
+            captured.update(kwargs)
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "find_turn_start_user", fake_turn_user)
+        monkeypatch.setattr(cs, "path_ending_at", fake_path)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(f"{_BASE}/c1/messages/15/regenerate", json={"model": "gpt-4o"})
+        assert resp.status_code == 200
+        assert '"done"' in resp.text
+        assert captured["model_name"] == "gpt-4o"  # 다른 모델로 재생성
+        # 새 assistant 는 parent=turn_user(10) + set_leaf(활성 리프 이동)
+        asst = [kw for kw in added if kw.get("role") == "assistant"]
+        assert asst and asst[-1]["parent_id"] == 10 and asst[-1]["set_leaf"] is True
+
+    async def test_regenerate_no_turn_user_400(self, client, monkeypatch):
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_turn_user(conv_id, **kwargs):
+            return None  # 턴-시작 user 없음
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "find_turn_start_user", fake_turn_user)
+        resp = await client.post(f"{_BASE}/c1/messages/15/regenerate", json={})
+        assert resp.status_code == 400

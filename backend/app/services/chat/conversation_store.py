@@ -82,6 +82,9 @@ def _conv_public(row: ChatConversation) -> dict:
         "user_id": row.user_id,
         "title": _dec(row.title),
         "model_name": row.model_name,
+        "active_leaf_id": row.active_leaf_id,
+        "parent_conversation_id": row.parent_conversation_id,
+        "forked_from_message_id": row.forked_from_message_id,
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }
@@ -92,10 +95,12 @@ def _msg_public(row: ChatMessage) -> dict:
         "id": row.id,
         "conversation_id": row.conversation_id,
         "role": row.role,
+        "parent_id": row.parent_id,
         "content": _dec(row.content),
         "tool_calls": _dec_json(row.tool_calls),
         "token_prompt": row.token_prompt,
         "token_completion": row.token_completion,
+        "model_name": row.model_name,
         "created_at": _iso(row.created_at),
     }
 
@@ -215,22 +220,214 @@ async def add_message(
     tool_calls: list | None = None,
     token_prompt: int = 0,
     token_completion: int = 0,
+    parent_id: int | None = None,
+    model_name: str | None = None,
+    set_leaf: bool = False,
 ) -> dict:
-    """메시지 추가(소유권은 호출부가 이미 검증했다고 가정 — 완료 경로 내부용)."""
+    """메시지 추가(소유권은 호출부가 이미 검증했다고 가정 — 완료 경로 내부용).
+
+    버전 트리: parent_id 로 부모를 잇는다(같은 parent = 재생성 형제). set_leaf=True 면 대화의
+    active_leaf_id 를 이 메시지로 갱신한다(활성 경로의 새 리프). model_name 은 형제 버전 라벨.
+    """
     factory = _require_db()
     row = ChatMessage(
         conversation_id=conv_id,
         role=role,
+        parent_id=parent_id,
         content=_enc(content),
         tool_calls=_enc_json(tool_calls),
         token_prompt=int(token_prompt),
         token_completion=int(token_completion),
+        model_name=model_name,
     )
     try:
         async with factory() as session, session.begin():
             session.add(row)
             await session.flush()
+            if set_leaf:
+                conv = await session.get(ChatConversation, conv_id)
+                if conv is not None:
+                    conv.active_leaf_id = row.id
             return _msg_public(row)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+def _backtrack(rows: list[ChatMessage], leaf_id: int | None) -> list[ChatMessage]:
+    """leaf_id 에서 parent_id 를 역추적한 선형 경로(루트→리프 오름차순). leaf 없으면 빈 경로."""
+    by_id = {r.id: r for r in rows}
+    path: list[ChatMessage] = []
+    cur = by_id.get(leaf_id) if leaf_id else None
+    seen: set[int] = set()
+    while cur is not None and cur.id not in seen:
+        seen.add(cur.id)
+        path.append(cur)
+        cur = by_id.get(cur.parent_id) if cur.parent_id else None
+    path.reverse()
+    return path
+
+
+async def get_active_path(conv_id: str, *, user_id: str) -> dict:
+    """active_leaf 에서 역추적한 활성 경로(모델 입력·재개용). {"messages":[오름차순], "active_leaf_id"}."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            conv = await _load_owned(session, conv_id, user_id)
+            rows = (
+                (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
+                .scalars()
+                .all()
+            )
+            path = _backtrack(list(rows), conv.active_leaf_id)
+            return {"messages": [_msg_public(r) for r in path], "active_leaf_id": conv.active_leaf_id}
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def path_ending_at(conv_id: str, *, user_id: str, message_id: int) -> list[dict]:
+    """message_id 를 리프로 한 경로(루트→message_id 오름차순). 재생성 모델 입력용."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            await _load_owned(session, conv_id, user_id)
+            rows = (
+                (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
+                .scalars()
+                .all()
+            )
+            return [_msg_public(r) for r in _backtrack(list(rows), message_id)]
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def list_message_tree(conv_id: str, *, user_id: str) -> dict:
+    """전체 메시지(트리, parent_id 포함) + active_leaf_id. 프론트가 활성 경로·형제 수를 계산."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            conv = await _load_owned(session, conv_id, user_id)
+            rows = (
+                (
+                    await session.execute(
+                        select(ChatMessage).where(ChatMessage.conversation_id == conv_id).order_by(ChatMessage.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return {"messages": [_msg_public(r) for r in rows], "active_leaf_id": conv.active_leaf_id}
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def set_active_leaf(conv_id: str, *, user_id: str, message_id: int) -> dict:
+    """활성 리프를 지정 메시지로 이동(형제 버전 전환). 메시지가 이 대화 소속이어야 함."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            conv = await _load_owned(session, conv_id, user_id)
+            msg = await session.get(ChatMessage, message_id)
+            if msg is None or msg.conversation_id != conv_id:
+                raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
+            conv.active_leaf_id = message_id
+            return _conv_public(conv)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def get_message_owned(conv_id: str, *, user_id: str, message_id: int) -> ChatMessage:
+    """소유권 검증 후 대화 소속 메시지 raw row 반환(재생성 parent 탐색용, 내부 전용)."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            await _load_owned(session, conv_id, user_id)
+            msg = await session.get(ChatMessage, message_id)
+            if msg is None or msg.conversation_id != conv_id:
+                raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
+            return msg
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def find_turn_start_user(conv_id: str, *, user_id: str, message_id: int) -> dict | None:
+    """message_id 에서 위로 걸어 가장 가까운 role='user' 메시지(재생성 분기점). 없으면 None."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            await _load_owned(session, conv_id, user_id)
+            rows = (
+                (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
+                .scalars()
+                .all()
+            )
+            by_id = {r.id: r for r in rows}
+            cur = by_id.get(message_id)
+            seen: set[int] = set()
+            while cur is not None and cur.id not in seen:
+                if cur.role == "user":
+                    return _msg_public(cur)
+                seen.add(cur.id)
+                cur = by_id.get(cur.parent_id) if cur.parent_id else None
+            return None
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def fork_conversation(conv_id: str, *, user_id: str, message_id: int) -> dict:
+    """message_id 까지의 경로를 새 대화로 복사(분기). 소유자 동일, 원본 독립."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            conv = await _load_owned(session, conv_id, user_id)
+            rows = list(
+                (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
+                .scalars()
+                .all()
+            )
+            by_id = {r.id: r for r in rows}
+            if message_id not in by_id:
+                raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
+            path = _backtrack(rows, message_id)  # message_id 를 리프로 간주해 역추적
+
+            new_conv = ChatConversation(
+                id=str(uuid.uuid4()),
+                project_id=conv.project_id,
+                user_id=user_id,
+                title=conv.title,  # 암호문 그대로 복사
+                model_name=conv.model_name,
+                parent_conversation_id=conv_id,
+                forked_from_message_id=message_id,
+            )
+            session.add(new_conv)
+            await session.flush()
+
+            id_map: dict[int, int] = {}  # old id -> new id (parent 재구성)
+            new_leaf_id = None
+            for r in path:
+                new_parent = id_map.get(r.parent_id) if r.parent_id else None
+                nr = ChatMessage(
+                    conversation_id=new_conv.id,
+                    role=r.role,
+                    parent_id=new_parent,
+                    content=r.content,  # 암호문 그대로 복사(재암호화 불필요)
+                    tool_calls=r.tool_calls,
+                    token_prompt=r.token_prompt,
+                    token_completion=r.token_completion,
+                    model_name=r.model_name,
+                )
+                session.add(nr)
+                await session.flush()
+                id_map[r.id] = nr.id
+                new_leaf_id = nr.id
+            new_conv.active_leaf_id = new_leaf_id
+            return _conv_public(new_conv)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc

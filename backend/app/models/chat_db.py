@@ -87,6 +87,11 @@ class ChatConversation(Base):
     # AES-256-GCM(도메인 chat_content) 암호문. 첫 메시지 요약 제목도 채팅 내용이라 암호화. TEXT(암호문 길이).
     title: Mapped[str | None] = mapped_column(TEXT)
     model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
+    # 버전 트리에서 현재 보이는 리프 메시지. 렌더 경로 = active_leaf → parent 역추적.
+    active_leaf_id: Mapped[int | None] = mapped_column(BIGINT)
+    # 분기(fork) 출처: 이 대화가 어느 대화의 어느 메시지에서 갈라졌는지(감사·표시용).
+    parent_conversation_id: Mapped[str | None] = mapped_column(CHAR(36))
+    forked_from_message_id: Mapped[int | None] = mapped_column(BIGINT)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -97,6 +102,7 @@ class ChatConversation(Base):
 
     __table_args__ = (
         Index("idx_chat_conversations_owner", "project_id", "user_id"),
+        Index("idx_chat_conversations_user_updated", "user_id", "updated_at"),  # 사용자별 목록(프로젝트 무관)
         Index("idx_chat_conversations_updated", "updated_at"),
     )
 
@@ -109,18 +115,25 @@ class ChatMessage(Base):
         CHAR(36), ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[str] = mapped_column(VARCHAR(20), nullable=False)  # system | user | assistant | tool
+    # 버전 트리 부모 메시지 id. 같은 parent_id 를 공유하는 형제 = 재생성 버전들. 루트는 NULL.
+    parent_id: Mapped[int | None] = mapped_column(BIGINT)
     # AES-256-GCM(도메인 chat_content) 암호문 저장. 읽을 때 decrypt_chat_content 로 복호화.
     content: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     # 툴 호출 기록(JSON)을 직렬화 후 암호화한 문자열. 평문 JSON 컬럼이 아님(암호화 도입).
     tool_calls: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     token_prompt: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     token_completion: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    # 재생성 시 어떤 모델로 생성했는지(형제 버전 구분·표시용). 미지정 시 대화 기본 모델.
+    model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
     conversation: Mapped["ChatConversation"] = relationship("ChatConversation", back_populates="messages")
 
-    __table_args__ = (Index("idx_chat_messages_conversation", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("idx_chat_messages_conversation", "conversation_id", "created_at"),
+        Index("idx_chat_messages_parent", "parent_id"),
+    )
 
 
 class ChatUsageLog(Base):
