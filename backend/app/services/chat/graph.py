@@ -163,15 +163,30 @@ def _build_graph(params: dict, ctx: ToolContext):
 
             tool_calls = [tc for tc in tool_acc.values() if tc.get("name")]
             if tool_calls and step < _MAX_TOOL_STEPS:
-                msgs.append(_assistant_tool_calls_msg("".join(text_parts), tool_calls))
+                step_text = "".join(text_parts)
+                msgs.append(_assistant_tool_calls_msg(step_text, tool_calls))
+                # 저장용 이벤트 — completions 가 chat_messages(암호화)에 assistant tool_calls 기록.
+                writer(
+                    {
+                        "type": "assistant_tool_calls",
+                        "content": step_text or None,
+                        "tool_calls": [
+                            {"id": tc.get("id") or tc["name"], "name": tc["name"], "args": tc.get("args") or "{}"}
+                            for tc in tool_calls
+                        ],
+                    }
+                )
                 for tc in tool_calls:
-                    writer({"type": "tool_call", "name": tc["name"]})
+                    writer({"type": "tool_call", "name": tc["name"]})  # 진행 표시(SSE 중계)
                     try:
                         args = json.loads(tc.get("args") or "{}")
                     except (json.JSONDecodeError, TypeError):
                         args = {}
                     result = await tool_runtime.context_execute(tc["name"], args, ctx)
-                    msgs.append({"role": "tool", "tool_call_id": tc.get("id") or tc["name"], "content": result})
+                    tc_id = tc.get("id") or tc["name"]
+                    msgs.append({"role": "tool", "tool_call_id": tc_id, "content": result})
+                    # 저장용 이벤트 — completions 가 role=tool 결과를 암호화 기록.
+                    writer({"type": "tool_result", "tool_call_id": tc_id, "name": tc["name"], "content": result})
                 continue  # 다음 턴(툴 결과 반영)
 
             final_text = "".join(text_parts)

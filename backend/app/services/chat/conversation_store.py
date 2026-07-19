@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 
@@ -14,8 +15,37 @@ from sqlalchemy.exc import OperationalError
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.models.chat_db import ChatConversation, ChatMessage
+from app.services.k3s_crypto import decrypt_chat_content, encrypt_chat_content
 
 logger = logging.getLogger(__name__)
+
+
+def _enc(value: str | None) -> str | None:
+    """평문 → chat_content 암호문. None/빈 문자열은 그대로."""
+    return encrypt_chat_content(value) if value else value
+
+
+def _dec(value: str | None) -> str | None:
+    """암호문 → 평문(prefix 없으면 평문 passthrough). None 안전."""
+    return decrypt_chat_content(value) if value else value
+
+
+def _enc_json(value: list | dict | None) -> str | None:
+    """tool_calls(JSON 직렬화) → 암호문. None 은 그대로."""
+    if value is None:
+        return None
+    return encrypt_chat_content(json.dumps(value, ensure_ascii=False))
+
+
+def _dec_json(value: str | None) -> list | dict | None:
+    """암호문 → JSON 파싱. None/파싱 실패는 None."""
+    if not value:
+        return None
+    try:
+        return json.loads(decrypt_chat_content(value))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        logger.warning("tool_calls 복호화/파싱 실패")
+        return None
 
 
 class ChatStorageUnavailable(RuntimeError):
@@ -48,7 +78,7 @@ def _conv_public(row: ChatConversation) -> dict:
         "id": row.id,
         "project_id": row.project_id,
         "user_id": row.user_id,
-        "title": row.title,
+        "title": _dec(row.title),
         "model_name": row.model_name,
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
@@ -60,8 +90,8 @@ def _msg_public(row: ChatMessage) -> dict:
         "id": row.id,
         "conversation_id": row.conversation_id,
         "role": row.role,
-        "content": row.content,
-        "tool_calls": row.tool_calls,
+        "content": _dec(row.content),
+        "tool_calls": _dec_json(row.tool_calls),
         "token_prompt": row.token_prompt,
         "token_completion": row.token_completion,
         "created_at": _iso(row.created_at),
@@ -84,7 +114,7 @@ async def create_conversation(*, project_id: str, user_id: str, title: str | Non
         id=str(uuid.uuid4()),
         project_id=project_id,
         user_id=user_id,
-        title=(title or None),
+        title=_enc(title or None),
         model_name=(model_name or None),
     )
     try:
@@ -137,6 +167,20 @@ async def delete_conversation(conv_id: str, *, project_id: str, user_id: str) ->
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
+async def update_title(conv_id: str, *, project_id: str, user_id: str, title: str | None) -> dict:
+    """대화 제목 갱신(소유권 검증 + 암호화 저장). 제목 자동 요약 경로용."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            row = await _load_owned(session, conv_id, project_id, user_id)
+            row.title = _enc(title or None)
+            await session.flush()
+            return _conv_public(row)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
 async def list_messages(
     conv_id: str, *, project_id: str, user_id: str, limit: int = 200, offset: int = 0
 ) -> list[dict]:
@@ -172,8 +216,8 @@ async def add_message(
     row = ChatMessage(
         conversation_id=conv_id,
         role=role,
-        content=content,
-        tool_calls=tool_calls,
+        content=_enc(content),
+        tool_calls=_enc_json(tool_calls),
         token_prompt=int(token_prompt),
         token_completion=int(token_completion),
     )

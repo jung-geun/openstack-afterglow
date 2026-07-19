@@ -32,6 +32,7 @@ _DOMAIN_NOTION = b"notion_config"
 _DOMAIN_MANAGER_PW = b"manager_password"
 _DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
 _DOMAIN_LLM_PROVIDER_KEY = b"llm_provider_key"
+_DOMAIN_CHAT_CONTENT = b"chat_content"
 
 _LEGACY_WARNED: set[str] = set()
 
@@ -179,3 +180,23 @@ def encrypt_llm_provider_key(plaintext: str) -> str:
 def decrypt_llm_provider_key(ciphertext_b64: str) -> str:
     """Decrypt LLM 프로바이더 API 키 — v3/v2/legacy 모두 처리."""
     return _aes_decrypt(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, ciphertext_b64)
+
+
+def encrypt_chat_content(plaintext: str) -> str:
+    """Encrypt 빌트인 AI 채팅 메시지/툴 기록/제목 (v3).
+
+    마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_CHAT_CONTENT, plaintext)
+
+
+def decrypt_chat_content(ciphertext_b64: str) -> str:
+    """Decrypt 채팅 콘텐츠 — v3 만 복호화, prefix 없으면 암호화 이전 평문으로 간주해 그대로 반환.
+
+    ⚠️ 채팅 콘텐츠는 legacy(prefix 없는) *암호문* 시대가 없다(암호화 도입 = v3 부터). 따라서
+    prefix 없는 값은 암호화 도입 전에 저장된 *평문*이며, generic _aes_decrypt 의 legacy 경로로
+    보내면 평문을 base64/AES-GCM 복호화하려다 깨진다. 평문 passthrough 로 하위호환한다.
+    """
+    if not ciphertext_b64.startswith(_V3_PREFIX):
+        return ciphertext_b64
+    return _aes_decrypt(_get_key(), _DOMAIN_CHAT_CONTENT, ciphertext_b64)

@@ -16,11 +16,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from app.api.deps import get_token_info
 from app.config import get_settings
 from app.services.chat import conversation_store as cs
-from app.services.chat import credit, engine, litellm_client
+from app.services.chat import credit, engine, litellm_client, title_summary
 from app.services.chat import provider_store as ps
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,12 @@ async def create_completion(
     except cs.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    messages = [{"role": m["role"], "content": m["content"]} for m in history if m.get("content")]
+    # 모델 replay 에서 role="tool" 은 제외한다. 툴 결과/호출 기록은 감사·표시용으로 저장하지만,
+    # tool 메시지를 선행 assistant tool_calls(+tool_call_id) 없이 되돌려주면 OpenAI 호환 API 가
+    # 400 으로 거부한다(멀티턴 회귀). 최종 assistant 답변이 이미 툴 결과를 요약해 문맥은 유지된다.
+    messages = [
+        {"role": m["role"], "content": m["content"]} for m in history if m.get("content") and m["role"] != "tool"
+    ]
     messages.append({"role": "user", "content": payload.message})
     max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
@@ -136,6 +142,28 @@ async def create_completion(
                     yield _sse({"type": "token", "text": ev["text"]})
                 elif etype == "tool_call":
                     yield _sse({"type": "tool_call", "name": ev.get("name")})
+                elif etype == "assistant_tool_calls":
+                    # 이 스텝 텍스트는 이 메시지로 저장 — 최종 답변 parts 에서 제외(중복 방지).
+                    parts.clear()
+                    try:
+                        await cs.add_message(
+                            conversation_id,
+                            role="assistant",
+                            content=ev.get("content"),
+                            tool_calls=ev.get("tool_calls"),
+                        )
+                    except Exception:
+                        logger.warning("assistant tool_calls 저장 실패 conv=%s", conversation_id, exc_info=True)
+                elif etype == "tool_result":
+                    try:
+                        await cs.add_message(
+                            conversation_id,
+                            role="tool",
+                            content=ev.get("content"),
+                            tool_calls=[{"tool_call_id": ev.get("tool_call_id"), "name": ev.get("name")}],
+                        )
+                    except Exception:
+                        logger.warning("tool_result 저장 실패 conv=%s", conversation_id, exc_info=True)
                 elif etype == "usage":
                     final_usage = ev.get("usage")
                 elif etype == "error":
@@ -185,4 +213,11 @@ async def create_completion(
                 except Exception:
                     logger.warning("중단 후 과금 실패 conv=%s", conversation_id, exc_info=True)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    # 응답 스트림 종료 후 제목이 없으면 요약 모델로 자동 생성(시스템 부담 과금).
+    title_task = BackgroundTask(
+        title_summary.generate_title_if_absent,
+        conversation_id=conversation_id,
+        project_id=project_id,
+        user_id=user_id,
+    )
+    return StreamingResponse(event_stream(), media_type="text/event-stream", background=title_task)

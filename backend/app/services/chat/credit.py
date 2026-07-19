@@ -123,24 +123,29 @@ async def apply_usage(
     conversation_id: str | None = None,
     source: str = "web",
     api_key_id: int | None = None,
+    charge_wallet: bool = True,
 ) -> Decimal:
     """사용량을 원장에 기록하고 지갑 used_quota 를 원자적으로 증가. 차감 크레딧 반환.
 
     호출부는 스트리밍 완료/중단(finally) 시점에 반드시 1회 호출한다.
+
+    charge_wallet=False: 지갑 차감 없이 usage_logs 만 기록(제목 요약 등 시스템 부담 호출).
+    이때도 credited_cost 는 산출해 원장에 남겨 시스템 원가를 추적한다(source="system").
     """
     credited = credits_for_cost(raw_cost, margin_multiplier)
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            # 지갑이 없으면 생성(+월 리셋 보정)
-            wallet = await _get_or_create_wallet(session, user_id, project_id)
-            _maybe_reset_month(wallet)
-            # 원자적 차감 — 컬럼 self-reference UPDATE(동시요청 race 완화)
-            await session.execute(
-                update(UserWallet)
-                .where(UserWallet.user_id == user_id)
-                .values(used_quota_this_month=UserWallet.used_quota_this_month + credited)
-            )
+            if charge_wallet:
+                # 지갑이 없으면 생성(+월 리셋 보정)
+                wallet = await _get_or_create_wallet(session, user_id, project_id)
+                _maybe_reset_month(wallet)
+                # 원자적 차감 — 컬럼 self-reference UPDATE(동시요청 race 완화)
+                await session.execute(
+                    update(UserWallet)
+                    .where(UserWallet.user_id == user_id)
+                    .values(used_quota_this_month=UserWallet.used_quota_this_month + credited)
+                )
             session.add(
                 ChatUsageLog(
                     project_id=project_id,

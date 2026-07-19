@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
@@ -76,6 +76,7 @@ def _model_public(row: LlmModel) -> dict:
         "model_name": row.model_name,
         "display_name": row.display_name,
         "is_active": row.is_active,
+        "is_title_model": row.is_title_model,
         "input_price": float(row.input_price) if row.input_price is not None else None,
         "output_price": float(row.output_price) if row.output_price is not None else None,
         "created_at": _iso(row.created_at),
@@ -300,6 +301,63 @@ async def resolve_model(model_name: str) -> dict | None:
                 "margin_multiplier": float(provider.margin_multiplier),
                 "input_price": float(model.input_price) if model.input_price is not None else None,
                 "output_price": float(model.output_price) if model.output_price is not None else None,
+            }
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def set_title_model(model_id: int | None) -> None:
+    """대화 제목 자동 요약에 쓸 모델 1개를 지정. 앱 레벨에서 최대 1개만 True 로 유지.
+
+    model_id=None 이면 지정 해제(모두 False). 대상이 없으면 ProviderNotFoundError.
+    """
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            if model_id is not None:
+                target = await session.get(LlmModel, model_id)
+                if target is None:
+                    raise ProviderNotFoundError(f"모델 {model_id} 를 찾을 수 없습니다")
+            # 먼저 전부 해제 후 대상만 True (단일 보장)
+            await session.execute(update(LlmModel).values(is_title_model=False))
+            if model_id is not None:
+                await session.execute(update(LlmModel).where(LlmModel.id == model_id).values(is_title_model=True))
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def resolve_title_model() -> dict | None:
+    """제목 요약용 모델(is_title_model=True, 활성 + 프로바이더 활성)의 완료 설정. 미지정 시 None.
+
+    ⚠️ 반환 dict 의 api_key 는 복호화 평문 — 서버 내부 요약 호출 전용, 노출 금지.
+    """
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            stmt = (
+                select(LlmModel, LlmProvider)
+                .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
+                .where(
+                    LlmModel.is_title_model.is_(True),
+                    LlmModel.is_active.is_(True),
+                    LlmProvider.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            res = (await session.execute(stmt)).first()
+            if res is None:
+                return None
+            model, provider = res
+            api_key = decrypt_llm_provider_key(provider.encrypted_api_key) if provider.encrypted_api_key else None
+            return {
+                "model_name": model.model_name,
+                "provider_name": provider.name,
+                "provider_type": provider.provider_type,
+                "api_base": provider.api_base,
+                "api_key": api_key,
+                "margin_multiplier": float(provider.margin_multiplier),
             }
     except OperationalError as exc:
         mark_db_unhealthy()

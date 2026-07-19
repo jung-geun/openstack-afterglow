@@ -334,6 +334,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/providers", "llm_provider"),
+    ("/api/v1/chat/admin/title-model", "llm_model"),
     ("/api/v1/chat/admin/models", "llm_model"),
     ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
@@ -624,11 +625,14 @@ if _svc_cfg.service_chat_enabled:
         chat_conversations_router,
         chat_extensions_admin_router,
         chat_extensions_user_router,
+        chat_stats_router,
         chat_usage_router,
     )
 
     # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
     app.include_router(chat_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 관리자 사용량 통계 (require_admin, GET 전용) — /admin/stats
+    app.include_router(chat_stats_router, prefix="/api/v1/chat", tags=["chat-admin"])
     # 관리자 MCP/커스텀툴 (require_admin, global) — /admin/mcp-servers, /admin/custom-tools
     app.include_router(chat_extensions_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
     # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)

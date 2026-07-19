@@ -61,6 +61,8 @@ class LlmModel(Base):
     model_name: Mapped[str] = mapped_column(VARCHAR(190), nullable=False)
     display_name: Mapped[str | None] = mapped_column(VARCHAR(150))
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    # 대화 제목 자동 요약에 쓸 모델. 앱 레벨에서 최대 1개만 True 로 유지(set_title_model).
+    is_title_model: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     # 미지정 시 litellm 내장 단가 사용 (override용). 토큰당 USD 단가.
     input_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     output_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
@@ -82,7 +84,8 @@ class ChatConversation(Base):
     id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    title: Mapped[str | None] = mapped_column(VARCHAR(255))
+    # AES-256-GCM(도메인 chat_content) 암호문. 첫 메시지 요약 제목도 채팅 내용이라 암호화. TEXT(암호문 길이).
+    title: Mapped[str | None] = mapped_column(TEXT)
     model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -106,8 +109,10 @@ class ChatMessage(Base):
         CHAR(36), ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[str] = mapped_column(VARCHAR(20), nullable=False)  # system | user | assistant | tool
+    # AES-256-GCM(도메인 chat_content) 암호문 저장. 읽을 때 decrypt_chat_content 로 복호화.
     content: Mapped[str | None] = mapped_column(MEDIUMTEXT)
-    tool_calls: Mapped[list | None] = mapped_column(JSON)
+    # 툴 호출 기록(JSON)을 직렬화 후 암호화한 문자열. 평문 JSON 컬럼이 아님(암호화 도입).
+    tool_calls: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     token_prompt: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     token_completion: Mapped[int] = mapped_column(INT, nullable=False, default=0)
 

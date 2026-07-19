@@ -175,3 +175,134 @@ async def test_provider_name_unique(chat_db):
     await ps.create_provider(name="dup", api_key=None)
     with pytest.raises(ps.ProviderValidationError):
         await ps.create_provider(name="dup", api_key=None)
+
+
+async def test_chat_content_encryption_at_rest(chat_db):
+    """메시지 content/tool_calls, 대화 title 이 DB 에 v3: 암호문으로 저장되고 조회 시 평문 복원."""
+    from app.models.chat_db import ChatConversation, ChatMessage
+    from app.services.chat import conversation_store as cs
+
+    factory = chat_db.get_session_factory()
+
+    conv = await cs.create_conversation(project_id="p1", user_id="u1", title="비밀 제목", model_name="m")
+    await cs.add_message(
+        conv["id"], role="assistant", content="비밀 응답", tool_calls=[{"id": "c1", "name": "list_instances"}]
+    )
+
+    # DB 원시값은 암호문(v3:) — 평문이 컬럼에 노출되지 않아야 한다.
+    async with factory() as s:
+        row_conv = await s.get(ChatConversation, conv["id"])
+        assert row_conv.title.startswith("v3:")
+        assert "비밀 제목" not in row_conv.title
+        msgs = (await s.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv["id"]))).scalars().all()
+        assert msgs[0].content.startswith("v3:")
+        assert "비밀 응답" not in msgs[0].content
+        assert msgs[0].tool_calls.startswith("v3:")
+        assert "list_instances" not in msgs[0].tool_calls
+
+    # 서비스 조회 시 평문 복원
+    got = await cs.get_conversation(conv["id"], project_id="p1", user_id="u1")
+    assert got["title"] == "비밀 제목"
+    out = await cs.list_messages(conv["id"], project_id="p1", user_id="u1")
+    assert out[0]["content"] == "비밀 응답"
+    assert out[0]["tool_calls"] == [{"id": "c1", "name": "list_instances"}]
+
+
+async def test_system_charge_does_not_debit_wallet(chat_db):
+    """charge_wallet=False(제목 요약 등 시스템 부담)는 usage_logs 만 남기고 지갑 미차감."""
+    from app.services.chat import credit
+
+    factory = chat_db.get_session_factory()
+
+    await credit.precheck("sysu", "p1")  # 지갑 생성(used=0)
+    await credit.apply_usage(
+        user_id="sysu",
+        project_id="p1",
+        model_name="gpt-4o-mini",
+        provider="openai",
+        prompt_tokens=10,
+        completion_tokens=4,
+        raw_cost=0.0001,
+        margin_multiplier=1.0,
+        source="system",
+        charge_wallet=False,
+    )
+    async with factory() as s:
+        wallet = await s.get(UserWallet, "sysu")
+        assert wallet.used_quota_this_month == Decimal("0")  # 미차감
+        logs = (await s.execute(select(ChatUsageLog).where(ChatUsageLog.user_id == "sysu"))).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].source == "system"
+
+
+async def test_set_title_model_single(chat_db):
+    """set_title_model 은 최대 1개만 is_title_model=True 로 유지(이동/해제 포함)."""
+    from app.services.chat import provider_store as ps
+
+    prov = await ps.create_provider(name="p-title", api_key=None)
+    m1 = await ps.create_model(provider_id=prov["id"], model_name="title-a")
+    await ps.create_model(provider_id=prov["id"], model_name="title-b")
+
+    await ps.set_title_model(m1["id"])
+    resolved = await ps.resolve_title_model()
+    assert resolved is not None and resolved["model_name"] == "title-a"
+
+    # 다른 모델로 이동 → 이전 모델은 자동 해제(단일 보장)
+    m2 = next(m for m in await ps.list_models() if m["model_name"] == "title-b")
+    await ps.set_title_model(m2["id"])
+    flags = {m["model_name"]: m["is_title_model"] for m in await ps.list_models()}
+    assert flags["title-a"] is False and flags["title-b"] is True
+
+    await ps.set_title_model(None)  # 해제
+    assert await ps.resolve_title_model() is None
+
+
+async def test_stats_aggregation(chat_db):
+    """실 DB GROUP BY 집계 — overview/by_model/by_user/monthly + source 규칙(by_user 는 system 제외)."""
+    from app.services.chat import credit, stats
+
+    # 사용자 u1(web), u2(web) + system 부담 1건을 원장에 적재
+    async def log(user, model, pt, ct, raw, source="web"):
+        await credit.apply_usage(
+            user_id=user,
+            project_id="p1",
+            model_name=model,
+            provider="openai",
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            raw_cost=raw,
+            margin_multiplier=1.0,
+            conversation_id=f"conv-{user}",
+            source=source,
+            charge_wallet=(source != "system"),
+        )
+
+    await log("u1", "gpt-4o", 100, 50, 0.002)
+    await log("u1", "gpt-4o-mini", 20, 10, 0.0001)
+    await log("u2", "gpt-4o", 200, 100, 0.004)
+    await log("sys", "gpt-4o-mini", 5, 5, 0.00001, source="system")
+
+    ov = await stats.overview("all", "p1")
+    assert ov["prompt_tokens"] == 325 and ov["completion_tokens"] == 165  # system 포함
+    assert ov["request_count"] == 4
+    assert ov["active_users"] == 3  # u1, u2, sys
+    src = {r["source"]: r for r in ov["by_source"]}
+    assert src["system"]["request_count"] == 1
+
+    models = {m["model_name"]: m for m in await stats.by_model("all", "p1")}
+    assert models["gpt-4o"]["total_tokens"] == 450  # (100+50)+(200+100)
+    assert models["gpt-4o"]["request_count"] == 2
+
+    users = {u["user_id"]: u for u in await stats.by_user("all", "p1")}
+    assert "sys" not in users  # by_user 는 system 제외
+    assert users["u2"]["total_tokens"] == 300
+    # 토큰 desc 정렬 — u2(300) 가 u1(180) 앞
+    ordered = [u["user_id"] for u in await stats.by_user("all", "p1")]
+    assert ordered[0] == "u2"
+
+    months = await stats.monthly("all", "p1")
+    assert len(months) >= 1
+    assert all("month" in m and "ts" in m for m in months)
+    assert sum(m["total_tokens"] for m in months) == 490  # 전체 토큰 합
+
+    assert "p1" in await stats.projects_with_usage("all")

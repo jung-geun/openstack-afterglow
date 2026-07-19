@@ -41,6 +41,7 @@
 		model_name: string;
 		display_name: string | null;
 		is_active: boolean;
+		is_title_model?: boolean;
 	}
 
 	const token = $derived($auth.token ?? undefined);
@@ -274,6 +275,18 @@
 		}
 	}
 
+	// 제목 요약 모델 지정/해제 — 최대 1개만 지정(백엔드가 단일 보장). 요약 호출은 시스템 부담.
+	async function setTitleModel(m: Model) {
+		try {
+			const target = m.is_title_model ? null : m.id;
+			await api.put('/api/v1/chat/admin/title-model', { model_id: target }, token, projectId);
+			models = models.map((x) => ({ ...x, is_title_model: x.id === target }));
+			toast.success(target ? '제목 요약 모델로 지정했습니다' : '제목 요약 모델을 해제했습니다');
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '제목 요약 모델 설정 실패');
+		}
+	}
+
 	function providerName(id: number): string {
 		return providers.find((p) => p.id === id)?.name ?? String(id);
 	}
@@ -412,7 +425,10 @@
 
 	<!-- 모델 -->
 	<section>
-		<h3 class="mb-3 text-sm font-semibold text-[var(--color-ink-1)]">모델</h3>
+		<h3 class="mb-1 text-sm font-semibold text-[var(--color-ink-1)]">모델</h3>
+		<p class="mb-3 text-xs text-[var(--color-ink-3)]">
+			'제목요약 지정'한 모델은 새 대화 제목을 자동 생성합니다. 이 호출 비용은 사용자 크레딧이 아닌 시스템에서 부담합니다.
+		</p>
 		<div class="{cardCls} mb-4 p-5">
 			<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 				<select class={inputCls} bind:value={mProviderId}>
@@ -449,10 +465,18 @@
 								>
 									{m.is_active ? '활성' : '비활성'}
 								</span>
+								{#if m.is_title_model}
+									<span class="rounded bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-xs text-[var(--color-accent)]">
+										제목 요약
+									</span>
+								{/if}
 							</div>
 							<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{m.model_name} · {providerName(m.provider_id)}</div>
 						</div>
 						<div class="flex shrink-0 items-center gap-3 text-xs">
+							<button class={rowActionCls} onclick={() => setTitleModel(m)}>
+								{m.is_title_model ? '제목요약 해제' : '제목요약 지정'}
+							</button>
 							<button class={rowActionCls} onclick={() => toggleModel(m)}>{m.is_active ? '비활성화' : '활성화'}</button>
 							<button class="text-[var(--color-state-danger)] transition-opacity hover:opacity-80" onclick={() => deleteModel(m.id)}>삭제</button>
 						</div>

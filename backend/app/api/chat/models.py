@@ -75,10 +75,19 @@ class ModelResponse(BaseModel):
     model_name: str
     display_name: str | None
     is_active: bool
+    is_title_model: bool = False
     input_price: float | None
     output_price: float | None
     created_at: str | None
     updated_at: str | None
+
+    model_config = {"protected_namespaces": ()}
+
+
+class TitleModelRequest(BaseModel):
+    """대화 제목 요약에 쓸 모델 지정. model_id=None 이면 해제."""
+
+    model_id: int | None = None
 
     model_config = {"protected_namespaces": ()}
 
@@ -148,6 +157,17 @@ async def available_models(provider_id: int):
 async def list_models(active_only: bool = False):
     try:
         return await ps.list_models(active_only=active_only)
+    except ps.ChatStorageUnavailable as exc:
+        raise _map_storage(exc) from exc
+
+
+@router.put("/admin/title-model", status_code=204)
+async def set_title_model(payload: TitleModelRequest):
+    """대화 제목 자동 요약에 쓸 모델 1개를 지정(또는 해제). 요약 호출 비용은 시스템 부담."""
+    try:
+        await ps.set_title_model(payload.model_id)
+    except ps.ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
         raise _map_storage(exc) from exc
 

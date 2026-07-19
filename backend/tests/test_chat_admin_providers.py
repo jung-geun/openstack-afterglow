@@ -127,3 +127,41 @@ class TestModelCrud:
         monkeypatch.setattr(ps, "create_model", fake_create)
         resp = await admin_client.post(_MODELS_URL, json={"provider_id": 999, "model_name": "x"})
         assert resp.status_code == 400
+
+
+class TestTitleModel:
+    _URL = "/api/v1/chat/admin/title-model"
+
+    async def test_forbidden_for_non_admin(self, non_admin_client):
+        resp = await non_admin_client.put(self._URL, json={"model_id": 5})
+        assert resp.status_code == 403
+
+    async def test_set_title_model_ok(self, admin_client, monkeypatch):
+        captured = {}
+
+        async def fake_set(model_id):
+            captured["model_id"] = model_id
+
+        monkeypatch.setattr(ps, "set_title_model", fake_set)
+        resp = await admin_client.put(self._URL, json={"model_id": 7})
+        assert resp.status_code == 204
+        assert captured["model_id"] == 7
+
+    async def test_clear_title_model(self, admin_client, monkeypatch):
+        captured = {}
+
+        async def fake_set(model_id):
+            captured["model_id"] = model_id
+
+        monkeypatch.setattr(ps, "set_title_model", fake_set)
+        resp = await admin_client.put(self._URL, json={"model_id": None})
+        assert resp.status_code == 204
+        assert captured["model_id"] is None
+
+    async def test_set_title_model_not_found_404(self, admin_client, monkeypatch):
+        async def fake_set(model_id):
+            raise ps.ProviderNotFoundError("모델 없음")
+
+        monkeypatch.setattr(ps, "set_title_model", fake_set)
+        resp = await admin_client.put(self._URL, json={"model_id": 999})
+        assert resp.status_code == 404

@@ -122,6 +122,7 @@
 			service: 'chat' as const,
 			items: [
 				{ label: '채팅 설정', href: '/admin/chat', service: 'chat' as const },
+				{ label: '채팅 통계', href: '/admin/chat/stats', service: 'chat' as const },
 			],
 		},
 		{
