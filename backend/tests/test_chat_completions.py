@@ -343,3 +343,49 @@ class TestRegenerate:
         monkeypatch.setattr(cs, "find_turn_start_user", fake_turn_user)
         resp = await client.post(f"{_BASE}/c1/messages/15/regenerate", json={})
         assert resp.status_code == 400
+
+
+class TestTempChat:
+    _URL = "/api/v1/chat/temp-completions"
+
+    async def test_temp_not_persisted_but_charges(self, client, monkeypatch):
+        """임시 채팅: chat_messages 미기록(add_message 미호출), usage_logs 는 기록(conversation_id=None)."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_resolve(model_name):
+            return _resolved(model_name=model_name, provider_name="openai")
+
+        added = []
+
+        async def fake_add(conv_id, **kwargs):
+            added.append(kwargs)
+            return {"id": 1}
+
+        async def fake_stream(**kwargs):
+            yield {"type": "token", "text": "임시 답변"}
+            yield {"type": "usage", "usage": None}
+
+        captured = {}
+
+        async def fake_apply(**kwargs):
+            captured.update(kwargs)
+            return Decimal("1")
+
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(
+            self._URL, json={"messages": [{"role": "user", "content": "안녕"}], "model": "gpt-3.5-turbo"}
+        )
+        assert resp.status_code == 200
+        assert '"done"' in resp.text
+        assert added == []  # 미저장
+        assert captured["conversation_id"] is None
+        assert captured["source"] == "web"
+        assert captured["raw_cost"] > 0  # 과금은 유지
+
+    async def test_temp_rejects_tool_role(self, client):
+        resp = await client.post(self._URL, json={"messages": [{"role": "tool", "content": "x"}]})
+        assert resp.status_code == 422  # role 화이트리스트(user|assistant|system) 위반

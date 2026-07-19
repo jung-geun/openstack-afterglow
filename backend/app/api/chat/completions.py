@@ -47,6 +47,25 @@ class RegenerateRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
 
+_MAX_TEMP_MESSAGES = 40
+
+
+class TempMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant|system)$")
+    content: str = Field(..., min_length=1, max_length=_MAX_MESSAGE_CHARS)
+
+
+class TempCompletionRequest(BaseModel):
+    """임시 채팅 — conversation 없이 메시지 배열로 stateless 스트리밍(미저장)."""
+
+    messages: list[TempMessage] = Field(..., min_length=1, max_length=_MAX_TEMP_MESSAGES)
+    model: str | None = Field(default=None, max_length=190)
+    max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+
+    model_config = {"protected_namespaces": ()}
+
+
 def _sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
@@ -86,7 +105,7 @@ async def _resolve_model(model_name: str) -> dict:
 
 async def _stream_and_persist(
     *,
-    conversation_id: str,
+    conversation_id: str | None,
     project_id: str,
     user_id: str,
     model_name: str,
@@ -95,18 +114,23 @@ async def _stream_and_persist(
     start_parent_id: int | None,
     max_tokens: int | None,
     temperature: float | None,
+    persist: bool = True,
 ):
     """engine.stream 을 소비해 SSE 를 yield 하고, parent 체인으로 메시지 저장 + active_leaf + 과금.
 
     start_parent_id 는 이 응답 턴의 부모(신규: 방금 저장한 user 메시지 / 재생성: 턴-시작 user).
+    persist=False(임시 채팅)면 메시지를 저장하지 않고 과금(usage_logs)만 한다(conversation_id=None).
     """
     parts: list[str] = []
     final_usage = None
     charged = False
     errored = False
     state = {"last_parent": start_parent_id}
+    _do_persist = persist and conversation_id is not None
 
     async def _save(role: str, content, tool_calls=None, is_leaf: bool = False):
+        if not _do_persist:
+            return {"id": None}
         msg = await cs.add_message(
             conversation_id,
             role=role,
@@ -120,7 +144,7 @@ async def _stream_and_persist(
         return msg
 
     async def _finalize(text: str, pt: int, ct: int, raw_cost: float):
-        if text:
+        if text and _do_persist:
             try:
                 await _save("assistant", text, is_leaf=True)
             except Exception:
@@ -296,5 +320,40 @@ async def regenerate_message(
         start_parent_id=turn_user["id"],
         max_tokens=max_tokens,
         temperature=payload.temperature,
+    )
+    return StreamingResponse(gen, media_type="text/event-stream")
+
+
+@router.post("/temp-completions")
+async def temp_completion(payload: TempCompletionRequest, token_info: dict = Depends(get_token_info)):
+    """임시 채팅 — conversation 없이 메시지 배열로 스트리밍. 미저장, 과금은 유지(source=web)."""
+    settings = get_settings()
+    project_id = token_info["project_id"]
+    user_id = token_info["user_id"]
+
+    try:
+        await credit.precheck(user_id, project_id)
+    except credit.QuotaExceeded as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except credit.ChatStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    model_name = payload.model or settings.chat_default_model
+    resolved = await _resolve_model(model_name)
+
+    input_messages = [{"role": m.role, "content": m.content} for m in payload.messages]
+    max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+
+    gen = _stream_and_persist(
+        conversation_id=None,
+        project_id=project_id,
+        user_id=user_id,
+        model_name=model_name,
+        resolved=resolved,
+        input_messages=input_messages,
+        start_parent_id=None,
+        max_tokens=max_tokens,
+        temperature=payload.temperature,
+        persist=False,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
