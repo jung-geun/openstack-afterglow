@@ -118,11 +118,15 @@ class TestAvailableModels:
                 },
             ]
 
+        async def fake_providers():
+            return [{"id": 1, "name": "openai"}]
+
         monkeypatch.setattr(provider_store, "list_models", fake_models)
+        monkeypatch.setattr(provider_store, "list_providers", fake_providers)
         resp = await client.get("/api/v1/chat/models")
         assert resp.status_code == 200
         body = resp.json()
-        assert body == [{"model_name": "gpt-4o", "display_name": "GPT-4o"}]
+        assert body == [{"model_name": "gpt-4o", "display_name": "GPT-4o", "provider": "openai"}]
         # 가격/내부 필드 미노출
         assert "input_price" not in body[0]
         assert "provider_id" not in body[0]

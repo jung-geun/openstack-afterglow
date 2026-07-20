@@ -20,18 +20,27 @@ router = APIRouter()
 class AvailableModel(BaseModel):
     model_name: str
     display_name: str
+    provider: str | None = None
 
     model_config = {"protected_namespaces": ()}
 
 
 @router.get("/models", response_model=list[AvailableModel])
 async def list_available_models(token_info: dict = Depends(get_token_info)):
-    """사용자용 활성 모델 카탈로그(키·가격 미포함). 저장소 장애 시 빈 목록(graceful)."""
+    """사용자용 활성 모델 카탈로그(키·가격 미포함, provider명 포함). 저장소 장애 시 빈 목록(graceful)."""
     try:
         models = await provider_store.list_models(active_only=True)
+        providers = {p["id"]: p["name"] for p in await provider_store.list_providers()}
     except provider_store.ChatStorageUnavailable:
         return []
-    return [{"model_name": m["model_name"], "display_name": m.get("display_name") or m["model_name"]} for m in models]
+    return [
+        {
+            "model_name": m["model_name"],
+            "display_name": m.get("display_name") or m["model_name"],
+            "provider": providers.get(m["provider_id"]),
+        }
+        for m in models
+    ]
 
 
 class ConversationCreateRequest(BaseModel):

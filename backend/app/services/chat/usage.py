@@ -1,16 +1,20 @@
 """빌트인 AI 채팅 사용량 집계 — chat_usage_logs 원장에서 사용자별 요약.
 
-(구 LibreChat MongoDB 미러링을 대체.) 저장소 장애 시에도 found=False 로 안전 반환(항상 200).
+로그인 사용자 본인의 누적/이번달 토큰·크레딧·요청 수 + 월 쿼터(user_wallets)를 반환한다.
+대화가 프로젝트 무관(user_id 소유)이므로 사용량도 user_id 기준으로 집계한다.
+source="system"(제목 요약 등 시스템 부담)은 사용자 사용량에서 제외한다.
+저장소 장애 시에도 found=False 로 안전 반환(항상 200).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
 from app.database import get_session_factory, is_db_available
-from app.models.chat_db import ChatUsageLog
+from app.models.chat_db import ChatUsageLog, UserWallet
 
 logger = logging.getLogger(__name__)
 
@@ -20,32 +24,55 @@ _EMPTY = {
     "prompt_tokens": 0,
     "completion_tokens": 0,
     "request_count": 0,
+    "month_credited_cost": 0.0,
+    "month_prompt_tokens": 0,
+    "month_completion_tokens": 0,
+    "month_request_count": 0,
+    "quota_used": 0.0,
+    "quota_max": 0.0,
 }
 
+_SUMS = (
+    func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
+    func.coalesce(func.sum(ChatUsageLog.prompt_tokens), 0),
+    func.coalesce(func.sum(ChatUsageLog.completion_tokens), 0),
+    func.count(ChatUsageLog.id),
+)
 
-async def user_usage_summary(user_id: str, project_id: str) -> dict:
-    """로그인 사용자 본인의 누적 사용량(크레딧·토큰·요청 수). 실패 시 빈 요약(found=False)."""
+
+async def user_usage_summary(user_id: str, project_id: str = "") -> dict:
+    """본인 누적/이번달 사용량 + 월 쿼터. 실패 시 빈 요약(found=False).
+
+    project_id 인자는 하위호환용으로 받되 사용하지 않는다(사용량은 user_id 기준, 프로젝트 무관).
+    """
     if not is_db_available():
         return dict(_EMPTY)
     factory = get_session_factory()
     if factory is None:
         return dict(_EMPTY)
     try:
+        month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        base = [ChatUsageLog.user_id == user_id, ChatUsageLog.source != "system"]
         async with factory() as session:
-            stmt = select(
-                func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
-                func.coalesce(func.sum(ChatUsageLog.prompt_tokens), 0),
-                func.coalesce(func.sum(ChatUsageLog.completion_tokens), 0),
-                func.count(ChatUsageLog.id),
-            ).where(ChatUsageLog.user_id == user_id, ChatUsageLog.project_id == project_id)
-            row = (await session.execute(stmt)).one()
-        credited, pt, ct, count = row
+            total = (await session.execute(select(*_SUMS).where(*base))).one()
+            month = (
+                await session.execute(select(*_SUMS).where(*base, ChatUsageLog.created_at >= month_start))
+            ).one()
+            wallet = await session.get(UserWallet, user_id)
+        tc, tp, tct, tcount = total
+        mc, mp, mct, mcount = month
         return {
-            "found": count > 0,
-            "total_credited_cost": float(credited or 0),
-            "prompt_tokens": int(pt or 0),
-            "completion_tokens": int(ct or 0),
-            "request_count": int(count or 0),
+            "found": tcount > 0,
+            "total_credited_cost": float(tc or 0),
+            "prompt_tokens": int(tp or 0),
+            "completion_tokens": int(tct or 0),
+            "request_count": int(tcount or 0),
+            "month_credited_cost": float(mc or 0),
+            "month_prompt_tokens": int(mp or 0),
+            "month_completion_tokens": int(mct or 0),
+            "month_request_count": int(mcount or 0),
+            "quota_used": float(wallet.used_quota_this_month) if wallet else 0.0,
+            "quota_max": float(wallet.max_quota_monthly) if wallet else 0.0,
         }
     except Exception:
         logger.warning("빌트인 채팅 사용량 집계 실패", exc_info=True)
