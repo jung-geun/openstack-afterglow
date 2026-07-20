@@ -26,14 +26,15 @@
 	import ChatSidebar from './ChatSidebar.svelte';
 	import ChatWindow from './ChatWindow.svelte';
 	import ChatInput from './ChatInput.svelte';
-	import ModelSelector from './ModelSelector.svelte';
-	import ChatUsageWidget from './ChatUsageWidget.svelte';
+	import ModelCapabilityBadges from './ModelCapabilityBadges.svelte';
 	import AgentPicker from './AgentPicker.svelte';
 	import AgentManagerModal from './AgentManagerModal.svelte';
 	import AgentHubModal from './AgentHubModal.svelte';
 	import ChatProjectsView from './ChatProjectsView.svelte';
 	import ChatSettingsOverlay from './ChatSettingsOverlay.svelte';
 	import ChatSourcesPanel from './ChatSourcesPanel.svelte';
+	import ModelPickerOverlay from './ModelPickerOverlay.svelte';
+	import ConversationWorkspacePicker from './ConversationWorkspacePicker.svelte';
 
 	interface Conversation {
 		id: string;
@@ -89,6 +90,26 @@
 	let view = $state<'chat' | 'projects'>('chat');
 	let settingsOpen = $state(false);
 	let sourcesOpen = $state(false);
+	let modelPickerOpen = $state(false);
+
+	// 현재 선택 모델의 능력(배지·게이팅). 에이전트 바인딩 시 에이전트 모델 기준.
+	const activeModelName = $derived(activeAgent?.model_name || selectedModel);
+	const selectedModelObj = $derived(models.find((m) => m.model_name === activeModelName) ?? null);
+
+	const _LAST_MODEL_KEY = 'chat:lastModel';
+	function persistLastModel(name: string) {
+		try {
+			if (typeof localStorage !== 'undefined' && name) localStorage.setItem(_LAST_MODEL_KEY, name);
+		} catch {
+			/* localStorage 불가 환경 무시 */
+		}
+	}
+	function chooseModel(name: string) {
+		if (!name) return;
+		selectedModel = name;
+		persistLastModel(name);
+	}
+
 	// 사이드바 접기/펼치기 (데스크톱 토글 · 모바일 드로어). 모바일은 기본 접힘.
 	let sidebarOpen = $state(true);
 	function toggleSidebar() {
@@ -110,6 +131,13 @@
 
 	const activePath = $derived(buildActivePath(allMessages, activeLeafId));
 	const activeConv = $derived(conversations.find((c) => c.id === activeConvId) ?? null);
+
+	// 현재 대화(또는 예약된 신규 대화)의 프로젝트. 입력창 위 선택기가 표시/변경.
+	const currentWorkspaceId = $derived(activeConv?.workspace_id ?? pendingWorkspaceId);
+	function changeConversationWorkspace(id: number | null) {
+		if (activeConv) void assignWorkspace(activeConv, id);
+		else pendingWorkspaceId = id; // 신규 대화 — 생성 시 배정
+	}
 
 	const displayPath = $derived.by((): DisplayMessage[] => {
 		if (stream) return [...stream.base, stream.assistant];
@@ -152,7 +180,17 @@
 		if (!token || !projectId) return;
 		try {
 			models = await api.get<AvailableModel[]>('/api/v1/chat/models', token, projectId);
-			if (!selectedModel && models.length) selectedModel = models[0].model_name;
+			if (!selectedModel && models.length) {
+				// 새 채팅은 마지막에 선택한 모델로 시작(localStorage). 없으면 첫 모델.
+				let last: string | null = null;
+				try {
+					last = typeof localStorage !== 'undefined' ? localStorage.getItem(_LAST_MODEL_KEY) : null;
+				} catch {
+					last = null;
+				}
+				selectedModel =
+					last && models.some((m) => m.model_name === last) ? last : models[0].model_name;
+			}
 		} catch {
 			models = [];
 		}
@@ -670,10 +708,10 @@
 		{activeConvId}
 		{tempMode}
 		open={sidebarOpen}
+		{usage}
 		busy={streaming}
 		onSelect={selectConversation}
 		onNew={newConversation}
-		onTempChat={startTempChat}
 		onDelete={deleteConversation}
 		onAssign={assignWorkspace}
 		onAgents={() => (agentManagerOpen = true)}
@@ -708,6 +746,11 @@
 				<button type="button" class="sidebar-toggle" onclick={toggleSidebar} aria-label={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'} aria-expanded={sidebarOpen} title={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'}>
 					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round" /></svg>
 				</button>
+				{#if !sidebarOpen}
+					<button type="button" class="sidebar-toggle" onclick={newConversation} disabled={streaming} title="새 채팅" aria-label="새 채팅">
+						<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" stroke-linecap="round" stroke-linejoin="round" /></svg>
+					</button>
+				{/if}
 				<div class="head-title">
 					{#if tempMode}
 						임시 채팅
@@ -718,14 +761,17 @@
 			</div>
 			<div class="head-center">
 				<div class="head-controls">
-					<ModelSelector
-						{models}
-						value={activeAgent?.model_name || selectedModel}
-						onSelect={(m) => (selectedModel = m)}
-						align="center"
-						searchable
+					<button
+						type="button"
+						class="model-btn"
 						disabled={streaming || modelLocked}
-					/>
+						onclick={() => (modelPickerOpen = true)}
+						title="모델 선택"
+					>
+						<span class="model-btn-name">{selectedModelObj?.display_name || activeModelName || '모델 선택'}</span>
+						<ModelCapabilityBadges caps={selectedModelObj?.capabilities} size="xs" iconsOnly />
+						<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+					</button>
 					<AgentPicker
 						{agents}
 						{activeAgent}
@@ -741,15 +787,24 @@
 				{/if}
 			</div>
 			<div class="head-right">
-					{#if allCitations.length}
-						<button type="button" class="sources-btn" onclick={() => (sourcesOpen = true)} title="이 대화의 출처 보기">
-							<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							출처 {allCitations.length}
-						</button>
-					{/if}
-				{#if usage}
-					<ChatUsageWidget {usage} />
+				{#if allCitations.length}
+					<button type="button" class="sources-btn" onclick={() => (sourcesOpen = true)} title="이 대화의 출처 보기">
+						<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						출처 {allCitations.length}
+					</button>
 				{/if}
+				<button
+					type="button"
+					class="temp-btn"
+					class:active={tempMode}
+					onclick={startTempChat}
+					disabled={streaming}
+					title="저장되지 않는 임시 채팅"
+					aria-pressed={tempMode}
+				>
+					<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 8v4l2.5 2.5M12 3a9 9 0 1 0 9 9" stroke-linecap="round" stroke-linejoin="round" /></svg>
+					<span class="temp-label">임시</span>
+				</button>
 			</div>
 		</header>
 
@@ -771,7 +826,17 @@
 			onSwitchVersion={switchVersion}
 		/>
 
-		<ChatInput bind:value={input} {streaming} onSend={send} onStop={stop} />
+		{#if !tempMode}
+				<div class="composer-meta">
+					<ConversationWorkspacePicker
+						{workspaces}
+						currentWorkspaceId={currentWorkspaceId}
+						disabled={streaming}
+						onChange={changeConversationWorkspace}
+					/>
+				</div>
+			{/if}
+			<ChatInput bind:value={input} {streaming} onSend={send} onStop={stop} />
 		{/if}
 	</section>
 </div>
@@ -785,6 +850,13 @@
 <AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
 <ChatSettingsOverlay open={settingsOpen} onClose={() => (settingsOpen = false)} {usage} />
 <ChatSourcesPanel open={sourcesOpen} citations={allCitations} onClose={() => (sourcesOpen = false)} />
+<ModelPickerOverlay
+	open={modelPickerOpen}
+	{models}
+	value={activeModelName}
+	onSelect={chooseModel}
+	onClose={() => (modelPickerOpen = false)}
+/>
 
 <style>
 	.chat-shell {
@@ -870,6 +942,67 @@
 	.model-lock-hint {
 		font-size: 0.66rem;
 		color: var(--color-ink-3);
+	}
+	.composer-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.3rem 1rem 0;
+	}
+	.model-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		max-width: 20rem;
+		padding: 0.4rem 0.7rem;
+		border-radius: 0.6rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-raised);
+		color: var(--color-ink-0);
+		font-size: 0.82rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: border-color 0.15s, background 0.15s;
+	}
+	.model-btn:hover:not(:disabled) {
+		border-color: var(--color-accent);
+	}
+	.model-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+	.model-btn-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.temp-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.35rem 0.65rem;
+		border-radius: 0.55rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-raised);
+		color: var(--color-ink-2);
+		font-size: 0.75rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: background 0.15s, color 0.15s, border-color 0.15s;
+	}
+	.temp-btn:hover:not(:disabled) {
+		color: var(--color-ink-0);
+		border-color: var(--color-line-2);
+	}
+	.temp-btn.active {
+		background: var(--color-accent);
+		color: var(--color-action-on-accent);
+		border-color: var(--color-accent);
+	}
+	.temp-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 	.head-right {
 		display: flex;
