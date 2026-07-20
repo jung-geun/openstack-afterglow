@@ -22,7 +22,9 @@ from app.config import get_settings
 from app.services.chat import agent_store as ags
 from app.services.chat import conversation_store as cs
 from app.services.chat import credit, engine, litellm_client, title_summary
+from app.services.chat import memory_store as ms
 from app.services.chat import provider_store as ps
+from app.services.chat import workspace_store as ws
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -119,17 +121,41 @@ async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
     return agent
 
 
-def _apply_agent(agent: dict | None, input_messages: list[dict], temperature, max_tokens_req):
-    """에이전트 바인딩 적용 — instructions 를 system 으로 선주입 + params 기본값 채움.
+async def _load_context(conv: dict, user_id: str) -> tuple[str | None, list[str]]:
+    """대화 소속 프로젝트(workspace) 지침 + 사용자 활성 메모리 로드. 부가 기능이라 실패는 무시."""
+    workspace_instr = None
+    try:
+        workspace_instr = await ws.get_instructions_for_run(conv.get("workspace_id"), user_id=user_id)
+    except Exception:
+        logger.warning("워크스페이스 지침 로드 실패", exc_info=True)
+    memories = await ms.active_contents_for_run(user_id=user_id)  # 자체 예외 흡수(빈 목록)
+    return workspace_instr, memories
 
-    시스템 메시지는 런타임 주입일 뿐 chat_messages 에는 저장하지 않는다(활성 경로 불변).
+
+def _apply_context(
+    agent: dict | None,
+    workspace_instr: str | None,
+    memories: list[str],
+    input_messages: list[dict],
+    temperature,
+    max_tokens_req,
+):
+    """system 선주입 컨텍스트 구성 — 메모리 → 프로젝트 지침 → 에이전트 지침(구체적일수록 뒤).
+
+    런타임 주입일 뿐 chat_messages 에는 저장하지 않는다(활성 경로 불변). params 는 에이전트에서만.
     반환: (messages, temperature, max_tokens_req)
     """
-    if not agent:
-        return input_messages, temperature, max_tokens_req
-    if agent.get("instructions"):
-        input_messages = [{"role": "system", "content": agent["instructions"]}, *input_messages]
-    params = agent.get("params") or {}
+    preamble: list[dict] = []
+    if memories:
+        joined = "\n".join(f"- {m}" for m in memories)
+        preamble.append({"role": "system", "content": f"사용자에 대해 기억할 사실:\n{joined}"})
+    if workspace_instr:
+        preamble.append({"role": "system", "content": workspace_instr})
+    if agent and agent.get("instructions"):
+        preamble.append({"role": "system", "content": agent["instructions"]})
+    if preamble:
+        input_messages = [*preamble, *input_messages]
+    params = (agent or {}).get("params") or {}
     if temperature is None:
         temperature = params.get("temperature")
     if max_tokens_req is None:
@@ -287,8 +313,9 @@ async def create_completion(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     input_messages = _model_input(path["messages"], extra_user=payload.message)
-    input_messages, temperature, max_tokens_req = _apply_agent(
-        agent, input_messages, payload.temperature, payload.max_tokens
+    workspace_instr, memories = await _load_context(conv, user_id)
+    input_messages, temperature, max_tokens_req = _apply_context(
+        agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
     )
     max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
@@ -351,8 +378,9 @@ async def regenerate_message(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     input_messages = _model_input(path_msgs)  # 경로 마지막이 turn_user(role=user)
-    input_messages, temperature, max_tokens_req = _apply_agent(
-        agent, input_messages, payload.temperature, payload.max_tokens
+    workspace_instr, memories = await _load_context(conv, user_id)
+    input_messages, temperature, max_tokens_req = _apply_context(
+        agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
     )
     max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 

@@ -82,6 +82,7 @@ def _conv_public(row: ChatConversation) -> dict:
         "user_id": row.user_id,
         "title": _dec(row.title),
         "model_name": row.model_name,
+        "workspace_id": row.workspace_id,
         "active_leaf_id": row.active_leaf_id,
         "parent_conversation_id": row.parent_conversation_id,
         "forked_from_message_id": row.forked_from_message_id,
@@ -119,7 +120,9 @@ async def _load_owned(session, conv_id: str, user_id: str) -> ChatConversation:
     return row
 
 
-async def create_conversation(*, project_id: str, user_id: str, title: str | None, model_name: str | None) -> dict:
+async def create_conversation(
+    *, project_id: str, user_id: str, title: str | None, model_name: str | None, workspace_id: int | None = None
+) -> dict:
     factory = _require_db()
     row = ChatConversation(
         id=str(uuid.uuid4()),
@@ -127,6 +130,7 @@ async def create_conversation(*, project_id: str, user_id: str, title: str | Non
         user_id=user_id,
         title=_enc(title or None),
         model_name=(model_name or None),
+        workspace_id=workspace_id,
     )
     try:
         async with factory() as session, session.begin():
@@ -186,6 +190,20 @@ async def update_title(conv_id: str, *, user_id: str, title: str | None) -> dict
         async with factory() as session, session.begin():
             row = await _load_owned(session, conv_id, user_id)
             row.title = _enc(title or None)
+            await session.flush()
+            return _conv_public(row)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def set_workspace(conv_id: str, *, user_id: str, workspace_id: int | None) -> dict:
+    """대화를 프로젝트(workspace)에 배정/해제(소유권 검증). workspace 소유 검증은 완료 경로가 별도 수행."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            row = await _load_owned(session, conv_id, user_id)
+            row.workspace_id = workspace_id
             await session.flush()
             return _conv_public(row)
     except OperationalError as exc:

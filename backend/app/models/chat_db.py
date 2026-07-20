@@ -44,6 +44,8 @@ class LlmProvider(Base):
     encrypted_api_key: Mapped[str | None] = mapped_column(TEXT)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
     margin_multiplier: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False, default=Decimal("1.0"))
+    # models.dev provider key. Display names are never used for catalog matching.
+    models_dev_provider_id: Mapped[str | None] = mapped_column(VARCHAR(100))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -66,6 +68,10 @@ class LlmModel(Base):
     # 미지정 시 litellm 내장 단가 사용 (override용). 토큰당 USD 단가.
     input_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     output_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    # models.dev catalog mapping and the immutable provenance of the last import.
+    models_dev_model_id: Mapped[str | None] = mapped_column(VARCHAR(190))
+    price_source: Mapped[str | None] = mapped_column(VARCHAR(20))
+    price_metadata: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -92,6 +98,8 @@ class ChatConversation(Base):
     # 분기(fork) 출처: 이 대화가 어느 대화의 어느 메시지에서 갈라졌는지(감사·표시용).
     parent_conversation_id: Mapped[str | None] = mapped_column(CHAR(36))
     forked_from_message_id: Mapped[int | None] = mapped_column(BIGINT)
+    # 소속 프로젝트(chat_workspaces). OpenStack project_id 와 별개 개념. 완료 시 워크스페이스 지침 주입.
+    workspace_id: Mapped[int | None] = mapped_column(BIGINT)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -151,6 +159,9 @@ class ChatUsageLog(Base):
     credited_cost: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
     source: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="web")  # web | api
     api_key_id: Mapped[int | None] = mapped_column(BIGINT)
+    event_id: Mapped[str | None] = mapped_column(VARCHAR(64), unique=True)
+    pricing_status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="legacy")
+    pricing_snapshot: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
@@ -259,3 +270,44 @@ class ChatAgent(Base):
         Index("idx_chat_agents_owner", "owner_user_id"),
         Index("idx_chat_agents_visibility", "visibility"),
     )
+
+
+class ChatWorkspace(Base):
+    """채팅 프로젝트(OpenAI/Claude식) — 대화 그룹 + 공통 지침. OpenStack project_id 와 별개 개념.
+
+    소유자(user_id)만 CRUD. instructions 는 chat_content 암호문. 완료 시 소속 대화에 system 주입.
+    """
+
+    __tablename__ = "chat_workspaces"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(VARCHAR(500))
+    # AES-256-GCM(chat_content) 암호문. 프로젝트 공통 지침(system 주입).
+    instructions: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_chat_workspaces_owner", "owner_user_id"),)
+
+
+class ChatMemory(Base):
+    """사용자 장기 메모리 — 프로젝트 무관, user_id 소유. 완료 시 컨텍스트 주입.
+
+    content 는 chat_content 암호문. v1 은 수동 관리(추가/편집/삭제), 자동 추출은 후속.
+    """
+
+    __tablename__ = "chat_memories"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    # AES-256-GCM(chat_content) 암호문. 기억할 사실(예: "사용자는 Python 을 선호").
+    content: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_chat_memories_user", "user_id"),)

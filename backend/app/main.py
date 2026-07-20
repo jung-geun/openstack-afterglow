@@ -339,6 +339,8 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
     ("/api/v1/chat/agents", "chat_agent"),
+    ("/api/v1/chat/workspaces", "chat_workspace"),
+    ("/api/v1/chat/memories", "chat_memory"),
     ("/api/v1/chat/conversations", "chat_conversation"),
     ("/api/v1/chat/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/custom-tools", "chat_custom_tool"),
@@ -627,8 +629,10 @@ if _svc_cfg.service_chat_enabled:
         chat_conversations_router,
         chat_extensions_admin_router,
         chat_extensions_user_router,
+        chat_memory_router,
         chat_stats_router,
         chat_usage_router,
+        chat_workspaces_router,
     )
 
     # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
@@ -644,6 +648,9 @@ if _svc_cfg.service_chat_enabled:
     app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone
     app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 프로젝트(workspace, 대화 그룹+공통 지침) + 장기 메모리 — /workspaces, /memories
+    app.include_router(chat_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_memory_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])

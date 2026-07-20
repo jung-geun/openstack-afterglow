@@ -10,7 +10,9 @@ from decimal import Decimal
 from app.services.chat import agent_store as ags
 from app.services.chat import conversation_store as cs
 from app.services.chat import credit, engine
+from app.services.chat import memory_store as ms
 from app.services.chat import provider_store as ps
+from app.services.chat import workspace_store as ws
 
 _BASE = "/api/v1/chat/conversations"
 
@@ -460,3 +462,54 @@ class TestAgentBinding:
         monkeypatch.setattr(ags, "get_agent_for_run", fake_agent)
         resp = await client.post(f"{_BASE}/c1/completions", json={"message": "hi", "agent_id": 999})
         assert resp.status_code == 404
+
+
+class TestContextInjection:
+    async def test_workspace_and_memory_prepended_as_system(self, client, monkeypatch):
+        """프로젝트 지침 + 사용자 메모리가 system 으로 선주입(메모리 → 워크스페이스 순)."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv(workspace_id=3)
+
+        async def fake_path(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            return {"id": 1}
+
+        async def fake_resolve(model_name):
+            return _resolved(model_name=model_name, provider_name="openai")
+
+        async def fake_ws(workspace_id, **kwargs):
+            return "이 프로젝트는 FastAPI 규칙을 따른다"
+
+        async def fake_mem(**kwargs):
+            return ["사용자는 Python 을 선호", "다크모드 사용"]
+
+        seen = {}
+
+        async def fake_stream(**kwargs):
+            seen["messages"] = kwargs.get("messages")
+            yield {"type": "token", "text": "네"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_path)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(ws, "get_instructions_for_run", fake_ws)
+        monkeypatch.setattr(ms, "active_contents_for_run", fake_mem)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(f"{_BASE}/c1/completions", json={"message": "안녕", "model": "gpt-3.5-turbo"})
+        assert resp.status_code == 200
+        msgs = seen["messages"]
+        # 순서: 메모리 system → 워크스페이스 system → user
+        assert msgs[0]["role"] == "system" and "Python 을 선호" in msgs[0]["content"]
+        assert msgs[1]["role"] == "system" and "FastAPI" in msgs[1]["content"]
+        assert msgs[-1] == {"role": "user", "content": "안녕"}

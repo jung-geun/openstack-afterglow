@@ -46,8 +46,13 @@ async def list_available_models(token_info: dict = Depends(get_token_info)):
 class ConversationCreateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     model_name: str | None = Field(default=None, max_length=190)
+    workspace_id: int | None = Field(default=None)  # 소속 프로젝트(workspace)
 
     model_config = {"protected_namespaces": ()}
+
+
+class WorkspaceAssignRequest(BaseModel):
+    workspace_id: int | None = None  # None 이면 프로젝트에서 제외
 
 
 class ConversationResponse(BaseModel):
@@ -56,6 +61,7 @@ class ConversationResponse(BaseModel):
     user_id: str
     title: str | None
     model_name: str | None
+    workspace_id: int | None = None
     active_leaf_id: int | None = None
     parent_conversation_id: str | None = None
     forked_from_message_id: int | None = None
@@ -111,8 +117,20 @@ async def create_conversation(payload: ConversationCreateRequest, token_info: di
             user_id=token_info["user_id"],
             title=payload.title,
             model_name=payload.model_name,
+            workspace_id=payload.workspace_id,
         )
     except cs.ChatStorageUnavailable as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch("/conversations/{conversation_id}/workspace", response_model=ConversationResponse)
+async def set_conversation_workspace(
+    conversation_id: str, payload: WorkspaceAssignRequest, token_info: dict = Depends(get_token_info)
+):
+    """대화를 프로젝트(workspace)에 배정하거나 해제(None)."""
+    try:
+        return await cs.set_workspace(conversation_id, user_id=token_info["user_id"], workspace_id=payload.workspace_id)
+    except (cs.ConversationNotFound, cs.ConversationForbidden, cs.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
 

@@ -31,6 +31,8 @@ _CHAT_TABLES = (
     "chat_messages",
     "chat_conversations",
     "chat_agents",
+    "chat_workspaces",
+    "chat_memories",
     "user_wallets",
     "llm_models",
     "llm_providers",
@@ -113,14 +115,14 @@ async def test_provider_model_conversation_usage_roundtrip(chat_db):
     # 4. 미등록 모델 → resolve None (화이트리스트)
     assert await ps.resolve_model("no-such-model") is None
 
-    # 5. 대화/메시지 + 소유권
+    # 5. 대화/메시지 + 소유권(user_id 기준, 프로젝트 무관)
     conv = await cs.create_conversation(project_id="p1", user_id="u1", title="t", model_name="gpt-4o")
     await cs.add_message(conv["id"], role="user", content="안녕하세요")
-    msgs = await cs.list_messages(conv["id"], project_id="p1", user_id="u1")
+    msgs = await cs.list_messages(conv["id"], user_id="u1")
     assert len(msgs) == 1
     assert msgs[0]["content"] == "안녕하세요"
     with pytest.raises(cs.ConversationForbidden):
-        await cs.get_conversation(conv["id"], project_id="other-project", user_id="u1")
+        await cs.get_conversation(conv["id"], user_id="other-user")
 
     # 6. apply_usage — 원자적 used_quota UPDATE + 원장 append
     credited = await credit.apply_usage(
@@ -329,9 +331,9 @@ async def test_chat_content_encryption_at_rest(chat_db):
         assert "list_instances" not in msgs[0].tool_calls
 
     # 서비스 조회 시 평문 복원
-    got = await cs.get_conversation(conv["id"], project_id="p1", user_id="u1")
+    got = await cs.get_conversation(conv["id"], user_id="u1")
     assert got["title"] == "비밀 제목"
-    out = await cs.list_messages(conv["id"], project_id="p1", user_id="u1")
+    out = await cs.list_messages(conv["id"], user_id="u1")
     assert out[0]["content"] == "비밀 응답"
     assert out[0]["tool_calls"] == [{"id": "c1", "name": "list_instances"}]
 
@@ -434,3 +436,35 @@ async def test_stats_aggregation(chat_db):
     assert sum(m["total_tokens"] for m in months) == 490  # 전체 토큰 합
 
     assert "p1" in await stats.projects_with_usage("all")
+
+
+async def test_workspace_and_memory_roundtrip(chat_db):
+    """워크스페이스/메모리 실 로직: 암호화 왕복·소유권·완료 주입용 조회."""
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import memory_store as ms
+    from app.services.chat import workspace_store as ws
+
+    # 워크스페이스 생성 + instructions 암호화 왕복
+    wsp = await ws.create_workspace(owner_user_id="wu", name="백엔드", instructions="FastAPI 규칙")
+    assert (await ws.get_workspace(wsp["id"], user_id="wu"))["instructions"] == "FastAPI 규칙"
+    with pytest.raises(ws.WorkspaceForbidden):
+        await ws.get_workspace(wsp["id"], user_id="other")
+    # 완료 경로 조회: 소유자면 지침, 타인이면 None(조용히 무시)
+    assert await ws.get_instructions_for_run(wsp["id"], user_id="wu") == "FastAPI 규칙"
+    assert await ws.get_instructions_for_run(wsp["id"], user_id="other") is None
+
+    # 대화를 워크스페이스에 배정
+    conv = await cs.create_conversation(project_id="p", user_id="wu", title="t", model_name="m", workspace_id=wsp["id"])
+    assert conv["workspace_id"] == wsp["id"]
+    moved = await cs.set_workspace(conv["id"], user_id="wu", workspace_id=None)
+    assert moved["workspace_id"] is None
+
+    # 메모리 암호화 왕복 + 활성 주입 조회(비활성 제외)
+    m1 = await ms.create_memory(user_id="wu", content="사용자는 Python 선호")
+    m2 = await ms.create_memory(user_id="wu", content="다크모드")
+    await ms.update_memory(m2["id"], user_id="wu", patch={"is_active": False})
+    active = await ms.active_contents_for_run(user_id="wu")
+    assert "사용자는 Python 선호" in active
+    assert "다크모드" not in active  # 비활성 제외
+    with pytest.raises(ms.MemoryForbidden):
+        await ms.update_memory(m1["id"], user_id="other", patch={"content": "탈취"})
