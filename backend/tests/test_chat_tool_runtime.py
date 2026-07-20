@@ -105,3 +105,60 @@ class TestCustomExecution:
             {"name": "x", "url": "https://api.example", "method": "GET"}, {}, _CTX
         )
         assert "오류" in out
+
+
+class TestSelectionFilter:
+    def test_none_all_empty_subset(self):
+        items = [{"id": 1}, {"id": 2}, {"id": 3}]
+        assert tool_runtime._selected(items, None) == items  # None=전체
+        assert tool_runtime._selected(items, ()) == []  # 빈=없음
+        assert tool_runtime._selected(items, (1, 3)) == [{"id": 1}, {"id": 3}]  # 부분
+
+
+class TestMcpTools:
+    async def test_selected_mcp_tool_prefixed_schema(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        async def fake_list_for_user(kind, *, user_id, project_id, active_only=False):
+            if kind == "mcp":
+                return [{"id": 7, "name": "srv", "transport": "http", "url": "https://mcp.example/x"}]
+            return []  # 커스텀 tool 없음
+
+        async def fake_list_tools(server):
+            return [{"name": "search", "description": "d", "input_schema": {"type": "object"}}]
+
+        monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
+        monkeypatch.setattr(tool_runtime.mcp_client, "list_tools", fake_list_tools)
+        schemas = await tool_runtime.context_tool_schemas(_CTX)
+        names = {s["function"]["name"] for s in schemas}
+        assert "mcp__7__search" in names  # server_id 접두
+
+    async def test_mcp_name_routes_to_call_tool(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        captured = {}
+
+        async def fake_list_for_user(kind, *, user_id, project_id, active_only=False):
+            if kind == "mcp":
+                return [{"id": 7, "name": "srv", "url": "https://mcp.example/x"}]
+            return []
+
+        async def fake_call_tool(server, tool_name, args):
+            captured.update(server_id=server["id"], tool=tool_name, args=args)
+            return "결과"
+
+        monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
+        monkeypatch.setattr(tool_runtime.mcp_client, "call_tool", fake_call_tool)
+        out = await tool_runtime.context_execute("mcp__7__search", {"q": "x"}, _CTX)
+        assert out == "결과"
+        assert captured == {"server_id": 7, "tool": "search", "args": {"q": "x"}}
+
+    async def test_mcp_unknown_server_safe_string(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        async def fake_list_for_user(kind, *, user_id, project_id, active_only=False):
+            return []
+
+        monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
+        out = await tool_runtime.context_execute("mcp__99__x", {}, _CTX)
+        assert "MCP" in out  # 안전한 거부

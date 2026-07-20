@@ -24,6 +24,8 @@ async def stream(
     max_tokens: int | None = None,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
+    selected_tool_ids: tuple[int, ...] | None = None,
+    selected_mcp_ids: tuple[int, ...] | None = None,
 ) -> AsyncIterator[dict]:
     async for ev in graph.stream(
         model=model,
@@ -36,5 +38,7 @@ async def stream(
         max_tokens=max_tokens,
         temperature=temperature,
         reasoning_effort=reasoning_effort,
+        selected_tool_ids=selected_tool_ids,
+        selected_mcp_ids=selected_mcp_ids,
     ):
         yield ev

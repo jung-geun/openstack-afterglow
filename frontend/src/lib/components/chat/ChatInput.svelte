@@ -16,6 +16,11 @@
 		effort?: string | null;
 		/** 첨부(bindable) — 업로드 진행/완료 아이템. 부모가 전송 시 refs 로 변환·초기화. */
 		attachments?: ChatAttachment[];
+		/** 대화별 tool/MCP 선택 — null=활성 전체(기본), 배열=해당 id 만. tool_call 지원 모델만 노출. */
+		availableTools?: { id: number; name: string }[];
+		availableMcp?: { id: number; name: string }[];
+		selectedToolIds?: number[] | null;
+		selectedMcpIds?: number[] | null;
 		token?: string;
 		projectId?: string;
 		onSend: () => void;
@@ -29,6 +34,10 @@
 		modelCaps = null,
 		effort = $bindable(null),
 		attachments = $bindable([]),
+		availableTools = [],
+		availableMcp = [],
+		selectedToolIds = $bindable(null),
+		selectedMcpIds = $bindable(null),
 		token,
 		projectId,
 		onSend,
@@ -43,6 +52,23 @@
 
 	// vision/attachment 지원 모델에서만 첨부 허용.
 	const canAttach = $derived(Boolean(modelCaps?.vision || modelCaps?.attachment));
+	// tool_call 지원 + 사용 가능한 tool/MCP 가 있을 때만 도구 선택 노출.
+	const canUseTools = $derived(
+		Boolean(modelCaps?.tool_call) && availableTools.length + availableMcp.length > 0
+	);
+	const hasPlus = $derived(canAttach || canUseTools);
+
+	function isOn(id: number, selected: number[] | null): boolean {
+		return selected === null ? true : selected.includes(id);
+	}
+	function toggleTool(id: number) {
+		const cur = selectedToolIds ?? availableTools.map((t) => t.id);
+		selectedToolIds = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+	}
+	function toggleMcp(id: number) {
+		const cur = selectedMcpIds ?? availableMcp.map((m) => m.id);
+		selectedMcpIds = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+	}
 
 	async function addFiles(files: FileList | File[]) {
 		if (!canAttach) return;
@@ -173,8 +199,8 @@
 					<button
 						type="button"
 						class="tool-shell"
-						disabled={!canAttach || streaming}
-						title={canAttach ? '이미지·파일 추가' : '이 모델은 첨부를 지원하지 않습니다'}
+						disabled={!hasPlus || streaming}
+						title={hasPlus ? '첨부·도구' : '이 모델은 첨부·도구를 지원하지 않습니다'}
 						aria-label="추가"
 						aria-haspopup="menu"
 						aria-expanded={plusOpen}
@@ -185,10 +211,33 @@
 					{#if plusOpen}
 						<div class="scrim" role="button" tabindex="-1" aria-label="닫기" onclick={() => (plusOpen = false)} onkeydown={(e) => e.key === 'Escape' && (plusOpen = false)}></div>
 						<div class="plus-menu" role="menu">
-							<button type="button" class="plus-opt" role="menuitem" onclick={() => fileInput?.click()}>
-								<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="2.6" /></svg>
-								이미지 추가
-							</button>
+							{#if canAttach}
+								<button type="button" class="plus-opt" role="menuitem" onclick={() => fileInput?.click()}>
+									<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="2.6" /></svg>
+									이미지 추가
+								</button>
+							{/if}
+							{#if canUseTools}
+								{#if canAttach}<div class="plus-sep"></div>{/if}
+								<div class="plus-head">도구</div>
+								{#each availableTools as t (t.id)}
+									<button type="button" class="plus-opt toggle" role="menuitemcheckbox" aria-checked={isOn(t.id, selectedToolIds)} onclick={() => toggleTool(t.id)}>
+										<span class="check" class:on={isOn(t.id, selectedToolIds)}>
+											{#if isOn(t.id, selectedToolIds)}<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
+										</span>
+										<span class="tool-name truncate">{t.name}</span>
+									</button>
+								{/each}
+								{#if availableMcp.length}<div class="plus-head">MCP</div>{/if}
+								{#each availableMcp as m (m.id)}
+									<button type="button" class="plus-opt toggle" role="menuitemcheckbox" aria-checked={isOn(m.id, selectedMcpIds)} onclick={() => toggleMcp(m.id)}>
+										<span class="check" class:on={isOn(m.id, selectedMcpIds)}>
+											{#if isOn(m.id, selectedMcpIds)}<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
+										</span>
+										<span class="tool-name truncate">{m.name}</span>
+									</button>
+								{/each}
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -410,6 +459,46 @@
 	.plus-opt:hover {
 		background: var(--color-surface-sunken);
 		color: var(--color-ink-0);
+	}
+	.plus-sep {
+		height: 1px;
+		margin: 0.25rem 0.2rem;
+		background: var(--color-line);
+	}
+	.plus-head {
+		padding: 0.35rem 0.55rem 0.2rem;
+		font-size: 0.64rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: var(--color-ink-3);
+	}
+	.plus-opt.toggle {
+		gap: 0.45rem;
+	}
+	.check {
+		flex-shrink: 0;
+		width: 1rem;
+		height: 1rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 0.28rem;
+		border: 1px solid var(--color-line-2);
+		color: var(--color-action-on-accent);
+	}
+	.check.on {
+		background: var(--color-accent);
+		border-color: var(--color-accent);
+	}
+	.tool-name {
+		flex: 1;
+		min-width: 0;
+	}
+	.truncate {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.effort {
 		position: relative;

@@ -5,7 +5,7 @@ description = "Afterglow - OpenStack VM deployment platform"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.125.0",
-    "uvicorn[standard]==0.30.6",
+    "uvicorn[standard]==0.39.0",
     "openstacksdk==3.3.0",
     "python-keystoneclient==5.4.0",
     "jinja2==3.1.6",
@@ -30,6 +30,7 @@ dependencies = [
     "litellm==1.93.0",
     # 빌트인 AI 채팅 Phase 2 — LangGraph 오케스트레이션 + 전용 Postgres 체크포인터
     # (MCP: langchain-mcp-adapters↔mcp 런타임 버전 비호환 해결 후 별도 추가)
+    "mcp==1.28.1",
     "langgraph==1.2.2",
     "langchain-core==1.4.9",
     "langgraph-checkpoint-postgres==3.1.0",

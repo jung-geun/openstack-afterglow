@@ -316,11 +316,14 @@ async def stream(
     max_tokens: int | None = None,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
+    selected_tool_ids: tuple[int, ...] | None = None,
+    selected_mcp_ids: tuple[int, ...] | None = None,
 ) -> AsyncIterator[dict]:
     """engine.stream 과 동일 계약. LangGraph custom 스트림으로 token/reasoning/tool_call/usage/error yield.
 
     project_id/user_id 는 툴 실행의 테넌트 컨텍스트(ToolContext)로만 쓰인다(LLM 입력 아님).
     reasoning_effort 는 지원 모델에만 적용돼 추론(reasoning) 이벤트를 유발한다.
+    selected_tool_ids/selected_mcp_ids 는 대화별 tool/MCP 노출 필터(None=전체).
     """
     params = {
         "model": model,
@@ -331,7 +334,12 @@ async def stream(
         "temperature": temperature,
         "reasoning_effort": reasoning_effort,
     }
-    ctx = ToolContext(project_id=project_id, user_id=user_id)
+    ctx = ToolContext(
+        project_id=project_id,
+        user_id=user_id,
+        selected_tool_ids=selected_tool_ids,
+        selected_mcp_ids=selected_mcp_ids,
+    )
     graph = _build_graph(params, ctx)
     async for chunk in graph.astream({"messages": messages}, stream_mode="custom"):
         yield chunk

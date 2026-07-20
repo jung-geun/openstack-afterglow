@@ -55,6 +55,9 @@ class CompletionRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
     reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
+    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
+    tool_ids: list[int] | None = Field(default=None)
+    mcp_ids: list[int] | None = Field(default=None)
 
     model_config = {"protected_namespaces": ()}
 
@@ -65,6 +68,9 @@ class RegenerateRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
     reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
+    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
+    tool_ids: list[int] | None = Field(default=None)
+    mcp_ids: list[int] | None = Field(default=None)
 
     model_config = {"protected_namespaces": ()}
 
@@ -86,6 +92,9 @@ class TempCompletionRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
     reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
+    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
+    tool_ids: list[int] | None = Field(default=None)
+    mcp_ids: list[int] | None = Field(default=None)
 
     model_config = {"protected_namespaces": ()}
 
@@ -102,6 +111,21 @@ def _model_input(path_messages: list[dict], extra_user: str | None = None) -> li
     if extra_user is not None:
         msgs.append({"role": "user", "content": extra_user})
     return msgs
+
+
+def _tool_selection(agent: dict | None, payload_tool_ids, payload_mcp_ids):
+    """대화별 tool/MCP 선택 계산 — 에이전트 바인딩 시 에이전트가 tool set 소유(빈=제한 없음).
+
+    반환: (selected_tool_ids, selected_mcp_ids) 각각 tuple 또는 None(=활성 전체).
+    """
+    if agent:
+        at = agent.get("tool_ids") or None
+        am = agent.get("mcp_ids") or None
+        return (tuple(at) if at else None, tuple(am) if am else None)
+    return (
+        tuple(payload_tool_ids) if payload_tool_ids is not None else None,
+        tuple(payload_mcp_ids) if payload_mcp_ids is not None else None,
+    )
 
 
 async def _apply_attachments(
@@ -226,6 +250,8 @@ async def _stream_and_persist(
     temperature: float | None,
     persist: bool = True,
     reasoning_effort: str | None = None,
+    selected_tool_ids: tuple[int, ...] | None = None,
+    selected_mcp_ids: tuple[int, ...] | None = None,
 ):
     """engine.stream 을 소비해 SSE 를 yield 하고, parent 체인으로 메시지 저장 + active_leaf + 과금.
 
@@ -302,6 +328,8 @@ async def _stream_and_persist(
             max_tokens=max_tokens,
             temperature=temperature,
             reasoning_effort=reasoning_effort,
+            selected_tool_ids=selected_tool_ids,
+            selected_mcp_ids=selected_mcp_ids,
         ):
             etype = ev.get("type")
             if etype == "token":
@@ -439,6 +467,7 @@ async def create_completion(
     # 현재 user 턴에 이미지 첨부를 멀티모달 content 로 주입(vision 모델만).
     input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
     max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+    _sel_tools, _sel_mcps = _tool_selection(agent, payload.tool_ids, payload.mcp_ids)
 
     gen = _stream_and_persist(
         conversation_id=conversation_id,
@@ -451,6 +480,8 @@ async def create_completion(
         max_tokens=max_tokens,
         temperature=temperature,
         reasoning_effort=payload.reasoning_effort,
+        selected_tool_ids=_sel_tools,
+        selected_mcp_ids=_sel_mcps,
     )
     # SSE 종료 후 백그라운드: 제목 요약 + 사용자 메모리 자동 추출(둘 다 시스템 부담, 실패 무시).
     # temp/regenerate 에는 붙이지 않는다(temp=휘발성, regenerate=중복 추출 방지).
@@ -517,6 +548,7 @@ async def regenerate_message(
         agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
     )
     max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+    _sel_tools, _sel_mcps = _tool_selection(agent, payload.tool_ids, payload.mcp_ids)
 
     gen = _stream_and_persist(
         conversation_id=conversation_id,
@@ -529,6 +561,8 @@ async def regenerate_message(
         max_tokens=max_tokens,
         temperature=temperature,
         reasoning_effort=payload.reasoning_effort,
+        selected_tool_ids=_sel_tools,
+        selected_mcp_ids=_sel_mcps,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 
@@ -553,6 +587,7 @@ async def temp_completion(payload: TempCompletionRequest, token_info: dict = Dep
     input_messages = [{"role": m.role, "content": m.content} for m in payload.messages]
     input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
     max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+    _sel_tools, _sel_mcps = _tool_selection(None, payload.tool_ids, payload.mcp_ids)
 
     gen = _stream_and_persist(
         conversation_id=None,
@@ -566,5 +601,7 @@ async def temp_completion(payload: TempCompletionRequest, token_info: dict = Dep
         temperature=payload.temperature,
         persist=False,
         reasoning_effort=payload.reasoning_effort,
+        selected_tool_ids=_sel_tools,
+        selected_mcp_ids=_sel_mcps,
     )
     return StreamingResponse(gen, media_type="text/event-stream")

@@ -66,6 +66,11 @@
 	let selectedModel = $state('');
 	let effort = $state<string | null>(null); // thinking effort(null=서버 기본). reasoning 지원 모델만.
 	let attachments = $state<ChatAttachment[]>([]); // 입력창 첨부(업로드 진행/완료)
+	// 대화별 tool/MCP 선택 — null=활성 전체(기본), 배열=해당 항목만. (에이전트 바인딩 시 에이전트가 소유)
+	let availableTools = $state<{ id: number; name: string }[]>([]);
+	let availableMcp = $state<{ id: number; name: string }[]>([]);
+	let selectedToolIds = $state<number[] | null>(null);
+	let selectedMcpIds = $state<number[] | null>(null);
 	let activeConvId = $state<string | null>(null);
 	let allMessages = $state<ChatMsg[]>([]);
 	let activeLeafId = $state<string | null>(null);
@@ -254,6 +259,27 @@
 			workspaces = await api.get<Workspace[]>('/api/v1/chat/workspaces', token, projectId);
 		} catch {
 			/* 프로젝트 로드 실패는 채팅 자체를 막지 않음 */
+		}
+	}
+	async function loadToolsAndMcp() {
+		if (!token || !projectId) return;
+		try {
+			availableTools = await api.get<{ id: number; name: string }[]>(
+				'/api/v1/chat/custom-tools',
+				token,
+				projectId
+			);
+		} catch {
+			availableTools = [];
+		}
+		try {
+			availableMcp = await api.get<{ id: number; name: string }[]>(
+				'/api/v1/chat/mcp-servers',
+				token,
+				projectId
+			);
+		} catch {
+			availableMcp = [];
 		}
 	}
 
@@ -572,7 +598,9 @@
 				model: selectedModel,
 				agent_id: activeAgent?.id,
 				reasoning_effort: effort,
-				attachments: atts
+				attachments: atts,
+				tool_ids: selectedToolIds,
+				mcp_ids: selectedMcpIds
 			},
 			live,
 			async (_evt, metrics) => {
@@ -603,7 +631,14 @@
 		const payload = history.map((m) => ({ role: m.role, content: m.content }));
 		await runStream(
 			'/api/v1/chat/temp-completions',
-			{ messages: payload, model: selectedModel, reasoning_effort: effort, attachments: atts },
+			{
+				messages: payload,
+				model: selectedModel,
+				reasoning_effort: effort,
+				attachments: atts,
+				tool_ids: selectedToolIds,
+				mcp_ids: selectedMcpIds
+			},
 			live,
 			(_evt, metrics) => {
 				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정(계측값 포함)
@@ -715,6 +750,7 @@
 			void loadUsage();
 			void loadAgents();
 			void loadWorkspaces();
+			void loadToolsAndMcp();
 		});
 	});
 </script>
@@ -858,6 +894,10 @@
 				bind:value={input}
 				bind:effort
 				bind:attachments
+				bind:selectedToolIds
+				bind:selectedMcpIds
+				{availableTools}
+				{availableMcp}
 				{token}
 				{projectId}
 				modelCaps={selectedModelObj?.capabilities}

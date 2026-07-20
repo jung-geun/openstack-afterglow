@@ -21,10 +21,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ToolContext:
-    """툴 실행 컨텍스트 — 요청 token_info 에서만 채워진다(LLM 입력 아님)."""
+    """툴 실행 컨텍스트 — 요청 token_info 에서만 채워진다(LLM 입력 아님).
+
+    selected_tool_ids/selected_mcp_ids: 대화별 tool/MCP 선택. None=활성 전체(하위호환),
+    []=없음, [id...]=해당 항목만 노출. 커스텀 tool·MCP 서버(extensions_store id) 기준.
+    """
 
     project_id: str
     user_id: str
+    selected_tool_ids: tuple[int, ...] | None = None
+    selected_mcp_ids: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
