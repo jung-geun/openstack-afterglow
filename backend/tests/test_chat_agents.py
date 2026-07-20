@@ -60,8 +60,30 @@ class TestCreateAndList:
         assert resp.status_code == 200
         assert captured["user_id"] == "test-user-123"
 
+    async def test_list_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
+        """저장소 미가용/데이터 없음은 503 이 아니라 빈 목록(200)으로 degrade."""
+
+        async def fake_list(**kwargs):
+            raise ags.ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
+
+        monkeypatch.setattr(ags, "list_agents", fake_list)
+        resp = await client.get(_URL)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
 
 class TestHubAndClone:
+    async def test_hub_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
+        """허브 검색도 저장소 미가용 시 빈 목록(200)으로 degrade."""
+
+        async def fake_public(**kwargs):
+            raise ags.ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
+
+        monkeypatch.setattr(ags, "list_public", fake_public)
+        resp = await client.get(f"{_URL}/hub")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
     async def test_hub_search(self, client, monkeypatch):
         captured = {}
 

@@ -91,6 +91,18 @@ class TestUserScope:
         assert resp.status_code == 200
         assert resp.json()[0]["name"] == "shared"
 
+    async def test_user_list_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
+        """사용자 MCP/Skill 목록은 저장소 미가용 시 빈 목록(200)으로 degrade(관리자 목록은 503 유지)."""
+
+        async def fake_list(kind, **kwargs):
+            raise es.ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
+
+        monkeypatch.setattr(es, "list_for_user", fake_list)
+        assert (await client.get(_USER_MCP)).json() == []
+        assert (await client.get(_USER_MCP)).status_code == 200
+        assert (await client.get(_USER_TOOL)).json() == []
+        assert (await client.get(_USER_TOOL)).status_code == 200
+
 
 class TestErrors:
     async def test_validation_400(self, client, monkeypatch):

@@ -131,8 +131,11 @@ def _owner(token_info: dict) -> tuple[str, str]:
 @user_router.get("/mcp-servers")
 async def user_list_mcp(token_info: dict = Depends(get_token_info)):
     uid, pid = _owner(token_info)
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
         return await es.list_for_user("mcp", user_id=uid, project_id=pid)
+    except es.ChatStorageUnavailable:
+        return []
     except _EXC as exc:
         raise _http(exc) from exc
 
@@ -171,8 +174,11 @@ async def user_delete_mcp(item_id: int, token_info: dict = Depends(get_token_inf
 @user_router.get("/custom-tools")
 async def user_list_tools(token_info: dict = Depends(get_token_info)):
     uid, pid = _owner(token_info)
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
         return await es.list_for_user("tool", user_id=uid, project_id=pid)
+    except es.ChatStorageUnavailable:
+        return []
     except _EXC as exc:
         raise _http(exc) from exc
 

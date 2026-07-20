@@ -42,10 +42,11 @@ async def create_memory(payload: MemoryCreate, token_info: dict = Depends(get_to
 
 @router.get("/memories")
 async def list_memories(token_info: dict = Depends(get_token_info)):
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
         return await ms.list_memories(user_id=token_info["user_id"])
-    except ms.ChatStorageUnavailable as exc:
-        raise _map_error(exc) from exc
+    except ms.ChatStorageUnavailable:
+        return []
 
 
 @router.patch("/memories/{memory_id}")

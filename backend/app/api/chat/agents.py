@@ -64,10 +64,11 @@ async def create_agent(payload: AgentCreate, token_info: dict = Depends(get_toke
 
 @router.get("/agents")
 async def list_agents(token_info: dict = Depends(get_token_info)):
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
         return await ags.list_agents(user_id=token_info["user_id"])
-    except ags.ChatStorageUnavailable as exc:
-        raise _map_error(exc) from exc
+    except ags.ChatStorageUnavailable:
+        return []
 
 
 @router.get("/agents/hub")
@@ -80,8 +81,8 @@ async def agent_hub(
     """공개 에이전트 검색(허브). 이름·설명 부분일치, 인기(clone_count) 순."""
     try:
         return await ags.list_public(query=query, limit=limit, offset=offset, user_id=token_info["user_id"])
-    except ags.ChatStorageUnavailable as exc:
-        raise _map_error(exc) from exc
+    except ags.ChatStorageUnavailable:
+        return []
 
 
 @router.get("/agents/{agent_id}")

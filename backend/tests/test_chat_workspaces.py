@@ -44,6 +44,17 @@ class TestCrud:
         assert resp.status_code == 200
         assert captured["user_id"] == "test-user-123"
 
+    async def test_list_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
+        """저장소 미가용/데이터 없음은 503 이 아니라 빈 목록(200)으로 degrade."""
+
+        async def fake_list(**kwargs):
+            raise ws.ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
+
+        monkeypatch.setattr(ws, "list_workspaces", fake_list)
+        resp = await client.get(_URL)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
     async def test_get_forbidden_403(self, client, monkeypatch):
         async def fake_get(wid, **kwargs):
             raise ws.WorkspaceForbidden("타인")

@@ -45,10 +45,11 @@ async def create_workspace(payload: WorkspaceCreate, token_info: dict = Depends(
 
 @router.get("/workspaces")
 async def list_workspaces(token_info: dict = Depends(get_token_info)):
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
         return await ws.list_workspaces(user_id=token_info["user_id"])
-    except ws.ChatStorageUnavailable as exc:
-        raise _map_error(exc) from exc
+    except ws.ChatStorageUnavailable:
+        return []
 
 
 @router.get("/workspaces/{workspace_id}")
