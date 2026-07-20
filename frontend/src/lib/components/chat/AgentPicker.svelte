@@ -53,7 +53,7 @@
 	{:else}
 		<button type="button" class="trigger" {disabled} aria-haspopup="menu" aria-expanded={open} onclick={toggle} title="에이전트 선택">
 			<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="7" width="16" height="12" rx="2" /><path d="M9 7V4h6v3M9 13h.01M15 13h.01" stroke-linecap="round" /></svg>
-			<span>에이전트</span>
+			<span class="agent-label">에이전트</span>
 			<svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 		</button>
 	{/if}
@@ -104,7 +104,15 @@
 		color: var(--color-ink-2);
 		font-size: 0.8125rem;
 		cursor: pointer;
+		white-space: nowrap;
+		flex-shrink: 0;
 		transition: background 0.15s, color 0.15s, border-color 0.15s;
+	}
+	/* 모바일: 라벨 숨겨 아이콘만(줄바꿈·과밀 방지) */
+	@media (max-width: 640px) {
+		.agent-label {
+			display: none;
+		}
 	}
 	.trigger:hover:not(:disabled) {
 		background: var(--color-surface-sunken);

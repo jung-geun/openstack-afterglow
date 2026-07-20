@@ -787,7 +787,7 @@
 						title="모델 선택"
 					>
 						<span class="model-btn-name">{selectedModelObj?.display_name || activeModelName || '모델 선택'}</span>
-						<ModelCapabilityBadges caps={selectedModelObj?.capabilities} size="xs" iconsOnly />
+						<span class="model-btn-caps"><ModelCapabilityBadges caps={selectedModelObj?.capabilities} size="xs" iconsOnly /></span>
 						<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 					</button>
 					<AgentPicker
@@ -1064,5 +1064,35 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.model-btn-caps {
+		display: inline-flex;
+	}
+	/* 모바일: 헤더 과밀 완화 — 제목·헤더 배지 숨기고 컨트롤 축소, 줄바꿈 방지 */
+	@media (max-width: 640px) {
+		.head {
+			gap: 0.4rem;
+			padding: 0.55rem 0.6rem;
+		}
+		.head-controls {
+			gap: 0.3rem;
+		}
+		.head-title {
+			display: none; /* 좁은 화면에선 모델 버튼이 주 정보 — 제목 생략 */
+		}
+		.model-btn {
+			max-width: 11rem;
+			padding: 0.4rem 0.55rem;
+		}
+		/* 능력 배지는 입력창 하단(Vision/Think/Tools)에 이미 표시 — 헤더에선 숨김 */
+		.model-btn-caps {
+			display: none;
+		}
+		.temp-label {
+			display: none; /* 아이콘만 */
+		}
+		.temp-btn {
+			padding: 0.35rem 0.45rem;
+		}
 	}
 </style>
