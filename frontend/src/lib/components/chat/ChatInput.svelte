@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { ModelCapabilities } from '$lib/api/chatTree';
 	import { effortLabel, effortOptionsFor } from '$lib/api/chatEffort';
+	import { uploadChatAttachment, type ChatAttachment } from '$lib/api/chatAttachments';
+	import { toast } from '$lib/stores/toast';
 	import ModelCapabilityBadges from './ModelCapabilityBadges.svelte';
 
 	interface Props {
@@ -12,6 +14,10 @@
 		modelCaps?: ModelCapabilities | null;
 		/** 선택된 thinking effort(null=서버 기본). reasoning 지원 모델만 노출. */
 		effort?: string | null;
+		/** 첨부(bindable) — 업로드 진행/완료 아이템. 부모가 전송 시 refs 로 변환·초기화. */
+		attachments?: ChatAttachment[];
+		token?: string;
+		projectId?: string;
 		onSend: () => void;
 		onStop: () => void;
 	}
@@ -22,12 +28,64 @@
 		placeholder = '메시지를 입력하세요  (Enter 전송 · Shift+Enter 줄바꿈)',
 		modelCaps = null,
 		effort = $bindable(null),
+		attachments = $bindable([]),
+		token,
+		projectId,
 		onSend,
 		onStop
 	}: Props = $props();
 
 	let ta = $state<HTMLTextAreaElement | null>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
 	let effortOpen = $state(false);
+	let plusOpen = $state(false);
+	let dragOver = $state(false);
+
+	// vision/attachment 지원 모델에서만 첨부 허용.
+	const canAttach = $derived(Boolean(modelCaps?.vision || modelCaps?.attachment));
+
+	async function addFiles(files: FileList | File[]) {
+		if (!canAttach) return;
+		for (const file of Array.from(files)) {
+			if (!file.type.startsWith('image/')) {
+				toast.error('현재는 이미지 첨부만 지원합니다');
+				continue;
+			}
+			const item: ChatAttachment = {
+				mime: file.type,
+				name: file.name || 'image',
+				previewUrl: URL.createObjectURL(file),
+				status: 'uploading'
+			};
+			attachments.push(item);
+			try {
+				const ref = await uploadChatAttachment(file, { token, projectId });
+				item.key = ref.key;
+				item.status = 'done';
+				attachments = attachments; // 반응성 트리거
+			} catch (e) {
+				item.status = 'error';
+				attachments = attachments.filter((a) => a !== item);
+				if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+				toast.error(e instanceof Error ? e.message : '첨부 업로드 실패');
+			}
+		}
+	}
+	function removeAttachment(item: ChatAttachment) {
+		attachments = attachments.filter((a) => a !== item);
+		if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+	}
+	function onFilePick(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		if (input.files?.length) void addFiles(input.files);
+		input.value = '';
+		plusOpen = false;
+	}
+	function onDrop(e: DragEvent) {
+		e.preventDefault();
+		dragOver = false;
+		if (e.dataTransfer?.files?.length) void addFiles(e.dataTransfer.files);
+	}
 
 	const effortOptions = $derived(effortOptionsFor(modelCaps));
 	const showEffort = $derived(effortOptions.length > 0);
@@ -60,7 +118,45 @@
 </script>
 
 <div class="composer">
-	<div class="input-wrap">
+	<input
+		bind:this={fileInput}
+		type="file"
+		accept="image/*"
+		multiple
+		hidden
+		onchange={onFilePick}
+	/>
+	<div
+		class="input-wrap"
+		class:drag-over={dragOver}
+		 role="group"
+		ondragover={(e) => {
+			if (canAttach) {
+				e.preventDefault();
+				dragOver = true;
+			}
+		}}
+		ondragleave={() => (dragOver = false)}
+		ondrop={onDrop}
+	>
+		{#if attachments.length}
+			<div class="chips">
+				{#each attachments as a (a.previewUrl ?? a.key ?? a.name)}
+					<div class="chip" class:uploading={a.status === 'uploading'}>
+						{#if a.previewUrl}
+							<img src={a.previewUrl} alt={a.name} />
+						{/if}
+						{#if a.status === 'uploading'}
+							<span class="chip-spin"></span>
+						{/if}
+						<button type="button" class="chip-x" title="제거" aria-label="첨부 제거" onclick={() => removeAttachment(a)}>
+							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" /></svg>
+						</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
 		<textarea
 			bind:this={ta}
 			bind:value
@@ -73,10 +169,29 @@
 
 		<div class="toolbar">
 			<div class="tb-left">
-				<!-- +메뉴(파일·이미지·도구) shell — P3/P4 에서 배선 -->
-				<button type="button" class="tool-shell" disabled title="파일·이미지·도구 (준비 중)" aria-label="첨부(준비 중)">
-					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke-linecap="round" /></svg>
-				</button>
+				<div class="plus">
+					<button
+						type="button"
+						class="tool-shell"
+						disabled={!canAttach || streaming}
+						title={canAttach ? '이미지·파일 추가' : '이 모델은 첨부를 지원하지 않습니다'}
+						aria-label="추가"
+						aria-haspopup="menu"
+						aria-expanded={plusOpen}
+						onclick={() => (plusOpen = !plusOpen)}
+					>
+						<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke-linecap="round" /></svg>
+					</button>
+					{#if plusOpen}
+						<div class="scrim" role="button" tabindex="-1" aria-label="닫기" onclick={() => (plusOpen = false)} onkeydown={(e) => e.key === 'Escape' && (plusOpen = false)}></div>
+						<div class="plus-menu" role="menu">
+							<button type="button" class="plus-opt" role="menuitem" onclick={() => fileInput?.click()}>
+								<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="2.6" /></svg>
+								이미지 추가
+							</button>
+						</div>
+					{/if}
+				</div>
 				<ModelCapabilityBadges caps={modelCaps} size="sm" />
 			</div>
 
@@ -174,8 +289,69 @@
 		gap: 0.4rem;
 		flex-shrink: 0;
 	}
-	.tool-shell {
+	.input-wrap.drag-over {
+		border-color: var(--color-accent);
+		box-shadow: var(--focus-ring);
+	}
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		padding: 0.15rem 0.2rem 0;
+	}
+	.chip {
+		position: relative;
+		width: 3.2rem;
+		height: 3.2rem;
+		border-radius: 0.5rem;
+		overflow: hidden;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-sunken);
+	}
+	.chip img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.chip.uploading img {
+		opacity: 0.5;
+	}
+	.chip-spin {
+		position: absolute;
+		inset: 50% auto auto 50%;
+		width: 1rem;
+		height: 1rem;
+		margin: -0.5rem 0 0 -0.5rem;
+		border-radius: 50%;
+		border: 2px solid var(--color-line-2);
+		border-top-color: var(--color-accent);
+		animation: spin 0.8s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.chip-x {
+		position: absolute;
+		top: 0.1rem;
+		right: 0.1rem;
+		width: 1.1rem;
+		height: 1.1rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		border-radius: 50%;
+		background: color-mix(in oklab, var(--color-ink-0) 55%, transparent);
+		color: #fff;
+		cursor: pointer;
+	}
+	.plus {
+		position: relative;
 		flex-shrink: 0;
+	}
+	.tool-shell {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -184,9 +360,56 @@
 		border-radius: 0.55rem;
 		border: 1px solid var(--color-line);
 		background: transparent;
+		color: var(--color-ink-2);
+		cursor: pointer;
+		transition: background 0.12s, color 0.12s, border-color 0.12s;
+	}
+	.tool-shell:hover:not(:disabled) {
+		color: var(--color-ink-0);
+		border-color: var(--color-line-2);
+		background: var(--color-surface-sunken);
+	}
+	.tool-shell:disabled {
 		color: var(--color-ink-3);
 		cursor: not-allowed;
-		opacity: 0.6;
+		opacity: 0.5;
+	}
+	.scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 20;
+		border: none;
+		background: transparent;
+	}
+	.plus-menu {
+		position: absolute;
+		bottom: calc(100% + 0.35rem);
+		left: 0;
+		z-index: 21;
+		min-width: 9rem;
+		background: var(--color-surface-raised);
+		border: 1px solid var(--color-line);
+		border-radius: 0.6rem;
+		box-shadow: 0 10px 28px color-mix(in oklab, var(--color-ink-0) 20%, transparent);
+		padding: 0.3rem;
+	}
+	.plus-opt {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.45rem 0.55rem;
+		border: none;
+		border-radius: 0.45rem;
+		background: transparent;
+		color: var(--color-ink-1);
+		font-size: 0.82rem;
+		cursor: pointer;
+		text-align: left;
+	}
+	.plus-opt:hover {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
 	}
 	.effort {
 		position: relative;

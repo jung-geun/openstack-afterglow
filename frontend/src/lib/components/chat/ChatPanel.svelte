@@ -13,6 +13,7 @@
 	import type { ToolActivityItem } from '$lib/api/chatToolActivity';
 	import { aggregateCitations } from '$lib/api/chatCitations';
 	import { normalizeEffort } from '$lib/api/chatEffort';
+	import { toRefs, type ChatAttachment } from '$lib/api/chatAttachments';
 	import { SvelteMap } from 'svelte/reactivity';
 	import {
 		buildActivePath,
@@ -64,6 +65,7 @@
 	let models = $state<AvailableModel[]>([]);
 	let selectedModel = $state('');
 	let effort = $state<string | null>(null); // thinking effort(null=서버 기본). reasoning 지원 모델만.
+	let attachments = $state<ChatAttachment[]>([]); // 입력창 첨부(업로드 진행/완료)
 	let activeConvId = $state<string | null>(null);
 	let allMessages = $state<ChatMsg[]>([]);
 	let activeLeafId = $state<string | null>(null);
@@ -532,8 +534,10 @@
 		}
 		error = null;
 		input = '';
+		const atts = toRefs(attachments); // 완료된 첨부만 참조로
+		attachments = []; // 전송과 함께 초기화
 
-		if (tempMode) return sendTemp(text);
+		if (tempMode) return sendTemp(text, atts);
 
 		streaming = true;
 		let convId: string | null;
@@ -563,7 +567,13 @@
 
 		await runStream(
 			`/api/v1/chat/conversations/${convId}/completions`,
-			{ message: text, model: selectedModel, agent_id: activeAgent?.id, reasoning_effort: effort },
+			{
+				message: text,
+				model: selectedModel,
+				agent_id: activeAgent?.id,
+				reasoning_effort: effort,
+				attachments: atts
+			},
 			live,
 			async (_evt, metrics) => {
 				await loadMessages(convId!);
@@ -575,7 +585,7 @@
 		);
 	}
 
-	async function sendTemp(text: string) {
+	async function sendTemp(text: string, atts: ReturnType<typeof toRefs> = []) {
 		const userMsg: DisplayMessage = {
 			id: tempId(),
 			conversation_id: '',
@@ -593,7 +603,7 @@
 		const payload = history.map((m) => ({ role: m.role, content: m.content }));
 		await runStream(
 			'/api/v1/chat/temp-completions',
-			{ messages: payload, model: selectedModel, reasoning_effort: effort },
+			{ messages: payload, model: selectedModel, reasoning_effort: effort, attachments: atts },
 			live,
 			(_evt, metrics) => {
 				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정(계측값 포함)
@@ -847,6 +857,9 @@
 			<ChatInput
 				bind:value={input}
 				bind:effort
+				bind:attachments
+				{token}
+				{projectId}
 				modelCaps={selectedModelObj?.capabilities}
 				{streaming}
 				onSend={send}

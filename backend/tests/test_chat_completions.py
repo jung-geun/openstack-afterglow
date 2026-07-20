@@ -168,6 +168,111 @@ class TestStreamingHappyPath:
         _ = resp.text
         assert captured.get("reasoning_effort") == "high"
 
+    async def test_image_attachment_multimodal_for_vision_model(self, client, monkeypatch):
+        """vision 모델 + 이미지 첨부 → 마지막 user 턴이 멀티모달 content 배열 + user 메시지에 attachments 저장."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+        captured: dict = {}
+        saved: list[dict] = []
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_resolve(model_name):
+            return _resolved(capabilities={"vision": True})
+
+        async def fake_list(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            saved.append(kwargs)
+            return {"id": len(saved)}
+
+        async def fake_stream(**kwargs):
+            captured.update(kwargs)
+            yield {"type": "token", "text": "보입니다"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        def fake_resolve_url(token, uid, pid, key, mime):
+            return "https://presigned/x.png"
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+        from app.services.chat import attachments as att
+
+        monkeypatch.setattr(att, "resolve_image_url", fake_resolve_url)
+
+        resp = await client.post(
+            f"{_BASE}/c1/completions",
+            json={
+                "message": "이게 뭐야?",
+                "model": "gpt-4o",
+                "attachments": [{"key": "u/abc/x.png", "mime": "image/png", "name": "x.png"}],
+            },
+        )
+        assert resp.status_code == 200
+        _ = resp.text
+        # engine.stream 에 전달된 마지막 user 메시지 = 멀티모달 배열(text + image_url)
+        last = captured["messages"][-1]
+        assert isinstance(last["content"], list)
+        assert any(
+            p.get("type") == "image_url" and p["image_url"]["url"] == "https://presigned/x.png"
+            for p in last["content"]
+        )
+        # user 메시지 저장에 attachments 참조가 실림
+        user_saved = [kw for kw in saved if kw.get("role") == "user"]
+        assert user_saved and user_saved[0]["attachments"][0]["key"] == "u/abc/x.png"
+
+    async def test_attachment_ignored_for_non_vision_model(self, client, monkeypatch):
+        """vision 미지원 모델은 첨부를 멀티모달로 넣지 않는다(content 는 문자열 유지)."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+        captured: dict = {}
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_resolve(model_name):
+            return _resolved(capabilities={"vision": False})
+
+        async def fake_list(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            return {"id": 1}
+
+        async def fake_stream(**kwargs):
+            captured.update(kwargs)
+            yield {"type": "token", "text": "x"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(
+            f"{_BASE}/c1/completions",
+            json={
+                "message": "hi",
+                "model": "gpt-3.5-turbo",
+                "attachments": [{"key": "u/abc/x.png", "mime": "image/png", "name": "x.png"}],
+            },
+        )
+        assert resp.status_code == 200
+        _ = resp.text
+        assert isinstance(captured["messages"][-1]["content"], str)
+
     async def test_reasoning_forwarded_and_persisted(self, client, monkeypatch):
         """reasoning 이벤트는 SSE 로 중계되고 최종 assistant 메시지에 저장된다(재로딩 시 유지)."""
         monkeypatch.setattr(credit, "precheck", _ok_precheck)

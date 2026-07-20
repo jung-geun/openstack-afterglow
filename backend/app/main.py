@@ -365,6 +365,7 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/file-storage", "file_storage"),
     ("/api/v1/object-storage", "object_storage"),
     ("/api/v1/invitations", "invitation"),
+    ("/api/v1/instances/cloud-init", "cloud_init_snippet"),
     ("/api/v1/instances", "instance"),
     ("/api/v1/keypairs", "keypair"),
     ("/api/v1/networks", "network"),
@@ -625,6 +626,7 @@ if _svc_cfg.service_chat_enabled:
     from app.api.chat import (
         chat_admin_router,
         chat_agents_router,
+        chat_attachments_router,
         chat_completions_router,
         chat_conversations_router,
         chat_extensions_admin_router,
@@ -644,6 +646,8 @@ if _svc_cfg.service_chat_enabled:
     # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)
     app.include_router(chat_conversations_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
+    # 채팅 첨부 업로드(전용 object storage 버킷) — /attachments
+    app.include_router(chat_attachments_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
     app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone

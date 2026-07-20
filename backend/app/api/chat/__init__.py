@@ -12,6 +12,7 @@ _ROUTERS = {
     "chat_admin_router": ".models",
     "chat_conversations_router": ".conversations",
     "chat_completions_router": ".completions",
+    "chat_attachments_router": ".attachments",
     "chat_extensions_admin_router": (".extensions", "admin_router"),
     "chat_extensions_user_router": (".extensions", "user_router"),
 }

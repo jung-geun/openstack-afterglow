@@ -9,6 +9,7 @@ user 메시지 저장(parent=active_leaf) → engine.stream → parent 체인으
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -21,6 +22,7 @@ from starlette.background import BackgroundTask
 from app.api.deps import get_token_info
 from app.config import get_settings
 from app.services.chat import agent_store as ags
+from app.services.chat import attachments as att
 from app.services.chat import conversation_store as cs
 from app.services.chat import credit, engine, litellm_client, title_summary
 from app.services.chat import memory_store as ms
@@ -34,8 +36,20 @@ _MAX_TOKENS_CAP = 4096
 _MAX_MESSAGE_CHARS = 32000
 
 
+class AttachmentRef(BaseModel):
+    """채팅 첨부 참조(POST /chat/attachments 반환값). 현재는 이미지 전용."""
+
+    key: str = Field(..., max_length=300)
+    mime: str = Field(..., max_length=100)
+    name: str = Field(default="", max_length=256)
+
+
+_MAX_ATTACHMENTS = 8
+
+
 class CompletionRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_MAX_MESSAGE_CHARS)
+    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=_MAX_ATTACHMENTS)
     model: str | None = Field(default=None, max_length=190)
     agent_id: int | None = Field(default=None)  # 에이전트 바인딩(instructions·모델·파라미터)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
@@ -67,6 +81,7 @@ class TempCompletionRequest(BaseModel):
     """임시 채팅 — conversation 없이 메시지 배열로 stateless 스트리밍(미저장)."""
 
     messages: list[TempMessage] = Field(..., min_length=1, max_length=_MAX_TEMP_MESSAGES)
+    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=_MAX_ATTACHMENTS)
     model: str | None = Field(default=None, max_length=190)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
@@ -87,6 +102,37 @@ def _model_input(path_messages: list[dict], extra_user: str | None = None) -> li
     if extra_user is not None:
         msgs.append({"role": "user", "content": extra_user})
     return msgs
+
+
+async def _apply_attachments(
+    input_messages: list[dict], attachments: list, resolved: dict, token_info: dict
+) -> list[dict]:
+    """마지막 user 턴을 멀티모달 content 로 교체(vision 모델 + 이미지 첨부 시). 현재 턴만(과거는 텍스트).
+
+    각 첨부는 presigned URL(실패 시 base64) 로 해석. boto3 동기 I/O 라 to_thread.
+    """
+    if not attachments or not input_messages:
+        return input_messages
+    caps = resolved.get("capabilities") or {}
+    if not caps.get("vision"):
+        return input_messages
+    parts: list[dict] = [{"type": "text", "text": input_messages[-1].get("content") or ""}]
+    for a in attachments:
+        if not att.is_image(a.mime):
+            continue
+        url = await asyncio.to_thread(
+            att.resolve_image_url,
+            token_info["token"],
+            token_info["user_id"],
+            token_info["project_id"],
+            a.key,
+            a.mime,
+        )
+        if url:
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+    if len(parts) > 1:
+        input_messages[-1]["content"] = parts
+    return input_messages
 
 
 async def _load_owned_conv(conversation_id: str, user_id: str) -> dict:
@@ -375,7 +421,12 @@ async def create_completion(
     try:
         path = await cs.get_active_path(conversation_id, user_id=user_id)
         user_msg = await cs.add_message(
-            conversation_id, role="user", content=payload.message, parent_id=path["active_leaf_id"], set_leaf=True
+            conversation_id,
+            role="user",
+            content=payload.message,
+            attachments=([a.model_dump() for a in payload.attachments] or None),
+            parent_id=path["active_leaf_id"],
+            set_leaf=True,
         )
     except cs.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -385,6 +436,8 @@ async def create_completion(
     input_messages, temperature, max_tokens_req = _apply_context(
         agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
     )
+    # 현재 user 턴에 이미지 첨부를 멀티모달 content 로 주입(vision 모델만).
+    input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
     max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
     gen = _stream_and_persist(
@@ -486,6 +539,7 @@ async def temp_completion(payload: TempCompletionRequest, token_info: dict = Dep
     resolved = await _resolve_model(model_name)
 
     input_messages = [{"role": m.role, "content": m.content} for m in payload.messages]
+    input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
     max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
     gen = _stream_and_persist(

@@ -139,6 +139,8 @@ class ChatMessage(Base):
     citations: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     # 추론(thinking) 텍스트를 암호화한 문자열(JSON 아님). 재로딩 시 추론 과정 표시용.
     reasoning: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    # 첨부(이미지) 참조 JSON([{key,mime,name}])을 암호화한 문자열. 표시·현재턴 vision content 재구성용.
+    attachments: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     token_prompt: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     token_completion: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     # 재생성 시 어떤 모델로 생성했는지(형제 버전 구분·표시용). 미지정 시 대화 기본 모델.
