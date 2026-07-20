@@ -17,6 +17,7 @@
 		onNew: () => void;
 		onTempChat: () => void;
 		onDelete: (conv: Conversation) => void;
+		onAgents: () => void;
 	}
 	let {
 		conversations,
@@ -26,7 +27,8 @@
 		onSelect,
 		onNew,
 		onTempChat,
-		onDelete
+		onDelete,
+		onAgents
 	}: Props = $props();
 
 	// 확장(MCP·도구) 설정 오버레이 모달 상태
@@ -90,6 +92,11 @@
 			{/each}
 		{/if}
 	</div>
+
+	<button type="button" class="agent-entry" onclick={onAgents}>
+		<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="7" width="16" height="12" rx="2" /><path d="M9 7V4h6v3M9 13h.01M15 13h.01" stroke-linecap="round" /></svg>
+		에이전트
+	</button>
 
 	<div class="foot">
 		<button type="button" class="ext-btn" onclick={() => (extOpen = 'mcp')}>
@@ -267,11 +274,32 @@
 		color: var(--color-state-danger);
 		background: color-mix(in oklab, var(--color-state-danger) 12%, transparent);
 	}
+	.agent-entry {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0.75rem;
+		padding: 0.55rem 0.7rem;
+		border-radius: 0.6rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-base);
+		color: var(--color-ink-1);
+		font-size: 0.8125rem;
+		font-weight: 550;
+		cursor: pointer;
+		transition: background 0.15s, color 0.15s, border-color 0.15s;
+	}
+	.agent-entry:hover {
+		background: var(--color-surface-raised);
+		color: var(--color-ink-0);
+		border-color: var(--color-line-2);
+	}
 	.foot {
 		display: flex;
 		gap: 0.4rem;
 		padding: 0.6rem 0.75rem;
 		border-top: 1px solid var(--color-line);
+		margin-top: 0.5rem;
 	}
 	.ext-btn {
 		flex: 1;

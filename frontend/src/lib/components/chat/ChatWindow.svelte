@@ -14,6 +14,7 @@
 		models: AvailableModel[];
 		busy?: boolean;
 		loading?: boolean;
+		modelLocked?: boolean;
 		toolActivity?: string | null;
 		error?: string | null;
 		empty?: boolean;
@@ -29,6 +30,7 @@
 		models,
 		busy = false,
 		loading = false,
+		modelLocked = false,
 		toolActivity = null,
 		error = null,
 		empty = false,
@@ -93,6 +95,7 @@
 						message={msg}
 						{models}
 						{busy}
+						{modelLocked}
 						siblingIndex={info.index}
 						siblingTotal={info.total}
 						modelDisplayName={modelDisplay(msg.model_name)}

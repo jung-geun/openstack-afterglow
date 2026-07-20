@@ -11,6 +11,8 @@
 		siblingTotal?: number;
 		/** 스트리밍 중 여부(액션 숨김) */
 		busy?: boolean;
+		/** 에이전트 바인딩 중 — 모델 선택 대신 단순 재생성만 */
+		modelLocked?: boolean;
 		modelDisplayName?: string | null;
 		onCopy: (text: string) => void;
 		onRegenerate: (modelName: string) => void;
@@ -24,6 +26,7 @@
 		siblingIndex = 1,
 		siblingTotal = 1,
 		busy = false,
+		modelLocked = false,
 		modelDisplayName = null,
 		onCopy,
 		onRegenerate,
@@ -92,7 +95,14 @@
 				</button>
 
 				{#if !isUser}
-					<ModelSelector {models} value={message.model_name ?? ''} compact disabled={busy} onSelect={onRegenerate} align="left" />
+					{#if modelLocked}
+						<!-- 에이전트 바인딩 중: 모델 선택 없이 단순 재생성 -->
+						<button type="button" class="act" disabled={busy} onclick={() => onRegenerate('')} title="재생성" aria-label="재생성">
+							<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v6h6M20 20v-6h-6" stroke-linecap="round" stroke-linejoin="round" /><path d="M20 10a8 8 0 0 0-14.9-3M4 14a8 8 0 0 0 14.9 3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						</button>
+					{:else}
+						<ModelSelector {models} value={message.model_name ?? ''} compact disabled={busy} onSelect={onRegenerate} align="left" />
+					{/if}
 					<button type="button" class="act" disabled={busy} onclick={onFork} title="이 지점에서 분기" aria-label="분기">
 						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="9" r="2.5" /><path d="M6 8.5v3a3 3 0 0 0 3 3h6M18 11.5v.5" stroke-linecap="round" /></svg>
 					</button>

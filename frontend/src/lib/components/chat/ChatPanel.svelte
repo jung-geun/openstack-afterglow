@@ -11,11 +11,15 @@
 		type ChatUsage,
 		type ChatMessage as ChatMsg
 	} from '$lib/api/chatTree';
+	import type { Agent } from '$lib/api/chatAgents';
 	import ChatSidebar from './ChatSidebar.svelte';
 	import ChatWindow from './ChatWindow.svelte';
 	import ChatInput from './ChatInput.svelte';
 	import ModelSelector from './ModelSelector.svelte';
 	import ChatUsageWidget from './ChatUsageWidget.svelte';
+	import AgentPicker from './AgentPicker.svelte';
+	import AgentManagerModal from './AgentManagerModal.svelte';
+	import AgentHubModal from './AgentHubModal.svelte';
 
 	interface Conversation {
 		id: string;
@@ -48,6 +52,13 @@
 	let tempMessages = $state<DisplayMessage[]>([]);
 	let treeLoading = $state(false); // 분기/재생성 대상 전환 등 트리 재조회 중
 	let usage = $state<ChatUsage | null>(null);
+
+	// 에이전트: 바인딩은 클라이언트 상태(대화 객체에 저장되지 않음). 바인딩 중엔 에이전트가 모델을 소유.
+	let agents = $state<Agent[]>([]);
+	let activeAgent = $state<Agent | null>(null);
+	let agentManagerOpen = $state(false);
+	let agentHubOpen = $state(false);
+	const modelLocked = $derived(activeAgent !== null);
 
 	// 스트리밍 중 화면에 얹는 낙관적 상태
 	let stream = $state<{ base: DisplayMessage[]; assistant: DisplayMessage } | null>(null);
@@ -126,6 +137,31 @@
 		} catch {
 			/* 사용량 위젯은 실패해도 채팅에 영향 없음 */
 		}
+	}
+
+	async function loadAgents() {
+		if (!token || !projectId) return;
+		try {
+			agents = await api.get<Agent[]>('/api/v1/chat/agents', token, projectId);
+			// 바인딩된 에이전트가 삭제/변경됐으면 동기화
+			if (activeAgent) {
+				const fresh = agents.find((a) => a.id === activeAgent!.id);
+				activeAgent = fresh ?? null;
+			}
+		} catch {
+			/* 에이전트 로드 실패는 채팅 자체를 막지 않음 */
+		}
+	}
+
+	function bindAgent(agent: Agent) {
+		activeAgent = agent;
+		// 에이전트가 모델을 소유 → 상단 셀렉터에도 반영(모델이 목록에 있으면)
+		if (agent.model_name && models.some((m) => m.model_name === agent.model_name)) {
+			selectedModel = agent.model_name;
+		}
+	}
+	function unbindAgent() {
+		activeAgent = null;
 	}
 
 	// --- 대화 선택/생성 ---
@@ -271,7 +307,7 @@
 
 		await runStream(
 			`/api/v1/chat/conversations/${convId}/completions`,
-			{ message: text, model: selectedModel },
+			{ message: text, model: selectedModel, agent_id: activeAgent?.id },
 			live,
 			async () => {
 				await loadMessages(convId!);
@@ -321,7 +357,7 @@
 
 		await runStream(
 			`/api/v1/chat/conversations/${activeConvId}/messages/${messageId}/regenerate`,
-			{ model: modelName || undefined },
+			{ model: modelName || undefined, agent_id: activeAgent?.id },
 			live,
 			async () => {
 				await loadMessages(activeConvId!);
@@ -401,6 +437,7 @@
 			void loadConversations();
 			void loadModels();
 			void loadUsage();
+			void loadAgents();
 		});
 	});
 </script>
@@ -415,6 +452,7 @@
 		onNew={newConversation}
 		onTempChat={startTempChat}
 		onDelete={deleteConversation}
+		onAgents={() => (agentManagerOpen = true)}
 	/>
 
 	<section class="main">
@@ -429,7 +467,28 @@
 				</div>
 			</div>
 			<div class="head-center">
-				<ModelSelector {models} value={selectedModel} onSelect={(m) => (selectedModel = m)} align="center" searchable />
+				<div class="head-controls">
+					<ModelSelector
+						{models}
+						value={activeAgent?.model_name || selectedModel}
+						onSelect={(m) => (selectedModel = m)}
+						align="center"
+						searchable
+						disabled={streaming || modelLocked}
+					/>
+					<AgentPicker
+						{agents}
+						{activeAgent}
+						disabled={streaming}
+						onBind={bindAgent}
+						onUnbind={unbindAgent}
+						onManage={() => (agentManagerOpen = true)}
+						onHub={() => (agentHubOpen = true)}
+					/>
+				</div>
+				{#if modelLocked}
+					<span class="model-lock-hint">모델은 에이전트가 제어합니다</span>
+				{/if}
 			</div>
 			<div class="head-right">
 				{#if usage}
@@ -444,6 +503,7 @@
 			{models}
 			busy={streaming}
 			loading={treeLoading}
+			{modelLocked}
 			{toolActivity}
 			{error}
 			empty={isEmpty}
@@ -457,6 +517,14 @@
 		<ChatInput bind:value={input} {streaming} onSend={send} onStop={stop} />
 	</section>
 </div>
+
+<AgentManagerModal
+	open={agentManagerOpen}
+	{models}
+	onClose={() => (agentManagerOpen = false)}
+	onChanged={loadAgents}
+/>
+<AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
 
 <style>
 	.chat-shell {
@@ -487,8 +555,20 @@
 	}
 	.head-center {
 		display: flex;
-		justify-content: center;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.2rem;
 		min-width: 0;
+	}
+	.head-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		min-width: 0;
+	}
+	.model-lock-hint {
+		font-size: 0.66rem;
+		color: var(--color-ink-3);
 	}
 	.head-right {
 		display: flex;
