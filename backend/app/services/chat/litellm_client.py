@@ -130,6 +130,9 @@ async def acompletion(
     """비스트리밍 litellm 호출."""
     import litellm
 
+    # 모델별 미지원 파라미터(tools/temperature 등)를 자동 드롭 — 예: gpt-5-search-api 는 tools 미지원.
+    litellm.drop_params = True
+
     params = _build_params(
         model,
         messages,
@@ -162,6 +165,9 @@ async def acompletion_stream(
     마지막 usage 청크를 extract_usage 에 넘겨 과금한다. tools 지정 시 tool_call 델타도 스트리밍된다.
     """
     import litellm
+
+    # 모델별 미지원 파라미터(tools/temperature 등)를 자동 드롭 — 예: gpt-5-search-api 는 tools 미지원.
+    litellm.drop_params = True
 
     params = _build_params(
         model,
