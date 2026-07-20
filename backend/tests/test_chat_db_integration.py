@@ -30,6 +30,7 @@ _CHAT_TABLES = (
     "chat_usage_logs",
     "chat_messages",
     "chat_conversations",
+    "chat_agents",
     "user_wallets",
     "llm_models",
     "llm_providers",
@@ -246,6 +247,62 @@ async def test_message_version_tree(chat_db):
 
     # 콘텐츠 복호화 왕복(복사본도 평문 복원)
     assert ftree["messages"][0]["content"] == "Q1"
+
+
+async def test_agent_crud_hub_clone(chat_db):
+    """에이전트 실 로직: instructions 암호화 왕복·소유권·공개 허브 검색·복제 독립성."""
+    from sqlalchemy import select as _select
+
+    from app.models.chat_db import ChatAgent
+    from app.services.chat import agent_store as ags
+
+    factory = chat_db.get_session_factory()
+
+    # 생성(공개) + instructions 암호화 저장
+    a = await ags.create_agent(
+        owner_user_id="owner",
+        name="리뷰 봇",
+        description="코드 리뷰",
+        instructions="너는 리뷰어야",
+        model_name="gpt-4o",
+        visibility="public",
+    )
+    async with factory() as s:
+        row = (await s.execute(_select(ChatAgent).where(ChatAgent.id == a["id"]))).scalar_one()
+        assert row.instructions.startswith("v3:")  # 암호문 저장
+        assert "리뷰어" not in row.instructions
+
+    # 소유자 조회 → instructions 평문 복원
+    got = await ags.get_agent(a["id"], user_id="owner")
+    assert got["instructions"] == "너는 리뷰어야" and got["is_owner"] is True
+
+    # 타인이 공개 에이전트 조회 가능(is_owner=False), 비공개면 불가
+    other_view = await ags.get_agent(a["id"], user_id="stranger")
+    assert other_view["is_owner"] is False
+    priv = await ags.create_agent(owner_user_id="owner", name="비밀", visibility="private")
+    with pytest.raises(ags.AgentForbidden):
+        await ags.get_agent(priv["id"], user_id="stranger")
+
+    # 허브 검색(이름 부분일치)
+    hub = await ags.list_public(query="리뷰", user_id="stranger")
+    assert any(h["id"] == a["id"] for h in hub)
+
+    # 복제 → 본인 소유 private 사본 + 출처 clone_count 증가
+    clone = await ags.clone_agent(a["id"], user_id="stranger")
+    assert clone["owner_user_id"] == "stranger"
+    assert clone["visibility"] == "private"
+    assert clone["cloned_from_id"] == a["id"]
+    assert clone["instructions"] == "너는 리뷰어야"  # 복호화 왕복
+    src_after = await ags.get_agent(a["id"], user_id="owner")
+    assert src_after["clone_count"] == 1
+
+    # 타인은 원본 수정 불가(소유자만)
+    with pytest.raises(ags.AgentForbidden):
+        await ags.update_agent(a["id"], user_id="stranger", patch={"name": "탈취"})
+    # 복제본은 stranger 소유라 수정 가능(원본 독립)
+    await ags.update_agent(clone["id"], user_id="stranger", patch={"name": "내 리뷰 봇"})
+    assert (await ags.get_agent(clone["id"], user_id="stranger"))["name"] == "내 리뷰 봇"
+    assert (await ags.get_agent(a["id"], user_id="owner"))["name"] == "리뷰 봇"  # 원본 불변
 
 
 async def test_chat_content_encryption_at_rest(chat_db):

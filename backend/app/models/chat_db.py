@@ -224,3 +224,38 @@ class ChatCustomTool(Base):
         Index("idx_chat_tool_scope", "scope"),
         Index("idx_chat_tool_owner", "owner_user_id"),
     )
+
+
+class ChatAgent(Base):
+    """사용자 정의 에이전트 — 프롬프트(instructions) + 모델 + 파라미터 + MCP/툴 묶음.
+
+    visibility='private'(소유자만) | 'public'(허브 공개 — 검색·복제 가능, 수정은 소유자만).
+    instructions 는 AES-256-GCM(chat_content 도메인) 암호문으로 저장한다.
+    mcp_ids/tool_ids 는 ChatMcpServer/ChatCustomTool id 목록(JSON) — 에이전트에 바인딩할 확장.
+    """
+
+    __tablename__ = "chat_agents"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(VARCHAR(500))
+    avatar: Mapped[str | None] = mapped_column(VARCHAR(500))  # 이모지 또는 URL
+    # AES-256-GCM(chat_content) 암호문. 시스템 프롬프트로 주입되는 지침.
+    instructions: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
+    params: Mapped[dict | None] = mapped_column(JSON)  # {temperature, max_tokens, ...}
+    mcp_ids: Mapped[list | None] = mapped_column(JSON)  # 바인딩된 ChatMcpServer id 목록
+    tool_ids: Mapped[list | None] = mapped_column(JSON)  # 바인딩된 ChatCustomTool id 목록
+    visibility: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="private")  # private|public
+    # 허브 복제 출처(감사·표시용): 이 에이전트가 어떤 공개 에이전트에서 복제됐는지.
+    cloned_from_id: Mapped[int | None] = mapped_column(BIGINT)
+    clone_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)  # 허브 인기 지표
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_chat_agents_owner", "owner_user_id"),
+        Index("idx_chat_agents_visibility", "visibility"),
+    )

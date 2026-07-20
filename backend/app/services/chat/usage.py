@@ -55,9 +55,7 @@ async def user_usage_summary(user_id: str, project_id: str = "") -> dict:
         base = [ChatUsageLog.user_id == user_id, ChatUsageLog.source != "system"]
         async with factory() as session:
             total = (await session.execute(select(*_SUMS).where(*base))).one()
-            month = (
-                await session.execute(select(*_SUMS).where(*base, ChatUsageLog.created_at >= month_start))
-            ).one()
+            month = (await session.execute(select(*_SUMS).where(*base, ChatUsageLog.created_at >= month_start))).one()
             wallet = await session.get(UserWallet, user_id)
         tc, tp, tct, tcount = total
         mc, mp, mct, mcount = month

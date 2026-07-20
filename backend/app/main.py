@@ -338,6 +338,7 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/models", "llm_model"),
     ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
+    ("/api/v1/chat/agents", "chat_agent"),
     ("/api/v1/chat/conversations", "chat_conversation"),
     ("/api/v1/chat/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/custom-tools", "chat_custom_tool"),
@@ -621,6 +622,7 @@ if _svc_cfg.service_vpn_enabled:
 if _svc_cfg.service_chat_enabled:
     from app.api.chat import (
         chat_admin_router,
+        chat_agents_router,
         chat_completions_router,
         chat_conversations_router,
         chat_extensions_admin_router,
@@ -640,6 +642,8 @@ if _svc_cfg.service_chat_enabled:
     app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
     app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone
+    app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
