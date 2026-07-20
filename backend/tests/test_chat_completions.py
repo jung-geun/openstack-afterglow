@@ -128,6 +128,46 @@ class TestStreamingHappyPath:
         assert captured["provider"] == "openai"
         assert captured["event_id"]
 
+    async def test_request_reasoning_effort_overrides_global(self, client, monkeypatch):
+        """요청 본문의 reasoning_effort 가 engine.stream 으로 전달된다(전역 기본 대신)."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+        captured: dict = {}
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_resolve(model_name):
+            return _resolved()
+
+        async def fake_list(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            return {"id": 1}
+
+        async def fake_stream(**kwargs):
+            captured.update(kwargs)
+            yield {"type": "token", "text": "x"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(
+            f"{_BASE}/c1/completions",
+            json={"message": "hi", "model": "gpt-3.5-turbo", "reasoning_effort": "high"},
+        )
+        assert resp.status_code == 200
+        _ = resp.text
+        assert captured.get("reasoning_effort") == "high"
+
     async def test_reasoning_forwarded_and_persisted(self, client, monkeypatch):
         """reasoning 이벤트는 SSE 로 중계되고 최종 assistant 메시지에 저장된다(재로딩 시 유지)."""
         monkeypatch.setattr(credit, "precheck", _ok_precheck)

@@ -40,6 +40,7 @@ class CompletionRequest(BaseModel):
     agent_id: int | None = Field(default=None)  # 에이전트 바인딩(instructions·모델·파라미터)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
 
     model_config = {"protected_namespaces": ()}
 
@@ -49,6 +50,7 @@ class RegenerateRequest(BaseModel):
     agent_id: int | None = Field(default=None)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
 
     model_config = {"protected_namespaces": ()}
 
@@ -68,6 +70,7 @@ class TempCompletionRequest(BaseModel):
     model: str | None = Field(default=None, max_length=190)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
+    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
 
     model_config = {"protected_namespaces": ()}
 
@@ -176,6 +179,7 @@ async def _stream_and_persist(
     max_tokens: int | None,
     temperature: float | None,
     persist: bool = True,
+    reasoning_effort: str | None = None,
 ):
     """engine.stream 을 소비해 SSE 를 yield 하고, parent 체인으로 메시지 저장 + active_leaf + 과금.
 
@@ -238,7 +242,8 @@ async def _stream_and_persist(
             source="web",
         )
 
-    reasoning_effort = get_settings().chat_reasoning_effort
+    # 요청별 effort 우선, 없으면 전역 기본. (litellm_client 가 지원 모델에만 적용)
+    reasoning_effort = reasoning_effort or get_settings().chat_reasoning_effort
     try:
         async for ev in engine.stream(
             model=model_name,
@@ -392,6 +397,7 @@ async def create_completion(
         start_parent_id=user_msg["id"],
         max_tokens=max_tokens,
         temperature=temperature,
+        reasoning_effort=payload.reasoning_effort,
     )
     title_task = BackgroundTask(
         title_summary.generate_title_if_absent, conversation_id=conversation_id, project_id=project_id, user_id=user_id
@@ -457,6 +463,7 @@ async def regenerate_message(
         start_parent_id=turn_user["id"],
         max_tokens=max_tokens,
         temperature=temperature,
+        reasoning_effort=payload.reasoning_effort,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 
@@ -492,5 +499,6 @@ async def temp_completion(payload: TempCompletionRequest, token_info: dict = Dep
         max_tokens=max_tokens,
         temperature=payload.temperature,
         persist=False,
+        reasoning_effort=payload.reasoning_effort,
     )
     return StreamingResponse(gen, media_type="text/event-stream")

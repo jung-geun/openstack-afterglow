@@ -12,6 +12,7 @@
 	} from '$lib/api/chatMetrics';
 	import type { ToolActivityItem } from '$lib/api/chatToolActivity';
 	import { aggregateCitations } from '$lib/api/chatCitations';
+	import { normalizeEffort } from '$lib/api/chatEffort';
 	import { SvelteMap } from 'svelte/reactivity';
 	import {
 		buildActivePath,
@@ -62,6 +63,7 @@
 	let conversations = $state<Conversation[]>([]);
 	let models = $state<AvailableModel[]>([]);
 	let selectedModel = $state('');
+	let effort = $state<string | null>(null); // thinking effort(null=서버 기본). reasoning 지원 모델만.
 	let activeConvId = $state<string | null>(null);
 	let allMessages = $state<ChatMsg[]>([]);
 	let activeLeafId = $state<string | null>(null);
@@ -95,6 +97,12 @@
 	// 현재 선택 모델의 능력(배지·게이팅). 에이전트 바인딩 시 에이전트 모델 기준.
 	const activeModelName = $derived(activeAgent?.model_name || selectedModel);
 	const selectedModelObj = $derived(models.find((m) => m.model_name === activeModelName) ?? null);
+
+	// 모델을 바꾸면 현재 effort 가 새 모델에 없을 수 있으므로 정규화(없으면 null=서버 기본).
+	$effect(() => {
+		const normalized = normalizeEffort(effort, selectedModelObj?.capabilities);
+		if (normalized !== effort) effort = normalized;
+	});
 
 	const _LAST_MODEL_KEY = 'chat:lastModel';
 	function persistLastModel(name: string) {
@@ -555,7 +563,7 @@
 
 		await runStream(
 			`/api/v1/chat/conversations/${convId}/completions`,
-			{ message: text, model: selectedModel, agent_id: activeAgent?.id },
+			{ message: text, model: selectedModel, agent_id: activeAgent?.id, reasoning_effort: effort },
 			live,
 			async (_evt, metrics) => {
 				await loadMessages(convId!);
@@ -585,7 +593,7 @@
 		const payload = history.map((m) => ({ role: m.role, content: m.content }));
 		await runStream(
 			'/api/v1/chat/temp-completions',
-			{ messages: payload, model: selectedModel },
+			{ messages: payload, model: selectedModel, reasoning_effort: effort },
 			live,
 			(_evt, metrics) => {
 				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정(계측값 포함)
@@ -607,7 +615,7 @@
 
 		await runStream(
 			`/api/v1/chat/conversations/${activeConvId}/messages/${messageId}/regenerate`,
-			{ model: modelName || undefined, agent_id: activeAgent?.id },
+			{ model: modelName || undefined, agent_id: activeAgent?.id, reasoning_effort: effort },
 			live,
 			async (_evt, metrics) => {
 				await loadMessages(activeConvId!);
@@ -836,7 +844,14 @@
 					/>
 				</div>
 			{/if}
-			<ChatInput bind:value={input} {streaming} onSend={send} onStop={stop} />
+			<ChatInput
+				bind:value={input}
+				bind:effort
+				modelCaps={selectedModelObj?.capabilities}
+				{streaming}
+				onSend={send}
+				onStop={stop}
+			/>
 		{/if}
 	</section>
 </div>
