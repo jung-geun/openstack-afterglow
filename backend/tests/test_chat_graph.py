@@ -86,6 +86,154 @@ class TestGraphStream:
         usage = [e for e in events if e["type"] == "usage"][-1]
         assert usage["usage"] == {"prompt_tokens": 5, "completion_tokens": 2}
 
+    async def test_emits_reasoning_events(self, monkeypatch):
+        """reasoning_content 델타 → reasoning 이벤트(최종 답변 텍스트와 분리)."""
+
+        class _RDelta:
+            def __init__(self, content=None, reasoning_content=None):
+                self.content = content
+                self.reasoning_content = reasoning_content
+                self.tool_calls = None
+
+        class _RChunk:
+            def __init__(self, delta, usage=None):
+                self.choices = [_ChoiceTC(delta)]
+                self.usage = usage
+
+        chunks = [
+            _RChunk(_RDelta(reasoning_content="단계적으로 생각하면")),
+            _RChunk(_RDelta(content="정답은 42")),
+            _RChunk(_RDelta(), usage={"prompt_tokens": 3, "completion_tokens": 2}),
+        ]
+
+        async def fake_stream(**kwargs):
+            return _aiter(chunks)
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        events = [
+            ev
+            async for ev in graph.stream(
+                model="claude-sonnet-5", messages=_MSGS, project_id="p1", user_id="u1", reasoning_effort="low"
+            )
+        ]
+        reasoning = [e for e in events if e["type"] == "reasoning"]
+        assert reasoning and reasoning[0]["text"] == "단계적으로 생각하면"
+        # 추론 텍스트가 최종 답변 토큰에 섞이지 않아야 함
+        tokens = "".join(e["text"] for e in events if e["type"] == "token")
+        assert tokens == "정답은 42"
+
+    async def test_emits_citations(self, monkeypatch):
+        """Perplexity(search_results/citations) + Gemini(annotations) 출처를 정규화·중복제거해 emit."""
+
+        class _CDelta:
+            def __init__(self, content=None, annotations=None):
+                self.content = content
+                self.annotations = annotations
+                self.tool_calls = None
+
+        class _CChunk:
+            def __init__(self, delta, citations=None, search_results=None, usage=None):
+                self.choices = [_ChoiceTC(delta)]
+                self.citations = citations
+                self.search_results = search_results
+                self.usage = usage
+
+        chunks = [
+            _CChunk(
+                _CDelta(content="서울과 부산"),
+                citations=["https://a.com", "javascript:alert(1)"],  # 비-http 스킴은 걸러져야 함
+                search_results=[{"url": "https://a.com", "title": "A", "snippet": "x" * 400}],
+            ),
+            _CChunk(
+                _CDelta(annotations=[{"type": "url_citation", "url_citation": {"url": "https://b.com", "title": "B"}}])
+            ),
+            _CChunk(_CDelta(), usage={"prompt_tokens": 1, "completion_tokens": 1}),
+        ]
+
+        async def fake_stream(**kwargs):
+            return _aiter(chunks)
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        events = [
+            ev async for ev in graph.stream(model="perplexity/sonar", messages=_MSGS, project_id="p1", user_id="u1")
+        ]
+        cites = [e for e in events if e["type"] == "citations"]
+        assert cites, "citations 이벤트 없음"
+        items = cites[-1]["items"]
+        assert {i["url"] for i in items} == {"https://a.com", "https://b.com"}
+        a = next(i for i in items if i["url"] == "https://a.com")
+        assert a["title"] == "A" and len(a["snippet"]) <= 300  # 스니펫 상한
+        # citations 는 usage 직전에 나와야 함(최종 답변 저장 타이밍)
+        types = [e["type"] for e in events]
+        assert types.index("citations") < types.index("usage")
+
+    async def test_no_citations_no_event(self, monkeypatch):
+        """출처가 없으면 citations 이벤트를 내지 않는다."""
+
+        async def fake_stream(**kwargs):
+            return _aiter([_Chunk("답변"), _Chunk(None, usage={"prompt_tokens": 1, "completion_tokens": 1})])
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        events = [ev async for ev in graph.stream(model="gpt-4o", messages=_MSGS, project_id="p1", user_id="u1")]
+        assert not any(e["type"] == "citations" for e in events)
+
+    async def test_passes_reasoning_effort(self, monkeypatch):
+        captured = {}
+
+        async def fake_stream(**kwargs):
+            captured.update(kwargs)
+            return _aiter([_Chunk("x")])
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        _ = [
+            ev
+            async for ev in graph.stream(
+                model="claude-sonnet-5",
+                messages=_MSGS,
+                project_id="p1",
+                user_id="u1",
+                reasoning_effort="high",
+            )
+        ]
+        assert captured.get("reasoning_effort") == "high"
+
+    async def test_reasoning_rejection_falls_back_and_caches(self, monkeypatch):
+        """reasoning 파라미터 400(예: Claude thinking.type 불일치) → reasoning 없이 재시도해 채팅 유지 +
+        해당 모델을 캐시해 이후 요청은 처음부터 reasoning 생략."""
+        model = "claude-fallback-test"
+        graph._REASONING_UNSUPPORTED.discard(model)  # 격리
+        calls: list = []
+
+        async def fake_stream(**kwargs):
+            calls.append(kwargs.get("reasoning_effort"))
+            if kwargs.get("reasoning_effort"):
+                raise RuntimeError("thinking.type.enabled is not supported for this model")
+            return _aiter([_Chunk("답변"), _Chunk(None, usage={"prompt_tokens": 1, "completion_tokens": 1})])
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        events = [
+            ev
+            async for ev in graph.stream(
+                model=model, messages=_MSGS, project_id="p1", user_id="u1", reasoning_effort="low"
+            )
+        ]
+        # 재시도로 정상 응답, error 이벤트 없음
+        assert any(e["type"] == "token" for e in events)
+        assert not any(e["type"] == "error" for e in events)
+        assert calls == ["low", None]  # 첫 시도(reasoning) → 재시도(reasoning 없이)
+        assert model in graph._REASONING_UNSUPPORTED
+
+        # 캐시 이후: 다음 요청은 처음부터 reasoning 없이(실패 요청 반복 안 함)
+        calls.clear()
+        _ = [
+            ev
+            async for ev in graph.stream(
+                model=model, messages=_MSGS, project_id="p1", user_id="u1", reasoning_effort="low"
+            )
+        ]
+        assert calls == [None]
+        graph._REASONING_UNSUPPORTED.discard(model)  # 정리
+
     async def test_error_on_start_failure(self, monkeypatch):
         async def fake_fail(**kwargs):
             raise RuntimeError("boom")
@@ -172,3 +320,23 @@ class TestEngineDelegates:
             ev async for ev in engine.stream(model="gpt-3.5-turbo", messages=_MSGS, project_id="p1", user_id="u1")
         ]
         assert any(e["type"] == "token" and e["text"] == "델타" for e in events)
+
+    async def test_falls_back_to_token_estimation_when_round_has_no_usage(self, monkeypatch):
+        async def fake_stream(**kwargs):
+            return _aiter([_Chunk("fallback")])
+
+        async def fake_schemas(*_):
+            return []
+
+        monkeypatch.setattr(graph.litellm_client, "acompletion_stream", fake_stream)
+        monkeypatch.setattr(graph.litellm_client, "extract_usage", lambda *_: (9, 3))
+        monkeypatch.setattr(graph.tool_runtime, "context_tool_schemas", fake_schemas)
+
+        events = [
+            event
+            async for event in graph.stream(
+                model="m", messages=[{"role": "user", "content": "hi"}], project_id="p1", user_id="u1"
+            )
+        ]
+        usage = [event for event in events if event["type"] == "usage"][-1]
+        assert usage["usage"] == {"prompt_tokens": 9, "completion_tokens": 3}

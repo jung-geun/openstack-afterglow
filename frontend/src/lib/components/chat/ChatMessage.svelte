@@ -1,11 +1,26 @@
 <script lang="ts">
 	import MarkdownMessage from './MarkdownMessage.svelte';
 	import ModelSelector from './ModelSelector.svelte';
+	import ToolCallCard from './ToolCallCard.svelte';
+	import ThinkingBlock from './ThinkingBlock.svelte';
 	import type { AvailableModel, ChatMessage } from '$lib/api/chatTree';
+	import { formatMetrics, type StreamMetrics } from '$lib/api/chatMetrics';
+	import {
+		parseAssistantToolCalls,
+		toolNameFromResultMeta,
+		type ToolActivityItem
+	} from '$lib/api/chatToolActivity';
+	import { citationDomain, citationLabel, normalizeCitations } from '$lib/api/chatCitations';
 
 	interface Props {
 		message: ChatMessage & { streaming?: boolean };
 		models: AvailableModel[];
+		/** 생성 속도 계측(tok/s). 없으면 미표시. */
+		metrics?: StreamMetrics | null;
+		/** 라이브 스트리밍 중 누적된 도구 실행 아이템(draft 전용). */
+		toolItems?: ToolActivityItem[];
+		/** 추론(thinking) 텍스트 — 있으면 접이식 블록 노출(라이브, 미저장). */
+		reasoning?: string;
 		/** 형제 버전 정보 (index/total). total>1 이면 ‹ n/m › 노출 */
 		siblingIndex?: number;
 		siblingTotal?: number;
@@ -23,6 +38,9 @@
 	let {
 		message,
 		models,
+		metrics = null,
+		toolItems = [],
+		reasoning = '',
 		siblingIndex = 1,
 		siblingTotal = 1,
 		busy = false,
@@ -38,6 +56,25 @@
 	const isUser = $derived(message.role === 'user');
 	const isTool = $derived(message.role === 'tool');
 	const streaming = $derived(Boolean(message.streaming));
+	// 추론은 본문 토큰이 시작되면 끝난다 — 스트리밍 중이라도 content 가 있으면 "추론 중"이 아니다.
+	const reasoningActive = $derived(streaming && message.content.length === 0);
+	const metricsText = $derived(formatMetrics(metrics));
+	// 저장된 assistant 호출 스텝(재로딩) → 호출 카드(인자). role=tool → 결과 카드.
+	const invocationItems = $derived(
+		!isUser && !isTool ? parseAssistantToolCalls(message.tool_calls) : []
+	);
+	const citations = $derived(!isUser && !isTool ? normalizeCitations(message.citations) : []);
+	const toolResultItem = $derived<ToolActivityItem | null>(
+		isTool
+			? {
+					id: null,
+					name: toolNameFromResultMeta(message.tool_calls) ?? '도구',
+					args: null,
+					result: message.content,
+					running: false
+				}
+			: null
+	);
 	let copied = $state(false);
 
 	function copy() {
@@ -48,13 +85,12 @@
 </script>
 
 {#if isTool}
-	<!-- 툴 메시지는 본문 대신 축약 뱃지로 -->
+	<!-- 툴 결과 메시지 → 접이식 결과 카드 -->
 	<div class="row assistant">
-		<div class="tool-badge" title={message.content}>
-			<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8">
-				<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-2.5 2.5-2.5z" stroke-linejoin="round" />
-			</svg>
-			<span>도구 사용됨</span>
+		<div class="tool-wrap">
+			{#if toolResultItem}
+				<ToolCallCard item={toolResultItem} />
+			{/if}
 		</div>
 	</div>
 {:else}
@@ -63,10 +99,45 @@
 			{#if isUser}
 				<div class="user-text">{message.content}</div>
 			{:else}
+				{#if reasoning}
+					<ThinkingBlock text={reasoning} active={reasoningActive} />
+				{/if}
+				{#if toolItems.length || invocationItems.length}
+					<div class="tool-cards">
+						{#each toolItems as t (t.id ?? t.name)}
+							<ToolCallCard item={t} />
+						{/each}
+						{#each invocationItems as t (t.id ?? t.name)}
+							<ToolCallCard item={t} />
+						{/each}
+					</div>
+				{/if}
 				<MarkdownMessage content={message.content} {streaming} />
 				{#if streaming && message.content.length === 0}
 					<div class="thinking">
 						<span></span><span></span><span></span>
+					</div>
+				{/if}
+				{#if streaming && metricsText}
+					<div class="live-metric" aria-live="off">{metricsText}</div>
+				{/if}
+				{#if citations.length}
+					<div class="sources">
+						<div class="sources-label">
+							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							출처 {citations.length}
+						</div>
+						<ol class="sources-list">
+							{#each citations as c, i (c.url + i)}
+								<li>
+									<a href={c.url} target="_blank" rel="noopener noreferrer nofollow" title={c.url}>
+										<span class="src-num">{i + 1}</span>
+										<span class="src-label">{citationLabel(c)}</span>
+										<span class="src-domain">{citationDomain(c.url)}</span>
+									</a>
+								</li>
+							{/each}
+						</ol>
 					</div>
 				{/if}
 			{/if}
@@ -108,6 +179,9 @@
 					</button>
 					{#if modelDisplayName}
 						<span class="model-tag">{modelDisplayName}</span>
+					{/if}
+					{#if metricsText}
+						<span class="metric-tag" title="생성 속도">{metricsText}</span>
 					{/if}
 				{/if}
 			</div>
@@ -204,16 +278,88 @@
 		color: var(--color-ink-3);
 		padding-left: 0.3rem;
 	}
-	.tool-badge {
+	.metric-tag {
+		font-size: 0.68rem;
+		color: var(--color-ink-3);
+		padding-left: 0.3rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.live-metric {
+		margin-top: 0.35rem;
+		font-size: 0.68rem;
+		color: var(--color-ink-3);
+		font-variant-numeric: tabular-nums;
+	}
+	.sources {
+		margin-top: 0.7rem;
+		padding-top: 0.6rem;
+		border-top: 1px solid var(--color-line);
+	}
+	.sources-label {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: var(--color-ink-3);
+		margin-bottom: 0.4rem;
+	}
+	.sources-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.sources-list a {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		padding: 0.28rem 0.4rem;
+		border-radius: 0.4rem;
+		text-decoration: none;
+		color: var(--color-ink-1);
+		font-size: 0.78rem;
+	}
+	.sources-list a:hover {
+		background: var(--color-surface-sunken);
+	}
+	.src-num {
+		flex-shrink: 0;
+		min-width: 1.1rem;
+		height: 1.1rem;
 		display: inline-flex;
 		align-items: center;
-		gap: 0.35rem;
-		padding: 0.25rem 0.6rem;
-		border-radius: 999px;
-		border: 1px solid var(--color-line);
+		justify-content: center;
+		border-radius: 0.3rem;
 		background: var(--color-surface-sunken);
-		color: var(--color-ink-2);
-		font-size: 0.72rem;
+		border: 1px solid var(--color-line);
+		font-size: 0.64rem;
+		color: var(--color-ink-3);
+		font-variant-numeric: tabular-nums;
+	}
+	.src-label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.src-domain {
+		flex-shrink: 0;
+		font-size: 0.68rem;
+		color: var(--color-ink-3);
+	}
+	.tool-wrap {
+		max-width: min(92%, 52rem);
+	}
+	.tool-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		margin-bottom: 0.6rem;
 	}
 	.thinking {
 		display: inline-flex;

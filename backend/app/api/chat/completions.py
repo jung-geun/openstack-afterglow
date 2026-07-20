@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -182,13 +183,19 @@ async def _stream_and_persist(
     persist=False(임시 채팅)면 메시지를 저장하지 않고 과금(usage_logs)만 한다(conversation_id=None).
     """
     parts: list[str] = []
+    reasoning_parts: list[str] = []
     final_usage = None
+    final_citations: list | None = None
     charged = False
     errored = False
     state = {"last_parent": start_parent_id}
     _do_persist = persist and conversation_id is not None
+    event_id = str(uuid.uuid4())
+    input_price_per_token = resolved.get("input_price_per_token")
+    output_price_per_token = resolved.get("output_price_per_token")
+    price_source = resolved.get("price_source")
 
-    async def _save(role: str, content, tool_calls=None, is_leaf: bool = False):
+    async def _save(role: str, content, tool_calls=None, citations=None, reasoning=None, is_leaf: bool = False):
         if not _do_persist:
             return {"id": None}
         msg = await cs.add_message(
@@ -196,6 +203,8 @@ async def _stream_and_persist(
             role=role,
             content=content,
             tool_calls=tool_calls,
+            citations=citations,
+            reasoning=reasoning,
             parent_id=state["last_parent"],
             model_name=(model_name if role == "assistant" else None),
             set_leaf=is_leaf,
@@ -203,25 +212,33 @@ async def _stream_and_persist(
         state["last_parent"] = msg["id"]
         return msg
 
-    async def _finalize(text: str, pt: int, ct: int, raw_cost: float):
+    async def _finalize(text: str, pt: int, ct: int, usage_cost: litellm_client.UsageCost):
         if text and _do_persist:
             try:
-                await _save("assistant", text, is_leaf=True)
+                await _save(
+                    "assistant",
+                    text,
+                    citations=final_citations,
+                    reasoning=("".join(reasoning_parts) or None),
+                    is_leaf=True,
+                )
             except Exception:
                 logger.warning("assistant 메시지 저장 실패 conv=%s", conversation_id, exc_info=True)
         return await credit.apply_usage(
+            event_id=event_id,
             user_id=user_id,
             project_id=project_id,
             model_name=model_name,
             provider=resolved.get("provider_name"),
             prompt_tokens=pt,
             completion_tokens=ct,
-            raw_cost=raw_cost,
-            margin_multiplier=resolved.get("margin_multiplier", 1.0),
+            usage_cost=usage_cost,
+            margin_multiplier=resolved["margin_multiplier"],
             conversation_id=conversation_id,
             source="web",
         )
 
+    reasoning_effort = get_settings().chat_reasoning_effort
     try:
         async for ev in engine.stream(
             model=model_name,
@@ -233,21 +250,47 @@ async def _stream_and_persist(
             api_key=resolved.get("api_key"),
             max_tokens=max_tokens,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
         ):
             etype = ev.get("type")
             if etype == "token":
                 parts.append(ev["text"])
                 yield _sse({"type": "token", "text": ev["text"]})
+            elif etype == "reasoning":
+                # 추론(thinking) 델타 — 라이브 중계 + 누적(최종 답변에 저장해 재로딩 시 유지).
+                rtext = ev.get("text", "")
+                reasoning_parts.append(rtext)
+                yield _sse({"type": "reasoning", "text": rtext})
             elif etype == "tool_call":
                 yield _sse({"type": "tool_call", "name": ev.get("name")})
             elif etype == "assistant_tool_calls":
                 # 이 스텝 텍스트는 이 메시지로 저장 — 최종 답변 parts 에서 제외(중복 방지).
                 parts.clear()
+                # 시각화용 SSE 중계 — 툴 호출(이름·인자)을 프론트가 카드로 표시. content 는 선행 사유.
+                yield _sse(
+                    {
+                        "type": "tool_calls",
+                        "content": ev.get("content"),
+                        "calls": [
+                            {"id": tc.get("id"), "name": tc.get("name"), "args": tc.get("args")}
+                            for tc in (ev.get("tool_calls") or [])
+                        ],
+                    }
+                )
                 try:
                     await _save("assistant", ev.get("content"), tool_calls=ev.get("tool_calls"))
                 except Exception:
                     logger.warning("assistant tool_calls 저장 실패 conv=%s", conversation_id, exc_info=True)
             elif etype == "tool_result":
+                # 시각화용 SSE 중계 — 툴 실행 결과를 프론트가 카드에 채운다.
+                yield _sse(
+                    {
+                        "type": "tool_result",
+                        "tool_call_id": ev.get("tool_call_id"),
+                        "name": ev.get("name"),
+                        "content": ev.get("content"),
+                    }
+                )
                 try:
                     await _save(
                         "tool",
@@ -256,6 +299,10 @@ async def _stream_and_persist(
                     )
                 except Exception:
                     logger.warning("tool_result 저장 실패 conv=%s", conversation_id, exc_info=True)
+            elif etype == "citations":
+                # 출처 — 최종 답변에 저장(_finalize) + 라이브 SSE 중계.
+                final_citations = ev.get("items")
+                yield _sse({"type": "citations", "items": final_citations})
             elif etype == "usage":
                 final_usage = ev.get("usage")
             elif etype == "error":
@@ -265,8 +312,16 @@ async def _stream_and_persist(
         if not errored:
             text = "".join(parts)
             pt, ct = litellm_client.extract_usage(model_name, input_messages, text, final_usage)
-            raw_cost = litellm_client.cost_from_usage(model_name, pt, ct)
-            credited = await _finalize(text, pt, ct, raw_cost)
+            usage_cost = litellm_client.cost_from_usage(
+                model_name,
+                pt,
+                ct,
+                input_price_per_token=input_price_per_token,
+                output_price_per_token=output_price_per_token,
+                price_source=price_source,
+                provider_type=resolved.get("provider_type"),
+            )
+            credited = await _finalize(text, pt, ct, usage_cost)
             charged = True
             yield _sse({"type": "done", "prompt_tokens": pt, "completion_tokens": ct, "credited_cost": float(credited)})
     finally:
@@ -274,9 +329,17 @@ async def _stream_and_persist(
         if not charged and not errored and parts:
             text = "".join(parts)
             pt, ct = litellm_client.extract_usage(model_name, input_messages, text, final_usage)
-            raw_cost = litellm_client.cost_from_usage(model_name, pt, ct)
+            usage_cost = litellm_client.cost_from_usage(
+                model_name,
+                pt,
+                ct,
+                input_price_per_token=input_price_per_token,
+                output_price_per_token=output_price_per_token,
+                price_source=price_source,
+                provider_type=resolved.get("provider_type"),
+            )
             try:
-                await _finalize(text, pt, ct, raw_cost)
+                await _finalize(text, pt, ct, usage_cost)
             except Exception:
                 logger.warning("중단 후 과금 실패 conv=%s", conversation_id, exc_info=True)
 

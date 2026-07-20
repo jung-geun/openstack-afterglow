@@ -6,10 +6,14 @@
  * 감싼 async generator 를 별도로 제공한다.
  *
  * 서버는 각 라인 `data: {json}\n\n` 형식으로 이벤트를 흘린다. json.type:
- * - token     : {text} 텍스트 델타(누적)
- * - tool_call : {name} 도구 호출 진행
- * - error     : {message} 모델 오류(done 안 옴)
- * - done      : {prompt_tokens, completion_tokens, credited_cost} 완료
+ * - token       : {text} 텍스트 델타(누적)
+ * - reasoning   : {text} 추론(thinking) 델타 — 최종 답변과 분리, 저장 안 함
+ * - tool_call   : {name} 도구 호출 진행(스피너)
+ * - tool_calls  : {content, calls:[{id,name,args}]} 도구 호출(인자) — 시각화 카드
+ * - tool_result : {tool_call_id, name, content} 도구 실행 결과 — 시각화 카드
+ * - citations   : {items:[{url,title,snippet}]} 답변 출처 — 하단 표시 + 패널
+ * - error       : {message} 모델 오류(done 안 옴)
+ * - done        : {prompt_tokens, completion_tokens, credited_cost} 완료
  */
 import { getBaseUrl } from './client';
 
@@ -17,9 +21,32 @@ export interface ChatStreamToken {
 	type: 'token';
 	text: string;
 }
+/** 추론(thinking) 델타 — 최종 답변과 분리해 접이식으로 노출. 저장하지 않음. */
+export interface ChatStreamReasoning {
+	type: 'reasoning';
+	text: string;
+}
 export interface ChatStreamToolCall {
 	type: 'tool_call';
 	name: string;
+}
+/** 도구 호출(인자 포함) — 시각화 카드용. */
+export interface ChatStreamToolCalls {
+	type: 'tool_calls';
+	content?: string | null;
+	calls: { id?: string | null; name: string; args?: string | null }[];
+}
+/** 도구 실행 결과 — 시각화 카드용. */
+export interface ChatStreamToolResult {
+	type: 'tool_result';
+	tool_call_id?: string | null;
+	name: string;
+	content: string;
+}
+/** 답변 출처 — 하단 리스트 + "출처" 패널. */
+export interface ChatStreamCitations {
+	type: 'citations';
+	items: { url: string; title?: string | null; snippet?: string | null }[];
 }
 export interface ChatStreamError {
 	type: 'error';
@@ -33,7 +60,11 @@ export interface ChatStreamDone {
 }
 export type ChatStreamEvent =
 	| ChatStreamToken
+	| ChatStreamReasoning
 	| ChatStreamToolCall
+	| ChatStreamToolCalls
+	| ChatStreamToolResult
+	| ChatStreamCitations
 	| ChatStreamError
 	| ChatStreamDone;
 

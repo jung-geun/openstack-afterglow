@@ -915,6 +915,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
         lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
         lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
+        lines.append(f"reasoning_effort = {_toml_str(chat.get('reasoning_effort', 'low'))}")
         # checkpointer_postgres_url(비밀)은 secret.yaml의 CHAT_CHECKPOINTER_POSTGRES_URL로 주입됩니다
         lines.append("")
 

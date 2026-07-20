@@ -113,6 +113,7 @@ class TestAvailableModels:
                     "is_active": True,
                     "input_price": 0.0000025,
                     "output_price": 0.00001,
+                    "effective_capabilities": {"vision": True, "reasoning": False, "context_limit": 128000},
                     "created_at": None,
                     "updated_at": None,
                 },
@@ -126,9 +127,14 @@ class TestAvailableModels:
         resp = await client.get("/api/v1/chat/models")
         assert resp.status_code == 200
         body = resp.json()
-        assert body == [{"model_name": "gpt-4o", "display_name": "GPT-4o", "provider": "openai"}]
-        # 가격/내부 필드 미노출
+        # 능력·context_limit 노출, 키/가격은 미노출
+        assert body[0]["model_name"] == "gpt-4o"
+        assert body[0]["display_name"] == "GPT-4o"
+        assert body[0]["provider"] == "openai"
+        assert body[0]["capabilities"] == {"vision": True, "reasoning": False, "context_limit": 128000}
+        assert body[0]["context_limit"] == 128000
         assert "input_price" not in body[0]
+        assert "api_key" not in body[0]
         assert "provider_id" not in body[0]
 
     async def test_graceful_empty_on_storage_unavailable(self, client, monkeypatch):

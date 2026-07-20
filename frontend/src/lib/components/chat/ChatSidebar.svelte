@@ -14,6 +14,8 @@
 		activeConvId: string | null;
 		tempMode?: boolean;
 		busy?: boolean;
+		/** 사이드바 열림 여부(데스크톱 접기 / 모바일 드로어). */
+		open?: boolean;
 		onSelect: (conv: Conversation) => void;
 		onNew: () => void;
 		onTempChat: () => void;
@@ -29,6 +31,7 @@
 		activeConvId,
 		tempMode = false,
 		busy = false,
+		open = true,
 		onSelect,
 		onNew,
 		onTempChat,
@@ -78,7 +81,7 @@
 	});
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:closed={!open}>
 	<div class="top">
 		<button type="button" class="new-btn" disabled={busy} onclick={onNew}>
 			<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" stroke-linecap="round" /></svg>
@@ -196,6 +199,25 @@
 		min-height: 0;
 		border-right: 1px solid var(--color-line);
 		background: var(--color-surface-sunken);
+		transition: margin-left 0.22s ease;
+	}
+	/* 데스크톱: 접으면 왼쪽으로 밀어내 본문이 전체 폭을 차지 */
+	.sidebar.closed {
+		margin-left: -16rem;
+	}
+	/* 모바일: 오버레이 드로어 — 흐름에서 빼내 본문은 항상 전체 폭, 열릴 때만 위에 겹침 */
+	@media (max-width: 768px) {
+		.sidebar {
+			position: absolute;
+			top: 0;
+			bottom: 0;
+			left: 0;
+			z-index: 40;
+			box-shadow: 2px 0 16px color-mix(in oklab, var(--color-ink-0) 18%, transparent);
+		}
+		.sidebar.closed {
+			margin-left: -17rem; /* 그림자까지 완전히 숨김 */
+		}
 	}
 	.top {
 		display: flex;

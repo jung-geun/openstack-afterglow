@@ -23,6 +23,7 @@ async def stream(
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
 ) -> AsyncIterator[dict]:
     async for ev in graph.stream(
         model=model,
@@ -34,5 +35,6 @@ async def stream(
         api_key=api_key,
         max_tokens=max_tokens,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
     ):
         yield ev

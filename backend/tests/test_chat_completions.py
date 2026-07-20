@@ -2,7 +2,7 @@
 
 DB/네트워크 없이 credit·conversation_store·provider_store·engine 을 monkeypatch:
 - 쿼터 초과 402, 대화 소유권 403, 모델 화이트리스트 위반 400
-- 스트리밍 정상 경로: SSE token/done + **apply_usage 가 raw_cost>0 으로 호출**(과금 누락 회귀 방지)
+- 스트리밍 정상 경로: SSE token/done + immutable UsageCost 원장 호출
 """
 
 from decimal import Decimal
@@ -41,9 +41,10 @@ def _resolved(**over) -> dict:
         "provider_name": "openai",
         "api_base": None,
         "api_key": "sk-test",
-        "margin_multiplier": 1.0,
-        "input_price": None,
-        "output_price": None,
+        "margin_multiplier": Decimal("1.0"),
+        "input_price_per_token": Decimal("0.000002"),
+        "output_price_per_token": Decimal("0.000008"),
+        "price_source": "manual",
     }
     base.update(over)
     return base
@@ -122,10 +123,93 @@ class TestStreamingHappyPath:
         body = resp.text
         assert '"token"' in body  # 델타 이벤트 전송
         assert '"done"' in body  # 종료 이벤트
-        # ⚠️ 스트리밍 usage 폴백으로 raw_cost>0 이 과금되어야 한다(0원 과금 회귀 방지).
         assert captured, "apply_usage 가 호출되지 않음"
-        assert captured["raw_cost"] > 0
+        assert captured["usage_cost"].raw_cost > 0
         assert captured["provider"] == "openai"
+        assert captured["event_id"]
+
+    async def test_reasoning_forwarded_and_persisted(self, client, monkeypatch):
+        """reasoning 이벤트는 SSE 로 중계되고 최종 assistant 메시지에 저장된다(재로딩 시 유지)."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+        added: list[tuple[str, dict]] = []
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_resolve(model_name):
+            return _resolved()
+
+        async def fake_list(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            added.append((kwargs.get("role"), kwargs))
+            return {"id": len(added)}
+
+        async def fake_stream(**kwargs):
+            yield {"type": "reasoning", "text": "단계적으로 생각"}
+            yield {"type": "token", "text": "정답"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(f"{_BASE}/c1/completions", json={"message": "17*23?", "model": "gpt-3.5-turbo"})
+        assert resp.status_code == 200
+        body = resp.text
+        assert '"reasoning"' in body and "단계적으로 생각" in body  # SSE 중계
+        # 최종 assistant 저장에 reasoning 이 실린다(본문 content 와는 별개 필드)
+        final_assistant = [kw for r, kw in added if r == "assistant"]
+        assert final_assistant and final_assistant[-1]["reasoning"] == "단계적으로 생각"
+        assert final_assistant[-1]["content"] == "정답"  # 추론이 본문에 섞이지 않음
+
+    async def test_citations_persisted_and_forwarded(self, client, monkeypatch):
+        """citations 이벤트 → 최종 assistant 메시지에 저장 + SSE 중계."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+        added: list[tuple[str, dict]] = []
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_resolve(model_name):
+            return _resolved()
+
+        async def fake_list(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            added.append((kwargs.get("role"), kwargs))
+            return {"id": len(added)}
+
+        async def fake_stream(**kwargs):
+            yield {"type": "token", "text": "서울과 부산입니다"}
+            yield {"type": "citations", "items": [{"url": "https://a.com", "title": "A", "snippet": "s"}]}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_list)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(f"{_BASE}/c1/completions", json={"message": "큰 도시?", "model": "gpt-3.5-turbo"})
+        assert resp.status_code == 200
+        body = resp.text
+        assert '"citations"' in body and "https://a.com" in body  # SSE 중계
+        # 최종 assistant 저장에 citations 실림
+        final_assistant = [kw for r, kw in added if r == "assistant"]
+        assert final_assistant and final_assistant[-1]["citations"][0]["url"] == "https://a.com"
 
 
 class TestToolRecordPersistence:
@@ -172,7 +256,11 @@ class TestToolRecordPersistence:
             f"{_BASE}/c1/completions", json={"message": "인스턴스 몇 개야?", "model": "gpt-3.5-turbo"}
         )
         assert resp.status_code == 200
-        _ = resp.text  # 스트림 소비
+        body = resp.text  # 스트림 소비
+
+        # 시각화용 SSE 중계 — 툴 호출(인자)/결과가 프론트로 전달되는지
+        assert '"tool_calls"' in body and '"list_instances"' in body
+        assert '"tool_result"' in body and '"3개"' in body
 
         roles = [r for r, _ in added]
         # user 저장 + assistant(tool_calls) + tool 결과 + 최종 assistant
@@ -387,7 +475,7 @@ class TestTempChat:
         assert added == []  # 미저장
         assert captured["conversation_id"] is None
         assert captured["source"] == "web"
-        assert captured["raw_cost"] > 0  # 과금은 유지
+        assert captured["usage_cost"].raw_cost > 0  # 과금은 유지
 
     async def test_temp_rejects_tool_role(self, client):
         resp = await client.post(self._URL, json={"messages": [{"role": "tool", "content": "x"}]})

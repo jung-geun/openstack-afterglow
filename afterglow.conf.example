@@ -512,6 +512,9 @@ default_model = ""              # 기본 모델명 (활성 llm_models 카탈로�
 credit_per_usd = 1000.0         # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
 default_monthly_quota = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
 stream_enabled = true           # SSE 스트리밍 응답 사용
+# 추론(thinking) 노출 effort — litellm.supports_reasoning 이 true 인 모델(Claude·Gemini 2.5·o-series 등)에만
+# 적용된다. low/medium/high 중 하나. 빈 문자열 또는 "off" 면 비활성(요청에 파라미터 미주입, 비용 증가 없음).
+reasoning_effort = "low"        # 추론 과정 노출 강도(지원 모델만). 비용에 영향 — 비활성은 "" 또는 "off"
 # Phase 2: LangGraph 전용 Postgres 체크포인터(대화 상태/메모리 영속화). 비밀값 — secret.yaml의
 # CHAT_CHECKPOINTER_POSTGRES_URL로 주입. 비워두면 MemorySaver(프로세스 메모리) fallback.
 checkpointer_postgres_url = ""   # 예: postgresql://afterglow:pass@postgres:5432/afterglow_chat

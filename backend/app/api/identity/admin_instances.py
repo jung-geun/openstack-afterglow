@@ -16,9 +16,10 @@ from app.api.common.activity_recorder import rec
 from app.api.deps import get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
+from app.models import compute as compute_models
 from app.models.compute import CreateInstanceRequest
 from app.models.progress import ProgressMessage, ProgressStep
-from app.services import cinder, cloudinit, keystone, neutron, nova
+from app.services import cinder, cloudinit, keystone, neutron, nova, vm_cloud_init_library
 from app.services import libraries as lib_svc
 from app.services.instance_names import ensure_unique_instance_name
 
@@ -30,6 +31,11 @@ class AdminCreateInstanceRequest(CreateInstanceRequest):
     """CreateInstanceRequest + 대상 프로젝트 ID."""
 
     project_id: str
+
+
+# pydantic 2.11+ 는 크로스모듈 서브클래스의 forward ref(부모의 list["NewVolumeRequest"]·["DataMountSpec"] 등)를
+# 서브클래스 모듈 네임스페이스에서 재해석한다. 부모가 정의된 compute 모듈 네임스페이스를 주입해 해소한다.
+AdminCreateInstanceRequest.model_rebuild(_types_namespace=vars(compute_models))
 
 
 def _make_admin_conn(project_id: str, user_id: str) -> openstack.connection.Connection:
@@ -264,10 +270,13 @@ async def admin_create_instance_async(
                     instance_id=_sse_health_id if _sse_health_token else "",
                     report_url=_sse_report_url if _sse_health_token else "",
                     report_token=_sse_health_token,
+                    github_username=req.github_username,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
             else:
                 userdata = None
+
+            userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
             _sse_effective_sgs: list[str] | None = list(req.security_groups) if req.security_groups else None
@@ -339,6 +348,11 @@ async def admin_create_instance_async(
                         floating_ip_id = fip.id
                         await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
                         yield send_progress(ProgressStep.FLOATING_IP_CREATING, 100, "Floating IP 할당 완료")
+
+            try:
+                await vm_cloud_init_library.record_history(user_id=token_info["user_id"], content=req.userdata)
+            except Exception:
+                logger.warning("cloud-init 실행 이력 저장 실패", extra={"user_id": token_info.get("user_id")})
 
             note = " (키페어 없음 — 콘솔 비밀번호 사용)" if not req.key_name else ""
             yield send_progress(

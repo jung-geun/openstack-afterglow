@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.deps import require_admin
-from app.services.chat import model_discovery
+from app.services.chat import model_discovery, models_dev
 from app.services.chat import provider_store as ps
 
+_PER_TOKEN_QUANTUM = Decimal("0.0000000001")
+_TOKENS_PER_MILLION = Decimal("1000000")
 router = APIRouter(dependencies=[Depends(require_admin)])
 
 
@@ -45,28 +49,87 @@ class ProviderResponse(BaseModel):
     margin_multiplier: float
     created_at: str | None
     updated_at: str | None
+    models_dev_provider_id: str | None = None
 
 
 # --- 모델 ---
+class CapabilitiesInput(BaseModel):
+    """관리자 능력 수동 오버라이드(전체 dict). model_dump() 이 canonical 형태를 만든다."""
+
+    vision: bool = False
+    reasoning: bool = False
+    tool_call: bool = False
+    attachment: bool = False
+    modalities: dict | None = None
+    reasoning_options: list = Field(default_factory=list)
+    context_limit: int | None = Field(default=None, ge=0)
+
+    model_config = {"extra": "forbid"}
+
+
 class ModelCreateRequest(BaseModel):
     provider_id: int
     model_name: str = Field(..., max_length=190)
     display_name: str | None = Field(default=None, max_length=150)
-    input_price: float | None = Field(default=None, ge=0)
-    output_price: float | None = Field(default=None, ge=0)
+    input_price_per_million: Decimal | None = Field(default=None, ge=0)
+    output_price_per_million: Decimal | None = Field(default=None, ge=0)
+    capabilities: CapabilitiesInput | None = None
     is_active: bool = True
 
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
+
+    @field_validator("input_price_per_million", "output_price_per_million")
+    @classmethod
+    def _finite_precise_price(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and not value.is_finite():
+            raise ValueError("가격은 유한한 숫자여야 합니다")
+        if (
+            value is not None
+            and value != 0
+            and (value / _TOKENS_PER_MILLION).quantize(_PER_TOKEN_QUANTUM, rounding=ROUND_HALF_UP) == 0
+        ):
+            raise ValueError("가격이 저장 정밀도보다 작습니다")
+        return value
+
+    @model_validator(mode="after")
+    def _price_pair(self):
+        if (self.input_price_per_million is None) != (self.output_price_per_million is None):
+            raise ValueError("입력·출력 가격은 함께 설정하거나 함께 비워야 합니다")
+        return self
 
 
 class ModelUpdateRequest(BaseModel):
     model_name: str | None = Field(default=None, max_length=190)
     display_name: str | None = Field(default=None, max_length=150)
-    input_price: float | None = Field(default=None, ge=0)
-    output_price: float | None = Field(default=None, ge=0)
+    input_price_per_million: Decimal | None = Field(default=None, ge=0)
+    output_price_per_million: Decimal | None = Field(default=None, ge=0)
+    capabilities: CapabilitiesInput | None = None
     is_active: bool | None = None
 
-    model_config = {"protected_namespaces": ()}  # model_name 필드 경고 억제
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
+
+    @field_validator("input_price_per_million", "output_price_per_million")
+    @classmethod
+    def _finite_precise_price(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and not value.is_finite():
+            raise ValueError("가격은 유한한 숫자여야 합니다")
+        if (
+            value is not None
+            and value != 0
+            and (value / _TOKENS_PER_MILLION).quantize(_PER_TOKEN_QUANTUM, rounding=ROUND_HALF_UP) == 0
+        ):
+            raise ValueError("가격이 저장 정밀도보다 작습니다")
+        return value
+
+    @model_validator(mode="after")
+    def _price_pair(self):
+        price_fields = {"input_price_per_million", "output_price_per_million"}
+        if self.model_fields_set & price_fields and (
+            not price_fields <= self.model_fields_set
+            or (self.input_price_per_million is None) != (self.output_price_per_million is None)
+        ):
+            raise ValueError("입력·출력 가격은 함께 설정하거나 함께 비워야 합니다")
+        return self
 
 
 class ModelResponse(BaseModel):
@@ -76,12 +139,35 @@ class ModelResponse(BaseModel):
     display_name: str | None
     is_active: bool
     is_title_model: bool = False
-    input_price: float | None
-    output_price: float | None
+    is_memory_model: bool = False
+    input_price_per_million: Decimal | None = None
+    output_price_per_million: Decimal | None = None
+    effective_input_price_per_million: Decimal | None = None
+    effective_output_price_per_million: Decimal | None = None
+    effective_price_source: str | None = None
+    models_dev_model_id: str | None = None
+    price_source: str | None = None
+    capabilities: dict | None = None
+    capability_source: str | None = None
+    effective_capabilities: dict | None = None
+    effective_capability_source: str | None = None
     created_at: str | None
     updated_at: str | None
 
     model_config = {"protected_namespaces": ()}
+
+
+class ModelsDevImportSelection(BaseModel):
+    local_model_id: int
+    models_dev_model_id: str = Field(..., min_length=1, max_length=190)
+
+
+class ModelsDevImportRequest(BaseModel):
+    local_provider_id: int
+    models_dev_provider_id: str = Field(..., min_length=1, max_length=100)
+    selections: list[ModelsDevImportSelection] = Field(..., min_length=1, max_length=500)
+
+    model_config = {"extra": "forbid"}
 
 
 class TitleModelRequest(BaseModel):
@@ -157,6 +243,54 @@ async def available_models(provider_id: int):
 async def list_models(active_only: bool = False):
     try:
         return await ps.list_models(active_only=active_only)
+    except ps.ChatStorageUnavailable as exc:
+        raise _map_storage(exc) from exc
+
+
+@router.get("/admin/models/pricing/models-dev/providers")
+async def list_models_dev_providers(refresh: bool = False):
+    try:
+        catalog = await models_dev.get_catalog(refresh=refresh)
+    except models_dev.ModelsDevCatalogError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "source_url": catalog.source_url,
+        "fetched_at": catalog.fetched_at,
+        "providers": models_dev.provider_list(catalog),
+    }
+
+
+@router.get("/admin/models/pricing/models-dev/providers/{models_dev_provider_id}")
+async def get_models_dev_provider(models_dev_provider_id: str, refresh: bool = False):
+    try:
+        catalog = await models_dev.get_catalog(refresh=refresh)
+    except models_dev.ModelsDevCatalogError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    details = models_dev.provider_detail(catalog, models_dev_provider_id)
+    if details is None:
+        raise HTTPException(status_code=404, detail="models.dev provider를 찾을 수 없습니다")
+    models = details.pop("models")
+    return {"source_url": catalog.source_url, "fetched_at": catalog.fetched_at, "provider": details, "models": models}
+
+
+@router.post("/admin/models/pricing/models-dev/import", response_model=list[ModelResponse])
+async def import_models_dev_prices(payload: ModelsDevImportRequest):
+    try:
+        catalog = await models_dev.get_catalog()
+        return await ps.import_models_dev_prices(
+            local_provider_id=payload.local_provider_id,
+            models_dev_provider_id=payload.models_dev_provider_id,
+            selections=[selection.model_dump() for selection in payload.selections],
+            catalog=catalog,
+        )
+    except models_dev.ModelsDevCatalogError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ps.ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ModelsDevImportConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ps.ProviderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
         raise _map_storage(exc) from exc
 

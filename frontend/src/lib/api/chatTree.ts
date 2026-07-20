@@ -11,22 +11,40 @@
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 
+/** 모델 능력(vision/think/tool 게이팅·배지용). 백엔드 effective_capabilities. */
+export interface ModelCapabilities {
+	vision?: boolean;
+	reasoning?: boolean;
+	tool_call?: boolean;
+	attachment?: boolean;
+	modalities?: { input?: string[]; output?: string[] } | null;
+	/** [{type:'effort', values:['low','medium','high']}] — effort 선택지 도출 */
+	reasoning_options?: { type: string; values: string[] }[];
+	context_limit?: number | null;
+}
+
 /** 채팅에서 선택 가능한 모델. 백엔드 GET /chat/models 응답 형태. */
 export interface AvailableModel {
 	model_name: string;
 	display_name: string;
 	provider?: string;
+	capabilities?: ModelCapabilities | null;
+	context_limit?: number | null;
 }
 
-/** 이번 달 사용량 요약. 백엔드 GET /chat/usage 응답(관련 필드만). */
+/** 원장 기반 채팅 사용량. 백엔드 GET /chat/usage 계약 전체. */
 export interface ChatUsage {
 	found: boolean;
-	month_prompt_tokens?: number;
-	month_completion_tokens?: number;
-	month_credited_cost?: number;
-	month_request_count?: number;
-	quota_used?: number;
-	quota_max?: number;
+	total_credited_cost: number;
+	lifetime_prompt_tokens: number;
+	lifetime_completion_tokens: number;
+	lifetime_request_count: number;
+	month_credited_cost: number;
+	month_prompt_tokens: number;
+	month_completion_tokens: number;
+	month_request_count: number;
+	quota_used: number;
+	quota_max: number;
 }
 
 export interface ChatMessage {
@@ -36,6 +54,8 @@ export interface ChatMessage {
 	parent_id: string | null;
 	content: string;
 	tool_calls?: unknown;
+	citations?: unknown;
+	reasoning?: string | null;
 	token_prompt?: number | null;
 	token_completion?: number | null;
 	model_name?: string | null;

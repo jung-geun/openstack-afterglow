@@ -343,6 +343,9 @@ def _load_toml() -> dict:
     flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
     flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
     flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
+    # 추론(thinking) 노출용 reasoning effort — 지원 모델에만 적용(litellm.supports_reasoning).
+    # "low"/"medium"/"high" 중 하나. 빈 문자열/"off" 이면 비활성(요청에 파라미터 미주입).
+    flat["chat_reasoning_effort"] = chat.get("reasoning_effort", "low")
     # Phase 2: LangGraph 전용 Postgres 체크포인터(비밀 — secret.yaml 주입). 미설정 시 MemorySaver fallback.
     flat["chat_checkpointer_postgres_url"] = chat.get("checkpointer_postgres_url", "")
 
@@ -645,6 +648,7 @@ class Settings(BaseSettings):
     chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
     chat_default_monthly_quota: float = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
     chat_stream_enabled: bool = True  # SSE 스트리밍 응답 사용
+    chat_reasoning_effort: str = "low"  # 추론 노출 effort(지원 모델만): low/medium/high, 빈값/off=비활성
     # Phase 2: LangGraph 전용 Postgres 체크포인터 접속 URL(secret.yaml 주입). 비면 MemorySaver 사용.
     chat_checkpointer_postgres_url: str = ""
 

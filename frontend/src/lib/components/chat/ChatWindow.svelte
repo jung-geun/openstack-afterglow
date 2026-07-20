@@ -6,8 +6,15 @@
 		type AvailableModel,
 		type ChatMessage as ChatMsg
 	} from '$lib/api/chatTree';
+	import type { StreamMetrics } from '$lib/api/chatMetrics';
+	import type { ToolActivityItem } from '$lib/api/chatToolActivity';
 
-	type DisplayMessage = ChatMsg & { streaming?: boolean };
+	type DisplayMessage = ChatMsg & {
+		streaming?: boolean;
+		metrics?: StreamMetrics | null;
+		toolItems?: ToolActivityItem[];
+		reasoning?: string | null;
+	};
 	interface Props {
 		activePath: DisplayMessage[];
 		allMessages: ChatMsg[];
@@ -15,6 +22,8 @@
 		busy?: boolean;
 		loading?: boolean;
 		modelLocked?: boolean;
+		/** 메시지 id → 생성 속도 계측(런타임, 미저장). 낙관적 draft 는 message.metrics 로 직접 전달. */
+		metricsById?: Map<string, StreamMetrics>;
 		toolActivity?: string | null;
 		error?: string | null;
 		empty?: boolean;
@@ -31,6 +40,7 @@
 		busy = false,
 		loading = false,
 		modelLocked = false,
+		metricsById = new Map(),
 		toolActivity = null,
 		error = null,
 		empty = false,
@@ -96,6 +106,9 @@
 						{models}
 						{busy}
 						{modelLocked}
+						metrics={msg.metrics ?? metricsById.get(msg.id) ?? null}
+						toolItems={msg.toolItems ?? []}
+						reasoning={msg.reasoning ?? ''}
 						siblingIndex={info.index}
 						siblingTotal={info.total}
 						modelDisplayName={modelDisplay(msg.model_name)}

@@ -6,6 +6,14 @@
 	import { toast } from '$lib/stores/toast';
 	import { streamChat, type ChatStreamEvent } from '$lib/api/chatStream';
 	import {
+		computeMetrics,
+		estimateTokens,
+		type StreamMetrics
+	} from '$lib/api/chatMetrics';
+	import type { ToolActivityItem } from '$lib/api/chatToolActivity';
+	import { aggregateCitations } from '$lib/api/chatCitations';
+	import { SvelteMap } from 'svelte/reactivity';
+	import {
 		buildActivePath,
 		lastAssistantModel,
 		siblingLeafInDirection,
@@ -25,6 +33,7 @@
 	import AgentHubModal from './AgentHubModal.svelte';
 	import ChatProjectsView from './ChatProjectsView.svelte';
 	import ChatSettingsOverlay from './ChatSettingsOverlay.svelte';
+	import ChatSourcesPanel from './ChatSourcesPanel.svelte';
 
 	interface Conversation {
 		id: string;
@@ -38,7 +47,12 @@
 		messages: ChatMsg[];
 		active_leaf_id: string | null;
 	}
-	type DisplayMessage = ChatMsg & { streaming?: boolean };
+	type DisplayMessage = ChatMsg & {
+		streaming?: boolean;
+		metrics?: StreamMetrics | null;
+		toolItems?: ToolActivityItem[];
+		reasoning?: string | null;
+	};
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -58,6 +72,10 @@
 	let tempMessages = $state<DisplayMessage[]>([]);
 	let treeLoading = $state(false); // 분기/재생성 대상 전환 등 트리 재조회 중
 	let usage = $state<ChatUsage | null>(null);
+	// 생성 속도(tok/s)는 저장하지 않는 런타임 계측값 — 이번 세션 동안 메시지 id 로 유지한다.
+	// done 후 loadMessages 로 낙관적 draft 가 권위 메시지로 교체되면 새 리프 id 에 재부착한다.
+	// SvelteMap: 일반 Map 은 $state 로 감싸도 .set() 이 반응성을 트리거하지 않는다(svelte/reactivity 필요).
+	const metricsById = new SvelteMap<string, StreamMetrics>();
 
 	// 에이전트: 바인딩은 클라이언트 상태(대화 객체에 저장되지 않음). 바인딩 중엔 에이전트가 모델을 소유.
 	let agents = $state<Agent[]>([]);
@@ -70,6 +88,18 @@
 	let workspaces = $state<Workspace[]>([]);
 	let view = $state<'chat' | 'projects'>('chat');
 	let settingsOpen = $state(false);
+	let sourcesOpen = $state(false);
+	// 사이드바 접기/펼치기 (데스크톱 토글 · 모바일 드로어). 모바일은 기본 접힘.
+	let sidebarOpen = $state(true);
+	function toggleSidebar() {
+		sidebarOpen = !sidebarOpen;
+	}
+	function isMobile(): boolean {
+		return typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+	}
+	function closeSidebarOnMobile() {
+		if (isMobile()) sidebarOpen = false;
+	}
 	// "이 프로젝트에서 새 채팅" → 다음 생성되는 대화를 이 프로젝트에 배정한다(생성 시 소비).
 	let pendingWorkspaceId = $state<number | null>(null);
 
@@ -88,6 +118,8 @@
 	});
 	const isEmpty = $derived(displayPath.length === 0);
 	const siblingSource = $derived(tempMode || stream ? [] : allMessages);
+	// 대화 전체 출처(중복 제거) — 헤더 "출처" 버튼 + 패널 공유
+	const allCitations = $derived(aggregateCitations(displayPath));
 
 	function tempId(): string {
 		return `tmp-${tmpSeq++}`;
@@ -101,7 +133,9 @@
 			content: '',
 			model_name: model,
 			created_at: null,
-			streaming: true
+			streaming: true,
+			toolItems: [],
+			reasoning: ''
 		};
 	}
 
@@ -258,6 +292,8 @@
 		view = 'chat';
 		pendingWorkspaceId = null;
 		tempMode = false;
+		closeSidebarOnMobile();
+		metricsById.clear(); // 런타임 tok/s 계측값은 대화 전환 시 초기화(누적 방지)
 		activeConvId = conv.id;
 		if (conv.model_name) selectedModel = conv.model_name;
 		error = null;
@@ -272,6 +308,8 @@
 		view = 'chat';
 		pendingWorkspaceId = null;
 		tempMode = false;
+		closeSidebarOnMobile();
+		metricsById.clear();
 		activeConvId = null;
 		allMessages = [];
 		activeLeafId = null;
@@ -282,6 +320,7 @@
 		if (streaming) return;
 		view = 'chat';
 		pendingWorkspaceId = null;
+		closeSidebarOnMobile();
 		tempMode = true;
 		activeConvId = null;
 		allMessages = [];
@@ -331,27 +370,88 @@
 		path: string,
 		body: unknown,
 		draft: DisplayMessage,
-		onDone: (evt: Extract<ChatStreamEvent, { type: 'done' }>) => Promise<void> | void
+		onDone: (
+			evt: Extract<ChatStreamEvent, { type: 'done' }>,
+			metrics: StreamMetrics | null
+		) => Promise<void> | void
 	) {
 		abortCtrl = new AbortController();
+		// tok/s 계측: 첫 토큰 도착 시각(performance.now) + 누적 문자 수(라이브 근사).
+		let firstTokenMs: number | null = null;
+		let charCount = 0;
 		try {
 			for await (const evt of streamChat(path, body, {
 				token,
 				projectId,
 				signal: abortCtrl.signal
 			})) {
-				if (evt.type === 'token') {
+				if (evt.type === 'reasoning') {
+					// 추론 델타 누적(저장 안 함, 라이브 노출)
+					draft.reasoning = (draft.reasoning ?? '') + evt.text;
+				} else if (evt.type === 'token') {
 					toolActivity = null;
+					if (firstTokenMs === null) firstTokenMs = performance.now();
+					charCount += evt.text.length;
 					draft.content += evt.text;
+					// 라이브 근사치(문자→토큰) 갱신 — 완료 시 done 의 정확한 토큰으로 대체.
+					draft.metrics = computeMetrics(
+						estimateTokens(charCount),
+						firstTokenMs,
+						performance.now(),
+						true
+					);
 				} else if (evt.type === 'tool_call') {
 					toolActivity = evt.name;
+				} else if (evt.type === 'tool_calls') {
+					// 도구 호출(인자) → 실행 중 카드 추가
+					const items = draft.toolItems ?? [];
+					for (const c of evt.calls) {
+						items.push({
+							id: c.id ?? null,
+							name: c.name,
+							args: c.args ?? null,
+							result: null,
+							running: true
+						});
+					}
+					draft.toolItems = items;
+				} else if (evt.type === 'tool_result') {
+					// 결과 → 매칭 카드 채우기(id 우선, 없으면 실행 중 동명 카드)
+					const items = draft.toolItems ?? [];
+					let target = evt.tool_call_id
+						? items.find((t) => t.id && t.id === evt.tool_call_id)
+						: undefined;
+					if (!target) target = items.find((t) => t.running && t.name === evt.name);
+					if (target) {
+						target.result = evt.content;
+						target.running = false;
+					} else {
+						items.push({
+							id: evt.tool_call_id ?? null,
+							name: evt.name,
+							args: null,
+							result: evt.content,
+							running: false
+						});
+					}
+					draft.toolItems = items;
+					toolActivity = null;
+				} else if (evt.type === 'citations') {
+					// 출처 — 저장/재로딩과 동일 필드(message.citations)에 실어 하단·패널이 공유
+					draft.citations = evt.items;
 				} else if (evt.type === 'error') {
 					error = evt.message || '모델 응답 중 오류가 발생했습니다';
 					endStream();
 					return;
 				} else if (evt.type === 'done') {
 					draft.streaming = false;
-					await onDone(evt);
+					// 확정 tok/s: done 이 준 completion_tokens 로 재계산(없으면 근사 유지).
+					const finalMetrics =
+						evt.completion_tokens != null
+							? computeMetrics(evt.completion_tokens, firstTokenMs, performance.now(), false)
+							: draft.metrics ?? null;
+					draft.metrics = finalMetrics;
+					await onDone(evt, finalMetrics);
 					endStream();
 					return;
 				}
@@ -419,8 +519,10 @@
 			`/api/v1/chat/conversations/${convId}/completions`,
 			{ message: text, model: selectedModel, agent_id: activeAgent?.id },
 			live,
-			async () => {
+			async (_evt, metrics) => {
 				await loadMessages(convId!);
+				// 권위 트리 로드 후 새 assistant 리프(activeLeafId)에 계측값 재부착.
+				if (metrics && activeLeafId) metricsById.set(activeLeafId, metrics);
 				void loadConversations();
 				void loadUsage();
 			}
@@ -447,9 +549,9 @@
 			'/api/v1/chat/temp-completions',
 			{ messages: payload, model: selectedModel },
 			live,
-			() => {
-				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정
-				tempMessages = [...history, { ...live, streaming: false }];
+			(_evt, metrics) => {
+				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정(계측값 포함)
+				tempMessages = [...history, { ...live, streaming: false, metrics }];
 				void loadUsage();
 			}
 		);
@@ -469,8 +571,9 @@
 			`/api/v1/chat/conversations/${activeConvId}/messages/${messageId}/regenerate`,
 			{ model: modelName || undefined, agent_id: activeAgent?.id },
 			live,
-			async () => {
+			async (_evt, metrics) => {
 				await loadMessages(activeConvId!);
+				if (metrics && activeLeafId) metricsById.set(activeLeafId, metrics);
 				void loadConversations();
 				void loadUsage();
 			}
@@ -540,6 +643,13 @@
 		void navigator.clipboard?.writeText(text);
 	}
 
+	// 최초 1회: 모바일이면 사이드바를 접은 상태로 시작(본문 우선 표시)
+	$effect(() => {
+		untrack(() => {
+			if (isMobile()) sidebarOpen = false;
+		});
+	});
+
 	// 최초 로드
 	$effect(() => {
 		void [token, projectId];
@@ -559,6 +669,7 @@
 		{workspaces}
 		{activeConvId}
 		{tempMode}
+		open={sidebarOpen}
 		busy={streaming}
 		onSelect={selectConversation}
 		onNew={newConversation}
@@ -569,6 +680,15 @@
 		onWorkspaces={() => (view = 'projects')}
 		onSettings={() => (settingsOpen = true)}
 	/>
+
+	<!-- 모바일 드로어 백드롭: 열렸을 때만 본문을 덮어 탭하면 닫힘 -->
+	<button
+		type="button"
+		class="sidebar-backdrop"
+		class:show={sidebarOpen}
+		aria-label="사이드바 닫기"
+		onclick={() => (sidebarOpen = false)}
+	></button>
 
 	<section class="main">
 		{#if view === 'projects'}
@@ -585,6 +705,9 @@
 		{:else}
 			<header class="head">
 			<div class="head-left">
+				<button type="button" class="sidebar-toggle" onclick={toggleSidebar} aria-label={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'} aria-expanded={sidebarOpen} title={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'}>
+					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round" /></svg>
+				</button>
 				<div class="head-title">
 					{#if tempMode}
 						임시 채팅
@@ -618,6 +741,12 @@
 				{/if}
 			</div>
 			<div class="head-right">
+					{#if allCitations.length}
+						<button type="button" class="sources-btn" onclick={() => (sourcesOpen = true)} title="이 대화의 출처 보기">
+							<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							출처 {allCitations.length}
+						</button>
+					{/if}
 				{#if usage}
 					<ChatUsageWidget {usage} />
 				{/if}
@@ -627,6 +756,7 @@
 		<ChatWindow
 			activePath={displayPath}
 			allMessages={siblingSource}
+			{metricsById}
 			{models}
 			busy={streaming}
 			loading={treeLoading}
@@ -654,6 +784,7 @@
 />
 <AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
 <ChatSettingsOverlay open={settingsOpen} onClose={() => (settingsOpen = false)} {usage} />
+<ChatSourcesPanel open={sourcesOpen} citations={allCitations} onClose={() => (sourcesOpen = false)} />
 
 <style>
 	.chat-shell {
@@ -662,6 +793,45 @@
 		width: 100%;
 		overflow: hidden;
 		background: var(--color-surface-base);
+		position: relative; /* 모바일 드로어 사이드바·백드롭 기준 */
+	}
+	.sidebar-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		width: 2rem;
+		height: 2rem;
+		margin-right: 0.4rem;
+		border: none;
+		border-radius: 0.45rem;
+		background: transparent;
+		color: var(--color-ink-2);
+		cursor: pointer;
+		transition: background 0.12s, color 0.12s;
+	}
+	.sidebar-toggle:hover {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+	.sidebar-backdrop {
+		display: none;
+		position: absolute;
+		inset: 0;
+		z-index: 39;
+		border: none;
+		padding: 0;
+		background: color-mix(in oklab, var(--color-ink-0) 40%, transparent);
+		opacity: 0;
+		transition: opacity 0.2s ease;
+		cursor: pointer;
+	}
+	/* 백드롭은 모바일에서 사이드바가 열렸을 때만 */
+	@media (max-width: 768px) {
+		.sidebar-backdrop.show {
+			display: block;
+			opacity: 1;
+		}
 	}
 	.main {
 		display: flex;
@@ -680,6 +850,8 @@
 		background: var(--color-surface-base);
 	}
 	.head-left {
+		display: flex;
+		align-items: center;
 		min-width: 0;
 	}
 	.head-center {
@@ -701,8 +873,28 @@
 	}
 	.head-right {
 		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		justify-content: flex-end;
 		min-width: 0;
+	}
+	.sources-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.3rem 0.6rem;
+		border-radius: 0.5rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-raised);
+		color: var(--color-ink-2);
+		font-size: 0.72rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.sources-btn:hover {
+		border-color: var(--color-accent);
+		color: var(--color-ink-0);
 	}
 	.head-title {
 		font-size: 0.9rem;

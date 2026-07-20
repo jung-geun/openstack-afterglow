@@ -65,6 +65,8 @@ class LlmModel(Base):
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
     # 대화 제목 자동 요약에 쓸 모델. 앱 레벨에서 최대 1개만 True 로 유지(set_title_model).
     is_title_model: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    # 채팅 완료 후 사용자 메모리 자동 추출에 쓸 초소형 모델. 최대 1개만 True(set_memory_model).
+    is_memory_model: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     # 미지정 시 litellm 내장 단가 사용 (override용). 토큰당 USD 단가.
     input_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
     output_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
@@ -72,6 +74,10 @@ class LlmModel(Base):
     models_dev_model_id: Mapped[str | None] = mapped_column(VARCHAR(190))
     price_source: Mapped[str | None] = mapped_column(VARCHAR(20))
     price_metadata: Mapped[dict | None] = mapped_column(JSON)
+    # 능력(vision/reasoning/tool_call/attachment/modalities/reasoning_options/context_limit) 저장.
+    # None 이면 런타임 litellm 판별로 fallback. capability_source: override|models_dev|None.
+    capabilities: Mapped[dict | None] = mapped_column(JSON)
+    capability_source: Mapped[str | None] = mapped_column(VARCHAR(20))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -129,6 +135,10 @@ class ChatMessage(Base):
     content: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     # 툴 호출 기록(JSON)을 직렬화 후 암호화한 문자열. 평문 JSON 컬럼이 아님(암호화 도입).
     tool_calls: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    # 답변 출처(citations) JSON([{url,title,snippet}])을 직렬화 후 암호화한 문자열. content 와 동일 도메인.
+    citations: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    # 추론(thinking) 텍스트를 암호화한 문자열(JSON 아님). 재로딩 시 추론 과정 표시용.
+    reasoning: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     token_prompt: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     token_completion: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     # 재생성 시 어떤 모델로 생성했는지(형제 버전 구분·표시용). 미지정 시 대화 기본 모델.

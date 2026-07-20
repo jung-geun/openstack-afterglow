@@ -21,26 +21,35 @@ class AvailableModel(BaseModel):
     model_name: str
     display_name: str
     provider: str | None = None
+    # 유효 능력(vision/reasoning/tool_call/attachment/modalities/reasoning_options/context_limit).
+    # 키·가격은 미포함이지만 능력은 배지·게이팅용으로 노출.
+    capabilities: dict | None = None
+    context_limit: int | None = None
 
     model_config = {"protected_namespaces": ()}
 
 
 @router.get("/models", response_model=list[AvailableModel])
 async def list_available_models(token_info: dict = Depends(get_token_info)):
-    """사용자용 활성 모델 카탈로그(키·가격 미포함, provider명 포함). 저장소 장애 시 빈 목록(graceful)."""
+    """사용자용 활성 모델 카탈로그(키·가격 미포함, provider명·능력 포함). 저장소 장애 시 빈 목록(graceful)."""
     try:
         models = await provider_store.list_models(active_only=True)
         providers = {p["id"]: p["name"] for p in await provider_store.list_providers()}
     except provider_store.ChatStorageUnavailable:
         return []
-    return [
-        {
-            "model_name": m["model_name"],
-            "display_name": m.get("display_name") or m["model_name"],
-            "provider": providers.get(m["provider_id"]),
-        }
-        for m in models
-    ]
+    result = []
+    for m in models:
+        caps = m.get("effective_capabilities") or {}
+        result.append(
+            {
+                "model_name": m["model_name"],
+                "display_name": m.get("display_name") or m["model_name"],
+                "provider": providers.get(m["provider_id"]),
+                "capabilities": caps or None,
+                "context_limit": caps.get("context_limit") if isinstance(caps, dict) else None,
+            }
+        )
+    return result
 
 
 class ConversationCreateRequest(BaseModel):
