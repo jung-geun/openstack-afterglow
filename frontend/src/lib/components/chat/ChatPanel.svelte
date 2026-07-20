@@ -12,6 +12,7 @@
 		type ChatMessage as ChatMsg
 	} from '$lib/api/chatTree';
 	import type { Agent } from '$lib/api/chatAgents';
+	import type { Workspace } from '$lib/api/chatWorkspaces';
 	import ChatSidebar from './ChatSidebar.svelte';
 	import ChatWindow from './ChatWindow.svelte';
 	import ChatInput from './ChatInput.svelte';
@@ -20,11 +21,14 @@
 	import AgentPicker from './AgentPicker.svelte';
 	import AgentManagerModal from './AgentManagerModal.svelte';
 	import AgentHubModal from './AgentHubModal.svelte';
+	import WorkspaceManagerModal from './WorkspaceManagerModal.svelte';
+	import MemoryManagerModal from './MemoryManagerModal.svelte';
 
 	interface Conversation {
 		id: string;
 		title: string | null;
 		model_name: string | null;
+		workspace_id: number | null;
 		active_leaf_id?: string | null;
 		updated_at: string | null;
 	}
@@ -59,6 +63,11 @@
 	let agentManagerOpen = $state(false);
 	let agentHubOpen = $state(false);
 	const modelLocked = $derived(activeAgent !== null);
+
+	// 프로젝트(workspace) · 메모리 관리
+	let workspaces = $state<Workspace[]>([]);
+	let workspaceManagerOpen = $state(false);
+	let memoryManagerOpen = $state(false);
 
 	// 스트리밍 중 화면에 얹는 낙관적 상태
 	let stream = $state<{ base: DisplayMessage[]; assistant: DisplayMessage } | null>(null);
@@ -150,6 +159,38 @@
 			}
 		} catch {
 			/* 에이전트 로드 실패는 채팅 자체를 막지 않음 */
+		}
+	}
+
+	async function loadWorkspaces() {
+		if (!token || !projectId) return;
+		try {
+			workspaces = await api.get<Workspace[]>('/api/v1/chat/workspaces', token, projectId);
+		} catch {
+			/* 프로젝트 로드 실패는 채팅 자체를 막지 않음 */
+		}
+	}
+
+	// 대화를 프로젝트에 배정/해제하고 로컬 목록을 낙관적으로 갱신(사이드바 재그룹핑).
+	async function assignWorkspace(conv: Conversation, workspaceId: number | null) {
+		if (!token || !projectId || conv.workspace_id === workspaceId) return;
+		const prev = conv.workspace_id;
+		conversations = conversations.map((c) =>
+			c.id === conv.id ? { ...c, workspace_id: workspaceId } : c
+		);
+		try {
+			await api.patch(
+				`/api/v1/chat/conversations/${conv.id}/workspace`,
+				{ workspace_id: workspaceId },
+				token,
+				projectId
+			);
+		} catch (e) {
+			// 실패 시 롤백
+			conversations = conversations.map((c) =>
+				c.id === conv.id ? { ...c, workspace_id: prev } : c
+			);
+			error = e instanceof Error ? e.message : '프로젝트 배정에 실패했습니다';
 		}
 	}
 
@@ -438,6 +479,7 @@
 			void loadModels();
 			void loadUsage();
 			void loadAgents();
+			void loadWorkspaces();
 		});
 	});
 </script>
@@ -445,6 +487,7 @@
 <div class="chat-shell">
 	<ChatSidebar
 		{conversations}
+		{workspaces}
 		{activeConvId}
 		{tempMode}
 		busy={streaming}
@@ -452,7 +495,10 @@
 		onNew={newConversation}
 		onTempChat={startTempChat}
 		onDelete={deleteConversation}
+		onAssign={assignWorkspace}
 		onAgents={() => (agentManagerOpen = true)}
+		onWorkspaces={() => (workspaceManagerOpen = true)}
+		onMemories={() => (memoryManagerOpen = true)}
 	/>
 
 	<section class="main">
@@ -525,6 +571,12 @@
 	onChanged={loadAgents}
 />
 <AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
+<WorkspaceManagerModal
+	open={workspaceManagerOpen}
+	onClose={() => (workspaceManagerOpen = false)}
+	onChanged={loadWorkspaces}
+/>
+<MemoryManagerModal open={memoryManagerOpen} onClose={() => (memoryManagerOpen = false)} />
 
 <style>
 	.chat-shell {
