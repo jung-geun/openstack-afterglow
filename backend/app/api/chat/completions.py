@@ -19,6 +19,7 @@ from starlette.background import BackgroundTask
 
 from app.api.deps import get_token_info
 from app.config import get_settings
+from app.services.chat import agent_store as ags
 from app.services.chat import conversation_store as cs
 from app.services.chat import credit, engine, litellm_client, title_summary
 from app.services.chat import provider_store as ps
@@ -33,6 +34,7 @@ _MAX_MESSAGE_CHARS = 32000
 class CompletionRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=_MAX_MESSAGE_CHARS)
     model: str | None = Field(default=None, max_length=190)
+    agent_id: int | None = Field(default=None)  # 에이전트 바인딩(instructions·모델·파라미터)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
 
@@ -41,6 +43,7 @@ class CompletionRequest(BaseModel):
 
 class RegenerateRequest(BaseModel):
     model: str | None = Field(default=None, max_length=190)
+    agent_id: int | None = Field(default=None)
     max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
     temperature: float | None = Field(default=None, ge=0, le=2)
 
@@ -101,6 +104,37 @@ async def _resolve_model(model_name: str) -> dict:
     if resolved is None:
         raise HTTPException(status_code=400, detail=f"허용되지 않은 모델입니다: {model_name}")
     return resolved
+
+
+async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
+    """agent_id 가 주어지면 실행 설정(instructions·model·params) 로드. 접근 불가/미존재 시 404."""
+    if agent_id is None:
+        return None
+    try:
+        agent = await ags.get_agent_for_run(agent_id, user_id=user_id)
+    except ags.ChatStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if agent is None:
+        raise HTTPException(status_code=404, detail="에이전트를 찾을 수 없거나 접근 권한이 없습니다")
+    return agent
+
+
+def _apply_agent(agent: dict | None, input_messages: list[dict], temperature, max_tokens_req):
+    """에이전트 바인딩 적용 — instructions 를 system 으로 선주입 + params 기본값 채움.
+
+    시스템 메시지는 런타임 주입일 뿐 chat_messages 에는 저장하지 않는다(활성 경로 불변).
+    반환: (messages, temperature, max_tokens_req)
+    """
+    if not agent:
+        return input_messages, temperature, max_tokens_req
+    if agent.get("instructions"):
+        input_messages = [{"role": "system", "content": agent["instructions"]}, *input_messages]
+    params = agent.get("params") or {}
+    if temperature is None:
+        temperature = params.get("temperature")
+    if max_tokens_req is None:
+        max_tokens_req = params.get("max_tokens")
+    return input_messages, temperature, max_tokens_req
 
 
 async def _stream_and_persist(
@@ -237,7 +271,10 @@ async def create_completion(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     conv = await _load_owned_conv(conversation_id, user_id)
-    model_name = payload.model or conv.get("model_name") or settings.chat_default_model
+    agent = await _resolve_agent(payload.agent_id, user_id)
+    model_name = (
+        payload.model or (agent or {}).get("model_name") or conv.get("model_name") or settings.chat_default_model
+    )
     resolved = await _resolve_model(model_name)
 
     # 활성 경로 로드 + user 메시지 저장(parent=active_leaf, 새 리프)
@@ -250,7 +287,10 @@ async def create_completion(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     input_messages = _model_input(path["messages"], extra_user=payload.message)
-    max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+    input_messages, temperature, max_tokens_req = _apply_agent(
+        agent, input_messages, payload.temperature, payload.max_tokens
+    )
+    max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
     gen = _stream_and_persist(
         conversation_id=conversation_id,
@@ -261,7 +301,7 @@ async def create_completion(
         input_messages=input_messages,
         start_parent_id=user_msg["id"],
         max_tokens=max_tokens,
-        temperature=payload.temperature,
+        temperature=temperature,
     )
     title_task = BackgroundTask(
         title_summary.generate_title_if_absent, conversation_id=conversation_id, project_id=project_id, user_id=user_id
@@ -299,7 +339,10 @@ async def regenerate_message(
     if turn_user is None:
         raise HTTPException(status_code=400, detail="재생성할 사용자 턴을 찾을 수 없습니다")
 
-    model_name = payload.model or conv.get("model_name") or settings.chat_default_model
+    agent = await _resolve_agent(payload.agent_id, user_id)
+    model_name = (
+        payload.model or (agent or {}).get("model_name") or conv.get("model_name") or settings.chat_default_model
+    )
     resolved = await _resolve_model(model_name)
 
     try:
@@ -308,7 +351,10 @@ async def regenerate_message(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     input_messages = _model_input(path_msgs)  # 경로 마지막이 turn_user(role=user)
-    max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
+    input_messages, temperature, max_tokens_req = _apply_agent(
+        agent, input_messages, payload.temperature, payload.max_tokens
+    )
+    max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
 
     gen = _stream_and_persist(
         conversation_id=conversation_id,
@@ -319,7 +365,7 @@ async def regenerate_message(
         input_messages=input_messages,
         start_parent_id=turn_user["id"],
         max_tokens=max_tokens,
-        temperature=payload.temperature,
+        temperature=temperature,
     )
     return StreamingResponse(gen, media_type="text/event-stream")
 

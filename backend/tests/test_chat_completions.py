@@ -7,6 +7,7 @@ DB/네트워크 없이 credit·conversation_store·provider_store·engine 을 mo
 
 from decimal import Decimal
 
+from app.services.chat import agent_store as ags
 from app.services.chat import conversation_store as cs
 from app.services.chat import credit, engine
 from app.services.chat import provider_store as ps
@@ -389,3 +390,73 @@ class TestTempChat:
     async def test_temp_rejects_tool_role(self, client):
         resp = await client.post(self._URL, json={"messages": [{"role": "tool", "content": "x"}]})
         assert resp.status_code == 422  # role 화이트리스트(user|assistant|system) 위반
+
+
+class TestAgentBinding:
+    async def test_agent_injects_system_and_uses_model_params(self, client, monkeypatch):
+        """agent_id 바인딩: instructions system 선주입 + 에이전트 모델·temperature 적용."""
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()  # 대화 자체 모델 없음
+
+        async def fake_path(conv_id, **kwargs):
+            return {"messages": [], "active_leaf_id": None}
+
+        async def fake_add(conv_id, **kwargs):
+            return {"id": 1}
+
+        async def fake_resolve(model_name):
+            return _resolved(model_name=model_name, provider_name="openai")
+
+        async def fake_agent(agent_id, **kwargs):
+            return {
+                "id": agent_id,
+                "instructions": "너는 해적처럼 말한다",
+                "model_name": "gpt-4o",
+                "params": {"temperature": 0.9},
+                "mcp_ids": [],
+                "tool_ids": [],
+            }
+
+        seen = {}
+
+        async def fake_stream(**kwargs):
+            seen["messages"] = kwargs.get("messages")
+            seen["model"] = kwargs.get("model")
+            seen["temperature"] = kwargs.get("temperature")
+            yield {"type": "token", "text": "아르"}
+            yield {"type": "usage", "usage": None}
+
+        async def fake_apply(**kwargs):
+            return Decimal("1")
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(cs, "get_active_path", fake_path)
+        monkeypatch.setattr(cs, "add_message", fake_add)
+        monkeypatch.setattr(ps, "resolve_model", fake_resolve)
+        monkeypatch.setattr(ags, "get_agent_for_run", fake_agent)
+        monkeypatch.setattr(engine, "stream", fake_stream)
+        monkeypatch.setattr(credit, "apply_usage", fake_apply)
+
+        resp = await client.post(f"{_BASE}/c1/completions", json={"message": "안녕", "agent_id": 7})
+        assert resp.status_code == 200
+        # 에이전트 instructions 가 system 으로 맨 앞에 주입
+        assert seen["messages"][0] == {"role": "system", "content": "너는 해적처럼 말한다"}
+        # 에이전트 모델 + params.temperature 적용(요청에 미지정 시)
+        assert seen["model"] == "gpt-4o"
+        assert seen["temperature"] == 0.9
+
+    async def test_agent_not_accessible_404(self, client, monkeypatch):
+        monkeypatch.setattr(credit, "precheck", _ok_precheck)
+
+        async def fake_get(conv_id, **kwargs):
+            return _conv()
+
+        async def fake_agent(agent_id, **kwargs):
+            return None  # 미존재/접근 불가
+
+        monkeypatch.setattr(cs, "get_conversation", fake_get)
+        monkeypatch.setattr(ags, "get_agent_for_run", fake_agent)
+        resp = await client.post(f"{_BASE}/c1/completions", json={"message": "hi", "agent_id": 999})
+        assert resp.status_code == 404
