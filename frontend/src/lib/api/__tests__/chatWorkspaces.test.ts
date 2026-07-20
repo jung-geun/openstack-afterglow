@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildWorkspacePayload,
+	countConversationsInWorkspace,
 	emptyWorkspaceForm,
 	workspaceToForm,
+	type ConversationRef,
 	type Workspace
 } from '../chatWorkspaces';
 
@@ -64,5 +66,28 @@ describe('workspaceToForm', () => {
 		const form = workspaceToForm({ ...base, description: null, instructions: null });
 		expect(form.description).toBe('');
 		expect(form.instructions).toBe('');
+	});
+});
+
+describe('countConversationsInWorkspace', () => {
+	const convs: ConversationRef[] = [
+		{ workspace_id: 1 },
+		{ workspace_id: 1 },
+		{ workspace_id: 2 },
+		{ workspace_id: null }
+	];
+
+	it('해당 프로젝트에 소속된 대화만 센다', () => {
+		expect(countConversationsInWorkspace(convs, 1)).toBe(2);
+		expect(countConversationsInWorkspace(convs, 2)).toBe(1);
+	});
+
+	it('소속 대화가 없으면 0', () => {
+		expect(countConversationsInWorkspace(convs, 99)).toBe(0);
+		expect(countConversationsInWorkspace([], 1)).toBe(0);
+	});
+
+	it('미분류(null)는 어떤 프로젝트에도 포함되지 않는다', () => {
+		expect(countConversationsInWorkspace([{ workspace_id: null }], 1)).toBe(0);
 	});
 });

@@ -72,3 +72,19 @@ export interface Memory {
 	created_at?: string | null;
 	updated_at?: string | null;
 }
+
+/** 대화 수 계산에 필요한 최소 형태(workspace_id 만 참조). */
+export interface ConversationRef {
+	workspace_id: number | null;
+}
+
+/**
+ * 특정 프로젝트에 소속된 대화 수. `c.workspace_id === workspaceId` 인 대화만 센다.
+ * (프로젝트 카드/상세의 "소속 대화 수" 배지에 사용.)
+ */
+export function countConversationsInWorkspace(
+	conversations: ConversationRef[],
+	workspaceId: number
+): number {
+	return conversations.filter((c) => c.workspace_id === workspaceId).length;
+}

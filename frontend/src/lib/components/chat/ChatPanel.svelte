@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
-	import { api } from '$lib/api/client';
+	import { api, ApiError } from '$lib/api/client';
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
+	import { toast } from '$lib/stores/toast';
 	import { streamChat, type ChatStreamEvent } from '$lib/api/chatStream';
 	import {
 		buildActivePath,
@@ -12,7 +14,7 @@
 		type ChatMessage as ChatMsg
 	} from '$lib/api/chatTree';
 	import type { Agent } from '$lib/api/chatAgents';
-	import type { Workspace } from '$lib/api/chatWorkspaces';
+	import type { Workspace, WorkspacePayload } from '$lib/api/chatWorkspaces';
 	import ChatSidebar from './ChatSidebar.svelte';
 	import ChatWindow from './ChatWindow.svelte';
 	import ChatInput from './ChatInput.svelte';
@@ -21,8 +23,8 @@
 	import AgentPicker from './AgentPicker.svelte';
 	import AgentManagerModal from './AgentManagerModal.svelte';
 	import AgentHubModal from './AgentHubModal.svelte';
-	import WorkspaceManagerModal from './WorkspaceManagerModal.svelte';
-	import MemoryManagerModal from './MemoryManagerModal.svelte';
+	import ChatProjectsView from './ChatProjectsView.svelte';
+	import ChatSettingsOverlay from './ChatSettingsOverlay.svelte';
 
 	interface Conversation {
 		id: string;
@@ -64,10 +66,12 @@
 	let agentHubOpen = $state(false);
 	const modelLocked = $derived(activeAgent !== null);
 
-	// 프로젝트(workspace) · 메모리 관리
+	// 프로젝트(workspace) 관리 · 설정 오버레이
 	let workspaces = $state<Workspace[]>([]);
-	let workspaceManagerOpen = $state(false);
-	let memoryManagerOpen = $state(false);
+	let view = $state<'chat' | 'projects'>('chat');
+	let settingsOpen = $state(false);
+	// "이 프로젝트에서 새 채팅" → 다음 생성되는 대화를 이 프로젝트에 배정한다(생성 시 소비).
+	let pendingWorkspaceId = $state<number | null>(null);
 
 	// 스트리밍 중 화면에 얹는 낙관적 상태
 	let stream = $state<{ base: DisplayMessage[]; assistant: DisplayMessage } | null>(null);
@@ -171,6 +175,49 @@
 		}
 	}
 
+	// --- 프로젝트(workspace) CRUD (프로젝트 뷰에서 호출) ---
+	async function createWorkspace(payload: WorkspacePayload) {
+		if (!token || !projectId) return;
+		try {
+			await api.post('/api/v1/chat/workspaces', payload, token, projectId);
+			await loadWorkspaces();
+			toast.success('프로젝트를 생성했습니다');
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '저장에 실패했습니다');
+		}
+	}
+	async function updateWorkspace(id: number, payload: WorkspacePayload) {
+		if (!token || !projectId) return;
+		try {
+			await api.patch(`/api/v1/chat/workspaces/${id}`, payload, token, projectId);
+			await loadWorkspaces();
+			toast.success('프로젝트를 수정했습니다');
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '저장에 실패했습니다');
+		}
+	}
+	async function deleteWorkspace(w: Workspace): Promise<boolean> {
+		if (!token || !projectId) return false;
+		if (!(await confirmDialog(`'${w.name}' 프로젝트를 삭제하시겠습니까? 대화는 미분류로 이동합니다.`)))
+			return false;
+		try {
+			await api.delete(`/api/v1/chat/workspaces/${w.id}`, token, projectId);
+			await loadWorkspaces();
+			await loadConversations();
+			toast.success('삭제했습니다');
+			return true;
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '삭제에 실패했습니다');
+			return false;
+		}
+	}
+
+	// 프로젝트 뷰에서 "이 프로젝트에서 새 채팅": 빈 대화로 초기화한 뒤 배정 대상만 예약.
+	function newInProject(workspaceId: number) {
+		newConversation(); // pending 초기화 + 뷰를 'chat'으로 복귀
+		pendingWorkspaceId = workspaceId; // reset 이후에 설정해야 유실되지 않음
+	}
+
 	// 대화를 프로젝트에 배정/해제하고 로컬 목록을 낙관적으로 갱신(사이드바 재그룹핑).
 	async function assignWorkspace(conv: Conversation, workspaceId: number | null) {
 		if (!token || !projectId || conv.workspace_id === workspaceId) return;
@@ -208,6 +255,8 @@
 	// --- 대화 선택/생성 ---
 	async function selectConversation(conv: Conversation) {
 		if (streaming) return;
+		view = 'chat';
+		pendingWorkspaceId = null;
 		tempMode = false;
 		activeConvId = conv.id;
 		if (conv.model_name) selectedModel = conv.model_name;
@@ -220,6 +269,8 @@
 	}
 	function newConversation() {
 		if (streaming) return;
+		view = 'chat';
+		pendingWorkspaceId = null;
 		tempMode = false;
 		activeConvId = null;
 		allMessages = [];
@@ -229,6 +280,8 @@
 	}
 	function startTempChat() {
 		if (streaming) return;
+		view = 'chat';
+		pendingWorkspaceId = null;
 		tempMode = true;
 		activeConvId = null;
 		allMessages = [];
@@ -245,6 +298,22 @@
 			token,
 			projectId
 		);
+		// "이 프로젝트에서 새 채팅"으로 예약된 배정을 여기서 1회 소비한다.
+		const wsId = pendingWorkspaceId;
+		pendingWorkspaceId = null;
+		if (wsId !== null) {
+			try {
+				await api.patch(
+					`/api/v1/chat/conversations/${conv.id}/workspace`,
+					{ workspace_id: wsId },
+					token,
+					projectId
+				);
+				conv.workspace_id = wsId;
+			} catch {
+				/* 배정 실패는 대화 생성 자체를 막지 않음 */
+			}
+		}
 		activeConvId = conv.id;
 		conversations = [conv, ...conversations];
 		return conv.id;
@@ -497,12 +566,24 @@
 		onDelete={deleteConversation}
 		onAssign={assignWorkspace}
 		onAgents={() => (agentManagerOpen = true)}
-		onWorkspaces={() => (workspaceManagerOpen = true)}
-		onMemories={() => (memoryManagerOpen = true)}
+		onWorkspaces={() => (view = 'projects')}
+		onSettings={() => (settingsOpen = true)}
 	/>
 
 	<section class="main">
-		<header class="head">
+		{#if view === 'projects'}
+			<ChatProjectsView
+				{conversations}
+				{workspaces}
+				onCreate={createWorkspace}
+				onUpdate={updateWorkspace}
+				onDelete={deleteWorkspace}
+				onAssign={assignWorkspace}
+				onOpenConversation={selectConversation}
+				onNewInProject={newInProject}
+			/>
+		{:else}
+			<header class="head">
 			<div class="head-left">
 				<div class="head-title">
 					{#if tempMode}
@@ -561,6 +642,7 @@
 		/>
 
 		<ChatInput bind:value={input} {streaming} onSend={send} onStop={stop} />
+		{/if}
 	</section>
 </div>
 
@@ -571,12 +653,7 @@
 	onChanged={loadAgents}
 />
 <AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
-<WorkspaceManagerModal
-	open={workspaceManagerOpen}
-	onClose={() => (workspaceManagerOpen = false)}
-	onChanged={loadWorkspaces}
-/>
-<MemoryManagerModal open={memoryManagerOpen} onClose={() => (memoryManagerOpen = false)} />
+<ChatSettingsOverlay open={settingsOpen} onClose={() => (settingsOpen = false)} {usage} />
 
 <style>
 	.chat-shell {
