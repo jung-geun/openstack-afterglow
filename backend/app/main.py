@@ -335,6 +335,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/providers", "llm_provider"),
     ("/api/v1/chat/admin/title-model", "llm_model"),
+    ("/api/v1/chat/admin/memory-model", "llm_model"),
     ("/api/v1/chat/admin/models", "llm_model"),
     ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),

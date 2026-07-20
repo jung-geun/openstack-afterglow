@@ -178,6 +178,14 @@ class TitleModelRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
 
+class MemoryModelRequest(BaseModel):
+    """채팅 후 사용자 메모리 자동 추출에 쓸 초소형 모델 지정. model_id=None 이면 해제."""
+
+    model_id: int | None = None
+
+    model_config = {"protected_namespaces": ()}
+
+
 def _map_storage(exc: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail=str(exc))
 
@@ -300,6 +308,17 @@ async def set_title_model(payload: TitleModelRequest):
     """대화 제목 자동 요약에 쓸 모델 1개를 지정(또는 해제). 요약 호출 비용은 시스템 부담."""
     try:
         await ps.set_title_model(payload.model_id)
+    except ps.ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ChatStorageUnavailable as exc:
+        raise _map_storage(exc) from exc
+
+
+@router.put("/admin/memory-model", status_code=204)
+async def set_memory_model(payload: MemoryModelRequest):
+    """채팅 후 사용자 메모리 자동 추출에 쓸 초소형 모델 1개 지정(또는 해제). 추출 비용은 시스템 부담."""
+    try:
+        await ps.set_memory_model(payload.model_id)
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:

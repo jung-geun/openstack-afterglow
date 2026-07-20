@@ -606,6 +606,51 @@ async def resolve_title_model() -> dict | None:
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
+async def set_memory_model(model_id: int | None) -> None:
+    """채팅 후 사용자 메모리 자동 추출에 쓸 초소형 모델 1개 지정(또는 해제). 앱 레벨 최대 1개."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            if model_id is not None:
+                target = await session.get(LlmModel, model_id)
+                if target is None:
+                    raise ProviderNotFoundError(f"모델 {model_id} 를 찾을 수 없습니다")
+            await session.execute(update(LlmModel).values(is_memory_model=False))
+            if model_id is not None:
+                await session.execute(update(LlmModel).where(LlmModel.id == model_id).values(is_memory_model=True))
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def resolve_memory_model() -> dict | None:
+    """메모리 추출용 모델(is_memory_model=True, 활성 + 프로바이더 활성)의 완료 설정. 미지정 시 None.
+
+    ⚠️ 반환 dict 의 api_key 는 복호화 평문 — 서버 내부 추출 호출 전용, 노출 금지.
+    """
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            stmt = (
+                select(LlmModel, LlmProvider)
+                .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
+                .where(
+                    LlmModel.is_memory_model.is_(True),
+                    LlmModel.is_active.is_(True),
+                    LlmProvider.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            res = (await session.execute(stmt)).first()
+            if res is None:
+                return None
+            model, provider = res
+            return _resolved_model(model, provider)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
 async def get_provider_for_discovery(provider_id: int) -> dict | None:
     """모델 discovery 용 — provider_type/api_base/복호화 api_key. 미존재 시 None.
 

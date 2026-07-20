@@ -17,14 +17,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
+from starlette.background import BackgroundTasks
 
 from app.api.deps import get_token_info
 from app.config import get_settings
 from app.services.chat import agent_store as ags
 from app.services.chat import attachments as att
 from app.services.chat import conversation_store as cs
-from app.services.chat import credit, engine, litellm_client, title_summary
+from app.services.chat import credit, engine, litellm_client, memory_extract, title_summary
 from app.services.chat import memory_store as ms
 from app.services.chat import provider_store as ps
 from app.services.chat import workspace_store as ws
@@ -452,10 +452,22 @@ async def create_completion(
         temperature=temperature,
         reasoning_effort=payload.reasoning_effort,
     )
-    title_task = BackgroundTask(
-        title_summary.generate_title_if_absent, conversation_id=conversation_id, project_id=project_id, user_id=user_id
+    # SSE 종료 후 백그라운드: 제목 요약 + 사용자 메모리 자동 추출(둘 다 시스템 부담, 실패 무시).
+    # temp/regenerate 에는 붙이지 않는다(temp=휘발성, regenerate=중복 추출 방지).
+    tasks = BackgroundTasks()
+    tasks.add_task(
+        title_summary.generate_title_if_absent,
+        conversation_id=conversation_id,
+        project_id=project_id,
+        user_id=user_id,
     )
-    return StreamingResponse(gen, media_type="text/event-stream", background=title_task)
+    tasks.add_task(
+        memory_extract.generate_memory_if_applicable,
+        conversation_id=conversation_id,
+        project_id=project_id,
+        user_id=user_id,
+    )
+    return StreamingResponse(gen, media_type="text/event-stream", background=tasks)
 
 
 @router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate")
