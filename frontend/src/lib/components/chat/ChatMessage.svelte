@@ -1,12 +1,8 @@
 <script lang="ts">
 	import MarkdownMessage from './MarkdownMessage.svelte';
 	import ModelSelector from './ModelSelector.svelte';
-	import type { ChatMessage } from '$lib/api/chatTree';
+	import type { AvailableModel, ChatMessage } from '$lib/api/chatTree';
 
-	interface AvailableModel {
-		model_name: string;
-		display_name: string;
-	}
 	interface Props {
 		message: ChatMessage & { streaming?: boolean };
 		models: AvailableModel[];

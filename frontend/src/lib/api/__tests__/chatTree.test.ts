@@ -3,6 +3,7 @@ import {
 	buildActivePath,
 	getSiblingInfo,
 	getSiblings,
+	lastAssistantModel,
 	resolveLeafFor,
 	siblingLeafInDirection,
 	type ChatMessage
@@ -101,5 +102,37 @@ describe('siblingLeafInDirection', () => {
 		expect(siblingLeafInDirection(tree, a2, 1)).toBeNull();
 		const a1 = tree.find((m) => m.id === 'a1')!;
 		expect(siblingLeafInDirection(tree, a1, -1)).toBeNull();
+	});
+});
+
+describe('lastAssistantModel', () => {
+	const withModel = (m: ChatMessage, model: string | null): ChatMessage => ({
+		...m,
+		model_name: model
+	});
+
+	it('마지막 assistant 의 model_name 을 반환', () => {
+		const path = [
+			msg('u1', 'user', null, '2026-01-01T00:00:00Z'),
+			withModel(msg('a1', 'assistant', 'u1', '2026-01-01T00:00:01Z'), 'gpt-4o'),
+			msg('u2', 'user', 'a1', '2026-01-01T00:00:02Z'),
+			withModel(msg('a2', 'assistant', 'u2', '2026-01-01T00:00:03Z'), 'claude-sonnet-5')
+		];
+		expect(lastAssistantModel(path)).toBe('claude-sonnet-5');
+	});
+
+	it('뒤에 tool 메시지가 붙어도 마지막 assistant 를 찾음', () => {
+		const path = [
+			withModel(msg('a1', 'assistant', null, '2026-01-01T00:00:01Z'), 'gpt-4o'),
+			msg('t1', 'tool', 'a1', '2026-01-01T00:00:02Z')
+		];
+		expect(lastAssistantModel(path)).toBe('gpt-4o');
+	});
+
+	it('assistant 가 없거나 model_name 이 없으면 null', () => {
+		expect(lastAssistantModel([msg('u1', 'user', null, '2026-01-01T00:00:00Z')])).toBeNull();
+		expect(
+			lastAssistantModel([withModel(msg('a1', 'assistant', null, '2026-01-01T00:00:01Z'), null)])
+		).toBeNull();
 	});
 });

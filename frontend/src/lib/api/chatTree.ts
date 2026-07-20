@@ -11,6 +11,24 @@
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 
+/** 채팅에서 선택 가능한 모델. 백엔드 GET /chat/models 응답 형태. */
+export interface AvailableModel {
+	model_name: string;
+	display_name: string;
+	provider?: string;
+}
+
+/** 이번 달 사용량 요약. 백엔드 GET /chat/usage 응답(관련 필드만). */
+export interface ChatUsage {
+	found: boolean;
+	month_prompt_tokens?: number;
+	month_completion_tokens?: number;
+	month_credited_cost?: number;
+	month_request_count?: number;
+	quota_used?: number;
+	quota_max?: number;
+}
+
 export interface ChatMessage {
 	id: string;
 	conversation_id: string;
@@ -60,6 +78,18 @@ export function buildActivePath(
 	}
 	path.reverse();
 	return path;
+}
+
+/**
+ * 활성 경로에서 가장 마지막 assistant 메시지의 model_name 을 반환한다.
+ * (마지막 메시지가 아니라 마지막 assistant 를 찾는다 — 뒤에 tool 메시지가 붙을 수 있다.)
+ * 이어서 질문할 때 그 모델을 유지하기 위한 용도. 없으면 null.
+ */
+export function lastAssistantModel(path: readonly ChatMessage[]): string | null {
+	for (let i = path.length - 1; i >= 0; i--) {
+		if (path[i].role === 'assistant' && path[i].model_name) return path[i].model_name ?? null;
+	}
+	return null;
 }
 
 /**

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import ChatExtensionsManager from './ChatExtensionsManager.svelte';
+
 	interface Conversation {
 		id: string;
 		title: string | null;
@@ -25,6 +28,10 @@
 		onTempChat,
 		onDelete
 	}: Props = $props();
+
+	// 확장(MCP·도구) 설정 오버레이 모달 상태
+	let extOpen = $state<'mcp' | 'tools' | null>(null);
+	const extTitle = $derived(extOpen === 'mcp' ? 'MCP 서버' : extOpen === 'tools' ? '도구 (Skill)' : '');
 
 	let query = $state('');
 	const filtered = $derived(
@@ -85,12 +92,32 @@
 	</div>
 
 	<div class="foot">
-		<a class="tools-link" href="/dashboard/chat/tools">
+		<button type="button" class="ext-btn" onclick={() => (extOpen = 'mcp')}>
+			<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" stroke-linecap="round" /></svg>
+			MCP 서버
+		</button>
+		<button type="button" class="ext-btn" onclick={() => (extOpen = 'tools')}>
 			<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-2.5 2.5-2.5z" stroke-linejoin="round" /></svg>
-			내 도구 관리 (MCP·툴)
-		</a>
+			도구 (Skill)
+		</button>
 	</div>
 </aside>
+
+<Modal open={extOpen !== null} onClose={() => (extOpen = null)}>
+	<div class="ext-panel">
+		<header class="ext-head">
+			<h2>{extTitle}</h2>
+			<button type="button" class="ext-close" onclick={() => (extOpen = null)} aria-label="닫기" title="닫기">
+				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" /></svg>
+			</button>
+		</header>
+		<div class="ext-body">
+			{#if extOpen}
+				<ChatExtensionsManager base="/api/v1/chat" only={extOpen} />
+			{/if}
+		</div>
+	</div>
+</Modal>
 
 <style>
 	.sidebar {
@@ -241,20 +268,74 @@
 		background: color-mix(in oklab, var(--color-state-danger) 12%, transparent);
 	}
 	.foot {
+		display: flex;
+		gap: 0.4rem;
 		padding: 0.6rem 0.75rem;
 		border-top: 1px solid var(--color-line);
 	}
-	.tools-link {
+	.ext-btn {
+		flex: 1;
 		display: inline-flex;
 		align-items: center;
-		gap: 0.45rem;
-		width: 100%;
-		font-size: 0.78rem;
-		color: var(--color-ink-3);
-		text-decoration: none;
-		transition: color 0.15s;
+		justify-content: center;
+		gap: 0.4rem;
+		padding: 0.45rem 0.5rem;
+		border-radius: 0.5rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-base);
+		color: var(--color-ink-2);
+		font-size: 0.75rem;
+		cursor: pointer;
+		transition: background 0.15s, color 0.15s, border-color 0.15s;
 	}
-	.tools-link:hover {
-		color: var(--color-ink-1);
+	.ext-btn:hover {
+		color: var(--color-ink-0);
+		background: var(--color-surface-raised);
+		border-color: var(--color-line-2);
+	}
+	.ext-panel {
+		width: min(92vw, 44rem);
+		max-height: 86vh;
+		display: flex;
+		flex-direction: column;
+		border-radius: 0.9rem;
+		border: 1px solid var(--color-line);
+		background: var(--color-surface-raised);
+		box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+		overflow: hidden;
+	}
+	.ext-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.9rem 1.1rem;
+		border-bottom: 1px solid var(--color-line);
+	}
+	.ext-head h2 {
+		margin: 0;
+		font-size: 0.95rem;
+		font-weight: 650;
+		color: var(--color-ink-0);
+	}
+	.ext-close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border: none;
+		border-radius: 0.5rem;
+		background: transparent;
+		color: var(--color-ink-3);
+		cursor: pointer;
+		transition: background 0.12s, color 0.12s;
+	}
+	.ext-close:hover {
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+	.ext-body {
+		padding: 1.1rem;
+		overflow-y: auto;
 	}
 </style>

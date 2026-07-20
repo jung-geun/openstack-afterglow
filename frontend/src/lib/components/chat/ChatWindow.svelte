@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import ChatMessage from './ChatMessage.svelte';
-	import { getSiblingInfo, type ChatMessage as ChatMsg } from '$lib/api/chatTree';
+	import {
+		getSiblingInfo,
+		type AvailableModel,
+		type ChatMessage as ChatMsg
+	} from '$lib/api/chatTree';
 
 	type DisplayMessage = ChatMsg & { streaming?: boolean };
-	interface AvailableModel {
-		model_name: string;
-		display_name: string;
-	}
 	interface Props {
 		activePath: DisplayMessage[];
 		allMessages: ChatMsg[];
 		models: AvailableModel[];
 		busy?: boolean;
+		loading?: boolean;
 		toolActivity?: string | null;
 		error?: string | null;
 		empty?: boolean;
@@ -27,6 +28,7 @@
 		allMessages,
 		models,
 		busy = false,
+		loading = false,
 		toolActivity = null,
 		error = null,
 		empty = false,
@@ -64,6 +66,9 @@
 </script>
 
 <div class="window">
+	{#if loading}
+		<div class="load-bar" role="status" aria-label="불러오는 중"><span></span></div>
+	{/if}
 	{#if tempMode}
 		<div class="temp-banner">
 			<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v4l2.5 2.5M12 3a9 9 0 1 0 9 9" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -121,6 +126,28 @@
 		flex: 1;
 		min-height: 0;
 		min-width: 0;
+		position: relative;
+	}
+	.load-bar {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 2px;
+		overflow: hidden;
+		background: color-mix(in oklab, var(--color-accent) 20%, transparent);
+		z-index: 5;
+	}
+	.load-bar span {
+		display: block;
+		width: 40%;
+		height: 100%;
+		background: var(--color-accent);
+		animation: indeterminate 1.1s ease-in-out infinite;
+	}
+	@keyframes indeterminate {
+		0% { transform: translateX(-100%); }
+		100% { transform: translateX(300%); }
 	}
 	.temp-banner {
 		display: flex;

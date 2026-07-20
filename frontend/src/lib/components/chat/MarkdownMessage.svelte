@@ -9,7 +9,8 @@
 	let { content, streaming = false }: Props = $props();
 
 	let host = $state<HTMLDivElement | null>(null);
-	const html = $derived(renderMarkdown(content));
+	// 스트리밍 중에는 캐시 미사용(매 델타 partial), 완료 후에는 content-keyed 캐시로 재파싱 방지.
+	const html = $derived(renderMarkdown(content, { cache: !streaming }));
 
 	// 스트리밍이 끝나고 최종 HTML 이 DOM 에 반영된 뒤 한 번만 하이라이트.
 	$effect(() => {

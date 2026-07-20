@@ -5,13 +5,17 @@
 	import { streamChat, type ChatStreamEvent } from '$lib/api/chatStream';
 	import {
 		buildActivePath,
+		lastAssistantModel,
 		siblingLeafInDirection,
+		type AvailableModel,
+		type ChatUsage,
 		type ChatMessage as ChatMsg
 	} from '$lib/api/chatTree';
 	import ChatSidebar from './ChatSidebar.svelte';
 	import ChatWindow from './ChatWindow.svelte';
 	import ChatInput from './ChatInput.svelte';
 	import ModelSelector from './ModelSelector.svelte';
+	import ChatUsageWidget from './ChatUsageWidget.svelte';
 
 	interface Conversation {
 		id: string;
@@ -19,10 +23,6 @@
 		model_name: string | null;
 		active_leaf_id?: string | null;
 		updated_at: string | null;
-	}
-	interface AvailableModel {
-		model_name: string;
-		display_name: string;
 	}
 	interface MessagesResponse {
 		messages: ChatMsg[];
@@ -46,6 +46,8 @@
 	let streaming = $state(false);
 	let tempMode = $state(false);
 	let tempMessages = $state<DisplayMessage[]>([]);
+	let treeLoading = $state(false); // 분기/재생성 대상 전환 등 트리 재조회 중
+	let usage = $state<ChatUsage | null>(null);
 
 	// 스트리밍 중 화면에 얹는 낙관적 상태
 	let stream = $state<{ base: DisplayMessage[]; assistant: DisplayMessage } | null>(null);
@@ -106,6 +108,24 @@
 		);
 		allMessages = res.messages ?? [];
 		activeLeafId = res.active_leaf_id ?? null;
+		syncSelectedModel();
+	}
+
+	// 활성 경로의 마지막 assistant 모델을 상단 셀렉터에 반영한다.
+	// select/switch/regenerate-done/fork 모두 loadMessages 를 지나므로 여기 단일 지점에 둔다.
+	// 단, 현재 등록된 models 목록에 존재하는 모델일 때만 반영(삭제/이름변경 모델로 셀렉터가 깨지지 않게).
+	function syncSelectedModel() {
+		const m = lastAssistantModel(buildActivePath(allMessages, activeLeafId));
+		if (m && models.some((x) => x.model_name === m)) selectedModel = m;
+	}
+
+	async function loadUsage() {
+		if (!token || !projectId) return;
+		try {
+			usage = await api.get<ChatUsage>('/api/v1/chat/usage', token, projectId);
+		} catch {
+			/* 사용량 위젯은 실패해도 채팅에 영향 없음 */
+		}
 	}
 
 	// --- 대화 선택/생성 ---
@@ -256,6 +276,7 @@
 			async () => {
 				await loadMessages(convId!);
 				void loadConversations();
+				void loadUsage();
 			}
 		);
 	}
@@ -283,6 +304,7 @@
 			() => {
 				// 임시 채팅은 저장되지 않으므로 완료된 답변을 로컬 배열에 확정
 				tempMessages = [...history, { ...live, streaming: false }];
+				void loadUsage();
 			}
 		);
 	}
@@ -304,6 +326,7 @@
 			async () => {
 				await loadMessages(activeConvId!);
 				void loadConversations();
+				void loadUsage();
 			}
 		);
 	}
@@ -315,6 +338,7 @@
 		if (!msg) return;
 		const targetLeaf = siblingLeafInDirection(allMessages, msg, direction);
 		if (!targetLeaf) return;
+		treeLoading = true;
 		try {
 			await api.patch(
 				`/api/v1/chat/conversations/${activeConvId}/active-leaf`,
@@ -326,12 +350,15 @@
 			await loadMessages(activeConvId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '버전 전환에 실패했습니다';
+		} finally {
+			treeLoading = false;
 		}
 	}
 
 	// --- 분기 ---
 	async function fork(messageId: string) {
 		if (streaming || tempMode || !activeConvId || !token || !projectId) return;
+		treeLoading = true;
 		try {
 			const conv = await api.post<Conversation>(
 				`/api/v1/chat/conversations/${activeConvId}/fork`,
@@ -343,6 +370,8 @@
 			await selectConversation(conv);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '분기에 실패했습니다';
+		} finally {
+			treeLoading = false;
 		}
 	}
 
@@ -371,6 +400,7 @@
 		untrack(() => {
 			void loadConversations();
 			void loadModels();
+			void loadUsage();
 		});
 	});
 </script>
@@ -389,14 +419,23 @@
 
 	<section class="main">
 		<header class="head">
-			<div class="head-title">
-				{#if tempMode}
-					임시 채팅
-				{:else}
-					{activeConv?.title || '새 채팅'}
+			<div class="head-left">
+				<div class="head-title">
+					{#if tempMode}
+						임시 채팅
+					{:else}
+						{activeConv?.title || '새 채팅'}
+					{/if}
+				</div>
+			</div>
+			<div class="head-center">
+				<ModelSelector {models} value={selectedModel} onSelect={(m) => (selectedModel = m)} align="center" searchable />
+			</div>
+			<div class="head-right">
+				{#if usage}
+					<ChatUsageWidget {usage} />
 				{/if}
 			</div>
-			<ModelSelector {models} value={selectedModel} onSelect={(m) => (selectedModel = m)} align="right" />
 		</header>
 
 		<ChatWindow
@@ -404,6 +443,7 @@
 			allMessages={siblingSource}
 			{models}
 			busy={streaming}
+			loading={treeLoading}
 			{toolActivity}
 			{error}
 			empty={isEmpty}
@@ -434,13 +474,26 @@
 		min-height: 0;
 	}
 	.head {
-		display: flex;
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
 		align-items: center;
-		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.7rem 1rem;
 		border-bottom: 1px solid var(--color-line);
 		background: var(--color-surface-base);
+	}
+	.head-left {
+		min-width: 0;
+	}
+	.head-center {
+		display: flex;
+		justify-content: center;
+		min-width: 0;
+	}
+	.head-right {
+		display: flex;
+		justify-content: flex-end;
+		min-width: 0;
 	}
 	.head-title {
 		font-size: 0.9rem;

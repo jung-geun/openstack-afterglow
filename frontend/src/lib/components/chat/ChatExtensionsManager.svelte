@@ -6,7 +6,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 
 	// base: '/api/v1/chat/admin' (관리자 global) 또는 '/api/v1/chat' (사용자 본인)
-	let { base }: { base: string } = $props();
+	// only: 특정 섹션만 렌더('mcp' | 'tools'). 미지정 시 둘 다.
+	let { base, only }: { base: string; only?: 'mcp' | 'tools' } = $props();
 
 	interface McpServer {
 		id: number;
@@ -141,6 +142,7 @@
 </script>
 
 <!-- MCP 서버 -->
+{#if only !== 'tools'}
 <section class="mb-8">
 	<h3 class="mb-1 text-sm font-semibold text-[var(--color-ink-1)]">MCP 서버</h3>
 	<p class="mb-3 text-xs text-[var(--color-ink-3)]">등록·관리 (실행은 추후 지원). 스코프: {base.includes('/admin') ? '전체 공용' : '내 전용'}</p>
@@ -183,8 +185,10 @@
 		</div>
 	{/if}
 </section>
+{/if}
 
 <!-- 커스텀 HTTP 툴 -->
+{#if only !== 'mcp'}
 <section>
 	<h3 class="mb-1 text-sm font-semibold text-[var(--color-ink-1)]">커스텀 HTTP 툴</h3>
 	<p class="mb-3 text-xs text-[var(--color-ink-3)]">LLM 이 호출할 수 있는 외부 HTTP 엔드포인트. 스코프: {base.includes('/admin') ? '전체 공용' : '내 전용'}</p>
@@ -227,3 +231,4 @@
 		</div>
 	{/if}
 </section>
+{/if}

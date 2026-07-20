@@ -12,17 +12,38 @@ import DOMPurify from 'dompurify';
 
 marked.setOptions({ breaks: true, gfm: true });
 
+// content-keyed 파싱/살균 결과 캐시. 완료된(스트리밍 끝난) 메시지는 content 가
+// 고정이므로 재파싱/재살균을 피한다(예: tmp→real id 스왑으로 컴포넌트가 재마운트돼도 히트).
+// 스트리밍 중 partial 은 매번 달라 캐시 이득이 없으므로 캐시를 쓰지 않는다(무한 증가 방지).
+const RENDER_CACHE = new Map<string, string>();
+const RENDER_CACHE_MAX = 200;
+
 /**
  * 마크다운을 살균된 HTML 로 변환한다. 코드블록은 아직 하이라이트하지 않은
  * plain <pre><code class="language-xxx"> 형태(스트리밍 중에도 안전하게 즉시 렌더).
+ * @param opts.cache 완료된 메시지에 한해 결과를 캐시(스트리밍 중에는 false 로 호출).
  */
-export function renderMarkdown(source: string): string {
-	const raw = marked.parse(source ?? '', { async: false }) as string;
-	return DOMPurify.sanitize(raw, {
+export function renderMarkdown(source: string, opts?: { cache?: boolean }): string {
+	const useCache = opts?.cache ?? false;
+	const key = source ?? '';
+	if (useCache) {
+		const hit = RENDER_CACHE.get(key);
+		if (hit !== undefined) return hit;
+	}
+	const raw = marked.parse(key, { async: false }) as string;
+	const html = DOMPurify.sanitize(raw, {
 		ADD_ATTR: ['target', 'rel'],
 		FORBID_TAGS: ['style', 'form', 'input', 'button'],
 		FORBID_ATTR: ['onerror', 'onload', 'onclick']
 	});
+	if (useCache) {
+		if (RENDER_CACHE.size >= RENDER_CACHE_MAX) {
+			const oldest = RENDER_CACHE.keys().next().value;
+			if (oldest !== undefined) RENDER_CACHE.delete(oldest);
+		}
+		RENDER_CACHE.set(key, html);
+	}
+	return html;
 }
 
 type CodeToHtml = (code: string, options: Record<string, unknown>) => Promise<string>;

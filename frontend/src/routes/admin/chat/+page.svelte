@@ -63,6 +63,12 @@
 	let mDisplay = $state('');
 	let addingModel = $state(false);
 
+	// 등록된 모델 일괄 선택/삭제
+	let selectedModelIds = $state<Record<number, boolean>>({});
+	let deletingBulk = $state(false);
+	const selectedCount = $derived(Object.values(selectedModelIds).filter(Boolean).length);
+	const allModelsSelected = $derived(models.length > 0 && selectedCount === models.length);
+
 	// 모델 discovery (프로바이더 API에서 목록 불러오기 → 필터 → 선택 등록)
 	let discoverId = $state<number | null>(null);
 	let available = $state<string[]>([]);
@@ -266,6 +272,39 @@
 		}
 	}
 
+	function toggleAllModels(checked: boolean) {
+		const next: Record<number, boolean> = {};
+		if (checked) for (const m of models) next[m.id] = true;
+		selectedModelIds = next;
+	}
+
+	async function deleteSelectedModels() {
+		const ids = Object.keys(selectedModelIds)
+			.filter((k) => selectedModelIds[Number(k)])
+			.map(Number);
+		if (ids.length === 0) return;
+		if (!(await confirmDialog(`선택한 ${ids.length}개 모델을 삭제하시겠습니까?`))) return;
+		deletingBulk = true;
+		let ok = 0;
+		const failed: string[] = [];
+		try {
+			for (const id of ids) {
+				try {
+					await api.delete(`/api/v1/chat/admin/models/${id}`, token, projectId);
+					ok++;
+				} catch {
+					failed.push(String(id));
+				}
+			}
+			selectedModelIds = {};
+			await load();
+			if (ok > 0) toast.success(`${ok}개 모델을 삭제했습니다`);
+			if (failed.length > 0) toast.error(`${failed.length}개 삭제 실패`);
+		} finally {
+			deletingBulk = false;
+		}
+	}
+
 	async function toggleModel(m: Model) {
 		try {
 			await api.patch(`/api/v1/chat/admin/models/${m.id}`, { is_active: !m.is_active }, token, projectId);
@@ -452,9 +491,26 @@
 		{:else if models.length === 0}
 			<p class="px-1 text-sm text-[var(--color-ink-3)]">등록된 모델이 없습니다.</p>
 		{:else}
+			<div class="mb-2 flex items-center justify-between gap-3 px-1">
+				<label class="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-ink-2)]">
+					<input
+						type="checkbox"
+						checked={allModelsSelected}
+						onchange={(e) => toggleAllModels(e.currentTarget.checked)}
+					/>
+					전체 선택{selectedCount > 0 ? ` (${selectedCount})` : ''}
+				</label>
+				{#if selectedCount > 0}
+					<Button variant="danger-outline" size="sm" onclick={deleteSelectedModels} disabled={deletingBulk}>
+						{deletingBulk ? '삭제 중…' : `선택 삭제 (${selectedCount})`}
+					</Button>
+				{/if}
+			</div>
 			<div class="space-y-2">
 				{#each models as m (m.id)}
 					<div class="{cardCls} flex items-center justify-between gap-3 px-4 py-3">
+						<div class="flex min-w-0 items-center gap-3">
+							<input type="checkbox" bind:checked={selectedModelIds[m.id]} aria-label="{m.display_name || m.model_name} 선택" />
 						<div class="min-w-0">
 							<div class="flex items-center gap-2">
 								<span class="truncate text-sm font-medium text-[var(--color-ink-1)]">{m.display_name || m.model_name}</span>
@@ -472,6 +528,7 @@
 								{/if}
 							</div>
 							<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{m.model_name} · {providerName(m.provider_id)}</div>
+						</div>
 						</div>
 						<div class="flex shrink-0 items-center gap-3 text-xs">
 							<button class={rowActionCls} onclick={() => setTitleModel(m)}>
