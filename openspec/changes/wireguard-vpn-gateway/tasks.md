@@ -30,7 +30,7 @@
 
 ### Phase 1 마감 (운영화 · QR · 제어채널 durability · 네임스페이스 컷오버)
 
-- [x] 🔴 에이전트 제어채널 토큰 durability 수정 — 토큰을 `waygate_servers.agent_token_encrypted`(AES-256-GCM, 도메인 `wg_agent_token`)에 영속 저장, Redis 는 캐시로만. server-scoped `hmac.compare_digest` 검증으로 변경. Redis eviction/7일 TTL 만료 후에도 채널 유지. 마이그레이션 `048_waygate_agent_token.sql`, 회귀 테스트 `TestAgentTokenDurability`
+- [x] 🔴 에이전트 제어채널 토큰 durability 수정 — 토큰을 `waygate_servers.agent_token_encrypted`(AES-256-GCM, 도메인 `wg_agent_token`)에 영속 저장, Redis 는 캐시로만. server-scoped `hmac.compare_digest` 검증으로 변경. Redis eviction/7일 TTL 만료 후에도 채널 유지. 마이그레이션 `052_waygate_agent_token.sql`(manifest 등록), 회귀 테스트 `TestAgentTokenDurability`
 - [x] QR 코드 — 프론트 `qrcode` 의존성 추가(bun.lock/package-lock.json 동기화), `getClientConfigText` 헬퍼, 클라이언트별 QR 버튼 + 모달(백엔드는 `.conf` 텍스트만 제공)
 - [x] `vpn`→`waygate` 클린 컷오버 — 테스트 6종 리네임, 빈 `app/api/vpn`·`routes/.../vpn` 제거, 로그 프리픽스·사용자 대면 문자열 통일
 - [x] `afterglow.conf.example [waygate]` 활성화 체크리스트 보강(callback_base_url 도달성 강조)
