@@ -26,6 +26,7 @@
 - [x] `app/services/neutron.py` `create_port` — security_groups를 UUID 문자열 리스트로 전달하도록 수정 (실환경 프로비저닝 400 회귀, 기존 잠복 버그)
 - [x] `[services] vpn` 피처 플래그 — 관리자가 VPN 기능을 켜고 끌 수 있음 (라우터 조건부 마운트, services.vpn = 플래그 AND 설정 완료, 회귀 테스트 `test_vpn_feature_flag.py`)
 - [x] `npm run test:all` + `npm run lint:backend` 모두 통과 확인
+- [x] CI 설정 파일이 없는 환경에서도 Waygate 라우터 회귀 테스트가 활성화되도록 테스트 플래그 환경변수 정정
 
 ### Phase 2 — 다중 테넌트 네트워크 연결
 
