@@ -1166,6 +1166,14 @@ async def _deferred_load_resource_policies() -> None:
 
 @app.on_event("startup")
 async def start_background_workers():
+    # 부팅 시 유효 설정(비밀값 제외)을 1회 로깅 — 설정 파일/오버라이드/서비스 플래그 진단용.
+    try:
+        from app.config import log_effective_config
+
+        log_effective_config()
+    except Exception:
+        _logger.warning("effective-config 로깅 실패", exc_info=True)
+
     # Redis 연결 pre-warm (첫 health check 지연 방지)
     try:
         from app.services.cache import _get_redis

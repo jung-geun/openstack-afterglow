@@ -95,7 +95,13 @@ async def refresh_runtime_settings() -> None:
     values = {row.policy_key: row.resource_id or "" for row in rows}
     settings = get_settings()
     for policy_key, field in _SETTING_FIELDS.items():
-        setattr(settings, field, values.get(policy_key, ""))
+        # DB 정책이 있으면(비어있지 않으면) 그것이 권위 있는 override. 없으면 afterglow.conf/기본값을
+        # 그대로 유지한다(과거엔 무조건 ""로 blank 해 config-file 값을 폐기 → waygate 등 서비스가
+        # 설정돼도 동작하지 않는 회귀가 있었다). 관리자가 정책을 명시적으로 비우면 config 기본값으로
+        # 복귀한다(인프라 셀렉터 특성상 의도된 동작).
+        db_val = values.get(policy_key)
+        if db_val:
+            setattr(settings, field, db_val)
 
 
 async def set_policy(*, conn, key: str, resource_id: str | None, updated_by_user_id: str) -> dict:

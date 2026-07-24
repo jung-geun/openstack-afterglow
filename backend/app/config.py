@@ -3,6 +3,7 @@
 우선순위: 환경변수 > afterglow.conf/config.toml (프로젝트 루트) > 기본값
 """
 
+import logging
 import os
 import tomllib
 from functools import lru_cache
@@ -917,6 +918,18 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
 
+# 부팅 시 실제로 읽어들인 설정 파일 목록(진단용). load_raw_toml() 첫 호출 시 채워진다.
+_LOADED_CONFIG_SOURCES: list[dict] = []
+
+
+def _record_source(path: Path, role: str) -> None:
+    try:
+        st = path.stat()
+        _LOADED_CONFIG_SOURCES.append({"path": str(path), "role": role, "size": st.st_size, "mtime": st.st_mtime})
+    except OSError:
+        _LOADED_CONFIG_SOURCES.append({"path": str(path), "role": role, "size": None, "mtime": None})
+
+
 @lru_cache
 def load_raw_toml() -> dict:
     """afterglow.conf/config.toml 원본(+ 같은 디렉토리 오버라이드 딥 머지)을 중첩 구조 그대로 반환.
@@ -924,15 +937,84 @@ def load_raw_toml() -> dict:
     머지 규칙: dict는 재귀 병합, 그 외는 오버라이드가 덮어쓴다. 오버라이드 파일은 알파벳순으로
     적용되어 뒤에 오는 파일이 앞의 값을 이긴다.
     """
+    _LOADED_CONFIG_SOURCES.clear()
     for path in _config_candidates():
         if path.exists() and path.stat().st_size > 0:
+            _record_source(path, "base")
             with open(path, "rb") as f:
                 merged = tomllib.load(f)
             for override in _config_override_paths(path):
+                _record_source(override, "override")
                 with open(override, "rb") as f:
                     merged = _deep_merge(merged, tomllib.load(f))
             return merged
     return {}
+
+
+# 로깅 시 값을 가려야 하는(비밀) 설정 키 판별용 키워드
+_SECRET_KEYWORDS = (
+    "password",
+    "secret",
+    "token",
+    "passphrase",
+    "credential",
+    "encryption_key",
+    "api_key",
+    "private_key",
+    "_dsn",
+    "sasl",
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    kl = key.lower()
+    return any(w in kl for w in _SECRET_KEYWORDS)
+
+
+def _mask_url_credentials(value: str) -> str:
+    """redis://user:pass@host → redis://user:***@host (자격증명만 마스킹)."""
+    try:
+        import re as _re
+
+        return _re.sub(r"(://[^:/@]+:)[^@/]+@", r"\1***@", value)
+    except Exception:
+        return value
+
+
+def log_effective_config() -> None:
+    """부팅 시 1회: 로드된 설정 파일 소스 + 비밀값을 제외한 유효 설정을 로그로 남긴다(진단용).
+
+    비밀 키(password/secret/token/...)는 값을 '***'로 가리고, url 계열은 자격증명만 마스킹한다.
+    service_*/waygate_* 같은 비밀이 아닌 값은 그대로 남겨 waygate 미노출 등 설정 문제를 진단한다.
+    """
+    logger = logging.getLogger("app.config")
+    try:
+        load_raw_toml()  # _LOADED_CONFIG_SOURCES 채우기 보장
+        dump = get_settings().model_dump()
+    except Exception:
+        logger.warning("effective-config 로깅 실패", exc_info=True)
+        return
+
+    redacted: dict = {}
+    for k, v in dump.items():
+        if _is_secret_key(k):
+            redacted[k] = "***" if v not in (None, "", False) else v
+        elif isinstance(v, str) and "://" in v and "@" in v:
+            redacted[k] = _mask_url_credentials(v)
+        else:
+            redacted[k] = v
+
+    logger.info(
+        "effective-config",
+        extra={
+            "pid": os.getpid(),
+            "config_sources": list(_LOADED_CONFIG_SOURCES),
+            "cwd": str(Path.cwd()),
+            "service_flags": {k: v for k, v in dump.items() if k.startswith("service_")},
+            "waygate": {k: v for k, v in dump.items() if k.startswith("waygate_")},
+            "settings": redacted,
+        },
+    )
 
 
 @lru_cache
