@@ -69,12 +69,19 @@ def render_client_conf(
     endpoint_ip: str,
     listen_port: int,
     allowed_ips: list[str],
+    nat_cidrs: list[str] | None = None,
 ) -> str:
     """클라이언트용 WireGuard `.conf` 파일 텍스트를 렌더한다.
 
-    Phase 1: AllowedIPs 는 터널 서브넷(+ 클라이언트 지정 allowed_ips)만 포함한다.
-    Phase 2 에서 attached network CIDR 이 추가될 예정.
+    AllowedIPs = 터널 서브넷(+ 클라이언트 지정 allowed_ips) + 연결된 테넌트 네트워크 CIDR(nat_cidrs).
+    nat_cidrs 를 포함해야 클라이언트가 그 네트워크로 향하는 트래픽을 터널로 라우팅한다(Phase 2 split-tunnel).
+    순서를 보존하며 중복은 제거한다.
     """
+    merged: list[str] = []
+    for cidr in [*allowed_ips, *(nat_cidrs or [])]:
+        if cidr and cidr not in merged:
+            merged.append(cidr)
+
     lines = [
         "[Interface]",
         f"PrivateKey = {private_key}",
@@ -86,7 +93,7 @@ def render_client_conf(
     lines.append("[Peer]")
     lines.append(f"PublicKey = {server_public_key}")
     lines.append(f"Endpoint = {endpoint_ip}:{listen_port}")
-    lines.append(f"AllowedIPs = {', '.join(allowed_ips)}")
+    lines.append(f"AllowedIPs = {', '.join(merged)}")
     lines.append("PersistentKeepalive = 25")
     lines.append("")
     return "\n".join(lines)
@@ -102,11 +109,13 @@ def render_agent_desired_state(
     listen_port: int,
     tunnel_cidr: str,
     clients: list[dict],
+    nat_networks: list[str] | None = None,
 ) -> dict:
     """에이전트가 폴링하는 desired-state dict를 렌더한다.
 
     clients: [{public_key, preshared_key, tunnel_ip, enabled}]
     enabled=False 클라이언트는 peers 목록에서 제외한다 (soft-disable = wg에서 제거).
+    nat_networks: 연결된 테넌트 네트워크 CIDR 목록 — 에이전트가 각 CIDR 로 SNAT masquerade 를 적용한다.
     """
     peers = []
     for c in clients:
@@ -124,6 +133,7 @@ def render_agent_desired_state(
         "listen_port": listen_port,
         "tunnel_cidr": tunnel_cidr,
         "peers": peers,
+        "nat_networks": list(nat_networks or []),
     }
 
 

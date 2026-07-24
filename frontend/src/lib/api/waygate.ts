@@ -5,6 +5,9 @@ import type {
 	WaygateClientCreateResult,
 	WaygateClientCreateRequest,
 	WaygateClientUpdateRequest,
+	WaygateNetworkAttachment,
+	WaygateNetworkAttachRequest,
+	WaygateImportResult,
 } from '$lib/types/waygate';
 
 const BASE = '/api/v1/waygate/servers';
@@ -98,4 +101,56 @@ export async function getClientConfigText(
 ): Promise<string> {
 	const { blob } = await downloadClientConfig(serverId, clientId, token, projectId);
 	return blob.text();
+}
+
+// 네트워크 연결 (Phase 2)
+export async function listAttachments(
+	serverId: string,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<WaygateNetworkAttachment[]> {
+	return api.get<WaygateNetworkAttachment[]>(`${BASE}/${serverId}/networks`, token, projectId);
+}
+
+export async function attachNetwork(
+	serverId: string,
+	body: WaygateNetworkAttachRequest,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<WaygateNetworkAttachment> {
+	return api.post<WaygateNetworkAttachment>(`${BASE}/${serverId}/networks`, body, token, projectId);
+}
+
+export async function detachNetwork(
+	serverId: string,
+	attachmentId: number,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<void> {
+	return api.delete<void>(`${BASE}/${serverId}/networks/${attachmentId}`, token, projectId);
+}
+
+// 백업 / 마이그레이션 (Phase 3) — export/import 은 패스프레이즈를 담으므로 POST
+export async function exportServer(
+	serverId: string,
+	passphrase: string,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<unknown> {
+	return api.post<unknown>(`${BASE}/${serverId}/export`, { passphrase }, token, projectId);
+}
+
+export async function importServer(
+	serverId: string,
+	passphrase: string,
+	bundle: unknown,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<WaygateImportResult> {
+	return api.post<WaygateImportResult>(
+		`${BASE}/${serverId}/import`,
+		{ passphrase, bundle },
+		token,
+		projectId
+	);
 }

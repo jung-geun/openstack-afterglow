@@ -98,10 +98,13 @@ async def get_desired_state(request: Request, server_id: str):
             }
         )
 
+    nat_networks = await waygate_db.list_active_attachment_cidrs(server_id)
+
     return waygate_config.render_agent_desired_state(
         listen_port=server["listen_port"],
         tunnel_cidr=server["tunnel_cidr"],
         clients=client_payload,
+        nat_networks=nat_networks,
     )
 
 

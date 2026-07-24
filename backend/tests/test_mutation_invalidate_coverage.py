@@ -77,10 +77,12 @@ EXEMPT_ROUTERS: set[str] = {
     "storage/file_storage.py",  # TODO: Phase C/D — access rule sub-resources
     "storage/volumes.py",  # TODO: Phase C/D — volume transfer sub-resources
     "storage/volume_backups.py",  # TODO: Phase C/D — backup / restore
-    # Waygate server/client state is read directly from its SQLAlchemy store;
-    # it bypasses the OpenStack resource-cache layer entirely.
+    # Waygate server/client/network/migration state is read directly from its
+    # SQLAlchemy store; it bypasses the OpenStack resource-cache layer entirely.
     "waygate/servers.py",
     "waygate/clients.py",
+    "waygate/attachments.py",
+    "waygate/migration.py",
     # Agent endpoints update their dedicated Redis status/token store, not the
     # application resource cache covered by this invariant.
     "waygate/agent.py",

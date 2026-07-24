@@ -623,12 +623,20 @@ if _svc_cfg.service_barbican_enabled:
     app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
     app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
 if _svc_cfg.service_waygate_enabled:
-    from app.api.waygate import waygate_agent_router, waygate_clients_router, waygate_servers_router
+    from app.api.waygate import (
+        waygate_agent_router,
+        waygate_attachments_router,
+        waygate_clients_router,
+        waygate_migration_router,
+        waygate_servers_router,
+    )
 
-    # Waygate — servers/clients(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
-    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/agent/register 등) 충돌 없음.
+    # Waygate — servers/clients/networks/migration(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
+    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/networks, POST /{id}/export, POST /{id}/agent/register 등) 충돌 없음.
     app.include_router(waygate_servers_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
     app.include_router(waygate_clients_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_attachments_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_migration_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
     app.include_router(waygate_agent_router, prefix="/api/v1/waygate/servers", tags=["waygate-agent"])
 if _svc_cfg.service_chat_enabled:
     from app.api.chat import (

@@ -36,3 +36,18 @@ def generate_keypair() -> tuple[str, str]:
 def generate_preshared_key() -> str:
     """WireGuard preshared key(32바이트 랜덤, base64 44자)를 생성한다."""
     return base64.b64encode(os.urandom(32)).decode()
+
+
+def public_key_from_private(private_key_b64: str) -> str:
+    """WireGuard base64 private key 로부터 대응하는 public key(base64)를 유도한다.
+
+    마이그레이션 import 시 언래핑한 private key 의 무결성(번들의 public_key 와 일치)을
+    검증하는 데 사용한다.
+    """
+    raw = base64.b64decode(private_key_b64)
+    priv = X25519PrivateKey.from_private_bytes(raw)
+    pub_bytes = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return base64.b64encode(pub_bytes).decode()

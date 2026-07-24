@@ -180,6 +180,7 @@ class TestAgentDesiredStateHappyPath:
                 return_value=_server_record(status="ACTIVE", server_public_key="A" * 43 + "=")
             )
             mock_db.list_all_active_clients = AsyncMock(return_value=[])
+            mock_db.list_active_attachment_cidrs = AsyncMock(return_value=[])
             resp = await api_client.get(
                 "/api/v1/waygate/servers/server-1/agent/desired-state",
                 headers={"Authorization": f"Bearer {token}"},
@@ -189,6 +190,7 @@ class TestAgentDesiredStateHappyPath:
         assert body["listen_port"] == 51820
         assert body["tunnel_cidr"] == "10.8.0.0/24"
         assert body["peers"] == []
+        assert body["nat_networks"] == []
 
     @pytest.mark.asyncio
     async def test_desired_state_404_when_server_not_found(self, api_client):
@@ -226,6 +228,7 @@ class TestAgentDesiredStateHappyPath:
                 return_value=_server_record(status="ACTIVE", server_public_key="A" * 43 + "=")
             )
             mock_db.list_all_active_clients = AsyncMock(return_value=clients)
+            mock_db.list_active_attachment_cidrs = AsyncMock(return_value=[])
             resp = await api_client.get(
                 "/api/v1/waygate/servers/server-1/agent/desired-state",
                 headers={"Authorization": f"Bearer {token}"},

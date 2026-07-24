@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_session_factory, is_db_available
-from app.models.db import WaygateClient, WaygateServer
+from app.models.db import WaygateClient, WaygateNetworkAttachment, WaygateServer
 
 _logger = logging.getLogger(__name__)
 
@@ -378,6 +378,127 @@ async def update_client(server_id: str, project_id: str, client_id: str, **field
         client.updated_at = datetime.now(UTC)
         await session.commit()
         return _client_to_dict(client)
+
+
+# ---------------------------------------------------------------------------
+# WaygateNetworkAttachment CRUD (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+def _attachment_to_dict(a: WaygateNetworkAttachment) -> dict:
+    return {
+        "id": a.id,
+        "server_id": a.server_id,
+        "project_id": a.project_id,
+        "network_id": a.network_id,
+        "subnet_id": a.subnet_id,
+        "port_id": a.port_id,
+        "cidr": a.cidr,
+        "nat_mode": a.nat_mode,
+        "status": a.status,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+    }
+
+
+async def create_attachment_record(server_id: str, project_id: str, data: dict) -> dict:
+    """네트워크 연결 레코드 생성 후 dict 반환."""
+    factory = get_session_factory()
+    async with factory() as session:
+        att = WaygateNetworkAttachment(
+            server_id=server_id,
+            project_id=project_id,
+            network_id=data["network_id"],
+            subnet_id=data.get("subnet_id") or None,
+            port_id=data.get("port_id") or None,
+            cidr=data.get("cidr") or None,
+            nat_mode=data.get("nat_mode") or "snat",
+            status=data.get("status") or "CREATING",
+        )
+        session.add(att)
+        await session.commit()
+        await session.refresh(att)
+        return _attachment_to_dict(att)
+
+
+async def list_attachments(server_id: str, project_id: str) -> list[dict]:
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = (
+            select(WaygateNetworkAttachment)
+            .where(
+                WaygateNetworkAttachment.server_id == server_id,
+                WaygateNetworkAttachment.project_id == project_id,
+            )
+            .order_by(WaygateNetworkAttachment.created_at.asc())
+        )
+        result = await session.execute(stmt)
+        return [_attachment_to_dict(a) for a in result.scalars().all()]
+
+
+async def list_active_attachment_cidrs(server_id: str) -> list[str]:
+    """desired-state 렌더용 — project_id 필터 없이 서버의 ACTIVE attachment CIDR 목록.
+
+    에이전트(베어러 토큰) 경로 전용. cidr 가 없는(아직 미해석) 항목은 제외한다.
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(WaygateNetworkAttachment.cidr).where(
+            WaygateNetworkAttachment.server_id == server_id,
+            WaygateNetworkAttachment.status == "ACTIVE",
+            WaygateNetworkAttachment.cidr.is_not(None),
+        )
+        result = await session.execute(stmt)
+        return [c for c in result.scalars().all() if c]
+
+
+async def get_attachment(server_id: str, project_id: str, attachment_id: int) -> dict | None:
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(WaygateNetworkAttachment).where(
+            WaygateNetworkAttachment.id == attachment_id,
+            WaygateNetworkAttachment.server_id == server_id,
+            WaygateNetworkAttachment.project_id == project_id,
+        )
+        result = await session.execute(stmt)
+        att = result.scalar_one_or_none()
+        return _attachment_to_dict(att) if att else None
+
+
+async def update_attachment(attachment_id: int, **fields) -> None:
+    """status/port_id/cidr 등 필드 업데이트 (백그라운드/서비스 경로 전용)."""
+    allowed = {"status", "port_id", "cidr", "subnet_id"}
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(WaygateNetworkAttachment).where(WaygateNetworkAttachment.id == attachment_id)
+        result = await session.execute(stmt)
+        att = result.scalar_one_or_none()
+        if att is None:
+            return
+        for k, v in fields.items():
+            if k in allowed:
+                setattr(att, k, v)
+        att.updated_at = datetime.now(UTC)
+        await session.commit()
+
+
+async def delete_attachment(server_id: str, project_id: str, attachment_id: int) -> dict | None:
+    """소유권 검증 후 하드 삭제. 삭제된 레코드 dict(포트 정리용) 반환, 없으면 None."""
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(WaygateNetworkAttachment).where(
+            WaygateNetworkAttachment.id == attachment_id,
+            WaygateNetworkAttachment.server_id == server_id,
+            WaygateNetworkAttachment.project_id == project_id,
+        )
+        result = await session.execute(stmt)
+        att = result.scalar_one_or_none()
+        if att is None:
+            return None
+        data = _attachment_to_dict(att)
+        await session.delete(att)
+        await session.commit()
+        return data
 
 
 async def soft_delete_client(server_id: str, project_id: str, client_id: str, user_id: str) -> bool:

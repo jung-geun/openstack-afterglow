@@ -20,6 +20,9 @@ _WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,43}=\Z")
 # DNS: 호스트네임 또는 IPv4/IPv6 (콤마 구분 최대 2개). 쉘/YAML 메타문자 차단.
 _DNS_HOST_RE = re.compile(r"^[A-Za-z0-9.:_-]{1,253}$")
 
+# OpenStack 리소스 ID(network_id/subnet_id): UUID(하이픈 유무 모두). API 호출 전용이지만 방어적 검증.
+_OS_ID_RE = re.compile(r"^[a-fA-F0-9]{8}-?[a-fA-F0-9]{4}-?[a-fA-F0-9]{4}-?[a-fA-F0-9]{4}-?[a-fA-F0-9]{12}$")
+
 
 class WaygateServerCreateRequest(BaseModel):
     """Waygate 서버 생성 요청."""
@@ -146,6 +149,83 @@ class WaygateClientCreateResponse(WaygateClientInfo):
 
 
 # ---------------------------------------------------------------------------
+# 네트워크 연결 (Phase 2) — 멀티 NIC + SNAT
+# ---------------------------------------------------------------------------
+
+
+class WaygateNetworkAttachCreateRequest(BaseModel):
+    """Waygate 서버에 테넌트 네트워크를 추가 연결하는 요청."""
+
+    network_id: str
+    subnet_id: str | None = None
+    nat_mode: str = "snat"
+
+    @field_validator("network_id")
+    @classmethod
+    def validate_network_id(cls, v: str) -> str:
+        if not _OS_ID_RE.match(v):
+            raise ValueError("network_id 형식이 유효하지 않습니다 (OpenStack UUID)")
+        return v
+
+    @field_validator("subnet_id")
+    @classmethod
+    def validate_subnet_id(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if not _OS_ID_RE.match(v):
+            raise ValueError("subnet_id 형식이 유효하지 않습니다 (OpenStack UUID)")
+        return v
+
+    @field_validator("nat_mode")
+    @classmethod
+    def validate_nat_mode(cls, v: str) -> str:
+        if v not in ("snat",):
+            raise ValueError("nat_mode 는 현재 'snat' 만 지원합니다")
+        return v
+
+
+class WaygateNetworkAttachmentInfo(BaseModel):
+    """네트워크 연결 목록/상세 응답."""
+
+    id: int
+    server_id: str
+    project_id: str
+    network_id: str
+    subnet_id: str | None = None
+    port_id: str | None = None
+    cidr: str | None = None
+    nat_mode: str
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# 백업 / 마이그레이션 (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+class WaygateExportRequest(BaseModel):
+    """export 요청 — 클라이언트 private key 를 래핑할 패스프레이즈."""
+
+    passphrase: str = Field(min_length=8, max_length=256)
+
+
+class WaygateImportRequest(BaseModel):
+    """import 요청 — 패스프레이즈 + export 번들(dict 또는 JSON 문자열)."""
+
+    passphrase: str = Field(min_length=8, max_length=256)
+    bundle: dict | str
+
+
+class WaygateImportResult(BaseModel):
+    """import 결과 요약."""
+
+    imported: int
+    skipped: list[dict] = []
+
+
+# ---------------------------------------------------------------------------
 # 에이전트(베어러 토큰) 대면 스키마
 # ---------------------------------------------------------------------------
 
@@ -200,3 +280,6 @@ class WaygateAgentDesiredState(BaseModel):
     listen_port: int
     tunnel_cidr: str
     peers: list[WaygateAgentDesiredStatePeer] = []
+    # Phase 2: 연결된 테넌트 네트워크 CIDR 목록. 에이전트가 각 CIDR 로 향하는 tunnel_cidr
+    # 트래픽을 해당 NIC 로 SNAT(MASQUERADE)한다.
+    nat_networks: list[str] = []

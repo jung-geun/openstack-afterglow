@@ -54,3 +54,30 @@ export interface WaygateClientUpdateRequest {
 	name?: string;
 	enabled?: boolean;
 }
+
+// 네트워크 연결 (Phase 2) — 멀티 NIC + SNAT
+export interface WaygateNetworkAttachment {
+	id: number;
+	server_id: string;
+	project_id: string;
+	network_id: string;
+	subnet_id: string | null;
+	port_id: string | null;
+	cidr: string | null;
+	nat_mode: string;
+	status: string;
+	created_at: string | null;
+	updated_at: string | null;
+}
+
+export interface WaygateNetworkAttachRequest {
+	network_id: string;
+	subnet_id?: string;
+	nat_mode?: string;
+}
+
+// 백업 / 마이그레이션 (Phase 3)
+export interface WaygateImportResult {
+	imported: number;
+	skipped: { name?: string; reason: string }[];
+}

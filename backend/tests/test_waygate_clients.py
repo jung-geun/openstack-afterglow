@@ -104,6 +104,7 @@ class TestCreateClient:
         with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[])
+            mock_db.list_active_attachment_cidrs = AsyncMock(return_value=[])
             mock_db.create_client_record = AsyncMock()
             mock_db.get_client = AsyncMock(return_value=_client_record())
             with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
@@ -177,6 +178,7 @@ class TestCreateClient:
         with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=existing)
+            mock_db.list_active_attachment_cidrs = AsyncMock(return_value=[])
             mock_db.create_client_record = AsyncMock(side_effect=_capture_create)
             mock_db.get_client = AsyncMock(return_value=_client_record(tunnel_ip="10.8.0.4"))
             with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
@@ -537,6 +539,7 @@ class TestDownloadClientConfigEndpoint:
         with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.get_client = AsyncMock(return_value=_client_record(private_key_encrypted=encrypted))
+            mock_db.list_active_attachment_cidrs = AsyncMock(return_value=[])
             resp = await api_client.get("/api/v1/waygate/servers/server-1/clients/client-1/config")
         assert resp.status_code == 200
         assert "laptop.conf" in resp.headers["content-disposition"]

@@ -103,6 +103,7 @@ async def create_waygate_client(
             detail = "클라이언트 생성 중 충돌이 발생했습니다. 잠시 후 다시 시도해주세요"
         raise HTTPException(status_code=409, detail=detail) from exc
 
+    nat_cidrs = await waygate_db.list_active_attachment_cidrs(server_id)
     tunnel_conf = waygate_config.render_client_conf(
         private_key=private_key,
         tunnel_ip=tunnel_ip,
@@ -111,6 +112,7 @@ async def create_waygate_client(
         endpoint_ip=server["endpoint_ip"] or "",
         listen_port=server["listen_port"],
         allowed_ips=allowed_ips,
+        nat_cidrs=nat_cidrs,
     )
 
     client = await waygate_db.get_client(server_id, project_id, client_id)
@@ -171,6 +173,7 @@ async def download_vpn_client_config(server_id: str, client_id: str, token_info:
         _logger.error("Waygate 클라이언트 private key 복호화 실패 (client=%s)", client_id)
         raise HTTPException(status_code=500, detail="클라이언트 키 복호화에 실패했습니다. 관리자에게 문의하세요.")
 
+    nat_cidrs = await waygate_db.list_active_attachment_cidrs(server_id)
     tunnel_conf = waygate_config.render_client_conf(
         private_key=private_key,
         tunnel_ip=client["tunnel_ip"],
@@ -179,6 +182,7 @@ async def download_vpn_client_config(server_id: str, client_id: str, token_info:
         endpoint_ip=server["endpoint_ip"],
         listen_port=server["listen_port"],
         allowed_ips=client.get("allowed_ips") or [server["tunnel_cidr"]],
+        nat_cidrs=nat_cidrs,
     )
 
     return Response(

@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { siteConfig } from '$lib/config/site';
-	import { ApiError } from '$lib/api/client';
+	import { api, ApiError } from '$lib/api/client';
 	import { toast } from '$lib/stores/toast';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -14,6 +14,7 @@
 	import FormModal from '$lib/components/ui/FormModal.svelte';
 	import Field from '$lib/components/ui/Field.svelte';
 	import TextInput from '$lib/components/ui/TextInput.svelte';
+	import SelectInput from '$lib/components/ui/SelectInput.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -24,7 +25,7 @@
 	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 	import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
 	import * as waygateApi from '$lib/api/waygate';
-	import type { WaygateServer, WaygateClient } from '$lib/types/waygate';
+	import type { WaygateServer, WaygateClient, WaygateNetworkAttachment } from '$lib/types/waygate';
 	import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
 	import { executeBulkMutations } from '$lib/utils/bulkActions';
 
@@ -168,9 +169,13 @@
 		const id = selectedServerId;
 		if (!id) {
 			clients = [];
+			attachments = [];
 			return;
 		}
-		untrack(() => fetchClients(id));
+		untrack(() => {
+			fetchClients(id);
+			fetchAttachments(id);
+		});
 	});
 
 	// 상세 패널이 열려있는 동안 서버 상태 + 클라이언트 상태를 함께 갱신
@@ -295,6 +300,125 @@
 		qrClient = null;
 		qrDataUrl = '';
 		qrError = '';
+	}
+
+	// ---- 네트워크 연결 (Phase 2 — 멀티 NIC + SNAT) ----
+	let attachments = $state<WaygateNetworkAttachment[]>([]);
+	let attachmentsLoading = $state(false);
+	let attachmentsError = $state('');
+	let showAttachModal = $state(false);
+	let availableNetworks = $state<{ id: string; name: string }[]>([]);
+	let attachNetworkId = $state('');
+	let attaching = $state(false);
+	let attachError = $state('');
+
+	async function fetchAttachments(serverId: string) {
+		attachmentsLoading = true;
+		try {
+			attachments = await waygateApi.listAttachments(serverId, token, projectId);
+			attachmentsError = '';
+		} catch (e) {
+			attachmentsError = e instanceof ApiError ? e.message : '네트워크 연결 조회 실패';
+		} finally {
+			attachmentsLoading = false;
+		}
+	}
+
+	async function openAttachModal() {
+		showAttachModal = true;
+		attachError = '';
+		attachNetworkId = '';
+		try {
+			availableNetworks = await api.get<{ id: string; name: string }[]>('/api/v1/networks', token, projectId);
+		} catch {
+			availableNetworks = [];
+		}
+	}
+
+	async function submitAttach() {
+		if (!selectedServerId || !attachNetworkId) return;
+		attaching = true;
+		attachError = '';
+		try {
+			await waygateApi.attachNetwork(selectedServerId, { network_id: attachNetworkId }, token, projectId);
+			showAttachModal = false;
+			toast.success('네트워크 연결이 시작되었습니다');
+			await fetchAttachments(selectedServerId);
+		} catch (e) {
+			attachError = e instanceof ApiError ? e.message : '네트워크 연결 실패';
+		} finally {
+			attaching = false;
+		}
+	}
+
+	async function detachNetwork(att: WaygateNetworkAttachment) {
+		if (!selectedServerId) return;
+		if (!(await confirmDialog(`네트워크 연결(${att.cidr ?? att.network_id})을 해제하시겠습니까?`))) return;
+		try {
+			await waygateApi.detachNetwork(selectedServerId, att.id, token, projectId);
+			toast.success('네트워크 연결이 해제되었습니다');
+			await fetchAttachments(selectedServerId);
+		} catch (e) {
+			toast.error('해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		}
+	}
+
+	// ---- 백업 / 마이그레이션 (Phase 3) ----
+	let showExportModal = $state(false);
+	let exportPassphrase = $state('');
+	let exporting = $state(false);
+	let exportError = $state('');
+
+	let showImportModal = $state(false);
+	let importPassphrase = $state('');
+	let importFile = $state<File | null>(null);
+	let importing = $state(false);
+	let importError = $state('');
+
+	async function submitExport() {
+		if (!selectedServerId || !selectedServer) return;
+		exporting = true;
+		exportError = '';
+		try {
+			const bundle = await waygateApi.exportServer(selectedServerId, exportPassphrase, token, projectId);
+			const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+			downloadBlobAs(blob, `${selectedServer.name}-waygate-export.json`);
+			showExportModal = false;
+			exportPassphrase = '';
+			toast.success('설정을 내보냈습니다');
+		} catch (e) {
+			exportError = e instanceof ApiError ? e.message : '내보내기 실패';
+		} finally {
+			exporting = false;
+		}
+	}
+
+	async function submitImport() {
+		if (!selectedServerId || !importFile) return;
+		importing = true;
+		importError = '';
+		try {
+			const text = await importFile.text();
+			const bundle = JSON.parse(text);
+			const result = await waygateApi.importServer(
+				selectedServerId,
+				importPassphrase,
+				bundle,
+				token,
+				projectId
+			);
+			showImportModal = false;
+			importPassphrase = '';
+			importFile = null;
+			const skippedMsg = result.skipped.length ? ` (${result.skipped.length}개 건너뜀)` : '';
+			toast.success(`${result.imported}개 클라이언트를 가져왔습니다${skippedMsg}`);
+			await fetchClients(selectedServerId);
+		} catch (e) {
+			if (e instanceof SyntaxError) importError = '번들 JSON 파싱에 실패했습니다';
+			else importError = e instanceof ApiError ? e.message : '가져오기 실패';
+		} finally {
+			importing = false;
+		}
 	}
 
 	function clientStatusLabel(client: WaygateClient): string {
@@ -550,6 +674,74 @@
 			<p class="text-xs text-[var(--color-ink-3)] mt-4">
 				<code>.conf</code> 파일을 다운로드하거나, <strong>QR</strong> 버튼으로 모바일 WireGuard 앱에서 바로 스캔해 등록할 수 있습니다.
 			</p>
+
+			<div class="flex items-center justify-between mb-3 mt-8">
+				<h3 class="text-sm font-medium text-[var(--color-ink-1)]">연결된 네트워크</h3>
+				<Button
+					onclick={openAttachModal}
+					variant="secondary"
+					size="sm"
+					disabled={selectedServer.status !== 'ACTIVE'}
+					title={selectedServer.status !== 'ACTIVE' ? 'Waygate 서버가 ACTIVE 상태여야 네트워크를 연결할 수 있습니다' : undefined}
+				>+ 네트워크 연결</Button>
+			</div>
+
+			{#if attachmentsError}
+				<Alert tone="danger" class="mb-4">{attachmentsError}</Alert>
+			{/if}
+
+			{#if attachmentsLoading && attachments.length === 0}
+				<LoadingSkeleton variant="table" rows={2} />
+			{:else if attachments.length === 0}
+				<div class="text-center py-8 text-[var(--color-ink-3)] bg-[var(--color-surface-raised)] border border-[var(--color-line)] rounded-xl text-sm">
+					연결된 테넌트 네트워크가 없습니다. 연결하면 VPN 클라이언트가 그 네트워크 내부로 접근할 수 있습니다.
+				</div>
+			{:else}
+				<TableShell>
+					<table>
+						<thead>
+							<tr>
+								<th>네트워크</th>
+								<th>CIDR</th>
+								<th>NAT</th>
+								<th>상태</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each attachments as att (att.id)}
+								<tr>
+									<td class="text-[var(--color-ink-2)] text-xs font-mono">{att.network_id}</td>
+									<td class="text-[var(--color-ink-2)] text-xs font-mono">{att.cidr ?? '-'}</td>
+									<td class="text-[var(--color-ink-2)] text-xs">{att.nat_mode}</td>
+									<td><StatusChip status={att.status} /></td>
+									<td>
+										<button onclick={() => detachNetwork(att)} class="text-xs text-[var(--color-state-danger)] hover:opacity-80">해제</button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</TableShell>
+			{/if}
+
+			<div class="flex items-center justify-between mb-3 mt-8">
+				<h3 class="text-sm font-medium text-[var(--color-ink-1)]">백업 / 마이그레이션</h3>
+			</div>
+			<div class="flex gap-2">
+				<Button onclick={() => { showExportModal = true; exportError = ''; }} variant="secondary" size="sm">설정 내보내기</Button>
+				<Button
+					onclick={() => { showImportModal = true; importError = ''; }}
+					variant="secondary"
+					size="sm"
+					disabled={selectedServer.status !== 'ACTIVE'}
+					title={selectedServer.status !== 'ACTIVE' ? 'Waygate 서버가 ACTIVE 상태여야 가져올 수 있습니다' : undefined}
+				>가져오기</Button>
+			</div>
+			<p class="text-xs text-[var(--color-ink-3)] mt-2">
+				클라이언트 키는 입력한 패스프레이즈로 암호화되어 번들에 저장됩니다. 다른 Waygate 서버로 이전할 때 같은 패스프레이즈로 가져오세요.
+				(서버 키는 이전되지 않으므로 가져온 뒤 클라이언트는 <code>.conf</code> 를 다시 내려받아야 합니다.)
+			</p>
 		</div>
 	</SlidePanel>
 {/if}
@@ -594,3 +786,78 @@
 		{/if}
 	</Card>
 </Modal>
+
+<FormModal
+	bind:open={showAttachModal}
+	title="네트워크 연결"
+	submitLabel="연결"
+	submitting={attaching}
+	onSubmit={submitAttach}
+	onClose={() => { showAttachModal = false; attachError = ''; }}
+>
+	<div class="space-y-4">
+		<Field label="테넌트 네트워크" required>
+			{#if availableNetworks.length === 0}
+				<p class="text-xs text-[var(--color-ink-3)]">사용 가능한 네트워크가 없거나 조회에 실패했습니다.</p>
+			{:else}
+				<SelectInput bind:value={attachNetworkId} ariaLabel="연결할 네트워크 선택">
+					<option value="" disabled>네트워크 선택</option>
+					{#each availableNetworks as net (net.id)}
+						<option value={net.id}>{net.name} ({net.id.slice(0, 8)})</option>
+					{/each}
+				</SelectInput>
+			{/if}
+		</Field>
+		<p class="text-xs text-[var(--color-ink-3)]">
+			연결하면 VPN 클라이언트의 <code>.conf</code> AllowedIPs 에 이 네트워크 CIDR 이 추가됩니다.
+			기존에 발급된 클라이언트는 <code>.conf</code> 를 다시 내려받아야 반영됩니다.
+		</p>
+		{#if attachError}
+			<p class="text-sm text-[var(--color-state-danger)]">{attachError}</p>
+		{/if}
+	</div>
+</FormModal>
+
+<FormModal
+	bind:open={showExportModal}
+	title="설정 내보내기"
+	submitLabel="내보내기"
+	submitting={exporting}
+	onSubmit={submitExport}
+	onClose={() => { showExportModal = false; exportError = ''; }}
+>
+	<div class="space-y-4">
+		<Field label="패스프레이즈" help="클라이언트 키를 암호화합니다 (8자 이상). 가져올 때 동일하게 입력해야 합니다." required>
+			<TextInput bind:value={exportPassphrase} type="password" placeholder="8자 이상" />
+		</Field>
+		{#if exportError}
+			<p class="text-sm text-[var(--color-state-danger)]">{exportError}</p>
+		{/if}
+	</div>
+</FormModal>
+
+<FormModal
+	bind:open={showImportModal}
+	title="설정 가져오기"
+	submitLabel="가져오기"
+	submitting={importing}
+	onSubmit={submitImport}
+	onClose={() => { showImportModal = false; importError = ''; importFile = null; }}
+>
+	<div class="space-y-4">
+		<Field label="번들 파일 (.json)" required>
+			<input
+				type="file"
+				accept="application/json,.json"
+				class="text-sm text-[var(--color-ink-1)]"
+				onchange={(e) => { importFile = (e.currentTarget as HTMLInputElement).files?.[0] ?? null; }}
+			/>
+		</Field>
+		<Field label="패스프레이즈" help="내보낼 때 사용한 패스프레이즈" required>
+			<TextInput bind:value={importPassphrase} type="password" />
+		</Field>
+		{#if importError}
+			<p class="text-sm text-[var(--color-state-danger)]">{importError}</p>
+		{/if}
+	</div>
+</FormModal>

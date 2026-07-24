@@ -7,6 +7,9 @@ packages:
   - wireguard
   - curl
   - python3
+  - iptables
+  - iproute2
+  - isc-dhcp-client
 
 write_files:
   - path: /etc/sysctl.d/99-afterglow-wg-forward.conf
@@ -68,7 +71,8 @@ write_files:
     permissions: "0750"
     content: |
       #!/usr/bin/env python3
-      """WireGuard reconcile 루프 — desired-state GET → wg syncconf → status POST."""
+      """WireGuard reconcile 루프 — desired-state GET → wg syncconf → NAT masquerade → status POST."""
+      import ipaddress
       import json
       import subprocess
       import sys
@@ -83,6 +87,7 @@ write_files:
       WG_CONF = "/etc/wireguard/wg0.conf"
       WG_CONF_HEAD = "/etc/wireguard/wg0.conf.head"
       PRIVATE_KEY_PATH = "/etc/wireguard/privatekey"
+      NAT_CHAIN = "WAYGATE-NAT"
 
       LOG = "/var/log/waygate-agent.log"
 
@@ -185,11 +190,89 @@ write_files:
           return peers
 
 
+      def _interfaces_without_ipv4() -> list:
+          """IPv4 주소가 없는 인터페이스(핫플러그 직후 NIC) 목록. lo/wg0 제외."""
+          have_ip = set()
+          addr = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, check=False)
+          for line in addr.stdout.splitlines():
+              parts = line.split()
+              if len(parts) >= 2:
+                  have_ip.add(parts[1])
+          missing = []
+          link = subprocess.run(["ip", "-o", "link", "show"], capture_output=True, text=True, check=False)
+          for line in link.stdout.splitlines():
+              seg = line.split(":")
+              if len(seg) >= 2:
+                  name = seg[1].strip().split("@")[0]
+                  if name in ("lo", WG_IFACE):
+                      continue
+                  if name and name not in have_ip:
+                      missing.append(name)
+          return missing
+
+
+      def bring_up_hotplug_nics() -> None:
+          """핫플러그된 NIC 를 up + DHCP 로 구성한다(cloud image 는 부팅 NIC 만 자동 구성).
+
+          nova.attach_interface 는 Neutron 포트만 붙일 뿐 게스트 내부 IP 를 구성하지 않으므로,
+          이 단계 없이는 아래 masquerade 가 IP 없는 죽은 NIC 에 바인딩된다.
+          """
+          for nic in _interfaces_without_ipv4():
+              subprocess.run(["ip", "link", "set", nic, "up"], check=False)
+              try:
+                  subprocess.run(["dhclient", "-1", nic], capture_output=True, check=False, timeout=30)
+              except subprocess.TimeoutExpired:
+                  log(f"dhclient {nic} 타임아웃 — 다음 주기 재시도")
+              log(f"핫플러그 NIC {nic} DHCP 구성 시도")
+
+
+      def _outbound_nic(cidr: str):
+          try:
+              host = str(next(ipaddress.ip_network(cidr, strict=False).hosts()))
+          except (ValueError, StopIteration):
+              host = cidr.split("/")[0]
+          route = subprocess.run(["ip", "-o", "route", "get", host], capture_output=True, text=True, check=False)
+          parts = route.stdout.split()
+          if "dev" in parts:
+              return parts[parts.index("dev") + 1]
+          return None
+
+
+      def apply_masquerade(tunnel_cidr: str, nat_networks: list) -> None:
+          """tunnel_cidr → 각 nat CIDR 트래픽을 해당 NIC 로 SNAT masquerade. idempotent.
+
+          전용 체인 WAYGATE-NAT 를 flush 후 재적용하므로, 연결 해제된 네트워크의 규칙도 자동 반영된다
+          (nat_networks 가 비면 체인이 비워져 모든 SNAT 규칙이 제거됨). 모든 인자는 subprocess 리스트
+          인자(shell=False)로만 전달되고 CIDR 은 백엔드에서 ip_network 검증된 값이라 주입 위험이 없다.
+          """
+          subprocess.run(["iptables", "-t", "nat", "-N", NAT_CHAIN], capture_output=True, check=False)
+          hooked = subprocess.run(
+              ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", NAT_CHAIN], capture_output=True, check=False
+          )
+          if hooked.returncode != 0:
+              subprocess.run(["iptables", "-t", "nat", "-A", "POSTROUTING", "-j", NAT_CHAIN], check=False)
+          subprocess.run(["iptables", "-t", "nat", "-F", NAT_CHAIN], check=False)
+          for cidr in nat_networks:
+              nic = _outbound_nic(cidr)
+              if not nic:
+                  log(f"masquerade: {cidr} 로의 NIC 미발견 — 스킵(다음 주기 재시도)")
+                  continue
+              subprocess.run(
+                  ["iptables", "-t", "nat", "-A", NAT_CHAIN, "-s", tunnel_cidr, "-o", nic, "-j", "MASQUERADE"],
+                  check=False,
+              )
+
+
       def main() -> int:
           desired = http_request(DESIRED_STATE_URL, "GET")
           if desired is not None:
               write_wg_conf(desired)
               syncconf()
+              nat_networks = desired.get("nat_networks", []) or []
+              if nat_networks:
+                  bring_up_hotplug_nics()
+              # nat_networks 가 비어도 호출 — 체인을 flush 해 이전 규칙을 정리한다.
+              apply_masquerade(desired.get("tunnel_cidr", "10.8.0.0/24"), nat_networks)
           else:
               log("desired-state 조회 실패 — 이번 주기 스킵")
 
