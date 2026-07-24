@@ -165,16 +165,20 @@ async def provision_waygate_server(
         if not image_id:
             raise RuntimeError("config.toml [waygate] image_id 가 설정되지 않았습니다")
 
-        server = await asyncio.to_thread(
-            conn.compute.create_server,
-            name=name,
-            image_id=image_id,
-            flavor_id=flavor_id,
-            networks=[{"port": port["id"]}],
-            user_data=userdata,
-            key_name=settings.waygate_key_name or None,
-            metadata={"afterglow_managed": "true", "waygate_type": "gateway", "waygate_server_id": server_id},
-        )
+        # key_name 은 선택 사항. 비어 있으면 kwargs 에서 아예 제외한다 — Nova 는 key_name: null 을
+        # 거부한다("None is not of type 'string'"). None 전달 대신 필드 자체를 생략해야 한다.
+        create_kwargs: dict = {
+            "name": name,
+            "image_id": image_id,
+            "flavor_id": flavor_id,
+            "networks": [{"port": port["id"]}],
+            "user_data": userdata,
+            "metadata": {"afterglow_managed": "true", "waygate_type": "gateway", "waygate_server_id": server_id},
+        }
+        if settings.waygate_key_name:
+            create_kwargs["key_name"] = settings.waygate_key_name
+
+        server = await asyncio.to_thread(conn.compute.create_server, **create_kwargs)
         created_server_vm_id = server.id
         await waygate_db.update_server_status(
             server_id,

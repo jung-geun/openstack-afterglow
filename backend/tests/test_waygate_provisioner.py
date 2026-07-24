@@ -193,6 +193,8 @@ class TestProvisionVpnServerSuccess:
         assert create_kwargs["image_id"] == "img-ubuntu-1"
         assert create_kwargs["flavor_id"] == "flavor-abc"
         assert create_kwargs["networks"] == [{"port": "port-1"}]
+        # key_name 이 비어 있으면 kwargs 에서 아예 제외되어야 한다 — Nova 는 key_name: null 거부.
+        assert "key_name" not in create_kwargs
 
         # 상태 전이 확인: 첫 호출은 CREATING(+server_vm_id 등), 마지막 호출은 PROVISIONING
         status_calls = mock_update_status.call_args_list
