@@ -74,7 +74,7 @@ def test_is_db_available_false_when_engine_none():
 
 
 def test_init_db_passes_timeout_options():
-    """init_db가 create_async_engine에 connect_timeout/pool_timeout/pool_recycle을 전달한다."""
+    """init_db가 연결 풀과 connect_timeout/pool_timeout/pool_recycle을 전달한다."""
     captured_kwargs: dict = {}
 
     def fake_engine(url, **kwargs):
@@ -92,6 +92,9 @@ def test_init_db_passes_timeout_options():
             db_mod._engine = original_engine
             db_mod._session_factory = original_factory
 
+    assert captured_kwargs.get("pool_size") == 5
+    assert captured_kwargs.get("max_overflow") == 10
+    assert captured_kwargs.get("pool_pre_ping") is True
     assert captured_kwargs.get("pool_timeout") == 10
     assert captured_kwargs.get("pool_recycle") == 1800
     assert captured_kwargs.get("connect_args", {}).get("connect_timeout") == 10
@@ -113,6 +116,8 @@ def test_init_db_uses_custom_timeouts():
         try:
             db_mod.init_db(
                 "mysql+aiomysql://u:p@localhost/db",
+                pool_size=7,
+                max_overflow=3,
                 connect_timeout=20,
                 pool_timeout=30,
             )
@@ -120,6 +125,8 @@ def test_init_db_uses_custom_timeouts():
             db_mod._engine = original_engine
             db_mod._session_factory = original_factory
 
+    assert captured_kwargs.get("pool_size") == 7
+    assert captured_kwargs.get("max_overflow") == 3
     assert captured_kwargs.get("pool_timeout") == 30
     assert captured_kwargs.get("connect_args", {}).get("connect_timeout") == 20
 

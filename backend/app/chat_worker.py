@@ -45,6 +45,9 @@ async def serve() -> None:
         settings.database_url,
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
+        connect_timeout=settings.database_connect_timeout,
+        pool_timeout=settings.database_pool_timeout,
+        unhealthy_seconds=settings.database_unhealthy_seconds,
     )
 
     from app.services.chat.checkpointer import chat_checkpointer

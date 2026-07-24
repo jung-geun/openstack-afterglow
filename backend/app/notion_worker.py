@@ -216,6 +216,9 @@ async def main() -> None:
                 settings.database_url,
                 pool_size=settings.database_pool_size,
                 max_overflow=settings.database_max_overflow,
+                connect_timeout=settings.database_connect_timeout,
+                pool_timeout=settings.database_pool_timeout,
+                unhealthy_seconds=settings.database_unhealthy_seconds,
             )
             _logger.info("DB 연결 완료")
         except Exception:
