@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     TEXT,
     VARCHAR,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -106,6 +107,8 @@ class ChatConversation(Base):
     forked_from_message_id: Mapped[int | None] = mapped_column(BIGINT)
     # 소속 프로젝트(chat_workspaces). OpenStack project_id 와 별개 개념. 완료 시 워크스페이스 지침 주입.
     workspace_id: Mapped[int | None] = mapped_column(BIGINT)
+    lifecycle_status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="active")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -141,6 +144,10 @@ class ChatMessage(Base):
     reasoning: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     # 첨부(이미지) 참조 JSON([{key,mime,name}])을 암호화한 문자열. 표시·현재턴 vision content 재구성용.
     attachments: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    parts: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    parts_version: Mapped[int | None] = mapped_column(INT)
+    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="complete")
+
     token_prompt: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     token_completion: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     # 재생성 시 어떤 모델로 생성했는지(형제 버전 구분·표시용). 미지정 시 대화 기본 모델.
@@ -152,6 +159,7 @@ class ChatMessage(Base):
 
     __table_args__ = (
         Index("idx_chat_messages_conversation", "conversation_id", "created_at"),
+        Index("idx_chat_messages_conversation_id", "conversation_id", "id"),
         Index("idx_chat_messages_parent", "parent_id"),
     )
 
@@ -174,6 +182,9 @@ class ChatUsageLog(Base):
     event_id: Mapped[str | None] = mapped_column(VARCHAR(64), unique=True)
     pricing_status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="legacy")
     pricing_snapshot: Mapped[dict | None] = mapped_column(JSON)
+    run_id: Mapped[str | None] = mapped_column(CHAR(36), unique=True)
+    usage_components: Mapped[dict | None] = mapped_column(JSON)
+    provider_reported_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
@@ -191,6 +202,7 @@ class UserWallet(Base):
     balance_credits: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
     max_quota_monthly: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
     used_quota_this_month: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
+    reserved_credits: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
     quota_period_start: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
@@ -208,10 +220,15 @@ class ChatMcpServer(Base):
     owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
-    transport: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="http")  # http|sse|stdio
+    transport: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="http")  # HTTPS streamable HTTP only
     url: Mapped[str | None] = mapped_column(VARCHAR(500))
-    command: Mapped[str | None] = mapped_column(VARCHAR(500))
-    headers: Mapped[dict | None] = mapped_column(JSON)
+    command: Mapped[str | None] = mapped_column(VARCHAR(500))  # deprecated(stdio 제거) — 컬럼만 유지
+    headers: Mapped[dict | None] = mapped_column(JSON)  # deprecated: 레거시 plaintext. 신규는 encrypted_headers.
+    # 인증 헤더(Bearer/API key) — AES-256-GCM(llm_provider_key 도메인) 암호화 문자열.
+    encrypted_headers: Mapped[str | None] = mapped_column(TEXT)
+    # 사용자별 인증 요구사항(비밀 아님) — [{"key","label","description"}]. 공용 시크릿 대신
+    # 사용자가 자신의 값(chat_mcp_credentials)을 채우도록 어떤 헤더가 필요한지 선언.
+    auth_requirements: Mapped[list | None] = mapped_column(JSON)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -220,6 +237,59 @@ class ChatMcpServer(Base):
     __table_args__ = (
         Index("idx_chat_mcp_scope", "scope"),
         Index("idx_chat_mcp_owner", "owner_user_id"),
+    )
+
+
+class ChatMcpCredential(Base):
+    """MCP 서버의 사용자별 인증 값 — 서버 auth_requirements 에 대응하는 개별 사용자 시크릿.
+
+    (mcp_server_id, owner_user_id, owner_project_id) 유일. values 는 AES-256-GCM(llm_provider_key
+    도메인)으로 암호화한 JSON({header_key: value}). 실행 시 서버 기본 헤더 위에 병합된다.
+    """
+
+    __tablename__ = "chat_mcp_credentials"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    mcp_server_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    encrypted_values: Mapped[str] = mapped_column(TEXT, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        UniqueConstraint("mcp_server_id", "owner_user_id", "owner_project_id", name="uq_chat_mcp_cred"),
+        Index("idx_chat_mcp_cred_owner", "owner_user_id", "owner_project_id"),
+    )
+
+
+class ChatApiKey(Base):
+    """외부 API 키 — 사용자가 OpenAI/Anthropic 호환 /v1 엔드포인트에 접속할 때 사용.
+
+    키 평문은 발급 시 1회만 반환하고 저장하지 않는다. key_hash 는 SHA-256(전체 키) hex 로,
+    인증 시 요청 키를 해시해 조회 후 hmac.compare_digest 로 타이밍 안전 비교한다.
+    사용량은 chat_usage_logs.api_key_id 로 이 id 를 참조(FK 없음 — 폐기 후에도 원장 보존).
+    """
+
+    __tablename__ = "chat_api_keys"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False, default="")
+    key_prefix: Mapped[str] = mapped_column(VARCHAR(24), nullable=False)  # 표시용(시크릿 아님)
+    key_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)  # SHA-256 hex
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_chat_api_keys_hash"),
+        Index("idx_chat_api_keys_owner", "owner_user_id", "owner_project_id"),
     )
 
 
@@ -246,6 +316,34 @@ class ChatCustomTool(Base):
     __table_args__ = (
         Index("idx_chat_tool_scope", "scope"),
         Index("idx_chat_tool_owner", "owner_user_id"),
+    )
+
+
+class ChatSkill(Base):
+    """빌트인 AI 채팅 스킬 (Claude Agent Skills 계열) — 선택 시 system 프리앰블에 주입.
+
+    MCP/커스텀툴과 같은 확장 체계(scope: global|user)이나, 실행 대신 지침(instructions,
+    SKILL.md 본문)을 대화 컨텍스트에 주입한다. 채팅별로 명시 선택된 스킬만 주입된다(opt-in).
+    instructions 는 AES-256-GCM(chat_content 도메인) 암호문으로 저장한다.
+    """
+
+    __tablename__ = "chat_skills"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
+    owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(VARCHAR(500))
+    instructions: Mapped[str] = mapped_column(TEXT, nullable=False)  # 암호문(chat_content 도메인)
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_chat_skill_scope", "scope"),
+        Index("idx_chat_skill_owner", "owner_user_id"),
     )
 
 
@@ -306,15 +404,19 @@ class ChatWorkspace(Base):
 
 
 class ChatMemory(Base):
-    """사용자 장기 메모리 — 프로젝트 무관, user_id 소유. 완료 시 컨텍스트 주입.
-
-    content 는 chat_content 암호문. v1 은 수동 관리(추가/편집/삭제), 자동 추출은 후속.
-    """
+    """Encrypted memory source of truth, scoped for fail-closed semantic hydration."""
 
     __tablename__ = "chat_memories"
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    workspace_id: Mapped[int | None] = mapped_column(BIGINT)
+    scope: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="account")
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="active")
+    extraction_status: Mapped[str | None] = mapped_column(VARCHAR(20))
     # AES-256-GCM(chat_content) 암호문. 기억할 사실(예: "사용자는 Python 을 선호").
     content: Mapped[str | None] = mapped_column(MEDIUMTEXT)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
@@ -322,4 +424,13 @@ class ChatMemory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
-    __table_args__ = (Index("idx_chat_memories_user", "user_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "(scope = 'account' AND project_id IS NULL AND workspace_id IS NULL) "
+            "OR (scope = 'project' AND project_id IS NOT NULL AND workspace_id IS NULL) "
+            "OR (scope = 'workspace' AND project_id IS NOT NULL AND workspace_id IS NOT NULL)",
+            name="chk_chat_memory_scope",
+        ),
+        Index("idx_chat_memories_user", "user_id"),
+        Index("idx_chat_memories_scope", "user_id", "project_id", "workspace_id", "status", "is_active"),
+    )

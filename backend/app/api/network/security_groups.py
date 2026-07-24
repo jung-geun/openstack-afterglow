@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import openstack
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
@@ -31,6 +32,17 @@ class CreateSecurityGroupRuleRequest(BaseModel):
     port_range_max: int | None = None
     remote_ip_prefix: str | None = None
     ethertype: str = "IPv4"
+
+    @field_validator("remote_ip_prefix")
+    @classmethod
+    def validate_remote_ip_prefix(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ValueError("원격 IP는 CIDR 형식이어야 합니다 (예: 0.0.0.0/0)") from exc
+        return value
 
 
 @router.get("")

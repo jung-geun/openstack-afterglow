@@ -19,13 +19,18 @@ class TestEffectiveCapabilities:
         caps = {"vision": True, "reasoning": False, "tool_call": True}
         row = _Row(capabilities=caps, capability_source="override")
         eff, source = ps._effective_capabilities(row, "anthropic")
-        assert eff == caps and source == "override"
+        assert source == "override"
+        assert eff["vision"] is True and eff["reasoning"] is False and eff["tool_call"] is True
+        assert eff["function_calling"] is True
+        assert eff["feature_gates"]["image_input"]["available"] is True
 
     def test_models_dev_source_preserved(self):
         caps = {"vision": True}
         row = _Row(capabilities=caps, capability_source="models_dev")
         eff, source = ps._effective_capabilities(row, "openai")
-        assert eff == caps and source == "models_dev"
+        assert source == "models_dev"
+        assert eff["vision"] is True
+        assert eff["feature_gates"]["image_input"]["available"] is True
 
     def test_litellm_fallback_when_no_stored(self, monkeypatch):
         import litellm

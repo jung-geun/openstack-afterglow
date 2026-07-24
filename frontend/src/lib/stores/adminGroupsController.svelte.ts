@@ -26,6 +26,10 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   let allUsers = $state<User[]>([]);
   let addMemberError = $state<Record<string, string>>({});
   let addMemberSaving = $state<Record<string, boolean>>({});
+  let usersGeneration = 0;
+  let usersToken: string | undefined;
+  let usersProjectId: string | undefined;
+  const memberGenerations: Record<string, number> = {};
 
   const tok = opts.token;
   const pid = opts.projectId;
@@ -43,11 +47,19 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   }
 
   async function loadUsers() {
-    if (allUsers.length > 0) return;
+    const requestToken = tok();
+    const requestProjectId = pid();
+    if (allUsers.length > 0 && usersToken === requestToken && usersProjectId === requestProjectId) return;
+    const generation = ++usersGeneration;
     try {
-      const res = await api.get<{ items: User[] }>('/api/v1/admin/users?limit=100', tok(), pid());
+      const res = await api.get<{ items: User[] }>('/api/v1/admin/users?limit=100', requestToken, requestProjectId);
+      if (generation !== usersGeneration || tok() !== requestToken || pid() !== requestProjectId) return;
       allUsers = res.items;
-    } catch {}
+      usersToken = requestToken;
+      usersProjectId = requestProjectId;
+    } catch {
+      if (generation === usersGeneration && tok() === requestToken && pid() === requestProjectId) allUsers = [];
+    }
   }
 
   async function createGroup(name: string, description: string): Promise<boolean> {
@@ -83,22 +95,30 @@ export function createAdminGroupsController(opts: AdminGroupsControllerOpts) {
   }
 
   async function loadGroupMembers(groupId: string) {
+    const requestToken = tok();
+    const requestProjectId = pid();
+    const generation = (memberGenerations[groupId] ?? 0) + 1;
+    memberGenerations[groupId] = generation;
+    const owns = () => memberGenerations[groupId] === generation
+      && tok() === requestToken
+      && pid() === requestProjectId;
     membersLoading = { ...membersLoading, [groupId]: true };
     try {
-      const res = await api.get<GroupMember[]>(`/api/v1/admin/groups/${groupId}/users`, tok(), pid());
-      groupMembers = { ...groupMembers, [groupId]: res };
+      const res = await api.get<GroupMember[]>(`/api/v1/admin/groups/${groupId}/users`, requestToken, requestProjectId);
+      if (owns()) groupMembers = { ...groupMembers, [groupId]: res };
     } catch {
-      groupMembers = { ...groupMembers, [groupId]: [] };
+      if (owns()) groupMembers = { ...groupMembers, [groupId]: [] };
     } finally {
-      membersLoading = { ...membersLoading, [groupId]: false };
+      if (owns()) membersLoading = { ...membersLoading, [groupId]: false };
     }
   }
 
   async function toggleMembers(g: Group) {
     if (expandedGroup === g.id) { expandedGroup = null; return; }
     expandedGroup = g.id;
-    await loadGroupMembers(g.id);
-    await loadUsers();
+    const membersPromise = loadGroupMembers(g.id);
+    const usersPromise = loadUsers();
+    await Promise.allSettled([membersPromise, usersPromise]);
   }
 
   async function addMember(groupId: string, userId: string): Promise<boolean> {

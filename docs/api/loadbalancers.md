@@ -1,7 +1,13 @@
+---
+title: 로드밸런서 (Load Balancers)
+parent: API 레퍼런스
+nav_order: 52
+---
+
 # 로드밸런서 (Load Balancers) API
 
 > 태그: `loadbalancers`  
-> 기본 경로: `/api/loadbalancers`
+> 기본 경로: `/api/v1/loadbalancers`
 
 Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합니다.
 
@@ -11,8 +17,8 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 헤더 | 설명 |
 |------|------|
-| `X-Auth-Token` | Keystone 인증 토큰 |
-| `X-Project-Id` | OpenStack 프로젝트 UUID |
+| `Authorization` | `Bearer <access_token>` (로그인 응답의 access JWT) |
+| `X-Project-Id` | (선택) 프로젝트 UUID — 생략 시 토큰의 프로젝트로 처리, 다른 값이면 rescope |
 
 ---
 
@@ -32,18 +38,18 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/loadbalancers` | 로드밸런서 목록 (30초 캐시) |
-| `POST` | `/api/loadbalancers` | 로드밸런서 생성 |
-| `GET` | `/api/loadbalancers/{lb_id}` | 로드밸런서 상세 |
-| `DELETE` | `/api/loadbalancers/{lb_id}` | 로드밸런서 삭제 |
+| `GET` | `/api/v1/loadbalancers` | 로드밸런서 목록 (30초 캐시) |
+| `POST` | `/api/v1/loadbalancers` | 로드밸런서 생성 |
+| `GET` | `/api/v1/loadbalancers/{lb_id}` | 로드밸런서 상세 |
+| `DELETE` | `/api/v1/loadbalancers/{lb_id}` | 로드밸런서 삭제 |
 
-### GET /api/loadbalancers
+### GET /api/v1/loadbalancers
 
 프로젝트의 Octavia 로드밸런서 목록을 반환합니다. 응답은 30초간 캐시됩니다.
 
 **응답 (200 OK)** — 배열
 
-### POST /api/loadbalancers
+### POST /api/v1/loadbalancers
 
 새 로드밸런서를 생성합니다.
 
@@ -65,7 +71,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 **응답 (201 Created)**
 
-### GET /api/loadbalancers/{lb_id}
+### GET /api/v1/loadbalancers/{lb_id}
 
 ![로드밸런서 상세](../../assets/lb-detail.png)
 *VIP 주소, 프로비저닝·운영 상태(ONLINE), TCP 리스너(443/80)와 백엔드 멤버 풀 상태(ACTIVE)를 상세 패널에서 확인*
@@ -76,7 +82,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 |----------|------|------|------|------|
 | `lb_id` | path | string | 예 | 로드밸런서 UUID |
 
-### DELETE /api/loadbalancers/{lb_id}
+### DELETE /api/v1/loadbalancers/{lb_id}
 
 로드밸런서를 삭제합니다. 하위 리스너, 풀도 함께 삭제됩니다.
 
@@ -90,15 +96,15 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/loadbalancers/{lb_id}/listeners` | 리스너 목록 |
-| `POST` | `/api/loadbalancers/{lb_id}/listeners` | 리스너 생성 |
-| `DELETE` | `/api/loadbalancers/{lb_id}/listeners/{listener_id}` | 리스너 삭제 |
+| `GET` | `/api/v1/loadbalancers/{lb_id}/listeners` | 리스너 목록 |
+| `POST` | `/api/v1/loadbalancers/{lb_id}/listeners` | 리스너 생성 |
+| `DELETE` | `/api/v1/loadbalancers/{lb_id}/listeners/{listener_id}` | 리스너 삭제 |
 
-### GET /api/loadbalancers/{lb_id}/listeners
+### GET /api/v1/loadbalancers/{lb_id}/listeners
 
 로드밸런서의 리스너 목록을 반환합니다.
 
-### POST /api/loadbalancers/{lb_id}/listeners
+### POST /api/v1/loadbalancers/{lb_id}/listeners
 
 리스너를 생성합니다.
 
@@ -120,7 +126,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 | `name` | string | 아니오 | 리스너 이름 |
 | `default_pool_id` | string | 아니오 | 기본 풀 UUID |
 
-### DELETE /api/loadbalancers/{lb_id}/listeners/{listener_id}
+### DELETE /api/v1/loadbalancers/{lb_id}/listeners/{listener_id}
 
 리스너를 삭제합니다.
 
@@ -134,15 +140,15 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/loadbalancers/{lb_id}/pools` | 풀 목록 |
-| `POST` | `/api/loadbalancers/{lb_id}/pools` | 풀 생성 |
-| `DELETE` | `/api/loadbalancers/{lb_id}/pools/{pool_id}` | 풀 삭제 |
+| `GET` | `/api/v1/loadbalancers/{lb_id}/pools` | 풀 목록 |
+| `POST` | `/api/v1/loadbalancers/{lb_id}/pools` | 풀 생성 |
+| `DELETE` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}` | 풀 삭제 |
 
-### GET /api/loadbalancers/{lb_id}/pools
+### GET /api/v1/loadbalancers/{lb_id}/pools
 
 로드밸런서의 풀 목록을 반환합니다.
 
-### POST /api/loadbalancers/{lb_id}/pools
+### POST /api/v1/loadbalancers/{lb_id}/pools
 
 풀을 생성합니다.
 
@@ -164,7 +170,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 | `name` | string | 아니오 | 풀 이름 |
 | `listener_id` | string | 아니오 | 연결할 리스너 UUID |
 
-### DELETE /api/loadbalancers/{lb_id}/pools/{pool_id}
+### DELETE /api/v1/loadbalancers/{lb_id}/pools/{pool_id}
 
 풀을 삭제합니다.
 
@@ -178,15 +184,15 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/members` | 멤버 목록 |
-| `POST` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/members` | 멤버 추가 |
-| `DELETE` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/members/{member_id}` | 멤버 제거 |
+| `GET` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members` | 멤버 목록 |
+| `POST` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members` | 멤버 추가 |
+| `DELETE` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members/{member_id}` | 멤버 제거 |
 
-### GET /api/loadbalancers/{lb_id}/pools/{pool_id}/members
+### GET /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members
 
 풀의 멤버 목록을 반환합니다.
 
-### POST /api/loadbalancers/{lb_id}/pools/{pool_id}/members
+### POST /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members
 
 풀에 멤버를 추가합니다.
 
@@ -210,7 +216,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 | `name` | string | 아니오 | 멤버 이름 |
 | `weight` | integer | 아니오 | 가중치 (기본값: `1`) |
 
-### DELETE /api/loadbalancers/{lb_id}/pools/{pool_id}/members/{member_id}
+### DELETE /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/members/{member_id}
 
 멤버를 제거합니다.
 
@@ -224,15 +230,15 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor` | 헬스 모니터 조회 |
-| `POST` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor` | 헬스 모니터 생성 |
-| `DELETE` | `/api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}` | 헬스 모니터 삭제 |
+| `GET` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor` | 헬스 모니터 조회 |
+| `POST` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor` | 헬스 모니터 생성 |
+| `DELETE` | `/api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}` | 헬스 모니터 삭제 |
 
-### GET /api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor
+### GET /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor
 
 풀의 헬스 모니터 정보를 반환합니다.
 
-### POST /api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor
+### POST /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor
 
 헬스 모니터를 생성합니다.
 
@@ -256,7 +262,7 @@ Octavia 로드밸런서와 리스너, 풀, 멤버, 헬스 모니터를 관리합
 | `max_retries` | integer | 예 | 최대 재시도 횟수 |
 | `name` | string | 아니오 | 헬스 모니터 이름 |
 
-### DELETE /api/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}
+### DELETE /api/v1/loadbalancers/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}
 
 헬스 모니터를 삭제합니다.
 

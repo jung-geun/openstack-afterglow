@@ -10,6 +10,7 @@
 		CapacityBar,
 		Card,
 	} from '$lib/components/ui';
+	import type { ChatUsage } from '$lib/api/chatTree';
 
 	interface FlavorHour {
 		flavor: string;
@@ -33,13 +34,7 @@
 		};
 	}
 
-	interface ChatUsage {
-		found: boolean;
-		total_credited_cost: number;
-		prompt_tokens: number;
-		completion_tokens: number;
-		request_count: number;
-	}
+
 
 	let data = $state<UsageReport | null>(null);
 	let loading = $state(true);
@@ -282,8 +277,8 @@
 				<SectionHeader title="AI 채팅 사용량" meta="빌트인 채팅" />
 				<div class="grid grid-cols-2 lg:grid-cols-3 gap-3.5 mt-4">
 					<StatTile
-						label="누계 토큰"
-						value={(chatUsage.prompt_tokens + chatUsage.completion_tokens).toLocaleString()}
+						label="이번 달 토큰"
+						value={(chatUsage.month_prompt_tokens + chatUsage.month_completion_tokens).toLocaleString()}
 						accent="blue"
 					>
 						{#snippet icon()}
@@ -292,9 +287,11 @@
 							</svg>
 						{/snippet}
 					</StatTile>
+					<StatTile label="입력 토큰" value={chatUsage.month_prompt_tokens.toLocaleString()} accent="blue" />
+					<StatTile label="출력 토큰" value={chatUsage.month_completion_tokens.toLocaleString()} accent="cyan" />
 					<StatTile
-						label="크레딧 소모"
-						value={chatUsage.total_credited_cost.toLocaleString()}
+						label="이번 달 크레딧"
+						value={chatUsage.month_credited_cost.toLocaleString()}
 						accent="violet"
 					>
 						{#snippet icon()}
@@ -304,8 +301,8 @@
 						{/snippet}
 					</StatTile>
 					<StatTile
-						label="요청 수"
-						value={chatUsage.request_count}
+						label="이번 달 요청"
+						value={chatUsage.month_request_count}
 						accent="cyan"
 					>
 						{#snippet icon()}
@@ -314,6 +311,7 @@
 							</svg>
 						{/snippet}
 					</StatTile>
+					<StatTile label="월 quota" value={`${chatUsage.quota_used.toLocaleString()} / ${chatUsage.quota_max.toLocaleString()}`} accent="amber" />
 				</div>
 			</Card>
 		{/if}

@@ -56,7 +56,7 @@ Afterglow dashboard
 `docs/architecture.md` 8장은 이 계획을 조금 더 구체화한다.
 
 ```text
-클라이언트 -> POST /api/k3s/clusters (SSE)
+클라이언트 -> POST /api/v1/k3s/clusters/async (SSE)
   -> 보안그룹 생성
   -> 부트 볼륨 생성 (Cinder)
   -> 플러그인 레지스트리 집계 (cloud.conf + 매니페스트 + 서버 인자)

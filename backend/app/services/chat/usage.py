@@ -21,15 +21,17 @@ logger = logging.getLogger(__name__)
 _EMPTY = {
     "found": False,
     "total_credited_cost": 0.0,
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "request_count": 0,
+    "lifetime_prompt_tokens": 0,
+    "lifetime_completion_tokens": 0,
+    "lifetime_request_count": 0,
     "month_credited_cost": 0.0,
     "month_prompt_tokens": 0,
     "month_completion_tokens": 0,
     "month_request_count": 0,
     "quota_used": 0.0,
     "quota_max": 0.0,
+    # 접근경로(web vs api) 분해 — 누적 기준.
+    "by_source": [],
 }
 
 _SUMS = (
@@ -56,21 +58,38 @@ async def user_usage_summary(user_id: str, project_id: str = "") -> dict:
         async with factory() as session:
             total = (await session.execute(select(*_SUMS).where(*base))).one()
             month = (await session.execute(select(*_SUMS).where(*base, ChatUsageLog.created_at >= month_start))).one()
+            src_rows = (
+                await session.execute(
+                    select(
+                        ChatUsageLog.source,
+                        func.coalesce(func.sum(ChatUsageLog.prompt_tokens + ChatUsageLog.completion_tokens), 0),
+                        func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
+                        func.count(ChatUsageLog.id),
+                    )
+                    .where(*base)
+                    .group_by(ChatUsageLog.source)
+                )
+            ).all()
             wallet = await session.get(UserWallet, user_id)
         tc, tp, tct, tcount = total
         mc, mp, mct, mcount = month
+        by_source = [
+            {"source": s or "web", "tokens": int(t or 0), "credited_cost": float(c or 0), "request_count": int(n or 0)}
+            for s, t, c, n in src_rows
+        ]
         return {
             "found": tcount > 0,
             "total_credited_cost": float(tc or 0),
-            "prompt_tokens": int(tp or 0),
-            "completion_tokens": int(tct or 0),
-            "request_count": int(tcount or 0),
+            "lifetime_prompt_tokens": int(tp or 0),
+            "lifetime_completion_tokens": int(tct or 0),
+            "lifetime_request_count": int(tcount or 0),
             "month_credited_cost": float(mc or 0),
             "month_prompt_tokens": int(mp or 0),
             "month_completion_tokens": int(mct or 0),
             "month_request_count": int(mcount or 0),
-            "quota_used": float(wallet.used_quota_this_month) if wallet else 0.0,
+            "quota_used": float(mc or 0),
             "quota_max": float(wallet.max_quota_monthly) if wallet else 0.0,
+            "by_source": by_source,
         }
     except Exception:
         logger.warning("빌트인 채팅 사용량 집계 실패", exc_info=True)

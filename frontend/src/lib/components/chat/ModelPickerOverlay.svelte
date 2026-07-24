@@ -104,6 +104,10 @@
 		z-index: 50;
 		border: none;
 	}
+	/* 다크 테마에서는 밝은 ink 토큰이 아닌 canvas를 섞어 회색 막을 방지한다. */
+	:global(:root:not(.light)) .overlay {
+		background: color-mix(in oklab, var(--color-surface-canvas) 68%, transparent);
+	}
 	.panel {
 		position: fixed;
 		inset: 50% auto auto 50%;

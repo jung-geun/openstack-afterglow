@@ -1,32 +1,57 @@
 /**
- * 채팅 첨부 업로드 — 전용 object storage 버킷(POST /api/v1/chat/attachments).
- *
- * 반환된 참조(key/mime/name)를 completions 요청의 attachments 로 넘기면 vision content 로 전달된다.
+ * Scanned canonical chat assets. The API returns an opaque asset id; object keys
+ * and signed URLs never cross the browser boundary.
  */
 import { getBaseUrl } from './client';
 
-/** 백엔드 반환 참조 + 프론트 로컬 상태(썸네일·업로드 진행). */
+/** Backend asset metadata plus local upload state. */
 export interface ChatAttachment {
-	/** 업로드 완료 후 채워지는 object key */
-	key?: string;
+	assetId?: string;
 	mime: string;
 	name: string;
-	/** 로컬 미리보기(object URL) — 칩 썸네일용 */
 	previewUrl?: string;
 	status: 'uploading' | 'done' | 'error';
 }
 
 export interface AttachmentRef {
-	key: string;
-	mime: string;
+	id: string;
+	mime_type: string;
 	name: string;
 }
 
-/** 완료(done)된 첨부만 백엔드 전송용 참조로. */
-export function toRefs(items: ChatAttachment[]): AttachmentRef[] {
+const CHAT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+export function isChatImageMime(mime: string): boolean {
+	return CHAT_IMAGE_MIME_TYPES.has(mime);
+}
+
+export function isChatDocumentMime(mime: string): boolean {
+	return mime === 'application/pdf';
+}
+
+/** Mark a successfully scanned upload as ready for a subsequent chat run. */
+export function completeChatAttachment(item: ChatAttachment, ref: AttachmentRef): ChatAttachment {
+	return {
+		...item,
+		assetId: ref.id,
+		mime: ref.mime_type,
+		name: ref.name,
+		status: 'done'
+	};
+}
+
+export function toInputParts(items: ChatAttachment[]) {
 	return items
-		.filter((a) => a.status === 'done' && a.key)
-		.map((a) => ({ key: a.key as string, mime: a.mime, name: a.name }));
+		.filter(
+			(item): item is ChatAttachment & { assetId: string } =>
+				item.status === 'done' &&
+				Boolean(item.assetId) &&
+				(isChatImageMime(item.mime) || isChatDocumentMime(item.mime))
+		)
+		.map((item) => ({
+			type: isChatImageMime(item.mime) ? ('image' as const) : ('document' as const),
+			asset_id: item.assetId
+		}));
 }
 
 interface UploadOptions {
@@ -35,7 +60,7 @@ interface UploadOptions {
 	signal?: AbortSignal;
 }
 
-/** 이미지 파일 1개 업로드 → {key,mime,name}. 실패 시 throw. */
+/** Upload a supported image or PDF through the scanned asset pipeline. */
 export async function uploadChatAttachment(
 	file: File,
 	{ token, projectId, signal }: UploadOptions = {}
@@ -47,7 +72,7 @@ export async function uploadChatAttachment(
 	const form = new FormData();
 	form.append('file', file);
 
-	const res = await fetch(`${getBaseUrl()}/api/v1/chat/attachments`, {
+	const res = await fetch(`${getBaseUrl()}/api/v1/chat/assets`, {
 		method: 'POST',
 		headers,
 		body: form,
@@ -63,5 +88,7 @@ export async function uploadChatAttachment(
 		}
 		throw new Error(detail || `첨부 업로드 실패 (${res.status})`);
 	}
-	return (await res.json()) as AttachmentRef;
+
+	const payload = (await res.json()) as AttachmentRef;
+	return { id: payload.id, mime_type: payload.mime_type, name: payload.name };
 }

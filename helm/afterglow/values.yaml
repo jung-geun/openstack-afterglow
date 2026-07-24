@@ -26,6 +26,7 @@ image:
 # -----------------------------------------------------------------------------
 replicaCount:
   backend: 2
+  chatWorker: 1
   frontend: 2
   worker: 1
   notionWorker: 1
@@ -81,6 +82,10 @@ ingress:
   certIssuer: letsencrypt-prod-traefik
   tlsSecretName: afterglow-tls
   ingressClass: traefik
+  # 외부 OpenAI/Anthropic 호환 API(/v1) 전용 서브도메인. 여기로 들어온 요청만 /v1 을 백엔드로 라우팅한다.
+  # 기본 host 에서는 /v1 이 프론트로 가 노출되지 않는다(충돌·오용 방지). backend 의 chat_api_hosts 와 일치시킬 것.
+  # 예: ["api.cloud.dmslab.re.kr", "api.test.cloud.dmslab.re.kr"]
+  apiHosts: []
 
 # -----------------------------------------------------------------------------
 # 시크릿 (실제 값은 --set 또는 values-prod.yaml 로 주입)
@@ -701,6 +706,13 @@ resources:
     limits:
       memory: "2Gi"
       cpu: "4"
+  chatWorker:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
   frontend:
     requests:
       memory: "128Mi"

@@ -148,7 +148,7 @@ def _load_toml() -> dict:
     flat["service_trove_enabled"] = svc.get("trove", False)
     flat["service_swift_enabled"] = svc.get("swift", False)
     flat["service_barbican_enabled"] = svc.get("barbican", False)
-    flat["service_vpn_enabled"] = svc.get("vpn", False)
+    flat["service_waygate_enabled"] = svc.get("waygate", False)
     flat["service_chat_enabled"] = svc.get("chat", False)
 
     k3s = data.get("k3s", {})
@@ -299,16 +299,16 @@ def _load_toml() -> dict:
     flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
     flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
 
-    vpn = data.get("vpn", {})
-    flat["vpn_provider_network_id"] = vpn.get("provider_network_id", "")
-    flat["vpn_flavor_name"] = vpn.get("flavor_name", "cpu.1c_2g")
-    flat["vpn_flavor_id"] = vpn.get("flavor_id", "")
-    flat["vpn_image_id"] = vpn.get("image_id", "")
-    flat["vpn_floating_network_id"] = vpn.get("floating_network_id", "")
-    flat["vpn_callback_base_url"] = vpn.get("callback_base_url", "")
-    flat["vpn_key_name"] = vpn.get("key_name", "")
-    flat["vpn_default_tunnel_cidr"] = vpn.get("default_tunnel_cidr", "10.8.0.0/24")
-    flat["vpn_default_listen_port"] = vpn.get("default_listen_port", 51820)
+    waygate = data.get("waygate", {})
+    flat["waygate_provider_network_id"] = waygate.get("provider_network_id", "")
+    flat["waygate_flavor_name"] = waygate.get("flavor_name", "cpu.1c_2g")
+    flat["waygate_flavor_id"] = waygate.get("flavor_id", "")
+    flat["waygate_image_id"] = waygate.get("image_id", "")
+    flat["waygate_floating_network_id"] = waygate.get("floating_network_id", "")
+    flat["waygate_callback_base_url"] = waygate.get("callback_base_url", "")
+    flat["waygate_key_name"] = waygate.get("key_name", "")
+    flat["waygate_default_tunnel_cidr"] = waygate.get("default_tunnel_cidr", "10.8.0.0/24")
+    flat["waygate_default_listen_port"] = waygate.get("default_listen_port", 51820)
 
     mon = data.get("monitoring", {})
     flat["prometheus_base_url"] = mon.get("prometheus_base_url", "http://prometheus:9090")
@@ -343,11 +343,37 @@ def _load_toml() -> dict:
     flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
     flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
     flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
-    # 추론(thinking) 노출용 reasoning effort — 지원 모델에만 적용(litellm.supports_reasoning).
-    # "low"/"medium"/"high" 중 하나. 빈 문자열/"off" 이면 비활성(요청에 파라미터 미주입).
-    flat["chat_reasoning_effort"] = chat.get("reasoning_effort", "low")
+    # 외부 OpenAI/Anthropic 호환 API(/v1)를 허용할 Host 화이트리스트(콤마 구분).
+    # 비면 모든 Host 허용(개발). 프로덕션은 api.cloud.dmslab.re.kr 등 전용 서브도메인만 지정 권장.
+    flat["chat_api_hosts"] = chat.get("api_hosts", "")
+    # "auto"는 provider/model 기본값(요청 파라미터 미주입), "none"은 명시적 비활성화다.
+    # named effort는 모델 capability의 reasoning_options로 endpoint에서 검증한다.
+    flat["chat_reasoning_effort"] = chat.get("reasoning_effort", "auto")
     # Phase 2: LangGraph 전용 Postgres 체크포인터(비밀 — secret.yaml 주입). 미설정 시 MemorySaver fallback.
     flat["chat_checkpointer_postgres_url"] = chat.get("checkpointer_postgres_url", "")
+    flat["chat_run_event_retention_hours"] = chat.get("run_event_retention_hours", 24)
+    flat["chat_checkpoint_retention_days"] = chat.get("checkpoint_retention_days", 7)
+    flat["chat_semantic_memory_enabled"] = chat.get("semantic_memory_enabled", False)
+    flat["chat_memory_pgvector_url"] = chat.get("memory_pgvector_url", "")
+    flat["chat_memory_embedding_model"] = chat.get("memory_embedding_model", "")
+    flat["chat_memory_embedding_dimensions"] = chat.get("memory_embedding_dimensions", 0)
+    flat["chat_memory_candidate_limit"] = chat.get("memory_candidate_limit", 20)
+    flat["chat_memory_retrieval_token_budget"] = chat.get("memory_retrieval_token_budget", 1200)
+    flat["chat_memory_retention_days"] = chat.get("memory_retention_days", 365)
+    flat["chat_asset_s3_endpoint"] = chat.get("asset_s3_endpoint", "")
+    flat["chat_asset_s3_bucket"] = chat.get("asset_s3_bucket", "")
+    flat["chat_asset_s3_access_key"] = chat.get("asset_s3_access_key", "")
+    flat["chat_asset_s3_secret_key"] = chat.get("asset_s3_secret_key", "")
+    flat["chat_asset_s3_server_side_encryption"] = chat.get("asset_s3_server_side_encryption", "AES256")
+    flat["chat_asset_s3_kms_key_id"] = chat.get("asset_s3_kms_key_id", "")
+    flat["chat_asset_signed_url_ttl_seconds"] = chat.get("asset_signed_url_ttl_seconds", 300)
+    flat["chat_clamav_host"] = chat.get("clamav_host", "")
+    flat["chat_clamav_port"] = chat.get("clamav_port", 3310)
+    flat["chat_sandbox_url"] = chat.get("sandbox_url", "")
+    flat["chat_sandbox_api_key"] = chat.get("sandbox_api_key", "")
+    flat["chat_sandbox_image_digest"] = chat.get("sandbox_image_digest", "")
+    flat["chat_sandbox_policy_version"] = chat.get("sandbox_policy_version", "")
+    flat["chat_sandbox_egress_allowlist"] = chat.get("sandbox_egress_allowlist", [])
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -496,7 +522,7 @@ class Settings(BaseSettings):
     service_trove_enabled: bool = False
     service_swift_enabled: bool = False
     service_barbican_enabled: bool = False
-    service_vpn_enabled: bool = False  # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정도 필요)
+    service_waygate_enabled: bool = False  # Waygate (활성화 시 [waygate] 섹션 설정도 필요)
     service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
 
     # k3s 설정
@@ -605,16 +631,16 @@ class Settings(BaseSettings):
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
 
-    # WireGuard VPN 게이트웨이 (Phase 1)
-    vpn_provider_network_id: str = ""  # VPN VM이 부팅될 provider 네트워크 ID
-    vpn_flavor_name: str = "cpu.1c_2g"  # flavor 이름으로 해석 (flavor_id override 가능)
-    vpn_flavor_id: str = ""  # 설정 시 이름 조회 없이 바로 사용
-    vpn_image_id: str = ""  # VPN VM 부팅 이미지 ID (Ubuntu 22.04+)
-    vpn_floating_network_id: str = ""  # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
-    vpn_callback_base_url: str = ""  # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
-    vpn_key_name: str = ""  # VPN VM에 연결할 Nova keypair 이름 (옵션)
-    vpn_default_tunnel_cidr: str = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값
-    vpn_default_listen_port: int = 51820  # WireGuard UDP 리슨 포트 기본값
+    # Waygate (WireGuard 게이트웨이)
+    waygate_provider_network_id: str = ""  # Waygate VM이 부팅될 provider 네트워크 ID
+    waygate_flavor_name: str = "cpu.1c_2g"  # flavor 이름으로 해석 (flavor_id override 가능)
+    waygate_flavor_id: str = ""  # 설정 시 이름 조회 없이 바로 사용
+    waygate_image_id: str = ""  # Waygate VM 부팅 이미지 ID (Ubuntu 22.04+)
+    waygate_floating_network_id: str = ""  # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
+    waygate_callback_base_url: str = ""  # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
+    waygate_key_name: str = ""  # Waygate VM에 연결할 Nova keypair 이름 (옵션)
+    waygate_default_tunnel_cidr: str = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값
+    waygate_default_listen_port: int = 51820  # WireGuard UDP 리슨 포트 기본값
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
@@ -648,9 +674,36 @@ class Settings(BaseSettings):
     chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
     chat_default_monthly_quota: float = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
     chat_stream_enabled: bool = True  # SSE 스트리밍 응답 사용
-    chat_reasoning_effort: str = "low"  # 추론 노출 effort(지원 모델만): low/medium/high, 빈값/off=비활성
+    # 외부 /v1 호환 API를 허용할 Host 화이트리스트(콤마 구분). 비면 전체 허용(개발).
+    chat_api_hosts: str = ""
+    chat_reasoning_effort: str = (
+        "auto"  # auto=provider 기본, none=명시적 비활성화, named values는 모델별 capability 검증
+    )
     # Phase 2: LangGraph 전용 Postgres 체크포인터 접속 URL(secret.yaml 주입). 비면 MemorySaver 사용.
     chat_checkpointer_postgres_url: str = ""
+    chat_run_event_retention_hours: int = 24
+    chat_checkpoint_retention_days: int = 7
+    chat_semantic_memory_enabled: bool = False
+    chat_memory_pgvector_url: str = ""
+    chat_memory_embedding_model: str = ""
+    chat_memory_embedding_dimensions: int = 0
+    chat_memory_candidate_limit: int = 20
+    chat_memory_retrieval_token_budget: int = 1200
+    chat_memory_retention_days: int = 365
+    chat_asset_s3_endpoint: str = ""
+    chat_asset_s3_bucket: str = ""
+    chat_asset_s3_access_key: str = ""
+    chat_asset_s3_secret_key: str = ""
+    chat_asset_s3_server_side_encryption: str = "AES256"
+    chat_asset_s3_kms_key_id: str = ""
+    chat_asset_signed_url_ttl_seconds: int = 300
+    chat_clamav_host: str = ""
+    chat_clamav_port: int = 3310
+    chat_sandbox_url: str = ""
+    chat_sandbox_api_key: str = ""
+    chat_sandbox_image_digest: str = ""
+    chat_sandbox_policy_version: str = ""
+    chat_sandbox_egress_allowlist: list[str] = []
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
@@ -671,6 +724,17 @@ class Settings(BaseSettings):
         if v not in _VALID_MODES:
             raise ValueError(f"token_ip_binding_mode={v!r} 은 유효하지 않습니다. 허용값: {sorted(_VALID_MODES)}")
         return v
+
+    @model_validator(mode="after")
+    def validate_semantic_memory_settings(self) -> "Settings":
+        if self.chat_semantic_memory_enabled:
+            if not self.chat_memory_pgvector_url:
+                raise ValueError("semantic_memory_enabled requires memory_pgvector_url")
+            if not self.chat_memory_embedding_model:
+                raise ValueError("semantic_memory_enabled requires memory_embedding_model")
+            if self.chat_memory_embedding_dimensions <= 0:
+                raise ValueError("semantic_memory_enabled requires memory_embedding_dimensions > 0")
+        return self
 
     # 보안 정책
     # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)
@@ -782,6 +846,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def chat_api_host_list(self) -> list[str]:
+        """외부 /v1 API 허용 Host(소문자). 비면 [] = 전체 허용(개발)."""
+        return [h.strip().lower() for h in self.chat_api_hosts.split(",") if h.strip()]
 
     @model_validator(mode="after")
     def warn_insecure_defaults(self) -> "Settings":

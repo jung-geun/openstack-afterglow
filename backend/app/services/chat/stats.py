@@ -13,14 +13,35 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.database import get_session_factory, is_db_available
-from app.models.chat_db import ChatUsageLog
+from app.models.chat_db import ChatApiKey, ChatUsageLog
 
 logger = logging.getLogger(__name__)
 
 _RANGE_DAYS = {"30d": 30, "90d": 90, "1y": 365}
+
+# 시간버킷 — MySQL DATE_FORMAT 기반. 세밀한 버킷은 분을 하한으로 내린다.
+_BUCKET_FMT = {"hour": "%Y-%m-%d %H:00:00", "day": "%Y-%m-%d", "month": "%Y-%m"}
+_FINE_BUCKET_MINUTES = {"5m": 5, "15m": 15}
+
+
+def _norm_bucket(value: str) -> str:
+    return value if value in _BUCKET_FMT or value in _FINE_BUCKET_MINUTES else "day"
+
+
+def _bucket_expr(bucket: str):
+    normalized = _norm_bucket(bucket)
+    if normalized in _FINE_BUCKET_MINUTES:
+        minutes = _FINE_BUCKET_MINUTES[normalized]
+        rounded_minute = func.floor(func.minute(ChatUsageLog.created_at) / minutes) * minutes
+        return func.concat(
+            func.date_format(ChatUsageLog.created_at, "%Y-%m-%d %H:"),
+            func.lpad(rounded_minute, 2, "0"),
+            ":00",
+        )
+    return func.date_format(ChatUsageLog.created_at, _BUCKET_FMT[normalized])
 
 
 def _cutoff(range_key: str) -> datetime | None:
@@ -55,6 +76,7 @@ _OVERVIEW_EMPTY = {
     "raw_cost": 0.0,
     "request_count": 0,
     "active_users": 0,
+    "unpriced_requests": 0,
     "conversation_count": 0,
     "by_source": [],
 }
@@ -76,6 +98,10 @@ async def overview(range_key: str = "all", project_id: str | None = None) -> dic
                         func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
                         func.coalesce(func.sum(ChatUsageLog.raw_cost), 0),
                         func.count(ChatUsageLog.id),
+                        func.coalesce(
+                            func.sum(case((ChatUsageLog.pricing_status.in_(("partial", "unpriced")), 1), else_=0)),
+                            0,
+                        ),
                         func.count(func.distinct(ChatUsageLog.user_id)),
                         func.count(func.distinct(ChatUsageLog.conversation_id)),
                     ).where(*conds)
@@ -93,7 +119,7 @@ async def overview(range_key: str = "all", project_id: str | None = None) -> dic
                     .group_by(ChatUsageLog.source)
                 )
             ).all()
-        pt, ct, credited, raw, req, users, convs = totals
+        pt, ct, credited, raw, req, unpriced, users, convs = totals
         return {
             "prompt_tokens": int(pt or 0),
             "completion_tokens": int(ct or 0),
@@ -101,6 +127,7 @@ async def overview(range_key: str = "all", project_id: str | None = None) -> dic
             "credited_cost": float(credited or 0),
             "raw_cost": float(raw or 0),
             "request_count": int(req or 0),
+            "unpriced_requests": int(unpriced or 0),
             "active_users": int(users or 0),
             "conversation_count": int(convs or 0),
             "by_source": [
@@ -131,6 +158,10 @@ async def by_model(range_key: str = "all", project_id: str | None = None) -> lis
                         func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
                         func.coalesce(func.sum(ChatUsageLog.raw_cost), 0),
                         func.count(ChatUsageLog.id),
+                        func.coalesce(
+                            func.sum(case((ChatUsageLog.pricing_status.in_(("partial", "unpriced")), 1), else_=0)),
+                            0,
+                        ),
                     )
                     .where(*conds)
                     .group_by(ChatUsageLog.model_name)
@@ -146,8 +177,9 @@ async def by_model(range_key: str = "all", project_id: str | None = None) -> lis
                 "credited_cost": float(credited or 0),
                 "raw_cost": float(raw or 0),
                 "request_count": int(req or 0),
+                "unpriced_requests": int(unpriced or 0),
             }
-            for name, pt, ct, credited, raw, req in rows
+            for name, pt, ct, credited, raw, req, unpriced in rows
         ]
     except Exception:
         logger.warning("채팅 통계 by_model 집계 실패", exc_info=True)
@@ -169,7 +201,6 @@ async def by_user(
                 await session.execute(
                     select(
                         ChatUsageLog.user_id,
-                        ChatUsageLog.project_id,
                         func.coalesce(func.sum(ChatUsageLog.prompt_tokens), 0),
                         func.coalesce(func.sum(ChatUsageLog.completion_tokens), 0),
                         func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
@@ -177,7 +208,7 @@ async def by_user(
                         func.count(ChatUsageLog.id),
                     )
                     .where(*conds)
-                    .group_by(ChatUsageLog.user_id, ChatUsageLog.project_id)
+                    .group_by(ChatUsageLog.user_id)
                     .order_by(func.sum(total_tok).desc())
                     .limit(min(max(limit, 1), 200))
                     .offset(max(offset, 0))
@@ -186,7 +217,6 @@ async def by_user(
         return [
             {
                 "user_id": uid,
-                "project_id": pid,
                 "prompt_tokens": int(pt or 0),
                 "completion_tokens": int(ct or 0),
                 "total_tokens": int(pt or 0) + int(ct or 0),
@@ -194,10 +224,128 @@ async def by_user(
                 "raw_cost": float(raw or 0),
                 "request_count": int(req or 0),
             }
-            for uid, pid, pt, ct, credited, raw, req in rows
+            for uid, pt, ct, credited, raw, req in rows
         ]
     except Exception:
         logger.warning("채팅 통계 by_user 집계 실패", exc_info=True)
+        return []
+
+
+async def timeseries(
+    bucket: str = "day",
+    range_key: str = "all",
+    project_id: str | None = None,
+    *,
+    user_id: str | None = None,
+    model_name: str | None = None,
+    include_system: bool = True,
+) -> list[dict]:
+    """시간버킷(hour/day/month)별 × source(web/api/system)별 시계열(오름차순).
+
+    프론트가 접근경로(web vs api)를 시간축으로 쌓아 "언제·어느 경로로 많이 썼는지" 표시.
+    user_id 지정 시 해당 사용자만(개인 사용량 뷰). include_system=False 면 시스템 부담 제외.
+    """
+    factory = _factory()
+    if factory is None:
+        return []
+    conds = _base_conds(range_key, project_id)
+    fine_window_days = {"5m": 1, "15m": 7}.get(_norm_bucket(bucket))
+    if fine_window_days is not None:
+        conds.append(ChatUsageLog.created_at >= datetime.now(UTC) - timedelta(days=fine_window_days))
+    if user_id:
+        conds.append(ChatUsageLog.user_id == user_id)
+    if model_name:
+        conds.append(ChatUsageLog.model_name == model_name)
+    if not include_system:
+        conds.append(ChatUsageLog.source != "system")
+    bexpr = _bucket_expr(bucket)
+    try:
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        bexpr,
+                        ChatUsageLog.source,
+                        func.coalesce(func.sum(ChatUsageLog.prompt_tokens), 0),
+                        func.coalesce(func.sum(ChatUsageLog.completion_tokens), 0),
+                        func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
+                        func.count(ChatUsageLog.id),
+                    )
+                    .where(*conds)
+                    .group_by(bexpr, ChatUsageLog.source)
+                    .order_by(bexpr.asc())
+                )
+            ).all()
+        return [
+            {
+                "bucket": b,
+                "source": s or "web",
+                "prompt_tokens": int(pt or 0),
+                "completion_tokens": int(ct or 0),
+                "total_tokens": int(pt or 0) + int(ct or 0),
+                "credited_cost": float(credited or 0),
+                "request_count": int(req or 0),
+            }
+            for b, s, pt, ct, credited, req in rows
+        ]
+    except Exception:
+        logger.warning("채팅 통계 timeseries 집계 실패", exc_info=True)
+        return []
+
+
+async def by_api_key(
+    range_key: str = "all",
+    project_id: str | None = None,
+    *,
+    user_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """API 키별 집계(토큰 desc) — source="api" 만. 폐기된 키도 원장 보존(name None 가능).
+
+    user_id 지정 시 본인 키만(개인 뷰). 미지정 시 전체(관리자 뷰).
+    """
+    factory = _factory()
+    if factory is None:
+        return []
+    conds = [*_base_conds(range_key, project_id), ChatUsageLog.source == "api", ChatUsageLog.api_key_id.isnot(None)]
+    if user_id:
+        conds.append(ChatUsageLog.user_id == user_id)
+    total_tok = ChatUsageLog.prompt_tokens + ChatUsageLog.completion_tokens
+    try:
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        ChatUsageLog.api_key_id,
+                        ChatApiKey.name,
+                        ChatApiKey.key_prefix,
+                        func.coalesce(func.sum(ChatUsageLog.prompt_tokens), 0),
+                        func.coalesce(func.sum(ChatUsageLog.completion_tokens), 0),
+                        func.coalesce(func.sum(ChatUsageLog.credited_cost), 0),
+                        func.count(ChatUsageLog.id),
+                    )
+                    .outerjoin(ChatApiKey, ChatApiKey.id == ChatUsageLog.api_key_id)
+                    .where(*conds)
+                    .group_by(ChatUsageLog.api_key_id, ChatApiKey.name, ChatApiKey.key_prefix)
+                    .order_by(func.sum(total_tok).desc())
+                    .limit(min(max(limit, 1), 200))
+                )
+            ).all()
+        return [
+            {
+                "api_key_id": kid,
+                "name": name,
+                "key_prefix": prefix,
+                "prompt_tokens": int(pt or 0),
+                "completion_tokens": int(ct or 0),
+                "total_tokens": int(pt or 0) + int(ct or 0),
+                "credited_cost": float(credited or 0),
+                "request_count": int(req or 0),
+            }
+            for kid, name, prefix, pt, ct, credited, req in rows
+        ]
+    except Exception:
+        logger.warning("채팅 통계 by_api_key 집계 실패", exc_info=True)
         return []
 
 

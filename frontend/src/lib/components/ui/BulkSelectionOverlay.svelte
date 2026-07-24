@@ -1,25 +1,43 @@
+<script lang="ts" module>
+	import { TONE_CSS_VAR, type DesignTone } from '$lib/design/tokens';
+
+	export type BulkActionTone = Extract<DesignTone, 'success' | 'warning' | 'danger' | 'info' | 'neutral'>;
+	export type BulkSelectionAction = {
+		key: string;
+		label: string;
+		tone: BulkActionTone;
+		onAction: () => void | Promise<void>;
+		disabled?: boolean;
+	};
+</script>
+
 <script lang="ts">
 	interface Props {
 		count: number;
+		ariaLabel: string;
+		actions: BulkSelectionAction[];
 		busy?: boolean;
-		onStart: () => void;
-		onStop: () => void;
-		onDelete: () => void;
 		onClear: () => void;
 	}
 
-	let { count, busy = false, onStart, onStop, onDelete, onClear }: Props = $props();
+	let { count, ariaLabel, actions, busy = false, onClear }: Props = $props();
 </script>
 
 {#if count > 0}
-	<div class="bulk-overlay-wrap" role="region" aria-label="선택한 인스턴스 일괄 작업">
+	<div class="bulk-overlay-wrap" role="region" aria-label={ariaLabel} aria-busy={busy}>
 		<div class="bulk-overlay-panel">
 			<div class="bulk-count" aria-live="polite"><strong>{count}</strong>개 선택됨</div>
 			<div class="bulk-actions">
-				<button type="button" class="bulk-btn bulk-start" disabled={busy} onclick={onStart}>시작</button>
-				<button type="button" class="bulk-btn bulk-stop" disabled={busy} onclick={onStop}>종료</button>
-				<button type="button" class="bulk-btn bulk-delete" disabled={busy} onclick={onDelete}>삭제</button>
-				<button type="button" class="bulk-btn bulk-clear" onclick={onClear}>취소</button>
+				{#each actions as action (action.key)}
+					<button
+						type="button"
+						class="bulk-btn"
+						style:--bulk-action-tone={TONE_CSS_VAR[action.tone]}
+						disabled={busy || action.disabled}
+						onclick={() => action.onAction()}
+					>{action.label}</button>
+				{/each}
+				<button type="button" class="bulk-btn bulk-clear" disabled={busy} onclick={onClear}>취소</button>
 			</div>
 		</div>
 	</div>
@@ -106,10 +124,17 @@
 		opacity: 0.55;
 	}
 
-	.bulk-start { background: linear-gradient(135deg, var(--color-state-success), color-mix(in oklab, var(--color-state-success) 74%, black)); }
-	.bulk-stop { background: linear-gradient(135deg, var(--color-state-warning), color-mix(in oklab, var(--color-state-warning) 74%, black)); }
-	.bulk-delete { background: linear-gradient(135deg, var(--color-state-danger), color-mix(in oklab, var(--color-state-danger) 74%, black)); }
-	.bulk-clear { background: linear-gradient(135deg, var(--color-state-neutral), color-mix(in oklab, var(--color-state-neutral) 74%, black)); }
+	.bulk-btn {
+		background: linear-gradient(
+			135deg,
+			var(--bulk-action-tone),
+			color-mix(in oklab, var(--bulk-action-tone) 74%, black)
+		);
+	}
+
+	.bulk-clear {
+		--bulk-action-tone: var(--color-state-neutral);
+	}
 
 	@keyframes bulk-rise {
 		from {

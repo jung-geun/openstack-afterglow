@@ -26,6 +26,13 @@ async def stream(
     reasoning_effort: str | None = None,
     selected_tool_ids: tuple[int, ...] | None = None,
     selected_mcp_ids: tuple[int, ...] | None = None,
+    tools_enabled: bool = True,
+    managed_search: dict | None = None,
+    managed_fetch: dict | None = None,
+    managed_advisor: dict | None = None,
+    response_format: dict | None = None,
+    run_id: str | None = None,
+    execution_hooks: object | None = None,
 ) -> AsyncIterator[dict]:
     async for ev in graph.stream(
         model=model,
@@ -40,5 +47,12 @@ async def stream(
         reasoning_effort=reasoning_effort,
         selected_tool_ids=selected_tool_ids,
         selected_mcp_ids=selected_mcp_ids,
+        tools_enabled=tools_enabled,
+        managed_search=managed_search,
+        managed_fetch=managed_fetch,
+        managed_advisor=managed_advisor,
+        run_id=run_id,
+        response_format=response_format,
+        execution_hooks=execution_hooks,
     ):
         yield ev

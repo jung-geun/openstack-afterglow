@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import AdminLoginBrandingPanel from '$lib/components/admin/AdminLoginBrandingPanel.svelte';
+	import AdminResourcePoliciesPanel from '$lib/components/admin/AdminResourcePoliciesPanel.svelte';
 	import { Card, PageHeader, PageShell } from '$lib/components/ui';
 
 	const token = $derived($auth.token ?? undefined);
@@ -26,6 +27,7 @@
 		</Card>
 
 		<AdminLoginBrandingPanel {token} {projectId} />
+		<AdminResourcePoliciesPanel {token} {projectId} />
 	</div>
 </PageShell>
 

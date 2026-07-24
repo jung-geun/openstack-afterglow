@@ -4,12 +4,14 @@
 	interface Props {
 		open: boolean;
 		onClose?: () => void;
+		dismissible?: boolean;
 		children: Snippet;
 	}
 
-	let { open = $bindable(false), onClose, children }: Props = $props();
+	let { open = $bindable(false), onClose, dismissible = true, children }: Props = $props();
 
 	function close() {
+		if (!dismissible) return;
 		open = false;
 		onClose?.();
 	}

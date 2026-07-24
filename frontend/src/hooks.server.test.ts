@@ -19,6 +19,8 @@ const baseConfig: PublicSiteConfig = {
 		trove: false,
 		swift: false,
 		barbican: false,
+		waygate: false,
+		chat: false,
 	},
 	runtime: {
 		api_base: 'https://api.example.com',
@@ -129,6 +131,40 @@ describe('hooks.server mockup gating', () => {
 		expect(request.resolve).not.toHaveBeenCalled();
 	});
 
+
+	it.each([
+		'/admin/instances',
+		'/admin/volumes',
+		'/admin/libraries',
+		'/admin/topology',
+		'/admin/containers',
+		'/admin/secrets',
+		'/admin/monitoring',
+		'/admin/services',
+		'/admin/users',
+	])('serves administrator tutorial route %s without redirecting', async (path) => {
+		const { handle } = await loadHandle();
+		const request = createRequest(`http://frontend.example.com${path}?tutorial=admin`);
+
+		const response = await handle({ event: request.event, resolve: request.resolve });
+
+		expect(response.status).toBe(200);
+		expect(request.resolve).toHaveBeenCalledOnce();
+		expect(request.event.locals).toMatchObject({
+			mockup: { active: true, profile: 'admin', homePath: '/admin' },
+		});
+	});
+
+	it('redirects an administrator near-prefix route to the administrator home', async () => {
+		const { handle } = await loadHandle();
+		const request = createRequest('http://frontend.example.com/admin/instances-near-prefix?tutorial=admin');
+
+		const response = await handle({ event: request.event, resolve: request.resolve });
+
+		expect(response.status).toBe(302);
+		expect(response.headers.get('Location')).toBe('/admin?tutorial=admin');
+		expect(request.resolve).not.toHaveBeenCalled();
+	});
 	it('keeps the profile allowlist active when a real session cookie is also present', async () => {
 		const { handle } = await loadHandle();
 		const request = createRequest(
@@ -141,5 +177,96 @@ describe('hooks.server mockup gating', () => {
 		expect(response.status).toBe(302);
 		expect(response.headers.get('Location')).toBe('/dashboard?tutorial=on');
 		expect(request.resolve).not.toHaveBeenCalled();
+	});
+});
+
+// 로그인 상태에서 문서 내비게이션이 404면 앱 셸(홈)을 200으로 내려 클라 라우터가 요청 경로를 렌더.
+function createNavRequest(url: string, { accept = 'text/html', cookies = {} as CookieJar } = {}) {
+	const jar = { ...cookies };
+	const cookieApi = {
+		get: vi.fn((name: string) => jar[name]),
+		set: vi.fn((name: string, value: string) => {
+			jar[name] = value;
+		}),
+		delete: vi.fn((name: string) => {
+			delete jar[name];
+		}),
+	};
+	const fetch = vi.fn(async (path: string) =>
+		path === '/'
+			? new Response('<html>APP SHELL</html>', { status: 200 })
+			: new Response('x', { status: 404 }),
+	);
+	const event = {
+		url: new URL(url),
+		locals: {},
+		cookies: cookieApi,
+		route: { id: null },
+		request: new Request(url, { headers: { accept } }),
+		fetch,
+	} as unknown as Parameters<Handle>[0]['event'];
+	return { event, fetch };
+}
+
+const SESSION = { afterglow_session: 'active-session' };
+
+describe('hooks.server SPA fallback', () => {
+	it('serves the app shell (200) for a logged-in html navigation that 404s', async () => {
+		const { handle } = await loadHandle();
+		const { event, fetch } = createNavRequest('http://f.example.com/dashboard/deep', { cookies: SESSION });
+		const resolve = vi.fn(async () => new Response('not found', { status: 404, headers: new Headers() }));
+
+		const response = await handle({ event, resolve });
+
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain('APP SHELL');
+		expect(fetch).toHaveBeenCalledWith('/');
+	});
+
+	it('keeps 404 for data requests (Accept: application/json)', async () => {
+		const { handle } = await loadHandle();
+		const { event, fetch } = createNavRequest('http://f.example.com/dashboard/deep', {
+			accept: 'application/json',
+			cookies: SESSION,
+		});
+		const resolve = vi.fn(async () => new Response('nf', { status: 404, headers: new Headers() }));
+
+		const response = await handle({ event, resolve });
+
+		expect(response.status).toBe(404);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('keeps 404 for __data.json navigation', async () => {
+		const { handle } = await loadHandle();
+		const { event, fetch } = createNavRequest('http://f.example.com/dashboard/__data.json', { cookies: SESSION });
+		const resolve = vi.fn(async () => new Response('nf', { status: 404, headers: new Headers() }));
+
+		const response = await handle({ event, resolve });
+
+		expect(response.status).toBe(404);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('keeps 404 for backend-forwarded prefixes (/api, /v1)', async () => {
+		const { handle } = await loadHandle();
+		for (const path of ['/api/v1/x', '/v1/chat/completions']) {
+			const { event, fetch } = createNavRequest(`http://f.example.com${path}`, { cookies: SESSION });
+			const resolve = vi.fn(async () => new Response('nf', { status: 404, headers: new Headers() }));
+			const response = await handle({ event, resolve });
+			expect(response.status).toBe(404);
+			expect(fetch).not.toHaveBeenCalled();
+		}
+	});
+
+	it('does not fall back when the route resolves 200', async () => {
+		const { handle } = await loadHandle();
+		const { event, fetch } = createNavRequest('http://f.example.com/dashboard', { cookies: SESSION });
+		const resolve = vi.fn(async () => new Response('ok', { status: 200, headers: new Headers() }));
+
+		const response = await handle({ event, resolve });
+
+		expect(response.status).toBe(200);
+		expect(fetch).not.toHaveBeenCalled();
 	});
 });

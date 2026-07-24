@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -9,6 +9,11 @@
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
+  import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
+  import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
+  import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+  import { executeBulkMutations, partitionBulkIds } from '$lib/utils/bulkActions';
   import { toast } from '$lib/stores/toast';
 
   let fips = $state<FloatingIp[]>([]);
@@ -17,6 +22,35 @@
   let error = $state('');
   let deleting = $state<string | null>(null);
 
+  let selection = createResourceSelection();
+  let busy = $state(false);
+  let selectableIds = $derived(new Set(fips.map((fip) => fip.id)));
+  const selectedCount = $derived([...selectableIds].filter((id) => selection.ids.has(id)).length);
+  const allSelected = $derived(selectableIds.size > 0 && selectedCount === selectableIds.size);
+  const indeterminate = $derived(selectedCount > 0 && !allSelected);
+
+  async function bulkRelease() {
+    const snapshotIds = [...selection.ids];
+    const { eligible, skipped } = partitionBulkIds(snapshotIds, selectableIds);
+    if (eligible.length === 0) return;
+    const suffix = skipped.length > 0 ? `\n${skipped.length}개는 현재 상태에서 제외됩니다.` : '';
+    if (!await confirmDialog(`${eligible.length}개 Floating IP 해제를 진행하시겠습니까?${suffix}`)) return;
+    const tokenSnapshot = $auth.token ?? undefined;
+    const projectSnapshot = $auth.projectId ?? undefined;
+    busy = true;
+    try {
+      const results = await executeBulkMutations(eligible, (id) => api.delete(`/api/v1/networks/floating-ips/${id}`, tokenSnapshot, projectSnapshot));
+      const succeeded = results.filter((result) => result.ok).map((result) => result.id);
+      if (projectSnapshot === ($auth.projectId ?? undefined)) selection.remove(succeeded);
+      if (succeeded.length > 0) toast.success(`${succeeded.length}개 Floating IP 해제 요청을 완료했습니다.`);
+      const failedCount = results.length - succeeded.length;
+      if (failedCount > 0) toast.error(`${failedCount}개 Floating IP 해제에 실패했습니다.`);
+      if (skipped.length > 0) toast.warning(`${skipped.length}개는 현재 상태에서 Floating IP 해제할 수 없어 제외했습니다.`);
+      if (projectSnapshot === ($auth.projectId ?? undefined)) await load({ refresh: true });
+    } finally {
+      busy = false;
+    }
+  }
   async function load(opts?: { refresh?: boolean }) {
     error = '';
     try {
@@ -26,6 +60,7 @@
         $auth.projectId ?? undefined,
         opts,
       );
+      if (selection.count > 0) selection.retain(fips.map((fip) => fip.id));
     } catch (e) {
       error = e instanceof ApiError ? e.message : '목록을 불러올 수 없습니다';
     } finally {
@@ -60,16 +95,20 @@
     defaultActive: false,
     defaultInterval: 30,
     intervalOptions: [10, 15, 30, 60],
+    invokeOnMount: false,
   });
 
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    untrack(() => load());
+    untrack(() => {
+      selection.clear();
+      void load();
+    });
   });
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="bulk-selection-page p-4 md:p-8 max-w-7xl mx-auto">
   <PageHeader breadcrumb="네트워크" title="Floating IP">
     {#snippet actions()}
       <AutoRefreshControl
@@ -96,7 +135,17 @@
   {:else}
     <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
       <div class="grid grid-cols-[1fr_160px_1fr_140px_90px] px-5 py-3 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
-        <div>Floating IP</div>
+        <div>
+          <SelectionToolbar
+            label="Floating IP"
+            ariaLabel="Floating IP 전체 선택"
+            checked={allSelected}
+            indeterminate={indeterminate}
+            selectedCount={selectedCount}
+            disabled={busy || selectableIds.size === 0}
+            onToggle={() => selection.toggleAll(selectableIds)}
+          />
+        </div>
         <div>연결된 Fixed IP</div>
         <div>인스턴스</div>
         <div>상태</div>
@@ -104,8 +153,16 @@
       </div>
 
       {#each fips as fip (fip.id)}
-        <div class="grid grid-cols-[1fr_160px_1fr_140px_90px] px-5 py-3.5 border-b border-gray-800 last:border-b-0 items-center hover:bg-gray-800/20 transition-colors">
-          <div class="font-mono text-[13px] text-white">{fip.floating_ip_address}</div>
+        <div class="resource-selection-surface grid grid-cols-[1fr_160px_1fr_140px_90px] px-5 py-3.5 border-b border-gray-800 last:border-b-0 items-center hover:bg-gray-800/20 transition-colors" data-selected={selection.has(fip.id)}>
+          <div class="flex items-center gap-2">
+            <SelectionCheckbox
+              checked={selection.has(fip.id)}
+              disabled={busy}
+              ariaLabel={`${fip.floating_ip_address} 선택`}
+              onclick={() => selection.toggle(fip.id)}
+            />
+            <div class="font-mono text-[13px] text-white">{fip.floating_ip_address}</div>
+          </div>
           <div class="text-[12px] text-gray-400 font-mono truncate">
             {fip.fixed_ip_address ?? '—'}
           </div>
@@ -137,3 +194,10 @@
     </div>
   {/if}
 </div>
+<BulkSelectionOverlay
+  count={selection.count}
+  ariaLabel="선택한 Floating IP 일괄 작업"
+  actions={[{ key: 'release', label: '해제', tone: 'warning', disabled: partitionBulkIds(selection.ids, selectableIds).eligible.length === 0, onAction: bulkRelease }]}
+  {busy}
+  onClear={() => selection.clear()}
+/>

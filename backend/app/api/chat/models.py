@@ -217,6 +217,8 @@ async def update_provider(provider_id: int, payload: ProviderUpdateRequest):
         return await ps.update_provider(provider_id, payload.model_dump(exclude_unset=True))
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ActiveRunConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ps.ProviderValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
@@ -229,6 +231,8 @@ async def delete_provider(provider_id: int):
         await ps.delete_provider(provider_id)
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ActiveRunConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
         raise _map_storage(exc) from exc
 
@@ -297,6 +301,8 @@ async def import_models_dev_prices(payload: ModelsDevImportRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ps.ModelsDevImportConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ps.ActiveRunConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ps.ProviderValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
@@ -341,6 +347,8 @@ async def update_model(model_id: int, payload: ModelUpdateRequest):
         return await ps.update_model(model_id, payload.model_dump(exclude_unset=True))
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ActiveRunConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ps.ProviderValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
@@ -353,5 +361,7 @@ async def delete_model(model_id: int):
         await ps.delete_model(model_id)
     except ps.ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ActiveRunConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ps.ChatStorageUnavailable as exc:
         raise _map_storage(exc) from exc

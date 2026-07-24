@@ -58,6 +58,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-drover',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60]

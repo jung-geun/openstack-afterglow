@@ -49,6 +49,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-k3s-templates',
+		invokeOnMount: false,
 		defaultActive: false,
 		defaultInterval: 60,
 		intervalOptions: [30, 60],

@@ -16,7 +16,7 @@ from sqlalchemy import (
     LargeBinary,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.mysql import MEDIUMBLOB
+from sqlalchemy.dialects.mysql import MEDIUMBLOB, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -748,18 +748,18 @@ class UserTutorialStatus(Base):
 
 
 # ---------------------------------------------------------------------------
-# WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
+# Waygate (WireGuard 게이트웨이 — Phase 1 서버 프로비저닝 + 클라이언트 관리)
 # ---------------------------------------------------------------------------
 
 
-class VpnServer(Base):
-    """WireGuard VPN 게이트웨이 인스턴스 1개.
+class WaygateServer(Base):
+    """Waygate 게이트웨이 인스턴스 1개.
 
     테넌트 프로젝트에 부팅되는 bastion VM. 서버 private key는 VM 내부에서만
     생성되고 백엔드 DB에는 절대 저장하지 않는다(마이그레이션 요구사항 ③ 자연 충족).
     """
 
-    __tablename__ = "vpn_servers"
+    __tablename__ = "waygate_servers"
 
     id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
@@ -798,31 +798,31 @@ class VpnServer(Base):
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
     # 관계
-    clients: Mapped[list["VpnClient"]] = relationship(
-        "VpnClient", back_populates="server", cascade="all, delete-orphan"
+    clients: Mapped[list["WaygateClient"]] = relationship(
+        "WaygateClient", back_populates="server", cascade="all, delete-orphan"
     )
-    network_attachments: Mapped[list["VpnNetworkAttachment"]] = relationship(
-        "VpnNetworkAttachment", back_populates="server", cascade="all, delete-orphan"
+    network_attachments: Mapped[list["WaygateNetworkAttachment"]] = relationship(
+        "WaygateNetworkAttachment", back_populates="server", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (Index("idx_vpn_server_project_created", "project_id", "created_at"),)
+    __table_args__ = (Index("idx_waygate_server_project_created", "project_id", "created_at"),)
 
 
-class VpnClient(Base):
+class WaygateClient(Base):
     """WireGuard peer(=wg-easy client). 클라이언트 private key는 AES-256-GCM 암호화 저장.
 
     private key는 백엔드가 X25519로 생성하며 서버 VM에는 절대 전송하지 않는다
     (서버는 peer의 public key만 필요).
     """
 
-    __tablename__ = "vpn_clients"
+    __tablename__ = "waygate_clients"
 
     id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
     server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("vpn_servers.id", ondelete="CASCADE"), nullable=False, index=True
+        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    # NOTE: soft-delete 시 NULL로 비워 uq_vpn_client_server_name 슬롯을 해제한다(아래 참고).
+    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_name 슬롯을 해제한다(아래 참고).
     name: Mapped[str | None] = mapped_column(VARCHAR(63))
     enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
@@ -830,7 +830,7 @@ class VpnClient(Base):
     private_key_encrypted: Mapped[str] = mapped_column(TEXT, nullable=False)
     preshared_key_encrypted: Mapped[str | None] = mapped_column(TEXT)
 
-    # NOTE: soft-delete 시 NULL로 비워 uq_vpn_client_server_tunnel_ip 슬롯을 해제한다.
+    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_tunnel_ip 슬롯을 해제한다.
     # MySQL/MariaDB는 partial/filtered unique index를 지원하지 않으므로, 활성 클라이언트만
     # unique 제약을 갖도록 하려면 값 자체를 NULL로 비우는 방법뿐이다(NULL은 unique index에서
     # 여러 번 허용됨). list_clients/list_all_active_clients 등 조회 경로는 전부
@@ -848,26 +848,26 @@ class VpnClient(Base):
     deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
-    server: Mapped["VpnServer"] = relationship("VpnServer", back_populates="clients")
+    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="clients")
 
     __table_args__ = (
-        UniqueConstraint("server_id", "tunnel_ip", name="uq_vpn_client_server_tunnel_ip"),
-        UniqueConstraint("server_id", "name", name="uq_vpn_client_server_name"),
-        Index("idx_vpn_client_project_created", "project_id", "created_at"),
+        UniqueConstraint("server_id", "tunnel_ip", name="uq_waygate_client_server_tunnel_ip"),
+        UniqueConstraint("server_id", "name", name="uq_waygate_client_server_name"),
+        Index("idx_waygate_client_project_created", "project_id", "created_at"),
     )
 
 
-class VpnNetworkAttachment(Base):
-    """VPN VM에 붙은 테넌트 네트워크 (Phase 2용 스키마 — Phase 1 API는 이 테이블을 사용하지 않음).
+class WaygateNetworkAttachment(Base):
+    """Waygate VM에 붙은 테넌트 네트워크 (Phase 2용 스키마 — Phase 1 API는 이 테이블을 사용하지 않음).
 
     다중 테넌트 네트워크 연결(요구사항 ②) 시 nova.attach_interface로 생성된 포트를 기록한다.
     """
 
-    __tablename__ = "vpn_network_attachments"
+    __tablename__ = "waygate_network_attachments"
 
     id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
     server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("vpn_servers.id", ondelete="CASCADE"), nullable=False, index=True
+        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
     network_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
@@ -880,9 +880,9 @@ class VpnNetworkAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
-    server: Mapped["VpnServer"] = relationship("VpnServer", back_populates="network_attachments")
+    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="network_attachments")
 
-    __table_args__ = (Index("idx_vpn_netattach_server", "server_id"),)
+    __table_args__ = (Index("idx_waygate_netattach_server", "server_id"),)
 
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
@@ -890,6 +890,7 @@ from app.models.activity import ActivityLog  # noqa: E402,F401
 
 # Announcement/AnnouncementRead 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402,F401
+from app.models.chat_assets import ChatAsset, ChatMessageAsset, ChatRunAsset  # noqa: E402,F401
 
 # 빌트인 AI 채팅 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.chat_db import (  # noqa: E402,F401
@@ -902,3 +903,50 @@ from app.models.chat_db import (  # noqa: E402,F401
     LlmProvider,
     UserWallet,
 )
+from app.models.chat_jobs import ChatInputDerivation, ChatJob, ChatMemoryOutbox, ChatMemoryProvenance  # noqa: E402,F401
+from app.models.chat_runs import (  # noqa: E402,F401
+    ChatRun,
+    ChatRunEventRow,
+    ChatRunProvider,
+    ChatRunSegment,
+    ChatRunTurn,
+    ChatSchedulerLease,
+    ChatTempThread,
+    ChatToolApproval,
+)
+
+
+class VmCloudInitSnippet(Base):
+    """사용자별 VM cloud-init 실행 이력과 명명된 재사용 프리셋."""
+
+    __tablename__ = "vm_cloud_init_snippets"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)  # history | preset
+    name: Mapped[str | None] = mapped_column(VARCHAR(100))
+    content_encrypted: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_vm_cloud_init_snippets_user_kind_created", "user_id", "kind", "created_at"),
+        UniqueConstraint("user_id", "kind", "name", name="uq_vm_cloud_init_snippet_user_kind_name"),
+    )
+
+
+class ResourcePolicy(Base):
+    """Global admin-owned selection of a discovered OpenStack resource."""
+
+    __tablename__ = "resource_policies"
+
+    policy_key: Mapped[str] = mapped_column(VARCHAR(100), primary_key=True)
+    resource_kind: Mapped[str] = mapped_column(VARCHAR(32), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(VARCHAR(128))
+    resource_name: Mapped[str | None] = mapped_column(VARCHAR(255))
+    constraints: Mapped[dict | None] = mapped_column(JSON)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_resource_policies_kind", "resource_kind"),)

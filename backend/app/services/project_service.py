@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ProjectInvitation, ProjectRole
-from app.services import activity
+from app.services import activity, cache
+from app.services.cache import keys
 
 _logger = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ async def create_project_for_user(
         resource_name=name,
     )
 
+    await cache.invalidate(keys.user_key(user_id, "projects"))
     return project
 
 

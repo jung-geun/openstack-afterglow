@@ -35,11 +35,12 @@ class TestCreateAndList:
             return _public_conv(title=kwargs.get("title"))
 
         monkeypatch.setattr(cs, "create_conversation", fake_create)
-        resp = await client.post(_URL, json={"title": "테스트 대화"})
+        resp = await client.post(_URL, json={"title": "테스트 대화", "workspace_id": 77})
         assert resp.status_code == 201
         # 소유자는 반드시 token_info 에서 주입 — 클라이언트 입력이 아님.
         assert captured["project_id"] == "test-project-123"
         assert captured["user_id"] == "test-user-123"
+        assert captured["workspace_id"] == 77
 
     async def test_list_scoped_to_owner(self, client, monkeypatch):
         captured = {}
@@ -51,9 +52,26 @@ class TestCreateAndList:
         monkeypatch.setattr(cs, "list_conversations", fake_list)
         resp = await client.get(_URL)
         assert resp.status_code == 200
-        # 프로젝트 무관 — user_id 단독 소유. project_id 는 소유권에서 제외됨.
         assert captured["user_id"] == "test-user-123"
-        assert "project_id" not in captured
+        assert captured["project_id"] == "test-project-123"
+
+    async def test_search_scoped_to_owner_project(self, client, monkeypatch):
+        captured = {}
+
+        async def fake_search(**kwargs):
+            captured.update(kwargs)
+            return [_public_conv(title="오래된 OpenStack 대화")]
+
+        monkeypatch.setattr(cs, "search_conversations", fake_search)
+        resp = await client.get(f"{_URL}/search", params={"q": "OpenStack", "limit": 20})
+        assert resp.status_code == 200
+        assert resp.json()[0]["title"] == "오래된 OpenStack 대화"
+        assert captured == {
+            "user_id": "test-user-123",
+            "project_id": "test-project-123",
+            "query": "OpenStack",
+            "limit": 20,
+        }
 
 
 class TestOwnership:
@@ -87,6 +105,25 @@ class TestOwnership:
 
         monkeypatch.setattr(cs, "list_message_tree", fake_msgs)
         resp = await client.get(f"{_URL}/other-project-conv/messages")
+        assert resp.status_code == 403
+
+    async def test_create_rejects_another_users_workspace(self, client, monkeypatch):
+        async def fake_create(**kwargs):
+            assert kwargs["workspace_id"] == 77
+            raise cs.WorkspaceForbidden("프로젝트에 접근할 권한이 없습니다")
+
+        monkeypatch.setattr(cs, "create_conversation", fake_create)
+        resp = await client.post(_URL, json={"workspace_id": 77})
+        assert resp.status_code == 403
+
+    async def test_assign_rejects_another_users_workspace(self, client, monkeypatch):
+        async def fake_set(conv_id, **kwargs):
+            assert conv_id == "conv-1"
+            assert kwargs["workspace_id"] == 77
+            raise cs.WorkspaceForbidden("프로젝트에 접근할 권한이 없습니다")
+
+        monkeypatch.setattr(cs, "set_workspace", fake_set)
+        resp = await client.patch(f"{_URL}/conv-1/workspace", json={"workspace_id": 77})
         assert resp.status_code == 403
 
 
@@ -135,7 +172,7 @@ class TestAvailableModels:
         assert body[0]["context_limit"] == 128000
         assert "input_price" not in body[0]
         assert "api_key" not in body[0]
-        assert "provider_id" not in body[0]
+        assert body[0]["id"] == 1
 
     async def test_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
         async def fake_models(*, active_only=False):
@@ -160,8 +197,8 @@ class TestForkAndActiveLeaf:
         resp = await client.patch(f"{_URL}/c1/active-leaf", json={"message_id": 7})
         assert resp.status_code == 200
         assert captured["message_id"] == 7
-        assert captured["user_id"] == "test-user-123"  # 소유자는 token_info 에서만
-        assert "project_id" not in captured
+        assert captured["user_id"] == "test-user-123"
+        assert captured["project_id"] == "test-project-123"
 
     async def test_fork_delegates_and_returns_new(self, client, monkeypatch):
         captured = {}
@@ -187,3 +224,28 @@ class TestForkAndActiveLeaf:
         monkeypatch.setattr(cs, "fork_conversation", fake_fork)
         resp = await client.post(f"{_URL}/c1/fork", json={"message_id": 999})
         assert resp.status_code == 404
+
+
+async def test_messages_uses_backward_cursor_and_returns_page_metadata(client, monkeypatch):
+    from app.api.chat import conversations
+
+    captured = {}
+
+    async def fake_page(conv_id, **kwargs):
+        captured["conv_id"] = conv_id
+        captured.update(kwargs)
+        return {"messages": [], "active_leaf_id": 99, "has_more": True, "next_before_id": 42}
+
+    monkeypatch.setattr(conversations.cs, "list_message_tree", fake_page)
+
+    response = await client.get(f"{_URL}/conv-1/messages?before_id=100&limit=40")
+
+    assert response.status_code == 200
+    assert captured == {
+        "conv_id": "conv-1",
+        "user_id": "test-user-123",
+        "project_id": "test-project-123",
+        "before_id": 100,
+        "limit": 40,
+    }
+    assert response.json()["next_before_id"] == 42

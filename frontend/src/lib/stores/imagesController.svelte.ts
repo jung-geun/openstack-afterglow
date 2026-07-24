@@ -3,6 +3,8 @@ import { KNOWN_DISTROS } from '$lib/utils/imageOs';
 import type { ImageInfo } from '$lib/types/compute';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
+import { executeBulkMutations, type BulkMutationResult } from '$lib/utils/bulkActions';
+import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
 
 export interface ImagesControllerOpts {
   token: () => string | undefined;
@@ -22,6 +24,8 @@ export function createImagesController(opts: ImagesControllerOpts) {
   let editTarget = $state<ImageInfo | null>(null);
   let showUploadModal = $state(false);
   let uploadInitialFile = $state<File | null>(null);
+  let bulkActioning = $state(false);
+  const selection = createResourceSelection();
 
   const filteredImages = $derived.by(() => {
     let list = [...images];
@@ -62,6 +66,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
 
   function handleImageDeleted(id: string) {
     images = images.filter(img => img.id !== id);
+    selection.remove([id]);
   }
 
   function updateImage(updated: ImageInfo) {
@@ -71,6 +76,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
   async function fetchImages(fetchOpts?: { refresh?: boolean }) {
     try {
       images = await api.get<ImageInfo[]>('/api/v1/images', opts.token(), opts.projectId(), fetchOpts);
+      selection.retain(images.map((image) => image.id));
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -85,6 +91,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
     try {
       await api.delete(`/api/v1/images/${id}`, opts.token(), opts.projectId());
       images = images.filter(img => img.id !== id);
+      selection.remove([id]);
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
@@ -102,6 +109,29 @@ export function createImagesController(opts: ImagesControllerOpts) {
       toast.error('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       togglingId = null;
+    }
+  }
+
+  async function executeBulkAction(
+    action: 'activate' | 'deactivate' | 'delete',
+    ids: readonly string[],
+  ): Promise<BulkMutationResult[]> {
+    const token = opts.token();
+    const projectId = opts.projectId();
+    bulkActioning = true;
+    try {
+      const results = await executeBulkMutations(ids, (id) => {
+        if (action === 'delete') return api.delete(`/api/v1/images/${id}`, token, projectId);
+        const endpoint = action === 'activate' ? 'reactivate' : 'deactivate';
+        return api.post(`/api/v1/images/${id}/${endpoint}`, {}, token, projectId);
+      });
+      if (opts.projectId() === projectId) {
+        selection.remove(results.filter((result) => result.ok).map((result) => result.id));
+        await fetchImages({ refresh: true });
+      }
+      return results;
+    } finally {
+      bulkActioning = false;
     }
   }
 
@@ -123,6 +153,8 @@ export function createImagesController(opts: ImagesControllerOpts) {
     get deleting() { return deleting; },
     get togglingId() { return togglingId; },
     get selectedImageId() { return selectedImageId; },
+    get bulkActioning() { return bulkActioning; },
+    get selection() { return selection; },
     get distroFilter() { return distroFilter; },
     set distroFilter(v: string) { distroFilter = v; },
     get sortOrder() { return sortOrder; },
@@ -142,6 +174,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
     fetchImages,
     deleteImage,
     toggleActivation,
+    executeBulkAction,
     forceRefresh,
   };
 }

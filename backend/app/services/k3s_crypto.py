@@ -33,6 +33,7 @@ _DOMAIN_MANAGER_PW = b"manager_password"
 _DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
 _DOMAIN_LLM_PROVIDER_KEY = b"llm_provider_key"
 _DOMAIN_CHAT_CONTENT = b"chat_content"
+_DOMAIN_VM_CLOUD_INIT = b"vm_cloud_init"
 
 _LEGACY_WARNED: set[str] = set()
 
@@ -69,6 +70,14 @@ def _derive_subkey(master: bytes, domain: bytes) -> bytes:
         salt=None,
         info=b"afterglow-k3s/" + domain,
     ).derive(master)
+
+
+def derive_encryption_subkey(domain: bytes) -> bytes:
+    """Return an AES-256 sub-key for a non-empty application encryption domain."""
+
+    if not domain:
+        raise ValueError("encryption domain must not be empty")
+    return _derive_subkey(_get_key(), domain)
 
 
 def _warn_legacy_once(domain: bytes, version: str) -> None:
@@ -200,3 +209,13 @@ def decrypt_chat_content(ciphertext_b64: str) -> str:
     if not ciphertext_b64.startswith(_V3_PREFIX):
         return ciphertext_b64
     return _aes_decrypt(_get_key(), _DOMAIN_CHAT_CONTENT, ciphertext_b64)
+
+
+def encrypt_vm_cloud_init(plaintext: str) -> str:
+    """Encrypt a user's reusable VM cloud-init snippet with a dedicated sub-key."""
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_VM_CLOUD_INIT, plaintext)
+
+
+def decrypt_vm_cloud_init(ciphertext_b64: str) -> str:
+    """Decrypt a user's reusable VM cloud-init snippet."""
+    return _aes_decrypt(_get_key(), _DOMAIN_VM_CLOUD_INIT, ciphertext_b64)

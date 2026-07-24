@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { goto } from '$app/navigation';
 import { setContext, getContext } from 'svelte';
-import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
+import { wizard, resetWizard, closeWizard, type WizardState } from '$lib/stores/wizard';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { maybeMockInstanceCreateStream } from '$lib/mockup/transport';
 import { auth } from '$lib/stores/auth';
@@ -11,8 +11,15 @@ import { toast } from '$lib/stores/toast';
 import type { NetworkInfo } from '$lib/types/networks';
 import type { SecurityGroup as SecurityGroupInfo } from '$lib/types/securityGroup';
 import type { Volume } from '$lib/types/volume';
-import type { KeypairInfo } from '$lib/types/keypair';
-import type { AvailabilityZone as AvailabilityZoneInfo } from '$lib/types/compute';
+import type { Keypair } from '$lib/types/keypair';
+import type { FlavorOption } from '$lib/types/flavor';
+import {
+	isGithubSshEligible,
+	isSshAccessReady,
+	isUbuntuImage,
+	normalizeGithubUsername,
+	normalizeRequestedInstanceName,
+} from '$lib/utils/instanceCreate';
 
 interface ProgressMessage {
 	step: string;
@@ -36,18 +43,11 @@ interface ProjectQuota {
 }
 interface VmImage {
 	id: string;
-	name?: string;
-	os_distro?: string | null;
-	os_version?: string | null;
-	properties?: Record<string, unknown> | null;
-}
-interface VmFlavor {
-	id: string;
-	name?: string;
-	vcpus: number;
-	ram: number;
-	disk: number;
-	extra_specs?: Record<string, string>;
+	name: string;
+	status: string;
+	os_distro?: string;
+	os_version?: string;
+	properties?: Record<string, unknown>;
 }
 interface LibraryItem {
 	id: string;
@@ -108,6 +108,45 @@ export function detectUbuntuBaseImage(
 	return nameMatch ? nameMatch[1] : null;
 }
 
+export function nextSquashfsSelection(
+	current: Pick<WizardState, 'squashfsMode' | 'layerProfileName' | 'layerArtifactIds'>,
+	intent:
+		| { type: 'mode'; mode: 'profile' | 'artifacts' }
+		| { type: 'profile'; name: string }
+		| { type: 'artifact'; id: number; lineageIds: number[] },
+): Pick<WizardState, 'squashfsMode' | 'layerProfileName' | 'layerArtifactIds'> {
+	const cleared: Pick<WizardState, 'squashfsMode' | 'layerProfileName' | 'layerArtifactIds'> = {
+		squashfsMode: null,
+		layerProfileName: null,
+		layerArtifactIds: [],
+	};
+
+	if (intent.type === 'mode') {
+		if (current.squashfsMode === intent.mode) return cleared;
+		return {
+			squashfsMode: intent.mode,
+			layerProfileName: intent.mode === 'profile' ? current.layerProfileName : null,
+			layerArtifactIds: intent.mode === 'artifacts' ? current.layerArtifactIds : [],
+		};
+	}
+
+	if (intent.type === 'profile') {
+		if (current.squashfsMode === 'profile' && current.layerProfileName === intent.name) return cleared;
+		return { squashfsMode: 'profile', layerProfileName: intent.name, layerArtifactIds: [] };
+	}
+
+	const ids = new Set(current.squashfsMode === 'artifacts' ? current.layerArtifactIds : []);
+	if (ids.has(intent.id)) {
+		ids.delete(intent.id);
+	} else {
+		intent.lineageIds.forEach(id => ids.add(id));
+	}
+	const layerArtifactIds = Array.from(ids);
+	return layerArtifactIds.length > 0
+		? { squashfsMode: 'artifacts', layerProfileName: null, layerArtifactIds }
+		: cleared;
+}
+
 export function normalizeSchedulingForBeta(
 	beta: Pick<BetaFeatures, 'haDeploy'>,
 	scheduling: 'standard' | 'ha',
@@ -164,6 +203,26 @@ export function shouldUseSquashfsConsume(options: {
 }
 
 export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
+
+type LoadStatus = 'idle' | 'loading' | 'loaded' | 'error';
+type OptionKey =
+	| 'images'
+	| 'volumes'
+	| 'flavors'
+	| 'squashfsProfiles'
+	| 'squashfsArtifacts'
+	| 'networks'
+	| 'keypairs'
+	| 'securityGroups'
+	| 'defaultNetwork'
+	| 'fileStorages'
+	| 'legacyLibraries';
+
+const OPTION_KEYS: OptionKey[] = [
+	'images', 'volumes', 'flavors', 'squashfsProfiles', 'squashfsArtifacts',
+	'networks', 'keypairs', 'securityGroups', 'defaultNetwork',
+	'fileStorages', 'legacyLibraries',
+];
 export const TOTAL_STEPS = 6;
 export const STEP_LABELS: Record<WizardStepId, string> = {
 	1: '이미지',
@@ -219,22 +278,47 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	$effect(() => wizard.subscribe(v => { wizardState = v; }));
 	$effect(() => betaFeatures.subscribe(v => { betaState = v; }));
 	let images = $state<VmImage[]>([]);
-	let flavors = $state<VmFlavor[]>([]);
+	let flavors = $state<FlavorOption[]>([]);
 	let libraries = $state<LibraryItem[]>([]);
 	let networks = $state<NetworkInfo[]>([]);
-	let keypairs = $state<KeypairInfo[]>([]);
+	let keypairs = $state<Keypair[]>([]);
 	let volumes = $state<Volume[]>([]);
 	let fileStorages = $state<{ id: string; name: string; status: string; share_proto: string }[]>([]);
 	let securityGroups = $state<SecurityGroupInfo[]>([]);
-	let availabilityZones = $state<AvailabilityZoneInfo[]>([]);
 	let defaultNetworkId = $state<string | null>(null);
 	let squashfsProfiles = $state<SquashfsProfile[]>([]);
 	let squashfsArtifacts = $state<SquashfsArtifact[]>([]);
 	let flavorQuota = $state<FlavorQuotaSummary | null>(null);
 
 	// UI state
-	let loading = $state(false);
-	let loadError = $state('');
+	let optionStatus = $state<Record<OptionKey, LoadStatus>>(
+		Object.fromEntries(OPTION_KEYS.map(key => [key, 'idle'])) as Record<OptionKey, LoadStatus>,
+	);
+	let optionErrors = $state<Partial<Record<OptionKey, string>>>({});
+	const optionRequests = new Map<string, Promise<void>>();
+	let loadGeneration = 0;
+	let adminProjectsRequestId = 0;
+	let adminProjectQuotasRequestId = 0;
+	let adminProjectQuotasPromise: Promise<void> | null = null;
+	function optionKeysForStep(step: WizardStepId): OptionKey[] {
+		if (step === 1) return ['images', 'volumes'];
+		if (step === 2) return ['flavors'];
+		if (step === 3) return squashfsEligible ? ['squashfsProfiles', 'squashfsArtifacts'] : [];
+		if (step === 5) {
+			return opts.adminMode()
+				? ['networks', 'securityGroups']
+				: ['networks', 'keypairs', 'securityGroups', 'defaultNetwork'];
+		}
+		return [];
+	}
+
+	const loading = $derived.by(() =>
+		optionKeysForStep(wizardState.step as WizardStepId)
+			.some(key => optionStatus[key] === 'idle' || optionStatus[key] === 'loading')
+	);
+	const hasCurrentStepError = $derived.by(() =>
+		optionKeysForStep(wizardState.step as WizardStepId).some(key => optionStatus[key] === 'error')
+	);
 	let deploying = $state(false);
 	let deployError = $state('');
 	let currentStep = $state('manila_preparing');
@@ -276,6 +360,15 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	));
 
 	const selectedImageUbuntuBase = $derived.by(() => detectUbuntuBaseImage(selectedImage, wizardState.imageName));
+
+	const selectedImageIsUbuntu = $derived.by(() => isUbuntuImage(selectedImage, wizardState.imageName));
+	const githubSshEligible = $derived.by(() =>
+		isGithubSshEligible({
+			adminMode: opts.adminMode(),
+			bootSource: wizardState.bootSource,
+			selectedImageIsUbuntu,
+		})
+	);
 
 	const selectedSquashfsArtifacts = $derived(
 		squashfsArtifacts.filter(artifact => wizardState.layerArtifactIds.includes(artifact.id))
@@ -363,13 +456,16 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 
 	$effect(() => {
 		const needsSchedulingReset = wizardState.scheduling !== normalizeSchedulingForBeta(betaState, wizardState.scheduling);
+		const needsGithubSshReset =
+			!githubSshEligible &&
+			(wizardState.sshAccessMode !== 'keypair' || wizardState.githubUsername !== '');
 		const needsSquashfsReset = !squashfsEligible && wizardState.squashfsMode !== null;
 		const needsStrategyReset = !visibleStepIds.includes(4) && wizardState.strategy !== null;
 		const isVisibleStep = visibleStepIds.includes(wizardState.step as WizardStepId);
 		const nextVisibleStep = isVisibleStep
 			? null
 			: (visibleStepIds.find(step => step > wizardState.step) ?? visibleStepIds[visibleStepIds.length - 1] ?? 1);
-		if (!needsSchedulingReset && !needsSquashfsReset && !needsStrategyReset && nextVisibleStep === null) return;
+		if (!needsSchedulingReset && !needsSquashfsReset && !needsStrategyReset && !needsGithubSshReset && nextVisibleStep === null) return;
 		wizard.update(w => {
 			let next = w;
 			const nextScheduling = normalizeSchedulingForBeta(betaState, next.scheduling);
@@ -381,6 +477,9 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			}
 			if (!visibleStepIds.includes(4) && next.strategy !== null) {
 				next = { ...next, strategy: null };
+			}
+			if (!githubSshEligible && (next.sshAccessMode !== 'keypair' || next.githubUsername !== '')) {
+				next = { ...next, sshAccessMode: 'keypair', githubUsername: '' };
 			}
 			if (nextVisibleStep !== null && next.step !== nextVisibleStep) {
 				next = { ...next, step: nextVisibleStep };
@@ -400,7 +499,13 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				if (wizardState.libraries.length > 0 && !wizardState.strategy) return false;
 				return true;
 			}
-			case 5: return adminMode || !!wizardState.keyName;
+			case 5:
+				return isSshAccessReady({
+					adminMode,
+					sshAccessMode: wizardState.sshAccessMode,
+					keyName: wizardState.keyName,
+					githubUsername: wizardState.githubUsername,
+				});
 			case 6: return true;
 			default: return false;
 		}
@@ -447,179 +552,359 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		return chain;
 	}
 
+	function optionError(error: unknown): string {
+		return error instanceof ApiError ? `데이터 로드 실패 (${error.status})` : '서버 오류';
+	}
+
+	function loadOption<T>(
+		key: OptionKey,
+		scope: string,
+		request: () => Promise<T>,
+		apply: (value: T) => void,
+		isCurrent = () => true,
+	): Promise<void> {
+		const requestKey = `${key}:${scope}`;
+		const existing = optionRequests.get(requestKey);
+		if (existing) return existing;
+		if (optionStatus[key] !== 'idle' && optionStatus[key] !== 'error') return Promise.resolve();
+
+		optionStatus[key] = 'loading';
+		delete optionErrors[key];
+		const promise = request()
+			.then(value => {
+				if (!isCurrent()) return;
+				apply(value);
+				optionStatus[key] = 'loaded';
+			})
+			.catch(error => {
+				if (!isCurrent()) return;
+				optionErrors[key] = optionError(error);
+				optionStatus[key] = 'error';
+			})
+			.finally(() => {
+				if (optionRequests.get(requestKey) === promise) optionRequests.delete(requestKey);
+			});
+		optionRequests.set(requestKey, promise);
+		return promise;
+	}
+
+	function authScope() {
+		return {
+			token: get(auth).token ?? undefined,
+			projectId: get(auth).projectId ?? undefined,
+		};
+	}
+
+	function targetIsCurrent(projectId: string, generation: number) {
+		return opts.adminMode() && adminSelectedProjectId === projectId && loadGeneration === generation;
+	}
+
+	async function loadBootOptions() {
+		const { token, projectId } = authScope();
+		const imagePromise = loadOption(
+			'images',
+			'global',
+			() => api.get<VmImage[]>('/api/v1/images', token, projectId),
+			value => { images = value; },
+		);
+		if (!opts.adminMode()) {
+			const volumePromise = loadOption(
+				'volumes',
+				`public:${projectId ?? ''}`,
+				() => api.get<Volume[]>('/api/v1/volumes', token, projectId),
+				value => { volumes = value; },
+			);
+			await Promise.all([imagePromise, volumePromise]);
+			return;
+		}
+		const targetProjectId = adminSelectedProjectId;
+		if (!targetProjectId) {
+			await imagePromise;
+			return;
+		}
+		const generation = loadGeneration;
+		const volumePromise = loadOption(
+			'volumes',
+			targetProjectId,
+			() => api.get<Volume[]>(
+				`/api/v1/admin/instances/volumes-for-project?project_id=${encodeURIComponent(targetProjectId)}`,
+				token,
+				projectId,
+			),
+			value => { volumes = value; },
+			() => targetIsCurrent(targetProjectId, generation),
+		);
+		await Promise.all([imagePromise, volumePromise]);
+	}
+
+	function loadFlavorOptions() {
+		const { token, projectId } = authScope();
+		return loadOption(
+			'flavors',
+			'global',
+			() => api.get<FlavorOption[]>('/api/v1/flavors', token, projectId),
+			value => { flavors = value; },
+		);
+	}
+
 	async function loadSquashfsCatalog() {
-		const token = get(auth).token ?? undefined;
-		const projectId = get(auth).projectId ?? undefined;
-		try {
-			[squashfsProfiles, squashfsArtifacts] = await Promise.all([
-				api.get<SquashfsProfile[]>('/api/v1/libraries/squashfs/profiles', token, projectId),
-				api.get<SquashfsArtifact[]>('/api/v1/libraries/squashfs/artifacts', token, projectId),
+		if (opts.adminMode()) return;
+		const { token, projectId } = authScope();
+		await Promise.allSettled([
+			loadOption(
+				'squashfsProfiles',
+				'public',
+				() => api.get<SquashfsProfile[]>('/api/v1/libraries/squashfs/profiles', token, projectId),
+				value => { squashfsProfiles = value; },
+			),
+			loadOption(
+				'squashfsArtifacts',
+				'public',
+				() => api.get<SquashfsArtifact[]>('/api/v1/libraries/squashfs/artifacts', token, projectId),
+				value => { squashfsArtifacts = value; },
+			),
+		]);
+	}
+
+	async function loadConfigurationOptions() {
+		const { token, projectId } = authScope();
+		if (!opts.adminMode()) {
+			await Promise.allSettled([
+				loadOption('networks', `public:${projectId ?? ''}`, () => api.get<NetworkInfo[]>('/api/v1/networks', token, projectId), value => { networks = value; }),
+				loadOption('keypairs', `public:${projectId ?? ''}`, () => api.get<Keypair[]>('/api/v1/keypairs', token, projectId), value => { keypairs = value; }),
+				loadOption('securityGroups', `public:${projectId ?? ''}`, () => api.get<SecurityGroupInfo[]>('/api/v1/security-groups', token, projectId), value => { securityGroups = value; }),
+				loadOption('defaultNetwork', `public:${projectId ?? ''}`, () => api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId), value => { defaultNetworkId = value.network_id; }),
 			]);
-		} catch {
-			squashfsProfiles = [];
-			squashfsArtifacts = [];
+			applyConfigurationDefaults();
+			return;
+		}
+		const targetProjectId = adminSelectedProjectId;
+		if (!targetProjectId) return;
+		const generation = loadGeneration;
+		const isCurrent = () => targetIsCurrent(targetProjectId, generation);
+		await Promise.allSettled([
+			loadOption(
+				'networks',
+				targetProjectId,
+				() => api.get<NetworkInfo[]>(`/api/v1/admin/instances/networks-for-project?project_id=${encodeURIComponent(targetProjectId)}`, token, projectId),
+				value => { networks = value; },
+				isCurrent,
+			),
+			loadOption(
+				'securityGroups',
+				targetProjectId,
+				() => api.get<SecurityGroupInfo[]>(`/api/v1/admin/instances/security-groups-for-project?project_id=${encodeURIComponent(targetProjectId)}`, token, projectId),
+				value => { securityGroups = value; },
+				isCurrent,
+			),
+		]);
+		if (isCurrent()) applyConfigurationDefaults();
+	}
+
+	function applyConfigurationDefaults() {
+		const current = get(wizard);
+		if (!opts.adminMode() && keypairs.length === 1 && !current.keyName) {
+			wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
+		}
+		if (networks.length > 0 && !current.networkId) {
+			const selected = networks.find(network => network.id === defaultNetworkId)
+				?? networks.find(network => network.name === 'Default')
+				?? networks[0];
+			wizard.update(w => ({ ...w, networkId: selected.id, networkName: selected.name }));
+		}
+		if (securityGroups.length > 0 && current.securityGroups.length === 0) {
+			const defaultGroup = securityGroups.find(group => group.name === 'default');
+			if (defaultGroup) wizard.update(w => ({ ...w, securityGroups: [defaultGroup.name] }));
 		}
 	}
 
-	// Data loading
+	function loadFileStorages() {
+		if (opts.adminMode()) return Promise.resolve();
+		const { token, projectId } = authScope();
+		return loadOption(
+			'fileStorages',
+			`public:${projectId ?? ''}`,
+			() => api.get<typeof fileStorages>('/api/v1/file-storage', token, projectId),
+			value => { fileStorages = value; },
+		);
+	}
+
+	function preloadConfigurationAfterBoot(bootPromise: Promise<void>, targetProjectId?: string) {
+		void bootPromise.then(() => {
+			if (opts.adminMode() && targetProjectId !== adminSelectedProjectId) return;
+			void loadConfigurationOptions();
+			void loadFileStorages();
+		});
+	}
+
+	function loadLegacyLibraries() {
+		if (wizardState.libraries.length === 0) return Promise.resolve();
+		const { token, projectId } = authScope();
+		return loadOption(
+			'legacyLibraries',
+			'public',
+			() => api.get<LibraryItem[]>('/api/v1/libraries', token, projectId),
+			value => { libraries = value; },
+		);
+	}
+
+	function hasCompleteProjectQuota(summary: ProjectQuota | undefined): summary is ProjectQuota {
+		if (!summary) return false;
+		return [summary.instances, summary.cpu, summary.ram_mb, summary.disk_gb]
+			.every(pair => Number.isFinite(pair?.used) && Number.isFinite(pair?.quota));
+	}
+
+	function mapProjectQuota(summary: ProjectQuota): FlavorQuotaSummary {
+		return {
+			instances: { limit: summary.instances.quota, in_use: summary.instances.used },
+			cores: { limit: summary.cpu.quota, in_use: summary.cpu.used },
+			ram: { limit: summary.ram_mb.quota, in_use: summary.ram_mb.used },
+			gigabytes: { limit: summary.disk_gb.quota, in_use: summary.disk_gb.used },
+		};
+	}
+
 	async function loadFlavorQuota() {
-		const token = get(auth).token ?? undefined;
-		const projectId = get(auth).projectId ?? undefined;
-		try {
-			if (opts.adminMode() && adminSelectedProjectId) {
-				const r = await api.get<QuotaResponse>(
-					`/api/v1/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`, token, projectId,
-				);
-				flavorQuota = {
-					instances: r.compute?.instances,
-					cores: r.compute?.cores,
-					ram: r.compute?.ram,
-					gigabytes: r.volume?.gigabytes,
-				};
-			} else if (!opts.adminMode()) {
-				const r = await api.get<QuotaResponse>('/api/v1/dashboard/quotas', token, projectId);
-				flavorQuota = {
-					instances: r.compute?.instances,
-					cores: r.compute?.cores,
-					ram: r.compute?.ram,
-					gigabytes: r.storage?.gigabytes,
-				};
+		const { token, projectId } = authScope();
+		if (opts.adminMode() && adminSelectedProjectId) {
+			const targetProjectId = adminSelectedProjectId;
+			const generation = loadGeneration;
+			if (adminProjectQuotasPromise) await adminProjectQuotasPromise;
+			if (!targetIsCurrent(targetProjectId, generation)) return;
+
+			const summary = adminProjectQuotas.get(targetProjectId);
+			if (hasCompleteProjectQuota(summary)) {
+				flavorQuota = mapProjectQuota(summary);
+				return;
 			}
-		} catch {
-			flavorQuota = null;
+
+			try {
+				const response = await api.get<QuotaResponse>(
+					`/api/v1/admin/quotas/${encodeURIComponent(targetProjectId)}`,
+					token,
+					projectId
+				);
+				if (!targetIsCurrent(targetProjectId, generation)) return;
+				flavorQuota = {
+					instances: response.compute?.instances,
+					cores: response.compute?.cores,
+					ram: response.compute?.ram,
+					gigabytes: response.volume?.gigabytes,
+				};
+			} catch {
+				if (targetIsCurrent(targetProjectId, generation)) flavorQuota = null;
+			}
+			return;
+		}
+		if (!opts.adminMode()) {
+			try {
+				const response = await api.get<QuotaResponse>('/api/v1/dashboard/quotas', token, projectId);
+				flavorQuota = {
+					instances: response.compute?.instances,
+					cores: response.compute?.cores,
+					ram: response.compute?.ram,
+					gigabytes: response.storage?.gigabytes,
+				};
+			} catch {
+				flavorQuota = null;
+			}
 		}
 	}
 
-	async function loadAdminProjectQuotas() {
-		if (!opts.adminMode()) return;
-		const token = get(auth).token ?? undefined;
-		const projectId = get(auth).projectId ?? undefined;
-		try {
-			const rows = await api.get<ProjectQuota[]>('/api/v1/admin/overview/projects', token, projectId);
-			const map = new Map<string, ProjectQuota>();
-			for (const r of rows) map.set(r.project_id, r);
-			adminProjectQuotas = map;
-		} catch {
-			adminProjectQuotas = new Map();
-		}
+	function loadAdminProjectQuotas(): Promise<void> {
+		if (!opts.adminMode()) return Promise.resolve();
+		if (adminProjectQuotasPromise) return adminProjectQuotasPromise;
+
+		const requestId = ++adminProjectQuotasRequestId;
+		const { token, projectId } = authScope();
+		let promise!: Promise<void>;
+		promise = (async () => {
+			try {
+				const rows = await api.get<ProjectQuota[]>('/api/v1/admin/overview/projects', token, projectId);
+				if (requestId !== adminProjectQuotasRequestId) return;
+				adminProjectQuotas = new Map(rows.map(row => [row.project_id, row]));
+			} catch {
+				if (requestId === adminProjectQuotasRequestId) adminProjectQuotas = new Map();
+			} finally {
+				if (adminProjectQuotasPromise === promise) adminProjectQuotasPromise = null;
+			}
+		})();
+		adminProjectQuotasPromise = promise;
+		return promise;
 	}
 
 	async function loadAdminProjects() {
 		if (!opts.adminMode()) return;
+		const requestId = ++adminProjectsRequestId;
 		adminProjectsLoading = true;
-		const token = get(auth).token ?? undefined;
-		const projectId = get(auth).projectId ?? undefined;
+		const { token, projectId } = authScope();
 		try {
-			const res = await api.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', token, projectId);
-			adminProjects = res.map(p => ({ id: p.id, name: p.name }));
+			const rows = await api.get<ProjectInfo[]>('/api/v1/admin/projects/names', token, projectId);
+			if (requestId !== adminProjectsRequestId) return;
+			adminProjects = rows;
+			const selected = adminSelectedProjectId && rows.find(project => project.id === adminSelectedProjectId);
+			if (selected) adminSelectedProjectName = selected.name;
 		} catch {
-			adminProjects = [];
+			if (requestId === adminProjectsRequestId) adminProjects = [];
 		} finally {
-			adminProjectsLoading = false;
+			if (requestId === adminProjectsRequestId) adminProjectsLoading = false;
 		}
-		loadAdminProjectQuotas();
 	}
 
-	async function loadData() {
-		loading = true;
-		loadError = '';
-		const token = get(auth).token ?? undefined;
-		const projectId = get(auth).projectId ?? undefined;
-		try {
-			if (opts.adminMode() && adminSelectedProjectId) {
-				const pid = adminSelectedProjectId;
-				[images, flavors, libraries] = await Promise.all([
-					api.get<VmImage[]>('/api/v1/images', token, projectId),
-					api.get<VmFlavor[]>('/api/v1/flavors', token, projectId),
-					api.get<LibraryItem[]>('/api/v1/libraries', token, projectId),
-				]);
-				[networks, volumes] = await Promise.all([
-					api.get<NetworkInfo[]>(`/api/v1/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
-					api.get<Volume[]>(`/api/v1/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
-				]);
-				keypairs = [];
-				try {
-					securityGroups = await api.get<SecurityGroupInfo[]>(
-						`/api/v1/admin/instances/security-groups-for-project?project_id=${pid}`, token, projectId,
-					);
-				} catch { securityGroups = []; }
-				availabilityZones = [];
-				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
-				} catch { /* 무시 */ }
-			} else {
-				[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
-					api.get<VmImage[]>('/api/v1/images', token, projectId),
-					api.get<VmFlavor[]>('/api/v1/flavors', token, projectId),
-					api.get<LibraryItem[]>('/api/v1/libraries', token, projectId),
-					api.get<NetworkInfo[]>('/api/v1/networks', token, projectId),
-					api.get<KeypairInfo[]>('/api/v1/keypairs', token, projectId),
-					api.get<Volume[]>('/api/v1/volumes', token, projectId),
-				]);
-				await loadSquashfsCatalog();
-				try {
-					securityGroups = await api.get<SecurityGroupInfo[]>('/api/v1/security-groups', token, projectId);
-				} catch { securityGroups = []; }
-				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
-				} catch { availabilityZones = []; }
-				try {
-					fileStorages = await api.get<typeof fileStorages>('/api/v1/storage/file-storages', token, projectId);
-				} catch { fileStorages = []; }
+	function resetTargetOptions() {
+		loadGeneration += 1;
+		for (const key of ['volumes', 'networks', 'securityGroups'] as const) {
+			optionStatus[key] = 'idle';
+			delete optionErrors[key];
+		}
+		volumes = [];
+		networks = [];
+		securityGroups = [];
+		defaultNetworkId = null;
+		flavorQuota = null;
+		wizard.update(w => ({
+			...w,
+			networkId: null,
+			networkName: null,
+			securityGroups: [],
+			keyName: null,
+			sshAccessMode: 'keypair',
+			githubUsername: '',
+		}));
+	}
 
-				if (keypairs.length === 1 && !get(wizard).keyName) {
-					wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
-				}
-				if (networks.length > 0 && !get(wizard).networkId) {
-					let selectedNet = networks[0];
-					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
-						defaultNetworkId = defaultRecord.network_id;
-						const found = networks.find(n => n.id === defaultRecord.network_id);
-						if (found) selectedNet = found;
-					} catch {
-						const byName = networks.find(n => n.name === 'Default');
-						if (byName) selectedNet = byName;
-					}
-					wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
-				} else if (get(wizard).networkId) {
-					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
-						defaultNetworkId = defaultRecord.network_id;
-					} catch { /* 무시 */ }
-				}
-			}
-			if (securityGroups.length > 0 && get(wizard).securityGroups.length === 0) {
-				const defaultSg = securityGroups.find(sg => sg.name === 'default');
-				if (defaultSg) wizard.update(w => ({ ...w, securityGroups: [defaultSg.name] }));
-			}
-			if (opts.adminMode() && networks.length > 0 && !get(wizard).networkId) {
-				const net = networks[0];
-				wizard.update(w => ({ ...w, networkId: net.id, networkName: net.name }));
-			}
-		} catch (e) {
-			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
-		} finally {
-			loading = false;
+	function ensureStepData(step: WizardStepId) {
+		if (step === 1) void loadBootOptions();
+		if (step === 2) void loadFlavorOptions();
+		if (step === 3 && squashfsEligible) void loadSquashfsCatalog();
+		if (step === 4 && wizardState.libraries.length > 0) void loadLegacyLibraries();
+		if (step === 5) {
+			void loadConfigurationOptions();
+			void loadFileStorages();
 		}
 	}
 
 	function selectAdminProject(id: string, name: string) {
 		adminSelectedProjectId = id;
 		adminSelectedProjectName = name;
-		wizard.update(w => ({ ...w, networkId: null, networkName: null, securityGroups: [], keyName: null }));
-		loadData();
-		loadFlavorQuota();
+		resetTargetOptions();
+		const bootPromise = loadBootOptions();
+		preloadConfigurationAfterBoot(bootPromise, id);
+		void loadFlavorOptions();
+		void loadFlavorQuota();
+		ensureStepData(wizardState.step as WizardStepId);
 	}
 
 	function handleReset() {
 		resetWizard();
 		adminSelectedProjectId = null;
 		adminSelectedProjectName = null;
+		resetTargetOptions();
 		if (opts.adminMode()) {
-			loadAdminProjects();
+			void Promise.all([loadAdminProjects(), loadAdminProjectQuotas()]);
 		} else {
-			loadData();
+			ensureStepData(1);
+			void loadFlavorOptions();
+			void loadFlavorQuota();
 		}
 	}
 
@@ -635,28 +920,39 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const current = get(wizard).step as WizardStepId;
 		const index = visibleStepIds.indexOf(current);
 		const next = visibleStepIds[Math.min(index + 1, visibleStepIds.length - 1)];
-		if (next && next !== current) wizard.update(w => ({ ...w, step: next }));
+		if (!next || next === current) return;
+		ensureStepData(next);
+		wizard.update(w => ({ ...w, step: next }));
 	}
 
 	function prevStep() {
 		const current = get(wizard).step as WizardStepId;
 		const index = visibleStepIds.indexOf(current);
 		const prev = visibleStepIds[Math.max(index - 1, 0)];
-		if (prev && prev !== current) wizard.update(w => ({ ...w, step: prev }));
+		if (!prev || prev === current) return;
+		ensureStepData(prev);
+		wizard.update(w => ({ ...w, step: prev }));
 	}
 
 	function goTo(step: number) {
-		wizard.update(w => ({ ...w, step: nearestVisibleStep(step) }));
+		const next = nearestVisibleStep(step);
+		ensureStepData(next);
+		wizard.update(w => ({ ...w, step: next }));
 	}
 
 	function goToVisible(index: number) {
 		const step = visibleStepIds[index - 1];
-		if (step) wizard.update(w => ({ ...w, step }));
+		if (!step) return;
+		ensureStepData(step);
+		wizard.update(w => ({ ...w, step }));
 	}
 
 	function selectImage(id: string, name: string) {
 		wizard.update(w => ({ ...w, imageId: id, imageName: name }));
-		// 선택 즉시 다음 단계로 자동 진행("다음" 버튼 클릭과 동일). 이전으로 돌아와도 핸들러가 재발화하지 않아 강제 진행되지 않는다.
+		const image = images.find(candidate => candidate.id === id);
+		if (!opts.adminMode() && betaState.libraryConsume && detectUbuntuBaseImage(image, name)) {
+			void loadSquashfsCatalog();
+		}
 		nextStep();
 	}
 	function selectFlavor(id: string, name: string) {
@@ -690,54 +986,66 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		wizard.update(w => ({ ...w, networkId: id, networkName: net?.name ?? null }));
 	}
 
+	function selectSshAccessMode(mode: 'keypair' | 'github') {
+		if (mode === 'github' && !githubSshEligible) return;
+		wizard.update(w => ({
+			...w,
+			sshAccessMode: mode,
+			keyName: mode === 'github' ? null : w.keyName,
+			githubUsername: mode === 'keypair' ? '' : w.githubUsername,
+		}));
+	}
+
 	function clearSquashfsSelection() {
 		wizard.update(w => ({ ...w, squashfsMode: null, layerProfileName: null, layerArtifactIds: [] }));
 	}
 
 	function selectSquashfsMode(mode: 'profile' | 'artifacts' | null) {
-		wizard.update(w => ({
-			...w,
-			squashfsMode: mode,
-			layerProfileName: mode === 'profile' ? w.layerProfileName : null,
-			layerArtifactIds: mode === 'artifacts' ? w.layerArtifactIds : [],
-			libraries: mode ? [] : w.libraries,
-			templateName: mode ? null : w.templateName,
-			templateVersion: mode ? null : w.templateVersion,
-			strategy: mode ? null : w.strategy,
-		}));
+		wizard.update(w => {
+			const selection = mode === null
+				? { squashfsMode: null, layerProfileName: null, layerArtifactIds: [] }
+				: nextSquashfsSelection(w, { type: 'mode', mode });
+			return {
+				...w,
+				...selection,
+				libraries: selection.squashfsMode ? [] : w.libraries,
+				templateName: selection.squashfsMode ? null : w.templateName,
+				templateVersion: selection.squashfsMode ? null : w.templateVersion,
+				strategy: selection.squashfsMode ? null : w.strategy,
+			};
+		});
 	}
 
 	function selectSquashfsProfile(name: string | null) {
-		wizard.update(w => ({
-			...w,
-			squashfsMode: name ? 'profile' : w.squashfsMode,
-			layerProfileName: name,
-			layerArtifactIds: [],
-			libraries: name ? [] : w.libraries,
-			templateName: name ? null : w.templateName,
-			templateVersion: name ? null : w.templateVersion,
-			strategy: name ? null : w.strategy,
-		}));
+		wizard.update(w => {
+			const selection = name === null
+				? { squashfsMode: null, layerProfileName: null, layerArtifactIds: [] }
+				: nextSquashfsSelection(w, { type: 'profile', name });
+			return {
+				...w,
+				...selection,
+				libraries: selection.squashfsMode ? [] : w.libraries,
+				templateName: selection.squashfsMode ? null : w.templateName,
+				templateVersion: selection.squashfsMode ? null : w.templateVersion,
+				strategy: selection.squashfsMode ? null : w.strategy,
+			};
+		});
 	}
 
 	function toggleSquashfsArtifact(id: number) {
 		wizard.update(w => {
-			const ids = new Set(w.layerArtifactIds);
-			if (ids.has(id)) {
-				ids.delete(id);
-			} else {
-				lineageIdsForArtifact(id).forEach(lineageId => ids.add(lineageId));
-			}
-			const nextIds = Array.from(ids);
+			const selection = nextSquashfsSelection(w, {
+				type: 'artifact',
+				id,
+				lineageIds: lineageIdsForArtifact(id),
+			});
 			return {
 				...w,
-				squashfsMode: nextIds.length > 0 ? 'artifacts' : w.squashfsMode,
-				layerArtifactIds: nextIds,
-				layerProfileName: null,
-				libraries: nextIds.length > 0 ? [] : w.libraries,
-				templateName: nextIds.length > 0 ? null : w.templateName,
-				templateVersion: nextIds.length > 0 ? null : w.templateVersion,
-				strategy: nextIds.length > 0 ? null : w.strategy,
+				...selection,
+				libraries: selection.squashfsMode ? [] : w.libraries,
+				templateName: selection.squashfsMode ? null : w.templateName,
+				templateVersion: selection.squashfsMode ? null : w.templateVersion,
+				strategy: selection.squashfsMode ? null : w.strategy,
 			};
 		});
 	}
@@ -763,6 +1071,11 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			: `${baseUrl}/api/v1/instances/async`;
 
 		const w = get(wizard);
+		const requestedName = normalizeRequestedInstanceName(w.instanceName);
+		const githubUsername = w.sshAccessMode === 'github'
+			? normalizeGithubUsername(w.githubUsername) || null
+			: null;
+		const keyName = w.sshAccessMode === 'github' ? null : w.keyName || null;
 		const useSquashfsConsume = shouldUseSquashfsConsume({
 			beta: betaState,
 			adminMode: opts.adminMode(),
@@ -774,13 +1087,14 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			squashfsBaseMismatch,
 		});
 		if (useSquashfsConsume) {
-			const requestedName = w.instanceName.trim() || null;
 			const consumeBody: Record<string, unknown> = {
 				server_name: requestedName,
 				flavor_id: w.flavorId,
 				image_id: w.imageId,
 				network_id: w.networkId,
-				key_name: w.keyName || null,
+				key_name: keyName,
+				github_username: githubUsername,
+				userdata: w.cloudInit || null,
 				...(w.squashfsMode === 'profile'
 					? { profile_name: w.layerProfileName }
 					: { artifact_ids: w.layerArtifactIds }),
@@ -817,8 +1131,6 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				return;
 			}
 		}
-
-		const requestedName = w.instanceName.trim() || null;
 		const body: Record<string, unknown> = {
 			name: requestedName,
 			...(w.bootSource === 'volume'
@@ -833,8 +1145,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			strategy: w.strategy,
 			scheduling: normalizeSchedulingForBeta(betaState, w.scheduling),
 			network_id: w.networkId,
-			key_name: w.keyName || null,
-			availability_zone: w.availabilityZone,
+			key_name: keyName,
+			github_username: githubUsername,
 			security_groups: w.securityGroups,
 			userdata: w.cloudInit || null,
 			data_mounts: w.dataMounts.map(m => ({
@@ -924,21 +1236,33 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		}
 	}
 
+	function retryCurrentStep() {
+		ensureStepData(wizardState.step as WizardStepId);
+	}
+
 	function init() {
 		if (opts.adminMode()) {
 			const targetId = get(wizard).targetProjectId;
 			if (targetId) {
 				adminSelectedProjectId = targetId;
-				const found = adminProjects.find(p => p.id === targetId);
-				adminSelectedProjectName = found?.name ?? targetId;
-				loadData();
-				loadFlavorQuota();
+				adminSelectedProjectName = targetId;
+				resetTargetOptions();
+				void loadAdminProjects();
+				const bootPromise = loadBootOptions();
+				preloadConfigurationAfterBoot(bootPromise, targetId);
+				void loadFlavorOptions();
+				void loadFlavorQuota();
+				ensureStepData(wizardState.step as WizardStepId);
+				return;
 			}
-			loadAdminProjects();
-		} else {
-			loadData();
-			loadFlavorQuota();
+			void Promise.all([loadAdminProjects(), loadAdminProjectQuotas()]);
+			return;
 		}
+		const bootPromise = loadBootOptions();
+		preloadConfigurationAfterBoot(bootPromise);
+		void loadFlavorOptions();
+		void loadFlavorQuota();
+		ensureStepData(wizardState.step as WizardStepId);
 	}
 
 	return {
@@ -955,14 +1279,15 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get volumes() { return volumes; },
 		get fileStorages() { return fileStorages; },
 		get securityGroups() { return securityGroups; },
-		get availabilityZones() { return availabilityZones; },
 		get defaultNetworkId() { return defaultNetworkId; },
 		get flavorQuota() { return flavorQuota; },
 		get squashfsProfiles() { return squashfsProfiles; },
 		get squashfsArtifacts() { return squashfsArtifacts; },
+		get optionStatus() { return optionStatus; },
+		get optionErrors() { return optionErrors; },
 		// UI state
 		get loading() { return loading; },
-		get loadError() { return loadError; },
+		get hasCurrentStepError() { return hasCurrentStepError; },
 		get deploying() { return deploying; },
 		get deployError() { return deployError; },
 		get currentStep() { return currentStep; },
@@ -988,6 +1313,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get selectedNetwork() { return selectedNetwork; },
 		get selectedImage() { return selectedImage; },
 		get selectedImageUbuntuBase() { return selectedImageUbuntuBase; },
+		get selectedImageIsUbuntu() { return selectedImageIsUbuntu; },
+		get githubSshEligible() { return githubSshEligible; },
 		get squashfsEligible() { return squashfsEligible; },
 		get selectedSquashfsArtifacts() { return selectedSquashfsArtifacts; },
 		get squashfsBaseMismatch() { return squashfsBaseMismatch; },
@@ -1003,7 +1330,10 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		// Lifecycle
 		init,
 		// Data loading
-		loadData,
+		ensureStepData,
+		retryCurrentStep,
+		loadBootOptions,
+		loadFlavorOptions,
 		loadFlavorQuota,
 		loadAdminProjects,
 		loadSquashfsCatalog,
@@ -1021,6 +1351,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		selectScheduling,
 		selectMountProtocol,
 		selectNetwork,
+		selectSshAccessMode,
 		clearSquashfsSelection,
 		selectSquashfsMode,
 		selectSquashfsProfile,

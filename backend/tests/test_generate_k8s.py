@@ -196,6 +196,33 @@ def test_render_secret_always_emits_manifest_required_keys():
     assert keys["BUILDER_SSH_PRIVATE_KEY"] == ""
 
 
+def test_chat_capability_platform_secrets_stay_out_of_configmap():
+    cfg = {
+        "app": {"secret_key": "0123456789abcdef0123456789abcdef"},
+        "chat": {
+            "memory_pgvector_url": "postgresql://memory-secret.example/db",
+            "asset_s3_access_key": "asset-access-secret",
+            "asset_s3_secret_key": "asset-secret",
+            "sandbox_api_key": "sandbox-secret",
+            "asset_s3_bucket": "chat-assets",
+            "semantic_memory_enabled": True,
+        },
+    }
+
+    secret = render_secret(cfg)
+    configmap = _render_toml_for_k8s(cfg)
+
+    assert "postgresql://memory-secret.example/db" in secret
+    assert "asset-access-secret" in secret
+    assert "asset-secret" in secret
+    assert "sandbox-secret" in secret
+    assert "memory_pgvector_url" not in configmap
+    assert "asset_s3_access_key" not in configmap
+    assert "asset_s3_secret_key" not in configmap
+    assert "sandbox_api_key" not in configmap
+    assert 'asset_s3_bucket = "chat-assets"' in configmap
+
+
 class TestRenderGrafanaDeployment:
     def test_default_password_is_admin(self):
         result = render_grafana_deployment({})

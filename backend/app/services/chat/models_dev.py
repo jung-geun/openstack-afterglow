@@ -91,9 +91,7 @@ def _model_capabilities(model_data: dict[str, object]) -> dict[str, object]:
     if isinstance(raw_options, list):
         for opt in raw_options:
             if isinstance(opt, dict):
-                reasoning_options.append(
-                    {"type": str(opt.get("type") or ""), "values": _str_list(opt.get("values"))}
-                )
+                reasoning_options.append({"type": str(opt.get("type") or ""), "values": _str_list(opt.get("values"))})
     return {
         "vision": "image" in inp,
         "reasoning": bool(model_data.get("reasoning")),

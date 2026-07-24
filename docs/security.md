@@ -9,7 +9,7 @@
 ## 인증·인가 모델
 
 ```
-브라우저 ──[X-Auth-Token + X-Project-Id]──▶ FastAPI
+브라우저 ──[Authorization: Bearer <jwt> (+X-Project-Id)]──▶ FastAPI
                                             │
                                             ├─ 토큰 캐시 검증 (Redis, TTL 60s) ─[Keystone]
                                             │  └ logout/revoke 시 invalidate

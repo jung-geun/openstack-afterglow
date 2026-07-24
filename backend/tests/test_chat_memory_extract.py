@@ -66,13 +66,15 @@ class TestGenerateMemory:
                 "price_source": None,
             }
 
-        async def fake_list_memories(*, user_id):
+        async def fake_list_memories(*, user_id, project_id):
+            assert (user_id, project_id) == ("u1", "p1")
             return [{"id": 5, "content": "기존 사실", "is_active": True}]
 
-        async def fake_list_messages(conv_id, *, user_id, limit=8):
+        async def fake_list_messages(conv_id, *, user_id, project_id, limit=8):
             return [{"role": "user", "content": "나는 커피를 좋아해"}, {"role": "assistant", "content": "알겠어요"}]
 
-        async def fake_acompletion(*a, **k):
+        async def fake_acompletion(_model, messages, **_kwargs):
+            assert "알겠어요" not in messages[-1]["content"]
             # add 1개 + 유효 update(id 5) + 무효 update(id 999, 무시돼야 함)
             return _Resp(
                 '[{"op":"add","content":"커피 선호"},'
@@ -80,11 +82,13 @@ class TestGenerateMemory:
                 '{"op":"update","id":999,"content":"소유 아님"}]'
             )
 
-        async def fake_create(*, user_id, content):
+        async def fake_create(*, user_id, project_id, scope, content):
+            assert (user_id, project_id, scope) == ("u1", "p1", "project")
             created.append(content)
             return {"id": 1}
 
-        async def fake_update(mid, *, user_id, patch):
+        async def fake_update(mid, *, user_id, project_id, patch):
+            assert (user_id, project_id) == ("u1", "p1")
             updated.append((mid, patch["content"]))
             return {"id": mid}
 

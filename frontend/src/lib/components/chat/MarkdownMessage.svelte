@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { renderMarkdown, highlightCodeBlocks } from '$lib/api/chatMarkdown';
+	import { enhanceChatMarkdown } from '$lib/api/chatRichOutput';
+	import 'katex/dist/katex.min.css';
 
 	interface Props {
 		content: string;
@@ -12,6 +14,49 @@
 	// 스트리밍 중에는 캐시 미사용(매 델타 partial), 완료 후에는 content-keyed 캐시로 재파싱 방지.
 	const html = $derived(renderMarkdown(content, { cache: !streaming }));
 
+
+	async function copyCode(button: HTMLButtonElement, code: string) {
+		try {
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(code);
+			} else {
+				const textarea = document.createElement('textarea');
+				textarea.value = code;
+				textarea.setAttribute('readonly', '');
+				textarea.style.cssText = 'position:fixed;opacity:0';
+				document.body.append(textarea);
+				textarea.select();
+				const copied = document.execCommand('copy');
+				textarea.remove();
+				if (!copied) throw new Error('copy command rejected');
+			}
+			button.textContent = '복사됨';
+			window.setTimeout(() => {
+				if (button.isConnected) button.textContent = '복사';
+			}, 1_400);
+		} catch {
+			button.textContent = '실패';
+			window.setTimeout(() => {
+				if (button.isConnected) button.textContent = '복사';
+			}, 1_400);
+		}
+	}
+
+	function installCodeCopyButtons(el: HTMLDivElement) {
+		for (const pre of el.querySelectorAll('pre')) {
+			if (pre.querySelector(':scope > .chat-code-copy')) continue;
+			const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
+			if (!code) continue;
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'chat-code-copy';
+			button.textContent = '복사';
+			button.ariaLabel = '코드 복사';
+			button.title = '코드 복사';
+			button.addEventListener('click', () => void copyCode(button, code));
+			pre.append(button);
+		}
+	}
 	// 스트리밍이 끝나고 최종 HTML 이 DOM 에 반영된 뒤 한 번만 하이라이트.
 	$effect(() => {
 		void html;
@@ -19,12 +64,20 @@
 		if (!el || streaming) return;
 		// 마이크로태스크 이후 DOM 반영 보장
 		queueMicrotask(() => {
-			if (host) void highlightCodeBlocks(host);
+			if (host === el && !streaming) {
+				void (async () => {
+					await highlightCodeBlocks(el);
+					if (host === el && !streaming) {
+						await enhanceChatMarkdown(el);
+						if (host === el && !streaming) installCodeCopyButtons(el);
+					}
+				})();
+			}
 		});
 	});
 </script>
 
-<div bind:this={host} class="md-body">
+<div bind:this={host} class="md-body" class:streaming>
 	<!-- renderMarkdown 이 DOMPurify.sanitize 로 살균한 HTML -->
 	{@html html}
 </div>
@@ -36,6 +89,53 @@
 		color: var(--color-ink-1);
 		word-break: break-word;
 		overflow-wrap: anywhere;
+	}
+	.md-body.streaming::after {
+		content: '';
+		display: inline-block;
+		width: 0.45rem;
+		height: 1.05em;
+		margin-left: 0.14rem;
+		vertical-align: -0.16em;
+		border-radius: 1px;
+		background: var(--color-accent);
+		animation: stream-cursor-blink 0.9s steps(1, end) infinite;
+	}
+	.md-body :global(.math-display) {
+		display: block;
+		margin: 0.8rem 0;
+		padding: 0.65rem 0.8rem;
+		overflow-x: auto;
+		border: 1px solid var(--color-line);
+		border-radius: 0.55rem;
+		background: var(--color-surface-sunken);
+		color: var(--color-ink-0);
+	}
+	.md-body :global(.math-inline .katex) {
+		font-size: 1em;
+	}
+	.md-body :global(.mermaid-diagram) {
+		display: grid;
+		place-items: center;
+		margin: 0 0 0.75rem;
+		padding: 0.9rem;
+		overflow-x: auto;
+		border: 1px solid var(--color-line);
+		border-radius: 0.6rem;
+		background: var(--color-surface-sunken);
+	}
+	.md-body :global(.mermaid-diagram svg) {
+		max-width: 100%;
+		height: auto;
+	}
+	.md-body :global(pre[data-mermaid-error]) {
+		border-color: var(--color-state-warning);
+	}
+	@keyframes stream-cursor-blink {
+		50% { opacity: 0; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.md-body.streaming::after { animation: none; }
 	}
 	.md-body :global(p) {
 		margin: 0 0 0.75em;
@@ -97,6 +197,7 @@
 	}
 	/* 코드 블록(하이라이트 전/후 공통 셸) */
 	.md-body :global(pre) {
+		position: relative;
 		margin: 0 0 0.75em;
 		padding: 0.85rem 1rem;
 		border-radius: 0.6rem;
@@ -105,6 +206,35 @@
 		overflow-x: auto;
 		font-size: 0.82em;
 		line-height: 1.55;
+	}
+	.md-body :global(.chat-code-copy) {
+		position: absolute;
+		top: 0.5rem;
+		right: 0.5rem;
+		z-index: 1;
+		padding: 0.2rem 0.45rem;
+		border: 1px solid var(--color-line-2);
+		border-radius: 0.35rem;
+		background: var(--color-surface-raised);
+		color: var(--color-ink-2);
+		font: inherit;
+		font-size: 0.75rem;
+		line-height: 1.2;
+		cursor: pointer;
+		opacity: 0;
+		transition: opacity 0.15s, background 0.15s;
+	}
+	.md-body :global(pre:hover .chat-code-copy),
+	.md-body :global(pre:focus-within .chat-code-copy) {
+		opacity: 1;
+	}
+	.md-body :global(.chat-code-copy:hover) {
+		background: var(--color-surface-sunken);
+	}
+	.md-body :global(.chat-code-copy:focus-visible) {
+		opacity: 1;
+		outline: none;
+		box-shadow: var(--focus-ring);
 	}
 	.md-body :global(pre code) {
 		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

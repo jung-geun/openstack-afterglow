@@ -19,6 +19,7 @@
 	import { toast } from '$lib/stores/toast';
 	import { isTransitional } from '$lib/utils/instanceStatus';
 	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
+	import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
 
 	let instances = $state<Instance[]>([]);
 	let loading = $state(true);
@@ -26,10 +27,12 @@
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let underutilized = $state<Record<string, boolean>>({});
-	let selectedIds = $state(new Set<string>());
+	const selection = createResourceSelection();
 	let bulkActioning = $state(false);
+	let loadGeneration = 0;
 
 	const mockupActive = $derived($page.data.mockup?.active === true);
+	const selectableIds = $derived(new Set(instances.map((instance) => instance.id)));
 
 	function openCreateEntryPoint() {
 		if (mockupActive) {
@@ -42,30 +45,61 @@
 
 	async function fetchInstances(opts?: { refresh?: boolean }) {
 		const path = '/api/v1/instances';
+		const requestToken = $auth.token ?? undefined;
+		const requestProjectId = $auth.projectId ?? undefined;
+		const generation = ++loadGeneration;
 		const cached = swrGet<Instance[]>(path);
-		if (cached && instances.length === 0) instances = cached;
+		if (cached && instances.length === 0) {
+			instances = cached;
+			selection.retain(cached.map((instance) => instance.id));
+		}
+		const listPromise = api.get<Instance[]>(path, requestToken, requestProjectId, opts);
+		const summaryPromise = fetchSummaryBatch(requestToken, requestProjectId, generation, opts);
 		try {
-			instances = await api.get<Instance[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+			const fetchedInstances = await listPromise;
+			if (
+				generation !== loadGeneration
+				|| ($auth.token ?? undefined) !== requestToken
+				|| ($auth.projectId ?? undefined) !== requestProjectId
+			) return;
+			instances = fetchedInstances;
+			selection.retain(fetchedInstances.map((instance) => instance.id));
 			swrSet(path, instances);
 			error = '';
-			// 리소스 사용량 배지 — 비차단 (실패해도 목록 미영향)
-			void fetchSummaryBatch();
 		} catch (e) {
-			if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (
+				generation === loadGeneration
+				&& ($auth.token ?? undefined) === requestToken
+				&& ($auth.projectId ?? undefined) === requestProjectId
+				&& !cached
+			) {
+				error = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			}
 		} finally {
-			loading = false;
+			if (generation === loadGeneration && ($auth.projectId ?? undefined) === requestProjectId) {
+				loading = false;
+			}
 		}
+		void summaryPromise;
 	}
 
-	async function fetchSummaryBatch() {
-		const token = $auth.token;
-		const projectId = $auth.projectId ?? undefined;
-		if (!token) return;
+	async function fetchSummaryBatch(
+		requestToken: string | undefined,
+		requestProjectId: string | undefined,
+		generation: number,
+		opts?: { refresh?: boolean },
+	) {
+		if (!requestToken) return;
 		try {
 			const resp = await api.get<{
 				prometheus_available: boolean;
 				instances: Record<string, { cpu_avg: number | null; mem_avg: number | null; underutilized: boolean }>;
-			}>('/api/v1/instances/metrics-summary-batch', token, projectId);
+			}>('/api/v1/instances/metrics-summary-batch', requestToken, requestProjectId, opts);
+			if (
+				generation !== loadGeneration
+				|| ($auth.token ?? undefined) !== requestToken
+				|| ($auth.projectId ?? undefined) !== requestProjectId
+			) return;
 			if (resp.prometheus_available) {
 				const map: Record<string, boolean> = {};
 				for (const [id, data] of Object.entries(resp.instances)) map[id] = data.underutilized;
@@ -87,6 +121,7 @@
 
 	const ar = createAutoRefresh(() => fetchInstances(), {
 		storageKey: 'dashboard-compute-instances',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 10,
 		intervalOptions: [10, 15, 30, 60],
@@ -116,7 +151,9 @@
 	}
 
 	async function bulkAction(action: 'start' | 'stop' | 'delete') {
-		const ids = [...selectedIds];
+		const ids = [...selection.ids];
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
 		if (ids.length === 0) return;
 
 		const labels: Record<string, string> = { start: '시작', stop: '종료', delete: '삭제' };
@@ -130,22 +167,33 @@
 		}
 
 		bulkActioning = true;
+		const results: { id: string; ok: boolean }[] = [];
+		for (let index = 0; index < ids.length; index += 50) {
+			const chunk = ids.slice(index, index + 50);
+			try {
+				const response = await api.post<{ results: { id: string; ok: boolean }[] }>(
+					'/api/v1/instances/bulk-action',
+					{ action, instance_ids: chunk },
+					token,
+					projectId,
+				);
+				results.push(...response.results);
+			} catch {
+				results.push(...chunk.map((id) => ({ id, ok: false })));
+			}
+		}
+
+		const successfulIds = results.filter((result) => result.ok).map((result) => result.id);
+		const failureCount = results.length - successfulIds.length;
+		if (successfulIds.length > 0) toast.success(`${successfulIds.length}개 ${verb} 요청을 완료했습니다.`);
+		if (failureCount > 0) toast.error(`${failureCount}개 ${verb}에 실패했습니다.`);
+
 		try {
-			const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>(
-				'/api/v1/instances/bulk-action',
-				{ action, instance_ids: ids },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined,
-			);
-			const failed = res.results.filter(r => !r.ok);
-			const succeeded = res.results.filter(r => r.ok).length;
-			if (succeeded > 0) toast.success(`${succeeded}개 ${verb} 요청 완료`);
-			if (failed.length > 0) toast.error(`${failed.length}개 처리 실패`);
-			selectedIds = new Set();
-			ar.setBoost(4);
-			await fetchInstances();
-		} catch {
-			toast.error(`일괄 ${verb} 요청 실패`);
+			if ($auth.projectId === projectId) {
+				selection.remove(successfulIds);
+				ar.setBoost(4);
+				await fetchInstances();
+			}
 		} finally {
 			bulkActioning = false;
 		}
@@ -205,13 +253,16 @@
 
 	$effect(() => {
 		const projectId = $auth.projectId;
-		if (!projectId) return;
-		loading = true;
-		untrack(() => fetchInstances());
+		untrack(() => {
+			selection.clear();
+			if (!projectId) return;
+			loading = true;
+			void fetchInstances();
+		});
 	});
 </script>
 
-<div class="p-4 md:p-8 pb-28 md:pb-32">
+<div class="bulk-selection-page p-4 md:p-8 pb-28 md:pb-32">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
 		{#snippet actions()}
 			<TutorialStartButton tour="vm-create" />
@@ -245,32 +296,27 @@
 		<InstancesTable
 			{instances}
 			{underutilized}
-			{selectedIds}
+			selectedIds={selection.ids}
+			{selectableIds}
+			selectionDisabled={bulkActioning}
 			onSelect={openInstancePanel}
 			onAction={handleAction}
-			onToggleSelect={(id) => {
-				const next = new Set(selectedIds);
-				if (next.has(id)) next.delete(id); else next.add(id);
-				selectedIds = next;
-			}}
-			onToggleAll={() => {
-				if (instances.every(i => selectedIds.has(i.id))) {
-					selectedIds = new Set();
-				} else {
-					selectedIds = new Set(instances.map(i => i.id));
-				}
-			}}
+			onToggleSelect={(id) => selection.toggle(id)}
+			onToggleAll={() => selection.toggleAll(selectableIds)}
 		/>
 	{/if}
 
-<BulkSelectionOverlay
-	count={selectedIds.size}
-	busy={bulkActioning}
-	onStart={() => bulkAction('start')}
-	onStop={() => bulkAction('stop')}
-	onDelete={() => bulkAction('delete')}
-	onClear={() => { selectedIds = new Set(); }}
-/>
+	<BulkSelectionOverlay
+		count={selection.count}
+		ariaLabel="선택한 인스턴스 일괄 작업"
+		actions={[
+			{ key: 'start', label: '시작', tone: 'success', onAction: () => bulkAction('start') },
+			{ key: 'stop', label: '종료', tone: 'warning', onAction: () => bulkAction('stop') },
+			{ key: 'delete', label: '삭제', tone: 'danger', onAction: () => bulkAction('delete') },
+		]}
+		busy={bulkActioning}
+		onClear={() => selection.clear()}
+	/>
 </div>
 
 {#if selectedInstanceId}

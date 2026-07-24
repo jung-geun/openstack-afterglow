@@ -5,6 +5,7 @@ url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 """
 
 import logging
+import sys
 import time
 from collections.abc import AsyncGenerator
 
@@ -78,15 +79,41 @@ def is_db_configured() -> bool:
     return _engine is not None
 
 
-def mark_db_unhealthy(seconds: int | None = None) -> None:
-    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환.
+_CONNECTION_ERROR_CODES = frozenset({2003, 2006, 2013, 2014, 2055})
 
-    seconds=None이면 init_db에서 설정한 기본값(_default_unhealthy_seconds) 사용.
+
+def is_connection_error(error: BaseException | None) -> bool:
+    """Return True only for DBAPI transport/protocol failures.
+
+    Query/schema failures such as MySQL 1054 must fail that request without
+    opening the process-wide availability breaker.
     """
+    if error is None:
+        return False
+    current: BaseException | None = error
+    while current is not None:
+        args = getattr(current, "args", ())
+        if args and isinstance(args[0], int) and args[0] in _CONNECTION_ERROR_CODES:
+            return True
+        current = getattr(current, "orig", None) or getattr(current, "__cause__", None)
+    return False
+
+
+def mark_db_unhealthy(error: BaseException | None = None, seconds: int | None = None) -> bool:
+    """Open the breaker only for confirmed database connection failures.
+
+    When called from an exception handler, ``sys.exception()`` supplies the
+    caught DBAPI error so legacy call sites remain safe during the cutover.
+    """
+    error = error if error is not None else sys.exception()
+    if not is_connection_error(error):
+        _logger.info("DB query failure did not open circuit breaker", exc_info=error is not None)
+        return False
     global _db_unhealthy_until
     duration = seconds if seconds is not None else _default_unhealthy_seconds
     _db_unhealthy_until = time.time() + duration
     _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", duration)
+    return True
 
 
 async def create_tables() -> None:

@@ -175,6 +175,7 @@ def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
 @router.get("/summary")
 async def get_dashboard_summary(
     view: Literal["full", "overview"] = Query("full"),
+    recent_limit: int = Query(5, ge=5, le=12),
     conn: openstack.connection.Connection = Depends(get_os_conn),
     cm: CacheMode = Depends(cache_mode),
 ):
@@ -201,7 +202,7 @@ async def get_dashboard_summary(
                 "shutoff": sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "SHUTOFF"),
                 "error": sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "ERROR"),
             },
-            "recent_instances": _recent_instances(servers, limit=5),
+            "recent_instances": _recent_instances(servers, limit=recent_limit),
         }
 
     try:

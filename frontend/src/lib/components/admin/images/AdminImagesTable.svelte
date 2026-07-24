@@ -17,6 +17,7 @@
 		onDelete,
 		onPrev,
 		onNext,
+		onintent,
 	}: {
 		images: AdminImage[];
 		selectedImageId: string | null;
@@ -29,6 +30,7 @@
 		onDelete: (img: AdminImage) => void;
 		onPrev: () => void;
 		onNext: () => void;
+		onintent?: () => void;
 	} = $props();
 
 	function formatSize(bytes: number): string {
@@ -106,4 +108,5 @@
 	hasNext={!!nextMarker}
 	{onPrev}
 	{onNext}
+	{onintent}
 />

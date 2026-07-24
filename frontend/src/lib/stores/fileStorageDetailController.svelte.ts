@@ -15,8 +15,9 @@ interface Options {
 	fileStorageId: () => string;
 	token: () => string | undefined;
 	projectId: () => string | undefined;
-	onDeleted?: () => void;
+	onDeleted?: () => void | Promise<void>;
 	onClose?: () => void;
+	onMutated?: () => Promise<void>;
 }
 
 function createFileStorageDetailController(opts: Options) {
@@ -36,7 +37,7 @@ function createFileStorageDetailController(opts: Options) {
 	let revokingId = $state<string | null>(null);
 	let copiedKey = $state<string | null>(null);
 
-	async function fetchFileStorage() {
+	async function fetchFileStorage(requestOpts?: { refresh?: boolean }) {
 		// 초기 로드일 때만 스켈레톤 표시 — 이미 데이터가 있으면 백그라운드 새로고침
 		if (fileStorage === null) loading = true;
 		error = '';
@@ -44,7 +45,8 @@ function createFileStorageDetailController(opts: Options) {
 			fileStorage = await api.get<FileStorage>(
 				`/api/v1/file-storage/${opts.fileStorageId()}`,
 				opts.token(),
-				opts.projectId()
+				opts.projectId(),
+				requestOpts
 			);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
@@ -53,7 +55,7 @@ function createFileStorageDetailController(opts: Options) {
 		}
 	}
 
-	async function fetchAccessRules() {
+	async function fetchAccessRules(requestOpts?: { refresh?: boolean }) {
 		// 초기 로드일 때만 로딩 표시 — 이미 규칙이 있으면 백그라운드 새로고침
 		if (accessRules.length === 0) accessLoading = true;
 		accessError = '';
@@ -61,7 +63,8 @@ function createFileStorageDetailController(opts: Options) {
 			accessRules = await api.get<AccessRule[]>(
 				`/api/v1/file-storage/${opts.fileStorageId()}/access-rules`,
 				opts.token(),
-				opts.projectId()
+				opts.projectId(),
+				requestOpts
 			);
 		} catch (e) {
 			accessRules = [];
@@ -71,8 +74,8 @@ function createFileStorageDetailController(opts: Options) {
 		}
 	}
 
-	async function fetchAll() {
-		await Promise.all([fetchFileStorage(), fetchAccessRules()]);
+	async function fetchAll(requestOpts?: { refresh?: boolean }) {
+		await Promise.allSettled([fetchFileStorage(requestOpts), fetchAccessRules(requestOpts)]);
 	}
 
 	async function addAccessRule() {
@@ -89,7 +92,8 @@ function createFileStorageDetailController(opts: Options) {
 			);
 			ruleForm = { access_to: '', access_level: 'ro' };
 			showAddRule = false;
-			await fetchAccessRules();
+			if (opts.onMutated) await opts.onMutated();
+			else await fetchAccessRules();
 		} catch (e) {
 			ruleError = e instanceof ApiError ? e.message : '생성 실패';
 		} finally {
@@ -107,7 +111,8 @@ function createFileStorageDetailController(opts: Options) {
 				opts.token(),
 				opts.projectId()
 			);
-			await fetchAccessRules();
+			if (opts.onMutated) await opts.onMutated();
+			else await fetchAccessRules();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -133,7 +138,7 @@ function createFileStorageDetailController(opts: Options) {
 		deleting = true;
 		try {
 			await api.delete(`/api/v1/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());
-			opts.onDeleted?.();
+			await opts.onDeleted?.();
 			opts.onClose?.();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

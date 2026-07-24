@@ -20,6 +20,7 @@
 		type?: 'button' | 'submit' | 'reset';
 		disabled?: boolean;
 		onclick?: (e: MouseEvent) => void;
+		onintent?: () => void;
 		href?: string;
 		ariaLabel?: string;
 		title?: string;
@@ -33,6 +34,7 @@
 		type = 'button',
 		disabled = false,
 		onclick,
+		onintent,
 		href,
 		ariaLabel,
 		title,
@@ -48,6 +50,10 @@
 		}
 		onclick?.(event);
 	}
+
+	function handleIntent() {
+		if (!disabled) onintent?.();
+	}
 </script>
 
 {#if href}
@@ -57,12 +63,14 @@
 		aria-disabled={disabled}
 		{title}
 		onclick={handleAnchorClick}
+		onpointerenter={handleIntent}
+		onfocus={handleIntent}
 		class="btn btn-{variant} btn-{size} {className}"
 	>
 		{@render children()}
 	</a>
 {:else}
-	<button {type} {disabled} aria-label={ariaLabel} {title} {onclick} class="btn btn-{variant} btn-{size} {className}">
+	<button {type} {disabled} aria-label={ariaLabel} {title} {onclick} onpointerenter={handleIntent} onfocus={handleIntent} class="btn btn-{variant} btn-{size} {className}">
 		{@render children()}
 	</button>
 {/if}

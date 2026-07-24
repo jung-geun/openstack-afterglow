@@ -6,6 +6,8 @@
 		placeholder?: string;
 		disabled?: boolean;
 		required?: boolean;
+		maxlength?: number;
+		element?: HTMLInputElement | null;
 		class?: string;
 		oninput?: (event: Event) => void;
 		onkeydown?: (event: KeyboardEvent) => void;
@@ -18,6 +20,8 @@
 		placeholder,
 		disabled = false,
 		required = false,
+		maxlength,
+		element = $bindable(null),
 		class: className = '',
 		oninput,
 		onkeydown,
@@ -25,12 +29,14 @@
 </script>
 
 <input
+	bind:this={element}
 	{id}
 	{type}
 	bind:value
 	{placeholder}
 	{disabled}
 	{required}
+	{maxlength}
 	{oninput}
 	{onkeydown}
 	class="control text-input {className}"

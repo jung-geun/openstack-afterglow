@@ -1,72 +1,288 @@
-"""SSRF 방어 — 커스텀 HTTP 툴이 호출할 URL 을 백엔드가 대리 요청하기 전 검증.
+"""DNS-pinned HTTP boundary for chat-owned outbound requests.
 
-차단 대상:
-- http/https 이외 스킴
-- 사설(10/8·172.16/12·192.168/16·fc00::/7), 루프백(127/8·::1),
-  링크로컬(169.254/16 — 클라우드 메타데이터 169.254.169.254 포함, fe80::/10),
-  멀티캐스트·예약·unspecified IP
-- 위험 호스트명(localhost, metadata.* 등)
-
-호스트명은 DNS 해석 후 **모든** 결과 IP 를 검사한다(하나라도 내부면 차단).
-⚠️ 한계: 해석 후 httpx 가 재해석하므로 DNS rebinding 완전 차단은 아님(내부 도구용, 문서화된 트레이드오프).
-DNS 해석은 블로킹이므로 호출부가 asyncio.to_thread 로 감싼다.
+The legacy ``validate_url`` helper remains for configuration-time checks. Runtime
+requests must use :class:`SafeAsyncTransport`: it resolves the original hostname,
+rejects every non-public answer, then opens the TCP socket to that validated IP
+while preserving the hostname for HTTP Host and TLS SNI. This closes the
+validate-then-re-resolve DNS-rebinding gap.
 """
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from collections.abc import Awaitable, Callable, Iterable
+from urllib.parse import urlsplit
+
+import httpcore
+import httpx
+from httpcore._backends.auto import AutoBackend
+from httpx._transports.default import AsyncResponseStream, map_httpcore_exceptions
 
 _BLOCKED_HOSTNAMES = {"localhost", "metadata", "metadata.google.internal"}
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_Resolver = Callable[[str, int], Awaitable[list[str]]]
 
 
 class SsrfBlocked(ValueError):
-    """SSRF 정책 위반 — 요청 거부."""
+    """Outbound request violates the SSRF policy."""
 
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+    return not ip.is_global or ip.is_multicast
+
+
+def _normalize_hostname(value: str) -> str:
+    hostname = value.strip().rstrip(".")
+    if not hostname or any(char.isspace() or ord(char) < 32 for char in hostname):
+        raise SsrfBlocked("hostname is required")
+    try:
+        return hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise SsrfBlocked("hostname is invalid") from exc
+
+
+def _matches_domain(hostname: str, domain: str) -> bool:
+    return hostname == domain or hostname.endswith(f".{domain}")
+
+
+def _validate_domain_policy(hostname: str, allowed_domains: Iterable[str], blocked_domains: Iterable[str]) -> None:
+    allowed = tuple(_normalize_hostname(domain) for domain in allowed_domains)
+    blocked = tuple(_normalize_hostname(domain) for domain in blocked_domains)
+    if any(_matches_domain(hostname, domain) for domain in blocked):
+        raise SsrfBlocked("blocked domain")
+    if allowed and not any(_matches_domain(hostname, domain) for domain in allowed):
+        raise SsrfBlocked("domain is not allowed")
+
+
+def _parse_and_validate_url(
+    url: str,
+    *,
+    allowed_domains: Iterable[str] = (),
+    blocked_domains: Iterable[str] = (),
+) -> tuple[str, int, str]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in _DEFAULT_PORTS:
+        raise SsrfBlocked("only http/https URLs are allowed")
+    if parsed.username is not None or parsed.password is not None:
+        raise SsrfBlocked("URL credentials are not allowed")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise SsrfBlocked("URL port is invalid") from exc
+    if port is not None and port not in _DEFAULT_PORTS.values():
+        raise SsrfBlocked("only ports 80 and 443 are allowed")
+    if parsed.scheme == "https" and port not in (None, 443):
+        raise SsrfBlocked("HTTPS requires port 443")
+    if parsed.scheme == "http" and port not in (None, 80):
+        raise SsrfBlocked("HTTP requires port 80")
+    if not parsed.hostname:
+        raise SsrfBlocked("hostname is required")
+
+    hostname = _normalize_hostname(parsed.hostname)
+    if hostname in _BLOCKED_HOSTNAMES:
+        raise SsrfBlocked(f"blocked hostname: {hostname}")
+    _validate_domain_policy(hostname, allowed_domains, blocked_domains)
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+    if ip is not None and _is_blocked_ip(ip):
+        raise SsrfBlocked("private or internal IP addresses are not allowed")
+    return hostname, port or _DEFAULT_PORTS[parsed.scheme], parsed.scheme
+
+
+def _resolve_public_addresses_sync(hostname: str, port: int) -> list[str]:
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise SsrfBlocked("hostname cannot be resolved") from exc
+    addresses = sorted({info[4][0] for info in infos})
+    if not addresses:
+        raise SsrfBlocked("hostname cannot be resolved")
+    for address in addresses:
+        try:
+            resolved = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise SsrfBlocked("hostname resolved to an invalid address") from exc
+        if _is_blocked_ip(resolved):
+            raise SsrfBlocked("hostname resolves to a private or internal IP address")
+    return addresses
+
+
+async def resolve_public_addresses(hostname: str, port: int) -> list[str]:
+    """Resolve and validate every address before a pinned socket is opened."""
+    return await asyncio.to_thread(_resolve_public_addresses_sync, hostname, port)
 
 
 def validate_url(url: str) -> str:
-    """URL 이 SSRF 정책을 통과하면 그대로 반환, 아니면 SsrfBlocked. (블로킹 — to_thread 로 호출)"""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise SsrfBlocked("http/https 스킴만 허용됩니다")
-    host = parsed.hostname
-    if not host:
-        raise SsrfBlocked("호스트가 없습니다")
-    if host.lower() in _BLOCKED_HOSTNAMES:
-        raise SsrfBlocked(f"차단된 호스트: {host}")
+    """Configuration-time URL validation, including DNS resolution.
 
-    # IP 리터럴이면 바로 검사
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
-    if ip is not None:
-        if _is_blocked_ip(ip):
-            raise SsrfBlocked("내부/사설 IP 는 차단됩니다")
-        return url
-
-    # 호스트명 → DNS 해석 후 모든 IP 검사
-    try:
-        infos = socket.getaddrinfo(
-            host,
-            parsed.port or (443 if parsed.scheme == "https" else 80),
-            proto=socket.IPPROTO_TCP,
-        )
-    except socket.gaierror as exc:
-        raise SsrfBlocked("호스트를 확인할 수 없습니다") from exc
-    if not infos:
-        raise SsrfBlocked("호스트를 확인할 수 없습니다")
-    for info in infos:
-        addr = info[4][0]
-        try:
-            resolved = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if _is_blocked_ip(resolved):
-            raise SsrfBlocked("내부/사설 IP 로 해석되는 호스트는 차단됩니다")
+    Runtime callers must use ``SafeAsyncTransport`` instead so their actual
+    connection remains pinned to these validated public addresses.
+    """
+    hostname, port, _ = _parse_and_validate_url(url)
+    _resolve_public_addresses_sync(hostname, port)
     return url
+
+
+class _DnsPinningNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Open TCP only to a public address resolved for the requested hostname."""
+
+    def __init__(self, resolver: _Resolver) -> None:
+        self._resolver = resolver
+        self._backend = AutoBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[tuple[int, int, int]] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        deadline = asyncio.get_running_loop().time() + timeout if timeout is not None else None
+        if deadline is None:
+            addresses = await self._resolver(host, port)
+        else:
+            async with asyncio.timeout(timeout):
+                addresses = await self._resolver(host, port)
+        if not addresses:
+            raise SsrfBlocked("hostname cannot be resolved")
+        for address in addresses:
+            try:
+                resolved = ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise SsrfBlocked("hostname resolved to an invalid address") from exc
+            if _is_blocked_ip(resolved):
+                raise SsrfBlocked("hostname resolves to a private or internal IP address")
+        last_error: Exception | None = None
+        for address in addresses:
+            remaining = None if deadline is None else deadline - asyncio.get_running_loop().time()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError("DNS-pinned connection timed out")
+            try:
+                return await self._backend.connect_tcp(
+                    host=address,
+                    port=port,
+                    timeout=remaining,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:  # Try each validated A/AAAA answer.
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[tuple[int, int, int]] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise SsrfBlocked("Unix sockets are not allowed")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
+
+
+def _validate_request_authority(request: httpx.Request, hostname: str, port: int, scheme: str) -> None:
+    host_header = request.headers.get("host")
+    if not host_header:
+        raise SsrfBlocked("Host header is required")
+    authority = urlsplit(f"//{host_header}")
+    if authority.username is not None or authority.password is not None or not authority.hostname:
+        raise SsrfBlocked("Host header is invalid")
+    try:
+        authority_port = authority.port
+    except ValueError as exc:
+        raise SsrfBlocked("Host header port is invalid") from exc
+    if _normalize_hostname(authority.hostname) != hostname:
+        raise SsrfBlocked("Host header does not match URL authority")
+    if authority_port not in (None, port, _DEFAULT_PORTS[scheme]):
+        raise SsrfBlocked("Host header port does not match URL authority")
+
+
+class _BoundedResponseStream(httpx.AsyncByteStream):
+    def __init__(self, stream: httpx.AsyncByteStream, maximum_bytes: int) -> None:
+        self._stream = stream
+        self._maximum_bytes = maximum_bytes
+
+    async def __aiter__(self):
+        total = 0
+        async for chunk in self._stream:
+            total += len(chunk)
+            if total > self._maximum_bytes:
+                raise SsrfBlocked("response exceeds the configured byte limit")
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+class SafeAsyncTransport(httpx.AsyncBaseTransport):
+    """An HTTPX transport with strict URL policy and DNS-pinned connections.
+
+    Redirects are deliberately disabled at the client boundary. A caller that
+    needs redirects must inspect each ``Location`` and issue a fresh request;
+    every hop is therefore validated by this transport.
+    """
+
+    def __init__(
+        self,
+        *,
+        allowed_domains: Iterable[str] = (),
+        blocked_domains: Iterable[str] = (),
+        max_response_bytes: int | None = None,
+        resolver: _Resolver = resolve_public_addresses,
+    ) -> None:
+        if max_response_bytes is not None and max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
+        self._allowed_domains = tuple(_normalize_hostname(domain) for domain in allowed_domains)
+        self._blocked_domains = tuple(_normalize_hostname(domain) for domain in blocked_domains)
+        self._max_response_bytes = max_response_bytes
+        self._pool = httpcore.AsyncConnectionPool(network_backend=_DnsPinningNetworkBackend(resolver), http2=False)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        hostname, _port, _scheme = _parse_and_validate_url(
+            str(request.url),
+            allowed_domains=self._allowed_domains,
+            blocked_domains=self._blocked_domains,
+        )
+        _validate_request_authority(request, hostname, _port, _scheme)
+        # httpcore retains the original request host for Host/TLS SNI; only its
+        # network backend substitutes the validated IP at socket-open time.
+        request.headers["accept-encoding"] = "identity"
+        headers = request.headers.raw
+        core_request = httpcore.Request(
+            method=request.method,
+            url=httpcore.URL(
+                scheme=request.url.raw_scheme,
+                host=request.url.raw_host,
+                port=request.url.port,
+                target=request.url.raw_path,
+            ),
+            headers=headers,
+            content=request.stream,
+            extensions=request.extensions,
+        )
+        with map_httpcore_exceptions():
+            response = await self._pool.handle_async_request(core_request)
+        content_encoding = httpx.Headers(response.headers).get("content-encoding", "identity").strip().lower()
+        if content_encoding not in ("", "identity"):
+            await response.stream.aclose()
+            raise SsrfBlocked("compressed responses are not allowed")
+        stream: httpx.AsyncByteStream = AsyncResponseStream(response.stream)
+        if self._max_response_bytes is not None:
+            stream = _BoundedResponseStream(stream, self._max_response_bytes)
+        return httpx.Response(
+            status_code=response.status,
+            headers=response.headers,
+            stream=stream,
+            extensions=response.extensions,
+        )
+
+    async def aclose(self) -> None:
+        await self._pool.aclose()

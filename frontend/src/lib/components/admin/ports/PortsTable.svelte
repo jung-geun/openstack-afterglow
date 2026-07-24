@@ -11,6 +11,7 @@
 		onDelete,
 		onPrev,
 		onNext,
+		onintent,
 	}: {
 		ports: PortInfo[];
 		markerStack: string[];
@@ -19,6 +20,7 @@
 		onDelete: (port: PortInfo) => void;
 		onPrev: () => void;
 		onNext: () => void;
+		onintent?: () => void;
 	} = $props();
 </script>
 
@@ -76,4 +78,5 @@
 	note="{ports.length}개 포트"
 	{onPrev}
 	{onNext}
+	{onintent}
 />

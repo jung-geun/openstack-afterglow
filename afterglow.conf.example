@@ -154,7 +154,7 @@ k3s = false         # k3s 자체 관리 Kubernetes 클러스터
 swift = false       # 오브젝트 스토리지
 trove = false       # DBaaS (Database as a Service)
 barbican = false    # Key Manager (시크릿/인증서 관리)
-vpn = false         # WireGuard VPN 게이트웨이 (활성화 시 [vpn] 섹션 설정 필수)
+waygate = false     # Waygate (활성화 시 [waygate] 섹션 설정 필수)
 chat = false        # 빌트인 AI 채팅 (활성화 시 [chat] 섹션 + 관리자 페이지에서 프로바이더/모델 등록)
 
 [k3s]
@@ -396,18 +396,18 @@ layer_store_ro_share_id = ""    # (레거시) 단일 layer-store-ro share ID (�
 manifest_store_share_id = ""    # manifest-store Manila share ID
 
 
-[vpn]
-# WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
+[waygate]
+# Waygate (WireGuard 게이트웨이 — Phase 1 서버 프로비저닝 + 클라이언트 관리)
 # 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다.
-# services.vpn = true 여야 라우터가 등록되고 사이드바에 노출된다.
-provider_network_id = ""       # VPN VM이 부팅될 provider 네트워크 ID (필수)
+# services.waygate = true 여야 라우터가 등록되고 사이드바에 노출된다.
+provider_network_id = ""       # Waygate VM이 부팅될 provider 네트워크 ID (필수)
 flavor_name = "cpu.1c_2g"      # flavor 이름으로 해석 (flavor_id 설정 시 이름 조회 생략)
 flavor_id = ""                 # 설정 시 이름 조회 없이 바로 사용
-image_id = ""                  # VPN VM 부팅 이미지 ID (Ubuntu 22.04+, 필수)
+image_id = ""                  # Waygate VM 부팅 이미지 ID (Ubuntu 22.04+, 필수)
 floating_network_id = ""       # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
 callback_base_url = ""         # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
                                # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
-key_name = ""                  # VPN VM에 연결할 Nova keypair 이름 (옵션, SSH 디버깅용)
+key_name = ""                  # Waygate VM에 연결할 Nova keypair 이름 (옵션, SSH 디버깅용)
 default_tunnel_cidr = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값 (신규 서버 생성 시 사용)
 default_listen_port = 51820    # WireGuard UDP 리슨 포트 기본값
 # 클라이언트 private key 암호화 키는 k3s.kubeconfig_encryption_key 를 재사용합니다 (신규 시크릿 불필요)
@@ -512,12 +512,51 @@ default_model = ""              # 기본 모델명 (활성 llm_models 카탈로�
 credit_per_usd = 1000.0         # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
 default_monthly_quota = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
 stream_enabled = true           # SSE 스트리밍 응답 사용
-# 추론(thinking) 노출 effort — litellm.supports_reasoning 이 true 인 모델(Claude·Gemini 2.5·o-series 등)에만
-# 적용된다. low/medium/high 중 하나. 빈 문자열 또는 "off" 면 비활성(요청에 파라미터 미주입, 비용 증가 없음).
-reasoning_effort = "low"        # 추론 과정 노출 강도(지원 모델만). 비용에 영향 — 비활성은 "" 또는 "off"
-# Phase 2: LangGraph 전용 Postgres 체크포인터(대화 상태/메모리 영속화). 비밀값 — secret.yaml의
-# CHAT_CHECKPOINTER_POSTGRES_URL로 주입. 비워두면 MemorySaver(프로세스 메모리) fallback.
+# 외부 OpenAI/Anthropic 호환 API(/v1/chat/completions, /v1/messages)를 허용할 Host 화이트리스트(콤마 구분).
+# 비우면 모든 Host에서 허용(개발). 프로덕션은 전용 서브도메인만 지정해 기본 URL과 충돌·오용을 막는다.
+# 예: api_hosts = "api.cloud.dmslab.re.kr,api.test.cloud.dmslab.re.kr"
+# (해당 서브도메인이 ingress/haproxy에서 백엔드로 라우팅되도록 함께 설정해야 함.)
+api_hosts = ""
+# 추론(thinking) effort — "auto"는 모델/provider 기본값으로 파라미터를 보내지 않는다.
+# "none"은 지원 모델에 명시적 비활성화를 보내며, named 값(low/medium/high/xhigh/max/ultra)은
+# models.dev capability에 그 모델의 reasoning_options로 있을 때만 채팅 UI에서 선택된다.
+reasoning_effort = "auto"
+# LangGraph 전용 Postgres 체크포인터(대화 상태/메모리 영속화). 비밀값 — secret.yaml의
+# CHAT_CHECKPOINTER_POSTGRES_URL로 주입. 연결 role에는 대상 schema의 USAGE, CREATE 권한이 필요하다.
+# 비우거나 schema 준비에 실패하면 일반 텍스트 채팅만 동작하고 승인 대기 도구는 fail-closed로 비활성화된다.
 checkpointer_postgres_url = ""   # 예: postgresql://afterglow:pass@postgres:5432/afterglow_chat
+# Durable run/event retention. Terminal event journals and encrypted checkpoints are pruned by chat-worker.
+run_event_retention_hours = 24
+checkpoint_retention_days = 7
+
+
+# Semantic memory is opt-in. Enabling it requires all three memory_* fields below.
+semantic_memory_enabled = false
+# memory_pgvector_url is a secret and is injected as CHAT_MEMORY_PGVECTOR_URL.
+memory_pgvector_url = ""
+memory_embedding_model = ""
+memory_embedding_dimensions = 0
+memory_candidate_limit = 20
+memory_retrieval_token_budget = 1200
+memory_retention_days = 365
+
+# Chat assets are stored only after scanning. Credentials are secrets injected through secret.yaml.
+asset_s3_endpoint = ""
+asset_s3_bucket = ""
+asset_s3_access_key = ""
+asset_s3_secret_key = ""
+asset_s3_server_side_encryption = "AES256"  # AES256 or aws:kms
+asset_s3_kms_key_id = ""
+asset_signed_url_ttl_seconds = 300
+clamav_host = ""
+clamav_port = 3310
+
+# Provider-managed code/computer sandbox. Incomplete configuration disables only that capability.
+sandbox_url = ""
+sandbox_api_key = ""
+sandbox_image_digest = ""
+sandbox_policy_version = ""
+sandbox_egress_allowlist = []
 
 
 [smtp]

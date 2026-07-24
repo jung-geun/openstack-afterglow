@@ -121,8 +121,10 @@
 			open: false,
 			service: 'chat' as const,
 			items: [
-				{ label: '채팅 설정', href: '/admin/chat', service: 'chat' as const },
 				{ label: '채팅 통계', href: '/admin/chat/stats', service: 'chat' as const },
+				{ label: '프로바이더 설정', href: '/admin/chat', service: 'chat' as const },
+				{ label: '모델 설정', href: '/admin/chat/models', service: 'chat' as const },
+				{ label: '도구 설정', href: '/admin/chat/tools', service: 'chat' as const },
 			],
 		},
 		{

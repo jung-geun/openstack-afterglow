@@ -2,13 +2,18 @@
 	import { OS_LOGOS, OS_EMOJI, osLabel } from '$lib/utils/imageOs';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import type { ImageInfo } from '$lib/types/compute';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	let {
 		img,
 		isOwner,
 		toggling,
 		deleting,
+		selected = false,
+		selectable = false,
+		selectionDisabled = false,
 		onSelect,
+		onToggleSelect,
 		onToggleActivation,
 		onEdit,
 		onDelete,
@@ -17,7 +22,11 @@
 		isOwner: boolean;
 		toggling: boolean;
 		deleting: boolean;
+		selected?: boolean;
+		selectable?: boolean;
+		selectionDisabled?: boolean;
 		onSelect: (id: string) => void;
+		onToggleSelect: () => void;
 		onToggleActivation: (img: ImageInfo) => void;
 		onEdit: (img: ImageInfo) => void;
 		onDelete: (id: string, name: string) => void;
@@ -30,15 +39,20 @@
 	}
 </script>
 
-<div
-	class="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-600 transition-colors"
-	onclick={() => onSelect(img.id)}
-	role="button"
-	tabindex="0"
-	onkeydown={(e) => e.key === 'Enter' && onSelect(img.id)}
+<article
+	class="resource-selection-surface bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col gap-3 hover:border-gray-600 transition-colors"
+	data-selected={selected}
 >
-	<!-- Header: icon + name -->
+	<!-- Header: selection + icon + detail -->
 	<div class="flex items-center gap-2.5">
+		<SelectionCheckbox
+			checked={selected}
+			disabled={!selectable || selectionDisabled}
+			unavailable={!selectable}
+			title={!selectable ? '현재 프로젝트 소유 이미지만 선택할 수 있습니다.' : undefined}
+			onclick={onToggleSelect}
+			ariaLabel={`${img.name} 선택`}
+		/>
 		<div class="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center overflow-hidden shrink-0">
 			{#if img.os_distro && OS_LOGOS[img.os_distro]}
 				<img src={OS_LOGOS[img.os_distro]} alt={img.os_distro} class="w-6 h-6 object-contain" />
@@ -48,10 +62,14 @@
 				<span class="text-lg">💿</span>
 			{/if}
 		</div>
-		<div class="flex-1 min-w-0">
+		<button
+			type="button"
+			class="flex-1 min-w-0 text-left"
+			onclick={() => onSelect(img.id)}
+		>
 			<div class="text-white text-[13px] font-medium truncate font-mono">{img.name}</div>
 			<div class="text-[11px] text-gray-500 mt-0.5">{img.os_distro ? osLabel(img.os_distro) : 'Unknown'}</div>
-		</div>
+		</button>
 	</div>
 
 	<!-- Footer: status + visibility + size -->
@@ -71,7 +89,7 @@
 
 	<!-- Actions (own images only) -->
 	{#if isOwner}
-		<div class="flex items-center gap-1 pt-1 border-t border-gray-800" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+		<div class="flex items-center gap-1 pt-1 border-t border-gray-800">
 			{#if img.status === 'active' || img.status === 'deactivated'}
 				<button
 					onclick={() => onToggleActivation(img)}
@@ -90,4 +108,4 @@
 			>{deleting ? '삭제 중...' : '삭제'}</button>
 		</div>
 	{/if}
-</div>
+</article>

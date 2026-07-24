@@ -2,28 +2,22 @@
 	import type { FileStorage } from '$lib/types/fileStorage';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { formatIsoDateTime } from '$lib/utils/format';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	let {
-		fs,
-		quotaLimit,
-		copiedExport,
-		deleting,
-		onOpenDetail,
-		onCopyExport,
-		onDelete,
+		fs, quotaLimit, copiedExport, deleting, selected = false, selectable = true, selectionDisabled = false,
+		onOpenDetail, onCopyExport, onDelete, onToggleSelect,
 	}: {
-		fs: FileStorage;
-		quotaLimit: number;
-		copiedExport: string | null;
-		deleting: string | null;
-		onOpenDetail: (id: string) => void;
-		onCopyExport: (path: string, id: string) => void;
-		onDelete: (id: string, name: string) => void;
+		fs: FileStorage; quotaLimit: number; copiedExport: string | null; deleting: string | null;
+		selected?: boolean; selectable?: boolean; selectionDisabled?: boolean;
+		onOpenDetail: (id: string) => void; onCopyExport: (path: string, id: string) => void;
+		onDelete: (id: string, name: string) => void; onToggleSelect: () => void;
 	} = $props();
 </script>
 
-<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+<article class="resource-selection-surface bg-gray-900 border border-gray-800 rounded-2xl p-5" data-selected={selected}>
 	<div class="flex items-center gap-2.5 mb-3.5">
+		<SelectionCheckbox checked={selected} disabled={!selectable || selectionDisabled} unavailable={!selectable} onclick={onToggleSelect} ariaLabel={`${fs.name || fs.id} 선택`} />
 		<div class="w-10 h-10 rounded-[10px] bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
 			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -79,4 +73,4 @@
 			class="text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:border-gray-700 transition-colors"
 		>{deleting === fs.id ? '삭제 중...' : '삭제'}</button>
 	</div>
-</div>
+</article>

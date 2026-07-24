@@ -8,6 +8,7 @@
 		hasNext,
 		onPrev,
 		onNext,
+		onintent,
 		total = null,
 		pageSize = null,
 		note = null,
@@ -18,6 +19,7 @@
 		hasNext: boolean;
 		onPrev: () => void;
 		onNext: () => void;
+		onintent?: () => void;
 		total?: number | null;
 		pageSize?: number | null;
 		note?: string | null;
@@ -34,7 +36,7 @@
 		{/if}
 		<span class="pagination-page">{totalPages != null ? `${page} / ${totalPages}` : `페이지 ${page}`}</span>
 	</div>
-	<Button disabled={!hasNext} onclick={onNext} variant="subtle" size="sm">다음 →</Button>
+	<Button disabled={!hasNext} onclick={onNext} onintent={hasNext ? onintent : undefined} variant="subtle" size="sm">다음 →</Button>
 </div>
 
 <style>

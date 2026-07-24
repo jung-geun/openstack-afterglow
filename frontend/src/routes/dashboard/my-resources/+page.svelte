@@ -48,6 +48,7 @@
 
 	const ar = createAutoRefresh(() => load(), {
 		storageKey: 'dashboard-my-resources',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],

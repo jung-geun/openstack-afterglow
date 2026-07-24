@@ -8,6 +8,7 @@
 	<button
 		onclick={s.toggleLogs}
 		class="w-full flex items-center justify-between px-4 py-3 text-xs text-gray-400 hover:text-white transition-colors"
+		data-tour="admin-containers-logs"
 	>
 		<span class="uppercase tracking-wide font-medium">로그</span>
 		<span class="text-gray-600">{s.logsOpen ? '▲' : '▼'}</span>

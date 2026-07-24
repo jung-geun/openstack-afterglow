@@ -12,6 +12,10 @@
   import ImageCard from '$lib/components/dashboard/images/ImageCard.svelte';
   import ImageEditModal from '$lib/components/dashboard/images/ImageEditModal.svelte';
   import ImageDropOverlay from '$lib/components/dashboard/images/ImageDropOverlay.svelte';
+  import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { partitionBulkIds } from '$lib/utils/bulkActions';
+  import { BulkSelectionOverlay, SelectionToolbar } from '$lib/components/ui';
 
   const ctrl = createImagesController({
     token: () => $auth.token ?? undefined,
@@ -20,16 +24,77 @@
 
   const ar = createAutoRefresh(() => ctrl.fetchImages(), {
     storageKey: 'dashboard-compute-images',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 60,
     intervalOptions: [10, 15, 30, 60],
   });
 
+  const ownedImageIds = $derived(new Set(
+    ctrl.filteredImages
+      .filter((image) => image.owner === $auth.projectId)
+      .map((image) => image.id),
+  ));
+  const selectedImageIds = $derived([...ctrl.selection.ids]);
+  const allOwnedSelected = $derived(
+    ownedImageIds.size > 0 && [...ownedImageIds].every((id) => ctrl.selection.has(id)),
+  );
+  const activatable = $derived(partitionBulkIds(
+    selectedImageIds,
+    ctrl.filteredImages.filter((image) => image.status === 'deactivated').map((image) => image.id),
+  ));
+  const deactivatable = $derived(partitionBulkIds(
+    selectedImageIds,
+    ctrl.filteredImages.filter((image) => image.status === 'active').map((image) => image.id),
+  ));
+
+  async function bulkAction(action: 'activate' | 'deactivate' | 'delete') {
+    const candidates = action === 'activate'
+      ? activatable
+      : action === 'deactivate'
+        ? deactivatable
+        : { eligible: selectedImageIds, skipped: [] };
+    if (candidates.eligible.length === 0) return;
+
+    const labels: Record<'activate' | 'deactivate' | 'delete', string> = {
+      activate: '활성화',
+      deactivate: '비활성화',
+      delete: '삭제',
+    };
+    const label = labels[action];
+    const excludedNotice = candidates.skipped.length > 0
+      ? `\n${candidates.skipped.length}개는 현재 상태에서 제외됩니다.`
+      : '';
+    if (action === 'delete' || candidates.skipped.length > 0) {
+      const prompt = action === 'delete'
+        ? `선택한 이미지 ${candidates.eligible.length}개를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.${excludedNotice}`
+        : `선택한 이미지 ${candidates.eligible.length}개를 ${label}하시겠습니까?${excludedNotice}`;
+      if (!await confirmDialog(prompt)) return;
+    }
+
+    const results = await ctrl.executeBulkAction(action, [...candidates.eligible]);
+    const successCount = results.filter((result) => result.ok).length;
+    const failureCount = results.length - successCount;
+    if (successCount > 0) toast.success(`${successCount}개 ${label} 요청을 완료했습니다.`);
+    if (failureCount > 0) toast.error(`${failureCount}개 ${label}에 실패했습니다.`);
+    if (candidates.skipped.length > 0) {
+      toast.warning(`${candidates.skipped.length}개는 현재 상태에서 ${label}할 수 없어 제외했습니다.`);
+    }
+  }
+
   $effect(() => {
     const pid = $auth.projectId;
-    if (!pid) return;
-    ctrl.loading = true;
-    untrack(() => ctrl.fetchImages());
+    untrack(() => {
+      ctrl.selection.clear();
+      if (!pid) return;
+      ctrl.loading = true;
+      void ctrl.fetchImages();
+    });
+  });
+
+  $effect(() => {
+    const visibleOwnedIds = ownedImageIds;
+    untrack(() => ctrl.selection.retain(visibleOwnedIds));
   });
 </script>
 
@@ -41,7 +106,7 @@
 
 <ImageDropOverlay onFile={(f) => { ctrl.uploadInitialFile = f; ctrl.showUploadModal = true; }} />
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
     {#snippet actions()}
       <AutoRefreshControl
@@ -82,6 +147,17 @@
         <p class="text-lg">이미지가 없습니다</p>
       </div>
     {:else}
+      <div class="mb-3">
+        <SelectionToolbar
+          label="이미지"
+          ariaLabel="이미지 전체 선택"
+          checked={allOwnedSelected}
+          indeterminate={selectedImageIds.length > 0 && !allOwnedSelected}
+          selectedCount={ctrl.selection.count}
+          disabled={ctrl.bulkActioning || ownedImageIds.size === 0}
+          onToggle={() => ctrl.selection.toggleAll(ownedImageIds)}
+        />
+      </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
         {#each ctrl.filteredImages as img (img.id)}
           <ImageCard
@@ -89,7 +165,11 @@
             isOwner={img.owner === $auth.projectId}
             toggling={ctrl.togglingId === img.id}
             deleting={ctrl.deleting === img.id}
+            selected={ctrl.selection.has(img.id)}
+            selectable={img.owner === $auth.projectId}
+            selectionDisabled={ctrl.bulkActioning}
             onSelect={ctrl.openImagePanel}
+            onToggleSelect={() => ctrl.selection.toggle(img.id)}
             onToggleActivation={ctrl.toggleActivation}
             onEdit={(i) => ctrl.editTarget = i}
             onDelete={ctrl.deleteImage}
@@ -98,6 +178,35 @@
       </div>
     {/if}
   {/if}
+  <BulkSelectionOverlay
+    count={ctrl.selection.count}
+    ariaLabel="선택한 이미지 일괄 작업"
+    actions={[
+      {
+        key: 'activate',
+        label: '활성화',
+        tone: 'success',
+        disabled: activatable.eligible.length === 0,
+        onAction: () => bulkAction('activate'),
+      },
+      {
+        key: 'deactivate',
+        label: '비활성화',
+        tone: 'warning',
+        disabled: deactivatable.eligible.length === 0,
+        onAction: () => bulkAction('deactivate'),
+      },
+      {
+        key: 'delete',
+        label: '삭제',
+        tone: 'danger',
+        disabled: selectedImageIds.length === 0,
+        onAction: () => bulkAction('delete'),
+      },
+    ]}
+    busy={ctrl.bulkActioning}
+    onClear={() => ctrl.selection.clear()}
+  />
 </div>
 
 <ImageUploadModal

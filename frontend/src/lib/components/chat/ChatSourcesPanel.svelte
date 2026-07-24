@@ -30,18 +30,31 @@
 			<div class="empty">이 대화에는 아직 출처가 없습니다.</div>
 		{:else}
 			<ol class="list">
-				{#each citations as c, i (c.url + i)}
+				{#each citations as c, i (`${c.source_kind}:${c.url ?? c.document_index}:${i}`)}
 					<li>
-						<a href={c.url} target="_blank" rel="noopener noreferrer nofollow">
-							<div class="top">
-								<span class="num">{i + 1}</span>
-								<span class="title">{citationLabel(c)}</span>
+						{#if c.url}
+							<a href={c.url} target="_blank" rel="noopener noreferrer nofollow">
+								<div class="top">
+									<span class="num">{i + 1}</span>
+									<span class="title">{citationLabel(c)}</span>
+								</div>
+								<div class="domain">{citationDomain(c.url)}</div>
+								{#if c.snippet}
+									<div class="snippet">{c.snippet}</div>
+								{/if}
+							</a>
+						{:else}
+							<div class="document">
+								<div class="top">
+									<span class="num">{i + 1}</span>
+									<span class="title">{citationLabel(c)}</span>
+								</div>
+								<div class="domain">입력 문서</div>
+								{#if c.snippet}
+									<div class="snippet">{c.snippet}</div>
+								{/if}
 							</div>
-							<div class="domain">{citationDomain(c.url)}</div>
-							{#if c.snippet}
-								<div class="snippet">{c.snippet}</div>
-							{/if}
-						</a>
+						{/if}
 					</li>
 				{/each}
 			</ol>
@@ -114,8 +127,8 @@
 		flex-direction: column;
 		gap: 0.35rem;
 	}
-	.list a {
-		display: block;
+	.list a,
+	.document {
 		padding: 0.6rem 0.7rem;
 		border-radius: 0.5rem;
 		border: 1px solid var(--color-line);

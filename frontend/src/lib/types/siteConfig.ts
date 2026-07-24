@@ -14,7 +14,7 @@ export interface PublicSiteConfig {
 		trove: boolean;
 		swift: boolean;
 		barbican: boolean;
-		vpn: boolean;
+		waygate: boolean;
 		chat: boolean;
 	};
 	runtime: {

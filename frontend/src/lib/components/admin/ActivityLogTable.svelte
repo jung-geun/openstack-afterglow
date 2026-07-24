@@ -41,27 +41,50 @@
 
 	let refreshing = $state(false);
 	let expandedId = $state<number | null>(null);
+	let loadGeneration = 0;
+	let loadController: AbortController | null = null;
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load(reset = true) {
-		if (reset) { loading = true; logs = []; }
-		else refreshing = true;
+		const generation = ++loadGeneration;
+		loadController?.abort();
+		const controller = new AbortController();
+		loadController = controller;
+		const requestToken = token;
+		const requestProjectId = projectId;
 		const params: Record<string, string> = { limit: String(PAGE) };
 		if (filterResourceType) params.resource_type = filterResourceType;
 		if (filterAction) params.action = filterAction;
 		if (showUser && filterUserId) params.user_id = filterUserId;
-		const qs = new URLSearchParams(params).toString();
+		if (reset) { loading = true; logs = []; }
+		else refreshing = true;
 		try {
-			const data = await api.get<ActivityLog[]>(`${endpoint}?${qs}`, token, projectId);
+			const data = await api.get<ActivityLog[]>(
+				`${endpoint}?${new URLSearchParams(params)}`,
+				requestToken,
+				requestProjectId,
+				{ signal: controller.signal },
+			);
+			if (generation !== loadGeneration || token !== requestToken || projectId !== requestProjectId) return;
 			logs = data;
 			hasMore = data.length === PAGE;
-		} catch {
-			logs = [];
+		} catch (error) {
+			if (
+				generation === loadGeneration
+				&& token === requestToken
+				&& projectId === requestProjectId
+				&& !(error instanceof DOMException && error.name === 'AbortError')
+			) {
+				logs = [];
+				hasMore = false;
+			}
 		} finally {
-			loading = false;
-			refreshing = false;
+			if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) {
+				loading = false;
+				refreshing = false;
+			}
 		}
 	}
 
@@ -85,17 +108,28 @@
 		}
 	}
 
-	const ar = createAutoRefresh(() => load(), {
+	const ar = createAutoRefresh(() => load(false), {
 		storageKey,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60],
+		invokeOnMount: false,
 	});
 
 	$effect(() => {
-		// re-load when auth or filters change
 		void $auth.projectId;
-		load();
+		void $auth.token;
+		void filterResourceType;
+		void filterAction;
+		void filterUserId;
+		void endpoint;
+		loadGeneration += 1;
+		loadController?.abort();
+		const timer = setTimeout(() => void load(), 250);
+		return () => {
+			clearTimeout(timer);
+			loadController?.abort();
+		};
 	});
 
 	function relativeTime(iso: string): string {
@@ -124,7 +158,6 @@
 	<div class="flex flex-wrap gap-3 items-center">
 		<select
 			bind:value={filterResourceType}
-			onchange={() => load()}
 			class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
 		>
 			<option value="">전체 리소스</option>
@@ -134,7 +167,6 @@
 		</select>
 		<input
 			bind:value={filterAction}
-			oninput={() => load()}
 			type="text"
 			placeholder="액션 필터 (예: instance.create)"
 			class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 w-52"
@@ -142,7 +174,6 @@
 		{#if showUser}
 			<input
 				bind:value={filterUserId}
-				oninput={() => load()}
 				type="text"
 				placeholder="사용자 ID"
 				class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 w-44"
@@ -154,7 +185,7 @@
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
 				{refreshing}
-				onManualRefresh={() => load()}
+				onManualRefresh={() => load(false)}
 			/>
 		</div>
 	</div>

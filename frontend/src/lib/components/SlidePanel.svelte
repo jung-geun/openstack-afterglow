@@ -26,6 +26,15 @@
   let widthPx = $state<number | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
   let isDesktop = $state<boolean>(true);
+  let viewportWidth = $state(typeof window === 'undefined' ? 0 : window.innerWidth);
+
+  function maxPanelWidth(): number {
+    return Math.max(MIN_PX, viewportWidth - SIDEBAR_WIDTH);
+  }
+
+  function clampPanelWidth(value: number): number {
+    return Math.max(MIN_PX, Math.min(maxPanelWidth(), value));
+  }
 
   function resolvedKey(): string {
     return storageKey ?? `slidePanel.${window.location.pathname}.width`;
@@ -33,10 +42,17 @@
 
   $effect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
-    const update = () => { isDesktop = mq.matches; };
+    const update = () => {
+      isDesktop = mq.matches;
+      viewportWidth = window.innerWidth;
+    };
     update();
+    window.addEventListener('resize', update);
     mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      mq.removeEventListener('change', update);
+    };
   });
 
   // 마운트 시 저장된 폭 복원
@@ -63,8 +79,8 @@
     document.body.style.cursor = 'col-resize';
 
     function onMove(ev: MouseEvent) {
-      const maxPx = window.innerWidth - SIDEBAR_WIDTH;
-      widthPx = Math.max(MIN_PX, Math.min(maxPx, startW + (startX - ev.clientX)));
+      viewportWidth = window.innerWidth;
+      widthPx = clampPanelWidth(startW + (startX - ev.clientX));
     }
 
     function onUp() {
@@ -98,7 +114,7 @@
     bind:this={panelEl}
     data-tour={dataTour}
     class="@container/panel absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
-    style={isDesktop && widthPx !== null ? `width: ${widthPx}px; max-width: none` : ''}
+    style={isDesktop && widthPx !== null ? `width: ${clampPanelWidth(widthPx)}px; max-width: 100%` : ''}
     transition:fly={{ x: 400, duration: 300, opacity: 1 }}
   >
     {#if resizable}

@@ -1,0 +1,67 @@
+- generic [ref=e2]:
+  - status [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: 튜토리얼
+      - generic [ref=e7]: 체험 모드입니다. 실제 리소스는 생성되지 않습니다.
+    - button "종료" [ref=e9] [cursor=pointer]
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - complementary [ref=e12]:
+        - link "Afterglow" [ref=e15] [cursor=pointer]:
+          - /url: /dashboard
+        - button "VM 생성" [ref=e17] [cursor=pointer]
+        - navigation [ref=e20]:
+          - button "대시보드 ▸" [ref=e22]:
+            - generic [ref=e23]: 대시보드
+            - generic [ref=e27]: ▸
+          - link "토폴로지" [ref=e28] [cursor=pointer]:
+            - /url: /dashboard/network/topology
+          - button "Compute ▸" [ref=e32]:
+            - generic [ref=e33]: Compute
+            - generic [ref=e37]: ▸
+          - button "볼륨 ▸" [ref=e39]:
+            - generic [ref=e40]: 볼륨
+            - generic [ref=e44]: ▸
+          - button "네트워크 ▸" [ref=e46]:
+            - generic [ref=e47]: 네트워크
+            - generic [ref=e51]: ▸
+        - generic [ref=e53]:
+          - generic [ref=e54]: 프로젝트
+          - generic [ref=e55]: —
+          - link "프로젝트 설정" [ref=e56] [cursor=pointer]:
+            - /url: /dashboard/project-settings
+      - main [ref=e60]:
+        - generic [ref=e61]:
+          - complementary [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64]: Lumen
+              - button "사이드바 접기" [ref=e65] [cursor=pointer]
+            - generic [ref=e68]:
+              - button "새 채팅" [ref=e69] [cursor=pointer]
+              - button "프로젝트" [ref=e72] [cursor=pointer]
+            - button "대화 검색" [ref=e75] [cursor=pointer]:
+              - generic [ref=e80]: ⌘ I
+            - paragraph [ref=e82]: 대화가 없습니다
+            - button "에이전트" [ref=e84] [cursor=pointer]
+            - button "? 사용자" [ref=e89] [cursor=pointer]:
+              - generic [ref=e90]: "?"
+              - generic [ref=e91]: 사용자
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - generic [ref=e99]:
+                - button "모델 선택" [ref=e100] [cursor=pointer]
+                - button "에이전트" [ref=e105] [cursor=pointer]
+              - button "저장되지 않는 임시 채팅" [ref=e113] [cursor=pointer]
+            - generic [ref=e116]:
+              - generic [ref=e119]:
+                - heading "무엇을 도와드릴까요?" [level=2] [ref=e123]
+                - paragraph [ref=e124]: 아래에 메시지를 입력해 대화를 시작하세요.
+              - generic [ref=e126]:
+                - group [ref=e127]:
+                  - textbox "메시지를 입력하세요 (Enter 전송 · Shift+Enter 줄바꿈)" [ref=e128]:
+                    - /placeholder: 메시지를 입력하세요  (Enter 전송 · Shift+Enter 줄바꿈)
+                  - generic [ref=e129]:
+                    - button "추가" [disabled] [ref=e132]
+                    - button "전송" [disabled] [ref=e136]
+                - button "프로젝트 선택" [ref=e141] [cursor=pointer]
+                - paragraph [ref=e145]: AI 응답은 부정확할 수 있습니다. 중요한 내용은 확인하세요.

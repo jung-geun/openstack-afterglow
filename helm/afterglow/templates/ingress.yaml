@@ -13,8 +13,12 @@ spec:
   tls:
     - hosts:
         - {{ .Values.ingress.host }}
+        {{- range .Values.ingress.apiHosts }}
+        - {{ . }}
+        {{- end }}
       secretName: {{ .Values.ingress.tlsSecretName }}
   rules:
+    # 기본 host — 웹 앱(/) + 내부 API(/api). 외부 /v1 은 여기서 노출하지 않는다.
     - host: {{ .Values.ingress.host }}
       http:
         paths:
@@ -32,3 +36,30 @@ spec:
                 name: frontend
                 port:
                   number: 3080
+    {{- range .Values.ingress.apiHosts }}
+    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)만 백엔드로. 나머지는 프론트(랜딩).
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3080
+    {{- end }}

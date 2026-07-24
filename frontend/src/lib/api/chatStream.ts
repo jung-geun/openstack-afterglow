@@ -1,146 +1,233 @@
-/**
- * 채팅 SSE 스트림 파서.
- *
- * `api.postSse` 는 콜백 기반이고 중단(abort)을 지원하지 않는다. 채팅은 사용자가
- * 응답을 도중에 멈출 수 있어야 하므로, fetch + ReadableStream 을 AbortController 로
- * 감싼 async generator 를 별도로 제공한다.
- *
- * 서버는 각 라인 `data: {json}\n\n` 형식으로 이벤트를 흘린다. json.type:
- * - token       : {text} 텍스트 델타(누적)
- * - reasoning   : {text} 추론(thinking) 델타 — 최종 답변과 분리, 저장 안 함
- * - tool_call   : {name} 도구 호출 진행(스피너)
- * - tool_calls  : {content, calls:[{id,name,args}]} 도구 호출(인자) — 시각화 카드
- * - tool_result : {tool_call_id, name, content} 도구 실행 결과 — 시각화 카드
- * - citations   : {items:[{url,title,snippet}]} 답변 출처 — 하단 표시 + 패널
- * - error       : {message} 모델 오류(done 안 옴)
- * - done        : {prompt_tokens, completion_tokens, credited_cost} 완료
- */
 import { getBaseUrl } from './client';
+import { parseChatRunEvent, type ChatRunEvent } from './chatContracts';
 
-export interface ChatStreamToken {
-	type: 'token';
-	text: string;
+export class ChatProtocolError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ChatProtocolError';
+	}
 }
-/** 추론(thinking) 델타 — 최종 답변과 분리해 접이식으로 노출. 저장하지 않음. */
-export interface ChatStreamReasoning {
-	type: 'reasoning';
-	text: string;
-}
-export interface ChatStreamToolCall {
-	type: 'tool_call';
-	name: string;
-}
-/** 도구 호출(인자 포함) — 시각화 카드용. */
-export interface ChatStreamToolCalls {
-	type: 'tool_calls';
-	content?: string | null;
-	calls: { id?: string | null; name: string; args?: string | null }[];
-}
-/** 도구 실행 결과 — 시각화 카드용. */
-export interface ChatStreamToolResult {
-	type: 'tool_result';
-	tool_call_id?: string | null;
-	name: string;
-	content: string;
-}
-/** 답변 출처 — 하단 리스트 + "출처" 패널. */
-export interface ChatStreamCitations {
-	type: 'citations';
-	items: { url: string; title?: string | null; snippet?: string | null }[];
-}
-export interface ChatStreamError {
-	type: 'error';
-	message: string;
-}
-export interface ChatStreamDone {
-	type: 'done';
-	prompt_tokens?: number;
-	completion_tokens?: number;
-	credited_cost?: number;
-}
-export type ChatStreamEvent =
-	| ChatStreamToken
-	| ChatStreamReasoning
-	| ChatStreamToolCall
-	| ChatStreamToolCalls
-	| ChatStreamToolResult
-	| ChatStreamCitations
-	| ChatStreamError
-	| ChatStreamDone;
 
-export interface ChatStreamOptions {
+export class ChatRunReloadRequiredError extends ChatProtocolError {
+	constructor() {
+		super('chat run journal is no longer available; reload the conversation');
+		this.name = 'ChatRunReloadRequiredError';
+	}
+}
+
+export interface ChatRunDescriptor {
+	run_id: string;
+	conversation_id: string | null;
+	temp_thread_id: string | null;
+	status: 'queued' | 'running' | 'awaiting_approval' | 'finalizing' | 'completed' | 'failed' | 'canceled';
+	events_url: string;
+	cancel_url: string;
+}
+
+export interface CreateChatRunOptions {
 	token?: string;
 	projectId?: string;
 	signal?: AbortSignal;
+	idempotencyKey?: string;
 }
 
-/**
- * POST 로 SSE 스트림을 열고 이벤트를 async generator 로 yield 한다.
- * signal 로 중단하면 fetch 가 취소되고 AbortError 가 던져지므로 호출측에서 처리한다.
- */
-export async function* streamChat(
+export interface FollowChatRunOptions {
+	token?: string;
+	projectId?: string;
+	afterSeq?: number;
+	signal?: AbortSignal;
+}
+
+type SseFrame = { id?: string; event?: string; data: string };
+const RUN_STATUSES = ['queued', 'running', 'awaiting_approval', 'finalizing', 'completed', 'failed', 'canceled'] as const;
+type ChatRunStatus = (typeof RUN_STATUSES)[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object';
+}
+
+function isRunStatus(value: unknown): value is ChatRunStatus {
+	return typeof value === 'string' && RUN_STATUSES.some((status) => status === value);
+}
+
+function delay(milliseconds: number): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	setTimeout(resolve, milliseconds);
+	return promise;
+}
+
+
+function headers(token?: string, projectId?: string): HeadersInit {
+	const result: Record<string, string> = { Accept: 'text/event-stream' };
+	if (token) result.Authorization = `Bearer ${token}`;
+	if (projectId) result['X-Project-Id'] = projectId;
+	return result;
+}
+
+export function parseChatRunDescriptor(value: unknown): ChatRunDescriptor {
+	if (!isRecord(value)) throw new ChatProtocolError('invalid chat run descriptor');
+	if (
+		typeof value.run_id !== 'string' ||
+		(typeof value.conversation_id !== 'string' && value.conversation_id !== null) ||
+		(typeof value.temp_thread_id !== 'string' && value.temp_thread_id !== null) ||
+		typeof value.events_url !== 'string' ||
+		typeof value.cancel_url !== 'string' ||
+		!isRunStatus(value.status)
+	) {
+		throw new ChatProtocolError('invalid chat run descriptor');
+	}
+	return {
+		run_id: value.run_id,
+		conversation_id: value.conversation_id,
+		temp_thread_id: value.temp_thread_id,
+		status: value.status,
+		events_url: value.events_url,
+		cancel_url: value.cancel_url
+	};
+}
+
+async function errorFrom(response: Response): Promise<Error> {
+	let detail = `chat request failed (${response.status})`;
+	try {
+		const body: unknown = await response.json();
+		if (isRecord(body) && typeof body.detail === 'string') {
+			detail = body.detail;
+		}
+	} catch {
+		// Keep the status-derived message when a proxy returned non-JSON.
+	}
+	return new ChatProtocolError(detail);
+}
+
+/** Creates exactly one durable run. The key remains stable for a caller retry. */
+export async function createChatRun(
 	path: string,
 	body: unknown,
-	{ token, projectId, signal }: ChatStreamOptions = {}
-): AsyncGenerator<ChatStreamEvent, void, unknown> {
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
-		Accept: 'text/event-stream'
-	};
-	if (token) headers['Authorization'] = `Bearer ${token}`;
-	// client.ts 와 동일한 케이싱(X-Project-Id) 을 사용한다.
-	if (projectId) headers['X-Project-Id'] = projectId;
-
+	{ token, projectId, signal, idempotencyKey = crypto.randomUUID() }: CreateChatRunOptions = {}
+): Promise<ChatRunDescriptor> {
 	const response = await fetch(`${getBaseUrl()}${path}`, {
 		method: 'POST',
-		headers,
+		headers: {
+			...headers(token, projectId),
+			'Content-Type': 'application/json',
+			'Idempotency-Key': idempotencyKey
+		},
 		body: JSON.stringify(body),
 		signal
 	});
+	if (response.status !== 202) throw await errorFrom(response);
+	return parseChatRunDescriptor(await response.json());
+}
 
-	if (!response.ok) {
-		let detail = response.statusText;
-		try {
-			const text = await response.text();
-			if (text) detail = text;
-		} catch {
-			/* ignore */
+function takeFrames(buffer: string): { frames: SseFrame[]; rest: string } {
+	const frames: SseFrame[] = [];
+	let boundary: number;
+	while ((boundary = buffer.search(/\r?\n\r?\n/)) >= 0) {
+		const raw = buffer.slice(0, boundary);
+		const separatorLength = buffer[boundary] === '\r' ? (buffer[boundary + 1] === '\n' && buffer[boundary + 2] === '\r' ? 4 : 2) : 2;
+		buffer = buffer.slice(boundary + separatorLength);
+		let id: string | undefined;
+		let event: string | undefined;
+		const data: string[] = [];
+		for (const line of raw.split(/\r?\n/)) {
+			if (!line || line.startsWith(':')) continue;
+			const colon = line.indexOf(':');
+			const field = colon < 0 ? line : line.slice(0, colon);
+			const value = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
+			if (field === 'id') id = value;
+			else if (field === 'event') event = value;
+			else if (field === 'data') data.push(value);
 		}
-		throw new Error(detail || `요청이 실패했습니다 (${response.status})`);
+		if (data.length) frames.push({ id, event, data: data.join('\n') });
 	}
+	return { frames, rest: buffer };
+}
 
-	const reader = response.body?.getReader();
-	if (!reader) throw new Error('응답 본문이 없습니다');
-
+async function* decodeFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseFrame> {
+	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = '';
-
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
-			const lines = buffer.split('\n');
-			buffer = lines.pop() ?? '';
-			for (const line of lines) {
-				const trimmed = line.trimEnd();
-				if (!trimmed.startsWith('data:')) continue;
-				const payload = trimmed.slice(5).trimStart();
-				if (!payload) continue;
-				let evt: ChatStreamEvent | null = null;
-				try {
-					evt = JSON.parse(payload) as ChatStreamEvent;
-				} catch {
-					continue; // 파싱 실패 라인은 무시
-				}
-				if (evt && typeof evt.type === 'string') yield evt;
-			}
+			const parsed = takeFrames(buffer);
+			buffer = parsed.rest;
+			yield* parsed.frames;
 		}
+		buffer += decoder.decode();
+		const parsed = takeFrames(buffer);
+		yield* parsed.frames;
+		if (parsed.rest.trim()) throw new ChatProtocolError('unterminated SSE frame');
 	} finally {
-		try {
-			await reader.cancel();
-		} catch {
-			/* ignore */
-		}
+		reader.releaseLock();
 	}
 }
+
+/**
+ * Replays the durable journal then tails it. Connection loss is never cancellation:
+ * only transport failures retry, and every retry resumes at the last accepted seq.
+ */
+export async function* followChatRun(
+	descriptor: ChatRunDescriptor,
+	{ token, projectId, afterSeq = 0, signal }: FollowChatRunOptions = {}
+): AsyncGenerator<ChatRunEvent> {
+	let lastSeq = afterSeq;
+	let attempts = 0;
+	const waits = [250, 500, 1000];
+	while (true) {
+		let response: Response;
+		try {
+			response = await fetch(`${getBaseUrl()}${descriptor.events_url}?after_seq=${lastSeq}`, {
+				headers: { ...headers(token, projectId), ...(lastSeq ? { 'Last-Event-ID': `${descriptor.run_id}:${lastSeq}` } : {}) },
+				signal
+			});
+		} catch (error) {
+			if (signal?.aborted) throw error;
+			if (attempts >= waits.length) throw new ChatProtocolError('chat event stream disconnected');
+			await delay(waits[attempts++]);
+			continue;
+		}
+		if (response.status === 410) throw new ChatRunReloadRequiredError();
+		if (!response.ok || !response.body) throw await errorFrom(response);
+		try {
+			for await (const frame of decodeFrames(response.body)) {
+				let raw: unknown;
+				try {
+					raw = JSON.parse(frame.data);
+				} catch {
+					throw new ChatProtocolError('chat event is not valid JSON');
+				}
+				const event = parseChatRunEvent(raw);
+				if (frame.id && frame.id !== event.event_id) throw new ChatProtocolError('SSE event id mismatch');
+				if (frame.event && frame.event !== event.type) throw new ChatProtocolError('SSE event type mismatch');
+				if (event.run_id !== descriptor.run_id) throw new ChatProtocolError('SSE event run mismatch');
+				if (event.seq <= lastSeq) continue;
+				if (event.seq !== lastSeq + 1) throw new ChatProtocolError('chat event sequence gap');
+				lastSeq = event.seq;
+				attempts = 0;
+				yield event;
+				if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.canceled') return;
+			}
+		} catch (error) {
+			if (signal?.aborted || error instanceof ChatProtocolError) throw error;
+		}
+		if (attempts >= waits.length) throw new ChatProtocolError('chat event stream disconnected');
+		await delay(waits[attempts++]);
+	}
+}
+
+export async function cancelChatRun(
+	descriptor: ChatRunDescriptor,
+	{ token, projectId, signal }: Omit<CreateChatRunOptions, 'idempotencyKey'> = {}
+): Promise<void> {
+	const response = await fetch(`${getBaseUrl()}${descriptor.cancel_url}`, {
+		method: 'POST',
+		headers: headers(token, projectId),
+		signal
+	});
+	if (!response.ok) throw await errorFrom(response);
+}
+
+export const __test__ = { takeFrames };

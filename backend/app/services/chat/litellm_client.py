@@ -216,8 +216,8 @@ def cost_from_usage(
     )
 
 
-_VALID_EFFORTS = {"minimal", "low", "medium", "high"}
-_DISABLED_EFFORTS = {"", "off", "none", "disabled", "false"}
+_VALID_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+_OMIT_EFFORTS = {"", "auto", "off", "disabled", "false"}
 
 
 def _reasoning_params(model: str, effort: str | None, custom_llm_provider: str | None) -> dict[str, Any]:
@@ -229,7 +229,9 @@ def _reasoning_params(model: str, effort: str | None, custom_llm_provider: str |
     if effort is None:
         return {}
     normalized = effort.strip().lower()
-    if normalized in _DISABLED_EFFORTS or normalized not in _VALID_EFFORTS:
+    if normalized in _OMIT_EFFORTS:
+        return {}
+    if normalized != "none" and normalized not in _VALID_EFFORTS:
         return {}
     try:
         import litellm

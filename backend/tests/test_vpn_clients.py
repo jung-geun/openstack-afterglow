@@ -1,7 +1,7 @@
 """VPN 클라이언트 생성/조회/수정/삭제, IPAM 유일성, project_id 소유권, `.conf` 렌더 테스트.
 
-DB 계층(vpn_db)은 test_k3s_callback.py/test_k3s_clusters.py 컨벤션을 따라
-`app.api.vpn.clients.vpn_db` 모듈을 patch 하여 모의한다(실 MariaDB 불필요).
+DB 계층(waygate_db)은 test_k3s_callback.py/test_k3s_clusters.py 컨벤션을 따라
+`app.api.waygate.clients.waygate_db` 모듈을 patch 하여 모의한다(실 MariaDB 불필요).
 """
 
 from types import SimpleNamespace
@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import IntegrityError
 
 from app.main import app
-from app.services import vpn_config, vpn_ipam
+from app.services import waygate_config, waygate_ipam
 
 _VALID_KEY_HEX = "a" * 64
 
@@ -21,7 +21,7 @@ def _server_record(**overrides) -> dict:
     base = {
         "id": "server-1",
         "project_id": "test-project-123",
-        "name": "vpn-gw-1",
+        "name": "waygate-gw-1",
         "status": "ACTIVE",
         "server_public_key": "server-pub-key-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "endpoint_ip": "203.0.113.10",
@@ -64,7 +64,7 @@ def _encryption_key(monkeypatch):
 @pytest.fixture(autouse=True)
 def _db_available(monkeypatch):
     """엔드포인트의 _require_db() 가드가 503을 반환하지 않도록 DB 가용 상태로 설정."""
-    monkeypatch.setattr("app.api.vpn.clients.is_db_available", lambda: True)
+    monkeypatch.setattr("app.api.waygate.clients.is_db_available", lambda: True)
 
 
 @pytest.fixture
@@ -101,15 +101,15 @@ class TestCreateClient:
     @pytest.mark.asyncio
     async def test_create_client_success(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[])
             mock_db.create_client_record = AsyncMock()
             mock_db.get_client = AsyncMock(return_value=_client_record())
-            with patch("app.api.vpn.clients.vpn_agent_auth") as mock_auth:
+            with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
                 mock_auth.get_status_result = AsyncMock(return_value=None)
                 resp = await api_client.post(
-                    "/api/v1/vpn/servers/server-1/clients",
+                    "/api/v1/waygate/servers/server-1/clients",
                     json={"name": "laptop"},
                 )
         assert resp.status_code == 201
@@ -122,10 +122,10 @@ class TestCreateClient:
     @pytest.mark.asyncio
     async def test_create_client_rejects_when_server_not_active(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record(status="PROVISIONING"))
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 409
@@ -133,10 +133,10 @@ class TestCreateClient:
     @pytest.mark.asyncio
     async def test_create_client_rejects_when_server_public_key_missing(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record(server_public_key=None))
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 409
@@ -144,10 +144,10 @@ class TestCreateClient:
     @pytest.mark.asyncio
     async def test_create_client_404_when_server_not_found(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=None)
             resp = await api_client.post(
-                "/api/v1/vpn/servers/nonexistent/clients",
+                "/api/v1/waygate/servers/nonexistent/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 404
@@ -156,7 +156,7 @@ class TestCreateClient:
     async def test_create_client_rejects_invalid_name(self, api_client):
         _override_token_info()
         resp = await api_client.post(
-            "/api/v1/vpn/servers/server-1/clients",
+            "/api/v1/waygate/servers/server-1/clients",
             json={"name": "evil\nruncmd: rm -rf /"},
         )
         assert resp.status_code == 422
@@ -174,15 +174,15 @@ class TestCreateClient:
         async def _capture_create(server_id, project_id, client_id, data):
             created_payload.update(data)
 
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=existing)
             mock_db.create_client_record = AsyncMock(side_effect=_capture_create)
             mock_db.get_client = AsyncMock(return_value=_client_record(tunnel_ip="10.8.0.4"))
-            with patch("app.api.vpn.clients.vpn_agent_auth") as mock_auth:
+            with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
                 mock_auth.get_status_result = AsyncMock(return_value=None)
                 resp = await api_client.post(
-                    "/api/v1/vpn/servers/server-1/clients",
+                    "/api/v1/waygate/servers/server-1/clients",
                     json={"name": "third-client"},
                 )
         assert resp.status_code == 201
@@ -191,37 +191,37 @@ class TestCreateClient:
     @pytest.mark.asyncio
     async def test_create_client_duplicate_name_returns_409(self, api_client):
         """동일 서버에 동일 이름의 클라이언트를 두 번 생성하면 두 번째는 500이 아닌 409여야 한다
-        (uq_vpn_client_server_name 위반 → vpn_db.VpnClientConflictError → HTTPException 409)."""
+        (uq_waygate_client_server_name 위반 → waygate_db.VpnClientConflictError → HTTPException 409)."""
         _override_token_info()
-        from app.services.vpn_db import VpnClientConflictError
+        from app.services.waygate_db import WaygateClientConflictError
 
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[])
-            mock_db.create_client_record = AsyncMock(side_effect=VpnClientConflictError(field="name"))
+            mock_db.create_client_record = AsyncMock(side_effect=WaygateClientConflictError(field="name"))
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 409
         # 내부 SQL 에러 원문이 아니라 안내 메시지만 노출되어야 한다 (CLAUDE.md §6)
         detail = resp.json()["detail"]
         assert "이름" in detail
-        assert "uq_vpn_client_server_name" not in detail
+        assert "uq_waygate_client_server_name" not in detail
         assert "IntegrityError" not in detail
 
     @pytest.mark.asyncio
     async def test_create_client_duplicate_tunnel_ip_returns_409(self, api_client):
-        """tunnel_ip unique 위반(uq_vpn_client_server_tunnel_ip)도 500이 아닌 409로 매핑되어야 한다."""
+        """tunnel_ip unique 위반(uq_waygate_client_server_tunnel_ip)도 500이 아닌 409로 매핑되어야 한다."""
         _override_token_info()
-        from app.services.vpn_db import VpnClientConflictError
+        from app.services.waygate_db import WaygateClientConflictError
 
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[])
-            mock_db.create_client_record = AsyncMock(side_effect=VpnClientConflictError(field="tunnel_ip"))
+            mock_db.create_client_record = AsyncMock(side_effect=WaygateClientConflictError(field="tunnel_ip"))
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 409
@@ -230,37 +230,37 @@ class TestCreateClient:
     async def test_create_client_unclassified_conflict_returns_409(self, api_client):
         """field를 판별할 수 없는 경우에도(예: 알 수 없는 제약) 500이 아닌 409로 방어적으로 처리한다."""
         _override_token_info()
-        from app.services.vpn_db import VpnClientConflictError
+        from app.services.waygate_db import WaygateClientConflictError
 
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[])
-            mock_db.create_client_record = AsyncMock(side_effect=VpnClientConflictError(field=None))
+            mock_db.create_client_record = AsyncMock(side_effect=WaygateClientConflictError(field=None))
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "laptop"},
             )
         assert resp.status_code == 409
 
 
 # ---------------------------------------------------------------------------
-# IPAM 유일성 (순수 함수 — vpn_ipam.allocate_next_ip)
+# IPAM 유일성 (순수 함수 — waygate_ipam.allocate_next_ip)
 # ---------------------------------------------------------------------------
 
 
 class TestIpamUniqueness:
     def test_first_client_gets_second_host(self):
         """서버 자신이 .1 이므로 첫 클라이언트는 .2 를 받는다."""
-        ip = vpn_ipam.allocate_next_ip("10.8.0.0/24", used_ips=[])
+        ip = waygate_ipam.allocate_next_ip("10.8.0.0/24", used_ips=[])
         assert ip == "10.8.0.2"
 
     def test_skips_used_ips(self):
-        ip = vpn_ipam.allocate_next_ip("10.8.0.0/24", used_ips=["10.8.0.2", "10.8.0.3"])
+        ip = waygate_ipam.allocate_next_ip("10.8.0.0/24", used_ips=["10.8.0.2", "10.8.0.3"])
         assert ip == "10.8.0.4"
 
     def test_skips_server_ip_even_if_not_in_used_list(self):
         """used_ips 에 서버 IP(.1)가 없어도 자동으로 예약 처리되어 재할당되지 않는다."""
-        ip = vpn_ipam.allocate_next_ip("10.8.0.0/24", used_ips=[])
+        ip = waygate_ipam.allocate_next_ip("10.8.0.0/24", used_ips=[])
         assert ip != "10.8.0.1"
 
     def test_no_duplicate_across_many_allocations(self):
@@ -268,7 +268,7 @@ class TestIpamUniqueness:
         used: list[str] = []
         allocated = []
         for _ in range(20):
-            ip = vpn_ipam.allocate_next_ip("10.8.0.0/24", used_ips=used)
+            ip = waygate_ipam.allocate_next_ip("10.8.0.0/24", used_ips=used)
             assert ip not in used
             used.append(ip)
             allocated.append(ip)
@@ -277,19 +277,21 @@ class TestIpamUniqueness:
     def test_raises_when_subnet_exhausted(self):
         """/30 서브넷(호스트 2개)에서 서버(.1) 외 1개만 할당 가능 — 초과 시 RuntimeError."""
         with pytest.raises(RuntimeError):
-            vpn_ipam.allocate_next_ip("10.8.0.0/30", used_ips=["10.8.0.2"])
+            waygate_ipam.allocate_next_ip("10.8.0.0/30", used_ips=["10.8.0.2"])
 
     def test_db_enforces_uniqueness_via_constraint(self):
         """allocate_next_ip는 애플리케이션 레벨 회피일 뿐, 실제 중복 방지 보증은
         VpnClient.__table_args__의 UniqueConstraint(server_id, tunnel_ip)가 담당한다.
         경합 상태(두 요청이 동시에 같은 IP를 계산)에서도 DB가 최종 방어선이 되어야
         하므로, 모델에 제약이 실제로 선언되어 있는지 회귀 검증한다."""
-        from app.models.db import VpnClient
+        from app.models.db import WaygateClient
 
-        constraint_names = {c.name for c in VpnClient.__table_args__ if hasattr(c, "name")}
-        assert "uq_vpn_client_server_tunnel_ip" in constraint_names
+        constraint_names = {c.name for c in WaygateClient.__table_args__ if hasattr(c, "name")}
+        assert "uq_waygate_client_server_tunnel_ip" in constraint_names
 
-        uq = next(c for c in VpnClient.__table_args__ if getattr(c, "name", None) == "uq_vpn_client_server_tunnel_ip")
+        uq = next(
+            c for c in WaygateClient.__table_args__ if getattr(c, "name", None) == "uq_waygate_client_server_tunnel_ip"
+        )
         column_names = {col.name if hasattr(col, "name") else col for col in uq.columns}
         assert column_names == {"server_id", "tunnel_ip"}
 
@@ -303,12 +305,12 @@ class TestListClients:
     @pytest.mark.asyncio
     async def test_list_clients_success(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[_client_record()])
-            with patch("app.api.vpn.clients.vpn_agent_auth") as mock_auth:
+            with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
                 mock_auth.get_status_result = AsyncMock(return_value=None)
-                resp = await api_client.get("/api/v1/vpn/servers/server-1/clients")
+                resp = await api_client.get("/api/v1/waygate/servers/server-1/clients")
         assert resp.status_code == 200
         body = resp.json()
         assert len(body) == 1
@@ -318,10 +320,10 @@ class TestListClients:
     async def test_list_clients_merges_online_status(self, api_client):
         """Redis 상태 캐시에 handshake 기록이 있으면 online=True."""
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.list_clients = AsyncMock(return_value=[_client_record()])
-            with patch("app.api.vpn.clients.vpn_agent_auth") as mock_auth:
+            with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
                 mock_auth.get_status_result = AsyncMock(
                     return_value={
                         "peers": [
@@ -334,7 +336,7 @@ class TestListClients:
                         ]
                     }
                 )
-                resp = await api_client.get("/api/v1/vpn/servers/server-1/clients")
+                resp = await api_client.get("/api/v1/waygate/servers/server-1/clients")
         assert resp.status_code == 200
         body = resp.json()
         assert body[0]["online"] is True
@@ -349,13 +351,13 @@ class TestListClients:
 class TestClientOwnership:
     @pytest.mark.asyncio
     async def test_other_project_cannot_list_clients_of_foreign_server(self, api_client):
-        """다른 프로젝트 토큰으로 서버에 접근하면 vpn_db.get_server 가 None을 반환(project_id 필터)
+        """다른 프로젝트 토큰으로 서버에 접근하면 waygate_db.get_server 가 None을 반환(project_id 필터)
         해야 하고, 엔드포인트는 이를 404로 매핑해야 한다(정보 노출 방지)."""
         _override_token_info(project_id="attacker-project-999")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             # get_server 는 project_id 로 필터하므로 다른 프로젝트에서는 None
             mock_db.get_server = AsyncMock(return_value=None)
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients")
         assert resp.status_code == 404
         # project_id 필터가 실제로 전달됐는지 확인
         mock_db.get_server.assert_called_once_with("attacker-project-999", "server-1")
@@ -363,10 +365,10 @@ class TestClientOwnership:
     @pytest.mark.asyncio
     async def test_other_project_cannot_create_client_on_foreign_server(self, api_client):
         _override_token_info(project_id="attacker-project-999")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=None)
             resp = await api_client.post(
-                "/api/v1/vpn/servers/server-1/clients",
+                "/api/v1/waygate/servers/server-1/clients",
                 json={"name": "attacker-client"},
             )
         assert resp.status_code == 404
@@ -374,18 +376,18 @@ class TestClientOwnership:
     @pytest.mark.asyncio
     async def test_other_project_cannot_delete_foreign_client(self, api_client):
         _override_token_info(project_id="attacker-project-999")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=None)
-            resp = await api_client.delete("/api/v1/vpn/servers/server-1/clients/client-1")
+            resp = await api_client.delete("/api/v1/waygate/servers/server-1/clients/client-1")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_other_project_cannot_update_foreign_client(self, api_client):
         _override_token_info(project_id="attacker-project-999")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=None)
             resp = await api_client.patch(
-                "/api/v1/vpn/servers/server-1/clients/client-1",
+                "/api/v1/waygate/servers/server-1/clients/client-1",
                 json={"enabled": False},
             )
         assert resp.status_code == 404
@@ -393,19 +395,19 @@ class TestClientOwnership:
     @pytest.mark.asyncio
     async def test_other_project_cannot_download_foreign_client_config(self, api_client):
         _override_token_info(project_id="attacker-project-999")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=None)
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients/client-1/config")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients/client-1/config")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_owner_project_can_access_own_server_clients(self, api_client):
         """대조군 — 동일 프로젝트는 정상 접근 가능해야 한다(false-positive 방지)."""
         _override_token_info(project_id="test-project-123")
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record(project_id="test-project-123"))
             mock_db.list_clients = AsyncMock(return_value=[])
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients")
         assert resp.status_code == 200
 
 
@@ -418,13 +420,13 @@ class TestUpdateDeleteClient:
     @pytest.mark.asyncio
     async def test_update_client_toggles_enabled(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.update_client = AsyncMock(return_value=_client_record(enabled=False))
-            with patch("app.api.vpn.clients.vpn_agent_auth") as mock_auth:
+            with patch("app.api.waygate.clients.waygate_agent_auth") as mock_auth:
                 mock_auth.get_status_result = AsyncMock(return_value=None)
                 resp = await api_client.patch(
-                    "/api/v1/vpn/servers/server-1/clients/client-1",
+                    "/api/v1/waygate/servers/server-1/clients/client-1",
                     json={"enabled": False},
                 )
         assert resp.status_code == 200
@@ -433,11 +435,11 @@ class TestUpdateDeleteClient:
     @pytest.mark.asyncio
     async def test_update_client_404_when_not_found(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.update_client = AsyncMock(return_value=None)
             resp = await api_client.patch(
-                "/api/v1/vpn/servers/server-1/clients/nonexistent",
+                "/api/v1/waygate/servers/server-1/clients/nonexistent",
                 json={"enabled": False},
             )
         assert resp.status_code == 404
@@ -445,30 +447,30 @@ class TestUpdateDeleteClient:
     @pytest.mark.asyncio
     async def test_delete_client_success(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.soft_delete_client = AsyncMock(return_value=True)
-            resp = await api_client.delete("/api/v1/vpn/servers/server-1/clients/client-1")
+            resp = await api_client.delete("/api/v1/waygate/servers/server-1/clients/client-1")
         assert resp.status_code == 204
 
     @pytest.mark.asyncio
     async def test_delete_client_404_when_not_found(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.soft_delete_client = AsyncMock(return_value=False)
-            resp = await api_client.delete("/api/v1/vpn/servers/server-1/clients/nonexistent")
+            resp = await api_client.delete("/api/v1/waygate/servers/server-1/clients/nonexistent")
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
-# `.conf` 렌더 정확성 (순수 함수 — vpn_config.render_client_conf)
+# `.conf` 렌더 정확성 (순수 함수 — waygate_config.render_client_conf)
 # ---------------------------------------------------------------------------
 
 
 class TestRenderClientConf:
     def test_conf_contains_required_interface_fields(self):
-        conf = vpn_config.render_client_conf(
+        conf = waygate_config.render_client_conf(
             private_key="client-priv-key-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             tunnel_ip="10.8.0.2",
             dns="1.1.1.1",
@@ -483,7 +485,7 @@ class TestRenderClientConf:
         assert "DNS = 1.1.1.1" in conf
 
     def test_conf_contains_required_peer_fields(self):
-        conf = vpn_config.render_client_conf(
+        conf = waygate_config.render_client_conf(
             private_key="client-priv-key-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             tunnel_ip="10.8.0.2",
             dns=None,
@@ -499,7 +501,7 @@ class TestRenderClientConf:
         assert "PersistentKeepalive = 25" in conf
 
     def test_conf_omits_dns_line_when_none(self):
-        conf = vpn_config.render_client_conf(
+        conf = waygate_config.render_client_conf(
             private_key="k",
             tunnel_ip="10.8.0.2",
             dns=None,
@@ -511,7 +513,7 @@ class TestRenderClientConf:
         assert "DNS" not in conf
 
     def test_conf_field_order_interface_before_peer(self):
-        conf = vpn_config.render_client_conf(
+        conf = waygate_config.render_client_conf(
             private_key="k",
             tunnel_ip="10.8.0.2",
             dns=None,
@@ -532,10 +534,10 @@ class TestDownloadClientConfigEndpoint:
         priv_key = "client-priv-key-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         encrypted = k3s_crypto.encrypt_wg_client_key(priv_key)
 
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.get_client = AsyncMock(return_value=_client_record(private_key_encrypted=encrypted))
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients/client-1/config")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients/client-1/config")
         assert resp.status_code == 200
         assert "laptop.conf" in resp.headers["content-disposition"]
         assert "PrivateKey = " + priv_key in resp.text
@@ -543,26 +545,26 @@ class TestDownloadClientConfigEndpoint:
     @pytest.mark.asyncio
     async def test_download_config_404_when_client_missing(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record())
             mock_db.get_client = AsyncMock(return_value=None)
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients/client-1/config")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients/client-1/config")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_download_config_409_when_server_not_ready(self, api_client):
         _override_token_info()
-        with patch("app.api.vpn.clients.vpn_db") as mock_db:
+        with patch("app.api.waygate.clients.waygate_db") as mock_db:
             mock_db.get_server = AsyncMock(return_value=_server_record(server_public_key=None))
             mock_db.get_client = AsyncMock(return_value=_client_record())
-            resp = await api_client.get("/api/v1/vpn/servers/server-1/clients/client-1/config")
+            resp = await api_client.get("/api/v1/waygate/servers/server-1/clients/client-1/config")
         assert resp.status_code == 409
 
 
 # ---------------------------------------------------------------------------
-# vpn_db.py 레이어 회귀 테스트 — 소프트삭제 후 재생성, unique 충돌 → 도메인 예외 변환
+# waygate_db.py 레이어 회귀 테스트 — 소프트삭제 후 재생성, unique 충돌 → 도메인 예외 변환
 #
-# 실 MariaDB(pytest.mark.db, AFTERGLOW_TEST_DATABASE_URL) 없이도 vpn_db.py의 실제
+# 실 MariaDB(pytest.mark.db, AFTERGLOW_TEST_DATABASE_URL) 없이도 waygate_db.py의 실제
 # 코드(soft_delete_client의 NULL-out, create_client_record의 IntegrityError 변환)를
 # 직접 실행해 검증한다. get_session_factory()만 in-memory 페이크로 교체하고, 그 페이크는
 # (server_id, name)/(server_id, tunnel_ip) UniqueConstraint를 실제로 흉내 낸다 — 즉
@@ -596,7 +598,7 @@ class _FakeUniqueConstraintStore:
 
 
 class _FakeSession:
-    """vpn_db.py가 사용하는 최소 AsyncSession 인터페이스(add/commit/rollback/execute)를
+    """waygate_db.py가 사용하는 최소 AsyncSession 인터페이스(add/commit/rollback/execute)를
     _FakeUniqueConstraintStore 위에서 구현한 페이크."""
 
     def __init__(self, store: _FakeUniqueConstraintStore):
@@ -617,11 +619,13 @@ class _FakeSession:
         if row is not None and row.id not in self._store.rows:
             field = self._store._conflict_field(row)
             if field is not None:
-                constraint_name = "uq_vpn_client_server_name" if field == "name" else "uq_vpn_client_server_tunnel_ip"
+                constraint_name = (
+                    "uq_waygate_client_server_name" if field == "name" else "uq_waygate_client_server_tunnel_ip"
+                )
                 orig = Exception(
                     f"(pymysql.err.IntegrityError) (1062, \"Duplicate entry for key '{constraint_name}'\")"
                 )
-                raise IntegrityError(statement="INSERT INTO vpn_clients ...", params={}, orig=orig)
+                raise IntegrityError(statement="INSERT INTO waygate_clients ...", params={}, orig=orig)
         if row is not None:
             self._store.rows[row.id] = row
         self._pending = None
@@ -661,14 +665,14 @@ def _make_client_row(**overrides) -> SimpleNamespace:
 
 class TestVpnDbSoftDeleteRegression:
     """soft_delete_client가 실제로 unique 슬롯을 해제하는지, create_client_record가
-    IntegrityError를 VpnClientConflictError로 변환하는지 — vpn_db.py 실제 코드를 실행해 검증."""
+    IntegrityError를 VpnClientConflictError로 변환하는지 — waygate_db.py 실제 코드를 실행해 검증."""
 
     @pytest.mark.asyncio
     async def test_recreate_after_delete_succeeds_when_soft_delete_nulls_fields(self, monkeypatch):
         """버그 재현 시나리오: 클라이언트를 삭제한 뒤 같은 이름/IP로 재생성하면
         soft_delete_client가 name/tunnel_ip를 NULL로 비우지 않는 한 IntegrityError → 500이
         발생해야 한다. 수정 후에는 soft_delete가 필드를 비우므로 재생성이 성공해야 한다."""
-        from app.services import vpn_db
+        from app.services import waygate_db
 
         store = _FakeUniqueConstraintStore()
         store.rows["client-1"] = _make_client_row()
@@ -677,10 +681,10 @@ class TestVpnDbSoftDeleteRegression:
         session._selected_id = "client-1"
 
         factory = MagicMock(return_value=session)
-        monkeypatch.setattr(vpn_db, "get_session_factory", lambda: factory)
+        monkeypatch.setattr(waygate_db, "get_session_factory", lambda: factory)
 
         # 1) 소프트삭제 — name/tunnel_ip가 NULL로 비워져야 unique 슬롯이 해제된다
-        ok = await vpn_db.soft_delete_client("server-1", "test-project-123", "client-1", "user-1")
+        ok = await waygate_db.soft_delete_client("server-1", "test-project-123", "client-1", "user-1")
         assert ok is True
         deleted_row = store.rows["client-1"]
         assert deleted_row.deleted_at is not None
@@ -690,7 +694,7 @@ class TestVpnDbSoftDeleteRegression:
         )
 
         # 2) 동일한 이름/IP로 재생성 — 소프트삭제된 행과 더 이상 충돌하지 않아야 한다
-        await vpn_db.create_client_record(
+        await waygate_db.create_client_record(
             "server-1",
             "test-project-123",
             "client-2",
@@ -708,17 +712,17 @@ class TestVpnDbSoftDeleteRegression:
     async def test_create_client_record_raises_conflict_on_duplicate_name(self, monkeypatch):
         """활성 클라이언트와 이름이 겹치면 IntegrityError가 그대로 전파되지 않고
         VpnClientConflictError(field='name')로 변환되어야 한다(라우터가 409로 매핑)."""
-        from app.services import vpn_db
+        from app.services import waygate_db
 
         store = _FakeUniqueConstraintStore()
         store.rows["client-1"] = _make_client_row(name="laptop", tunnel_ip="10.8.0.2")
 
         session = _FakeSession(store)
         factory = MagicMock(return_value=session)
-        monkeypatch.setattr(vpn_db, "get_session_factory", lambda: factory)
+        monkeypatch.setattr(waygate_db, "get_session_factory", lambda: factory)
 
-        with pytest.raises(vpn_db.VpnClientConflictError) as excinfo:
-            await vpn_db.create_client_record(
+        with pytest.raises(waygate_db.WaygateClientConflictError) as excinfo:
+            await waygate_db.create_client_record(
                 "server-1",
                 "test-project-123",
                 "client-2",
@@ -735,17 +739,17 @@ class TestVpnDbSoftDeleteRegression:
 
     @pytest.mark.asyncio
     async def test_create_client_record_raises_conflict_on_duplicate_tunnel_ip(self, monkeypatch):
-        from app.services import vpn_db
+        from app.services import waygate_db
 
         store = _FakeUniqueConstraintStore()
         store.rows["client-1"] = _make_client_row(name="laptop", tunnel_ip="10.8.0.2")
 
         session = _FakeSession(store)
         factory = MagicMock(return_value=session)
-        monkeypatch.setattr(vpn_db, "get_session_factory", lambda: factory)
+        monkeypatch.setattr(waygate_db, "get_session_factory", lambda: factory)
 
-        with pytest.raises(vpn_db.VpnClientConflictError) as excinfo:
-            await vpn_db.create_client_record(
+        with pytest.raises(waygate_db.WaygateClientConflictError) as excinfo:
+            await waygate_db.create_client_record(
                 "server-1",
                 "test-project-123",
                 "client-2",

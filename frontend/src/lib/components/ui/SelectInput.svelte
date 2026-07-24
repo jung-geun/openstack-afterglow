@@ -8,6 +8,7 @@
 		required?: boolean;
 		class?: string;
 		children: Snippet;
+		ariaLabel?: string;
 		onchange?: (event: Event) => void;
 	}
 
@@ -17,12 +18,13 @@
 		disabled = false,
 		required = false,
 		class: className = '',
+		ariaLabel,
 		children,
 		onchange,
 	}: Props = $props();
 </script>
 
-<select {id} bind:value {disabled} {required} {onchange} class="control select-input {className}">
+<select {id} bind:value {disabled} {required} {onchange} aria-label={ariaLabel} class="control select-input {className}">
 	{@render children()}
 </select>
 

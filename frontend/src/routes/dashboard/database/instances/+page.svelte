@@ -7,7 +7,10 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+	import { executeBulkMutations } from '$lib/utils/bulkActions';
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import DbInstanceDetailPanel from '$lib/components/database/DbInstanceDetailPanel.svelte';
@@ -22,6 +25,16 @@
 	let restarting = $state<string | null>(null);
 	let showCreatePanel = $state(false);
 	let selectedInstanceId = $state<string | null>(null);
+	const selection = createResourceSelection();
+	let bulkBusy = $state(false);
+	const selectableIds = $derived(new Set(instances.map((instance) => instance.id)));
+
+	function prefetchCreateMetadata() {
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		void api.prefetch('/api/v1/database-instances/flavors', token, projectId);
+		void api.prefetch('/api/v1/database-instances/datastores', token, projectId);
+	}
 
 	function openPanel(id: string) {
 		selectedInstanceId = id;
@@ -39,24 +52,39 @@
 	async function load() {
 		if (instances.length === 0) loading = true;
 		else refreshing = true;
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
 		try {
-			instances = await api.get<DbInstance[]>('/api/v1/database-instances', token, projectId);
+			const nextInstances = await api.get<DbInstance[]>('/api/v1/database-instances', tokenSnapshot, projectSnapshot);
+			if ($auth.projectId !== projectSnapshot) return;
+			instances = nextInstances;
+			selection.retain(nextInstances.map((instance) => instance.id));
 		} catch {
-			instances = [];
+			if ($auth.projectId === projectSnapshot) {
+				instances = [];
+				selection.clear();
+			}
 		} finally {
-			loading = false;
-			refreshing = false;
+			if ($auth.projectId === projectSnapshot) {
+				loading = false;
+				refreshing = false;
+			}
 		}
 	}
 
 	async function forceRefresh() {
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
 		refreshing = true;
 		try {
-			instances = await api.get<DbInstance[]>('/api/v1/database-instances', token, projectId, { refresh: true });
+			const nextInstances = await api.get<DbInstance[]>('/api/v1/database-instances', tokenSnapshot, projectSnapshot, { refresh: true });
+			if ($auth.projectId !== projectSnapshot) return;
+			instances = nextInstances;
+			selection.retain(nextInstances.map((instance) => instance.id));
 		} catch {
-			instances = [];
+			if ($auth.projectId === projectSnapshot) instances = [];
 		} finally {
-			refreshing = false;
+			if ($auth.projectId === projectSnapshot) refreshing = false;
 		}
 	}
 
@@ -85,9 +113,39 @@
 			restarting = null;
 		}
 	}
+	async function runBulk(action: 'restart' | 'delete') {
+		const snapshot = [...selection.ids];
+		if (snapshot.length === 0) return;
+		const label = action === 'restart' ? '재시작' : '삭제';
+		if (!await confirmDialog(`선택한 DB 인스턴스 ${snapshot.length}개를 ${label}하시겠습니까?`)) return;
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
+		bulkBusy = true;
+		try {
+			const results = await executeBulkMutations(snapshot, (id) => action === 'restart'
+				? api.post(`/api/v1/database-instances/${id}/restart`, {}, tokenSnapshot, projectSnapshot)
+				: api.delete(`/api/v1/database-instances/${id}`, tokenSnapshot, projectSnapshot));
+			const successful = results.filter((result) => result.ok).map((result) => result.id);
+			const failed = results.length - successful.length;
+			if (successful.length > 0) toast.success(`${successful.length}개 ${label} 요청을 완료했습니다.`);
+			if (failed > 0) toast.error(`${failed}개 ${label}에 실패했습니다.`);
+			if ($auth.projectId === projectSnapshot) {
+				selection.remove(successful);
+				await load();
+			}
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	const bulkActions: BulkSelectionAction[] = [
+		{ key: 'restart', label: '재시작', tone: 'warning', onAction: () => runBulk('restart') },
+		{ key: 'delete', label: '삭제', tone: 'danger', onAction: () => runBulk('delete') },
+	];
 
 	const ar = createAutoRefresh(() => load(), {
 		storageKey: 'dashboard-database-instances',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],
@@ -95,8 +153,9 @@
 
 	$effect(() => {
 		const pid = $auth.projectId;
-		if (!pid) return;
 		instances = [];
+		selection.clear();
+		if (!pid) return;
 		untrack(() => load());
 	});
 </script>
@@ -115,7 +174,7 @@
 	</SlidePanel>
 {/if}
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="bulk-selection-page p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="DATABASE / INSTANCES" title="DB 인스턴스">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -127,6 +186,8 @@
 			/>
 			<button
 				onclick={() => (showCreatePanel = true)}
+				onpointerenter={prefetchCreateMetadata}
+				onfocus={prefetchCreateMetadata}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500"
 			>+ 인스턴스 생성</button>
 		{/snippet}
@@ -142,9 +203,15 @@
 			{refreshing}
 			{restarting}
 			{deleting}
+			selectedIds={selection.ids}
+			selectableIds={selectableIds}
+			selectionDisabled={bulkBusy}
+			onToggleSelect={(id) => selection.toggle(id)}
+			onToggleAll={() => selection.toggleAll(selectableIds)}
 			onOpen={openPanel}
 			onRestart={restartInstance}
 			onDelete={deleteInstance}
 		/>
+		<BulkSelectionOverlay count={selection.count} ariaLabel="선택한 DB 인스턴스 일괄 작업" actions={bulkActions} busy={bulkBusy} onClear={() => selection.clear()} />
 	{/if}
 </div>

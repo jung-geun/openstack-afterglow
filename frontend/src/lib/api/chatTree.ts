@@ -1,3 +1,5 @@
+import type { ModelCapabilities } from './chatContracts';
+
 /**
  * 채팅 메시지 버전 트리 파생 (순수 함수).
  *
@@ -11,20 +13,10 @@
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 
-/** 모델 능력(vision/think/tool 게이팅·배지용). 백엔드 effective_capabilities. */
-export interface ModelCapabilities {
-	vision?: boolean;
-	reasoning?: boolean;
-	tool_call?: boolean;
-	attachment?: boolean;
-	modalities?: { input?: string[]; output?: string[] } | null;
-	/** [{type:'effort', values:['low','medium','high']}] — effort 선택지 도출 */
-	reasoning_options?: { type: string; values: string[] }[];
-	context_limit?: number | null;
-}
 
 /** 채팅에서 선택 가능한 모델. 백엔드 GET /chat/models 응답 형태. */
 export interface AvailableModel {
+	id: number;
 	model_name: string;
 	display_name: string;
 	provider?: string;
@@ -55,10 +47,21 @@ export interface ChatMessage {
 	content: string;
 	tool_calls?: unknown;
 	citations?: unknown;
+	parts?: unknown;
+	status?: 'streaming' | 'complete' | 'failed' | 'canceled' | null;
+	execution?: { run_id?: string; agent_id?: string | null; skill_ids?: number[]; skills?: { id: number; name: string }[] } | null;
 	reasoning?: string | null;
 	token_prompt?: number | null;
 	token_completion?: number | null;
 	model_name?: string | null;
+	created_at: string | null;
+}
+
+/** Lightweight, content-free message metadata used for version navigation. */
+export interface ChatTreeNode {
+	id: string;
+	parent_id: string | null;
+	role: ChatRole;
 	created_at: string | null;
 }
 
@@ -117,7 +120,7 @@ export function lastAssistantModel(path: readonly ChatMessage[]): string | null 
  * created_at 오름차순 정렬(안정적 순서). 자기 자신 포함.
  * 개수 > 1 이면 UI 에 `‹ n/m ›` 표시한다.
  */
-export function getSiblings(messages: readonly ChatMessage[], message: ChatMessage): ChatMessage[] {
+export function getSiblings(messages: readonly ChatTreeNode[], message: ChatTreeNode): ChatTreeNode[] {
 	const siblings = messages.filter(
 		(m) => m.parent_id === message.parent_id && m.role === message.role
 	);
@@ -126,14 +129,14 @@ export function getSiblings(messages: readonly ChatMessage[], message: ChatMessa
 
 export interface SiblingInfo {
 	/** 형제 목록(정렬됨) */
-	siblings: ChatMessage[];
+	siblings: ChatTreeNode[];
 	/** 현재 메시지의 1-based 인덱스 */
 	index: number;
 	/** 형제 총 개수 */
 	total: number;
 }
 
-export function getSiblingInfo(messages: readonly ChatMessage[], message: ChatMessage): SiblingInfo {
+export function getSiblingInfo(messages: readonly ChatTreeNode[], message: ChatTreeNode): SiblingInfo {
 	const siblings = getSiblings(messages, message);
 	const idx = siblings.findIndex((m) => m.id === message.id);
 	return { siblings, index: idx + 1, total: siblings.length };
@@ -146,8 +149,8 @@ export function getSiblingInfo(messages: readonly ChatMessage[], message: ChatMe
  * 결정론적으로 따라 내려가 리프를 고른다. 각 단계에서 가장 최근 created_at 자식을
  * 선택한다. 그냥 형제 id 를 넘기면 하위 트리가 있는 경우 화면이 잘린다.
  */
-export function resolveLeafFor(messages: readonly ChatMessage[], startId: string): string {
-	const childrenOf = new Map<string, ChatMessage[]>();
+export function resolveLeafFor(messages: readonly ChatTreeNode[], startId: string): string {
+	const childrenOf = new Map<string, ChatTreeNode[]>();
 	for (const m of messages) {
 		if (!m.parent_id) continue;
 		const arr = childrenOf.get(m.parent_id);
@@ -173,8 +176,8 @@ export function resolveLeafFor(messages: readonly ChatMessage[], startId: string
  * 이동 불가(경계)면 null.
  */
 export function siblingLeafInDirection(
-	messages: readonly ChatMessage[],
-	message: ChatMessage,
+	messages: readonly ChatTreeNode[],
+	message: ChatTreeNode,
 	direction: -1 | 1
 ): string | null {
 	const siblings = getSiblings(messages, message);
@@ -185,7 +188,7 @@ export function siblingLeafInDirection(
 	return resolveLeafFor(messages, target.id);
 }
 
-function pickLatest(items: readonly ChatMessage[]): ChatMessage | null {
+function pickLatest<T extends ChatTreeNode>(items: readonly T[]): T | null {
 	if (items.length === 0) return null;
 	let best = items[0];
 	for (let i = 1; i < items.length; i++) {
@@ -194,14 +197,14 @@ function pickLatest(items: readonly ChatMessage[]): ChatMessage | null {
 	return best;
 }
 
-function sortByCreatedAt(items: ChatMessage[]): ChatMessage[] {
+function sortByCreatedAt<T extends ChatTreeNode>(items: T[]): T[] {
 	return [...items].sort(compareCreatedAt);
 }
 
 /**
  * created_at 오름차순 비교. null/동률이면 id 로 안정 정렬.
  */
-function compareCreatedAt(a: ChatMessage, b: ChatMessage): number {
+function compareCreatedAt(a: ChatTreeNode, b: ChatTreeNode): number {
 	const ta = a.created_at ? Date.parse(a.created_at) : NaN;
 	const tb = b.created_at ? Date.parse(b.created_at) : NaN;
 	const va = Number.isNaN(ta) ? 0 : ta;

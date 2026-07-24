@@ -13,18 +13,27 @@ import asyncio
 import json
 import logging
 import uuid
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from starlette.background import BackgroundTasks
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.api.deps import get_token_info
 from app.config import get_settings
+from app.models.chat_contracts import (
+    ChatFeatureOptions,
+    CompletionRequest,
+    ReasoningEffort,
+    RegenerateRequest,
+    UserInputPart,
+    text_projection_from_user_input_parts,
+)
 from app.services.chat import agent_store as ags
-from app.services.chat import attachments as att
 from app.services.chat import conversation_store as cs
-from app.services.chat import credit, engine, litellm_client, memory_extract, title_summary
+from app.services.chat import credit, durable_runs, engine, litellm_client
+from app.services.chat import extensions_store as es
 from app.services.chat import memory_store as ms
 from app.services.chat import provider_store as ps
 from app.services.chat import workspace_store as ws
@@ -36,67 +45,218 @@ _MAX_TOKENS_CAP = 4096
 _MAX_MESSAGE_CHARS = 32000
 
 
-class AttachmentRef(BaseModel):
-    """채팅 첨부 참조(POST /chat/attachments 반환값). 현재는 이미지 전용."""
-
-    key: str = Field(..., max_length=300)
-    mime: str = Field(..., max_length=100)
-    name: str = Field(default="", max_length=256)
-
-
-_MAX_ATTACHMENTS = 8
-
-
-class CompletionRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=_MAX_MESSAGE_CHARS)
-    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=_MAX_ATTACHMENTS)
-    model: str | None = Field(default=None, max_length=190)
-    agent_id: int | None = Field(default=None)  # 에이전트 바인딩(instructions·모델·파라미터)
-    max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
-    temperature: float | None = Field(default=None, ge=0, le=2)
-    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
-    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
-    tool_ids: list[int] | None = Field(default=None)
-    mcp_ids: list[int] | None = Field(default=None)
-
-    model_config = {"protected_namespaces": ()}
-
-
-class RegenerateRequest(BaseModel):
-    model: str | None = Field(default=None, max_length=190)
-    agent_id: int | None = Field(default=None)
-    max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
-    temperature: float | None = Field(default=None, ge=0, le=2)
-    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
-    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
-    tool_ids: list[int] | None = Field(default=None)
-    mcp_ids: list[int] | None = Field(default=None)
-
-    model_config = {"protected_namespaces": ()}
-
-
-_MAX_TEMP_MESSAGES = 40
-
-
-class TempMessage(BaseModel):
-    role: str = Field(..., pattern="^(user|assistant|system)$")
-    content: str = Field(..., min_length=1, max_length=_MAX_MESSAGE_CHARS)
-
-
 class TempCompletionRequest(BaseModel):
-    """임시 채팅 — conversation 없이 메시지 배열로 stateless 스트리밍(미저장)."""
+    """Canonical first-turn temporary completion request."""
 
-    messages: list[TempMessage] = Field(..., min_length=1, max_length=_MAX_TEMP_MESSAGES)
-    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=_MAX_ATTACHMENTS)
-    model: str | None = Field(default=None, max_length=190)
-    max_tokens: int | None = Field(default=None, ge=1, le=_MAX_TOKENS_CAP)
-    temperature: float | None = Field(default=None, ge=0, le=2)
-    reasoning_effort: str | None = Field(default=None, max_length=20)  # 요청별 추론 강도(없으면 전역 기본)
-    # 대화별 tool/MCP 선택(None=활성 전체, []=없음, [id...]=해당 항목만). 에이전트 바인딩 시 에이전트 우선.
-    tool_ids: list[int] | None = Field(default=None)
-    mcp_ids: list[int] | None = Field(default=None)
+    model_config = ConfigDict(protected_namespaces=())
 
-    model_config = {"protected_namespaces": ()}
+    parts: list[UserInputPart] = Field(min_length=1, max_length=32)
+    model_id: str = Field(min_length=1, max_length=190)
+    features: ChatFeatureOptions = Field(default_factory=ChatFeatureOptions)
+    reasoning_effort: ReasoningEffort = "auto"
+    skill_ids: list[int] = Field(default_factory=list, max_length=100)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value) or any(item < 1 for item in value):
+            raise ValueError("skill_ids must be unique positive ids")
+        return value
+
+    temp_thread_id: str | None = Field(default=None, max_length=36)
+
+
+def _capability_gate(feature: str, resolved: dict) -> dict:
+    """Normalize legacy overrides and canonical gates to one fail-closed shape."""
+    capabilities = resolved.get("capabilities") or {}
+    if feature == "memory":
+        # Manual account memory is an existing local capability. Semantic
+        # retrieval and automatic extraction remain separately unavailable.
+        return {
+            "available": True,
+            "mode": "native",
+            "reason_code": None,
+            "pricing_available": True,
+        }
+    configured_gate = (capabilities.get("feature_gates") or {}).get(feature)
+    base_pricing_available = (
+        resolved.get("input_price_per_token") is not None and resolved.get("output_price_per_token") is not None
+    )
+    if configured_gate is not None:
+        gate = dict(configured_gate)
+    else:
+        legacy_available = {
+            "text": True,
+            "structured_output": bool(capabilities.get("structured_output")),
+            "memory": True,
+            "image_input": bool(capabilities.get("vision")),
+        }.get(feature, False)
+        gate = {
+            "available": legacy_available,
+            "mode": "native" if legacy_available else "none",
+            "reason_code": None if legacy_available else "capability_not_configured",
+            "pricing_available": base_pricing_available,
+        }
+
+    # Text and executor-backed structured output consume the selected model's
+    # actual prices. A display capability must never make an unpriced model billable.
+    if feature in {"text", "structured_output"}:
+        gate["pricing_available"] = base_pricing_available
+    return gate
+
+
+def _has_priced_advisor_route(routes: dict[str, dict[str, Any]] | None) -> bool:
+    route = (routes or {}).get("advisor")
+    if not isinstance(route, dict):
+        return False
+    try:
+        return all(
+            Decimal(str(route[key])).is_finite() and Decimal(str(route[key])) >= 0
+            for key in ("input_price_per_token", "output_price_per_token")
+        )
+    except (InvalidOperation, KeyError, TypeError, ValueError):
+        return False
+
+
+def _require_execution_capability(
+    features: ChatFeatureOptions,
+    resolved: dict,
+    *,
+    parts: list[UserInputPart] | None = None,
+    feature_routes: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Reject requested features, modalities, and output combinations without a priced route."""
+    requested = ["text"]
+    if features.response_format.kind != "text":
+        requested.append("structured_output")
+    if features.web_search.enabled:
+        requested.append("web_search")
+    if features.web_fetch.enabled:
+        requested.append("web_fetch")
+    if features.advisor.enabled:
+        requested.append("advisor")
+    if features.memory:
+        requested.append("memory")
+    requested.extend(f"{modality}_output" for modality in features.output_modalities if modality != "text")
+    if parts:
+        requested.extend(f"{part.type}_input" for part in parts if part.type != "text")
+
+    capabilities = resolved.get("capabilities") or {}
+    allowed_combinations = capabilities.get("allowed_output_combinations")
+    if allowed_combinations and list(features.output_modalities) not in allowed_combinations:
+        raise HTTPException(status_code=422, detail="requested chat output combination is not available")
+    if features.tool_policy.mode == "none" and (
+        features.web_search.enabled or features.web_fetch.enabled or features.advisor.enabled
+    ):
+        raise HTTPException(status_code=422, detail="requested chat capability requires tool execution")
+
+    for feature in requested:
+        if feature == "advisor":
+            if not capabilities.get("function_calling") or not _has_priced_advisor_route(feature_routes):
+                raise HTTPException(status_code=422, detail="requested chat capability is not available: advisor")
+            continue
+        gate = _capability_gate(feature, resolved)
+        if not gate.get("available") or not gate.get("pricing_available"):
+            reason = gate.get("reason_code") or "pricing_unavailable"
+            raise HTTPException(
+                status_code=422, detail=f"requested chat capability is not available: {feature} ({reason})"
+            )
+
+    # Only managed web search/fetch/advisor have an execution path today. Keep
+    # advertised future output modalities fail-closed rather than silently omitting them.
+    if features.output_modalities != ["text"]:
+        raise HTTPException(status_code=422, detail="requested chat capability is not available")
+
+
+def _feature_route_snapshot(route: dict[str, Any], *, purpose: str) -> dict[str, Any]:
+    """Copy only immutable non-secret route identity into the plaintext run snapshot."""
+    fields = ("provider_id", "provider_name", "config_version_hash")
+    snapshot = {field: route[field] for field in fields}
+    if purpose == "advisor":
+        snapshot.update({"model_id": route["model_id"], "model_name": route["model_name"]})
+    return snapshot
+
+
+async def _resolve_feature_routes(features: ChatFeatureOptions) -> dict[str, dict[str, Any]]:
+    """Resolve only user-selected managed routes after idempotency admission."""
+    routes: dict[str, dict[str, Any]] = {}
+    if features.web_search.enabled:
+        provider_id = features.web_search.provider_id
+        if provider_id is None:
+            raise HTTPException(status_code=422, detail="web search provider is required")
+        search = await ps.get_active_provider_route(provider_id)
+        if search is None:
+            raise HTTPException(status_code=422, detail="selected web search provider is not available")
+        routes["search"] = search
+    if features.advisor.enabled:
+        model_id = features.advisor.model_id
+        if model_id is None:
+            raise HTTPException(status_code=422, detail="advisor model is required")
+        advisor = await ps.resolve_model_by_id(model_id)
+        if advisor is None:
+            raise HTTPException(status_code=422, detail="selected advisor model is not available")
+        routes["advisor"] = advisor
+    return routes
+
+
+def _run_snapshots(
+    resolved: dict,
+    features: dict[str, Any],
+    *,
+    feature_routes: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Persist only immutable, non-secret execution and pricing inputs for a run."""
+    price_metadata = resolved.get("price_metadata")
+    costs = price_metadata.get("cost", price_metadata) if isinstance(price_metadata, dict) else {}
+    component_keys = (
+        "embedding_input_per_token",
+        "web_search_request_per_unit",
+        "web_search_context_low_per_unit",
+        "web_search_context_medium_per_unit",
+        "web_search_context_high_per_unit",
+        "web_fetch_request_per_unit",
+        "web_fetch_context_per_unit",
+        "image_per_unit",
+        "audio_input_per_second",
+        "audio_output_per_second",
+        "video_per_second",
+        "sandbox_per_second",
+    )
+    component_prices = {key: str(costs[key]) for key in component_keys if isinstance(costs, dict) and key in costs}
+    advisor_route = (feature_routes or {}).get("advisor")
+    if isinstance(advisor_route, dict):
+        for price_key, route_key in (
+            ("advisor_input_price_per_token", "input_price_per_token"),
+            ("advisor_output_price_per_token", "output_price_per_token"),
+        ):
+            if advisor_route.get(route_key) is not None:
+                component_prices[price_key] = str(advisor_route[route_key])
+    capability_snapshot = {
+        "effective_features": features,
+        "provider_id": resolved["provider_id"],
+        "model_id": resolved["model_id"],
+        "provider_name": resolved["provider_name"],
+        "model_name": resolved["model_name"],
+        "config_version_hash": resolved["config_version_hash"],
+        "capabilities": resolved.get("capabilities") or {},
+        "feature_routes": {
+            purpose: _feature_route_snapshot(route, purpose=purpose)
+            for purpose, route in (feature_routes or {}).items()
+        },
+    }
+    pricing_snapshot = {
+        "input_price_per_token": str(resolved["input_price_per_token"]),
+        "output_price_per_token": str(resolved["output_price_per_token"]),
+        "component_prices": component_prices,
+        "price_source": resolved.get("price_source"),
+        "price_version": resolved.get("price_version"),
+        "provider_name": resolved["provider_name"],
+        "model_name": resolved["model_name"],
+        "margin_multiplier": str(resolved.get("margin_multiplier", "1")),
+        "chat_credit_per_usd": str(get_settings().chat_credit_per_usd),
+        "rounding_version": "half_even_v1",
+    }
+    return capability_snapshot, pricing_snapshot
 
 
 def _sse(obj: dict) -> str:
@@ -128,40 +288,9 @@ def _tool_selection(agent: dict | None, payload_tool_ids, payload_mcp_ids):
     )
 
 
-async def _apply_attachments(
-    input_messages: list[dict], attachments: list, resolved: dict, token_info: dict
-) -> list[dict]:
-    """마지막 user 턴을 멀티모달 content 로 교체(vision 모델 + 이미지 첨부 시). 현재 턴만(과거는 텍스트).
-
-    각 첨부는 presigned URL(실패 시 base64) 로 해석. boto3 동기 I/O 라 to_thread.
-    """
-    if not attachments or not input_messages:
-        return input_messages
-    caps = resolved.get("capabilities") or {}
-    if not caps.get("vision"):
-        return input_messages
-    parts: list[dict] = [{"type": "text", "text": input_messages[-1].get("content") or ""}]
-    for a in attachments:
-        if not att.is_image(a.mime):
-            continue
-        url = await asyncio.to_thread(
-            att.resolve_image_url,
-            token_info["token"],
-            token_info["user_id"],
-            token_info["project_id"],
-            a.key,
-            a.mime,
-        )
-        if url:
-            parts.append({"type": "image_url", "image_url": {"url": url}})
-    if len(parts) > 1:
-        input_messages[-1]["content"] = parts
-    return input_messages
-
-
-async def _load_owned_conv(conversation_id: str, user_id: str) -> dict:
+async def _load_owned_conv(conversation_id: str, user_id: str, project_id: str) -> dict:
     try:
-        return await cs.get_conversation(conversation_id, user_id=user_id)
+        return await cs.get_conversation(conversation_id, user_id=user_id, project_id=project_id)
     except cs.ConversationNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except cs.ConversationForbidden as exc:
@@ -182,6 +311,29 @@ async def _resolve_model(model_name: str) -> dict:
     return resolved
 
 
+def _validated_reasoning_effort(value: str, resolved: dict) -> str:
+    effort = value.strip().lower()
+    capabilities = resolved.get("capabilities") or {}
+    if effort == "auto":
+        return effort
+    if not capabilities.get("reasoning"):
+        raise HTTPException(status_code=422, detail="선택한 모델은 추론 강도를 지원하지 않습니다")
+    if effort == "none":
+        return effort
+    options = capabilities.get("reasoning_options") or []
+    supported = next(
+        (
+            {str(item).strip().lower() for item in option.get("values", [])}
+            for option in options
+            if isinstance(option, dict) and option.get("type") == "effort"
+        ),
+        set(),
+    )
+    if effort not in supported:
+        raise HTTPException(status_code=422, detail=f"선택한 모델은 추론 강도 '{effort}'를 지원하지 않습니다")
+    return effort
+
+
 async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
     """agent_id 가 주어지면 실행 설정(instructions·model·params) 로드. 접근 불가/미존재 시 404."""
     if agent_id is None:
@@ -195,14 +347,54 @@ async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
     return agent
 
 
-async def _load_context(conv: dict, user_id: str) -> tuple[str | None, list[str]]:
-    """대화 소속 프로젝트(workspace) 지침 + 사용자 활성 메모리 로드. 부가 기능이라 실패는 무시."""
+async def _load_skill_snapshot(
+    agent: dict | None, payload_skill_ids: list[int], user_id: str, project_id: str
+) -> tuple[list[str], list[dict[str, int | str]]]:
+    """Load owned active skills once and retain only safe execution provenance."""
+    ids = (agent or {}).get("skill_ids") or payload_skill_ids
+    if not ids:
+        return [], []
+    want = set(ids)
+    try:
+        items = await es.list_for_user("skill", user_id=user_id, project_id=project_id, active_only=True)
+    except Exception:
+        logger.warning("스킬 지침 로드 실패", exc_info=True)
+        return [], []
+    selected = [item for item in items if item.get("id") in want]
+    return (
+        [item["instructions"] for item in selected if item.get("instructions")],
+        [
+            {"id": item["id"], "name": item["name"]}
+            for item in selected
+            if isinstance(item.get("id"), int) and isinstance(item.get("name"), str)
+        ],
+    )
+
+
+async def _load_skill_instructions(
+    agent: dict | None, payload_skill_ids: list[int], user_id: str, project_id: str
+) -> list[str]:
+    """Compatibility helper for callers that need only the private instructions."""
+    instructions, _ = await _load_skill_snapshot(agent, payload_skill_ids, user_id, project_id)
+    return instructions
+
+
+async def _load_context(
+    conv: dict, user_id: str, project_id: str, *, include_memory: bool
+) -> tuple[str | None, list[str]]:
+    """Load workspace instructions and only the caller's visible memory scopes."""
     workspace_instr = None
     try:
         workspace_instr = await ws.get_instructions_for_run(conv.get("workspace_id"), user_id=user_id)
     except Exception:
         logger.warning("워크스페이스 지침 로드 실패", exc_info=True)
-    memories = await ms.active_contents_for_run(user_id=user_id)  # 자체 예외 흡수(빈 목록)
+    if not include_memory:
+        return workspace_instr, []
+    memories = await ms.active_contents_for_run(
+        user_id=user_id,
+        project_id=project_id,
+        workspace_id=conv.get("workspace_id"),
+    )
     return workspace_instr, memories
 
 
@@ -213,8 +405,9 @@ def _apply_context(
     input_messages: list[dict],
     temperature,
     max_tokens_req,
+    skill_instructions: list[str] | None = None,
 ):
-    """system 선주입 컨텍스트 구성 — 메모리 → 프로젝트 지침 → 에이전트 지침(구체적일수록 뒤).
+    """system 선주입 컨텍스트 구성 — 메모리 → 프로젝트 지침 → 스킬 지침 → 에이전트 지침(구체적일수록 뒤).
 
     런타임 주입일 뿐 chat_messages 에는 저장하지 않는다(활성 경로 불변). params 는 에이전트에서만.
     반환: (messages, temperature, max_tokens_req)
@@ -225,6 +418,8 @@ def _apply_context(
         preamble.append({"role": "system", "content": f"사용자에 대해 기억할 사실:\n{joined}"})
     if workspace_instr:
         preamble.append({"role": "system", "content": workspace_instr})
+    for instr in skill_instructions or []:
+        preamble.append({"role": "system", "content": instr})
     if agent and agent.get("instructions"):
         preamble.append({"role": "system", "content": agent["instructions"]})
     if preamble:
@@ -423,185 +618,393 @@ async def _stream_and_persist(
                 logger.warning("중단 후 과금 실패 conv=%s", conversation_id, exc_info=True)
 
 
-@router.post("/conversations/{conversation_id}/completions")
+def _features_payload(features: ChatFeatureOptions) -> dict:
+    return features.model_dump(mode="json", by_alias=True)
+
+
+def _run_error(exc: durable_runs.DurableRunError) -> HTTPException:
+    if isinstance(exc, durable_runs.DurableRunConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, durable_runs.DurableRunInputError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, durable_runs.DurableRunCursorExpired):
+        return HTTPException(status_code=410, detail=str(exc))
+    if isinstance(exc, durable_runs.DurableRunNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=503, detail=str(exc))
+
+
+@router.post("/conversations/{conversation_id}/completions", status_code=status.HTTP_202_ACCEPTED)
 async def create_completion(
-    conversation_id: str, payload: CompletionRequest, token_info: dict = Depends(get_token_info)
+    conversation_id: str,
+    payload: CompletionRequest,
+    idempotency_key: str = Header(...),
+    token_info: dict = Depends(get_token_info),
 ):
-    settings = get_settings()
-    project_id = token_info["project_id"]
+    """Persist intent and return a descriptor; the worker owns all provider I/O."""
     user_id = token_info["user_id"]
-
+    project_id = token_info["project_id"]
     try:
-        await credit.precheck(user_id, project_id)
-    except credit.QuotaExceeded as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
-    except credit.ChatStorageUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        message_text = text_projection_from_user_input_parts(payload.parts)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    conv = await _load_owned_conv(conversation_id, user_id)
-    agent = await _resolve_agent(payload.agent_id, user_id)
-    model_name = (
-        payload.model or (agent or {}).get("model_name") or conv.get("model_name") or settings.chat_default_model
-    )
-    resolved = await _resolve_model(model_name)
-
-    # 활성 경로 로드 + user 메시지 저장(parent=active_leaf, 새 리프)
+    conv = await _load_owned_conv(conversation_id, user_id, project_id)
     try:
-        path = await cs.get_active_path(conversation_id, user_id=user_id)
-        user_msg = await cs.add_message(
-            conversation_id,
-            role="user",
-            content=payload.message,
-            attachments=([a.model_dump() for a in payload.attachments] or None),
-            parent_id=path["active_leaf_id"],
-            set_leaf=True,
+        path = await cs.get_active_path(conversation_id, user_id=user_id, project_id=project_id)
+        features = _features_payload(payload.features)
+        intent = {
+            "endpoint": "completion",
+            "conversation_id": conversation_id,
+            "parent_id": str(path["active_leaf_id"]) if path["active_leaf_id"] is not None else None,
+            "model_id": payload.model_id,
+            "parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+            "features": features,
+            "agent_id": payload.agent_id,
+            "reasoning_effort": payload.reasoning_effort,
+            "skill_ids": payload.skill_ids,
+        }
+        existing = await durable_runs.existing_run_for_intent(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
         )
+        if existing is not None:
+            return existing
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
     except cs.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    input_messages = _model_input(path["messages"], extra_user=payload.message)
-    workspace_instr, memories = await _load_context(conv, user_id)
-    input_messages, temperature, max_tokens_req = _apply_context(
-        agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
-    )
-    # 현재 user 턴에 이미지 첨부를 멀티모달 content 로 주입(vision 모델만).
-    input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
-    max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
-    _sel_tools, _sel_mcps = _tool_selection(agent, payload.tool_ids, payload.mcp_ids)
-
-    gen = _stream_and_persist(
-        conversation_id=conversation_id,
-        project_id=project_id,
-        user_id=user_id,
-        model_name=model_name,
-        resolved=resolved,
-        input_messages=input_messages,
-        start_parent_id=user_msg["id"],
-        max_tokens=max_tokens,
-        temperature=temperature,
-        reasoning_effort=payload.reasoning_effort,
-        selected_tool_ids=_sel_tools,
-        selected_mcp_ids=_sel_mcps,
-    )
-    # SSE 종료 후 백그라운드: 제목 요약 + 사용자 메모리 자동 추출(둘 다 시스템 부담, 실패 무시).
-    # temp/regenerate 에는 붙이지 않는다(temp=휘발성, regenerate=중복 추출 방지).
-    tasks = BackgroundTasks()
-    tasks.add_task(
-        title_summary.generate_title_if_absent,
-        conversation_id=conversation_id,
-        project_id=project_id,
-        user_id=user_id,
-    )
-    tasks.add_task(
-        memory_extract.generate_memory_if_applicable,
-        conversation_id=conversation_id,
-        project_id=project_id,
-        user_id=user_id,
-    )
-    return StreamingResponse(gen, media_type="text/event-stream", background=tasks)
-
-
-@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerate")
-async def regenerate_message(
-    conversation_id: str, message_id: int, payload: RegenerateRequest, token_info: dict = Depends(get_token_info)
-):
-    """대상 답변의 턴-시작 user 아래에 새 assistant 형제를 생성(다른 모델 가능). active_leaf 이동."""
-    settings = get_settings()
-    project_id = token_info["project_id"]
-    user_id = token_info["user_id"]
-
     try:
         await credit.precheck(user_id, project_id)
     except credit.QuotaExceeded as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except credit.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    conv = await _load_owned_conv(conversation_id, user_id)
-
-    # 대상 답변의 턴-시작 user(분기점) 탐색
+    agent = await _resolve_agent(int(payload.agent_id) if payload.agent_id else None, user_id)
+    resolved = await _resolve_model(payload.model_id)
+    feature_routes = await _resolve_feature_routes(payload.features)
+    _require_execution_capability(payload.features, resolved, parts=payload.parts, feature_routes=feature_routes)
+    reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    skill_instructions, skill_snapshot = await _load_skill_snapshot(agent, payload.skill_ids, user_id, project_id)
+    input_messages = _model_input(path["messages"], extra_user=message_text)
+    workspace_instr, memories = await _load_context(conv, user_id, project_id, include_memory=payload.features.memory)
+    skill_instructions = await _load_skill_instructions(agent, payload.skill_ids, user_id, project_id)
+    input_messages, temperature, max_tokens = _apply_context(
+        agent, workspace_instr, memories, input_messages, None, None, skill_instructions=skill_instructions
+    )
+    capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
     try:
-        turn_user = await cs.find_turn_start_user(conversation_id, user_id=user_id, message_id=message_id)
-    except cs.ConversationNotFound as exc:
+        return await durable_runs.create_persistent_run(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
+            model_name=payload.model_id,
+            agent_id=agent.get("id") if agent else None,
+            user_content=message_text,
+            user_parts=[part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+            request_payload={
+                "input_messages": input_messages,
+                "input_parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+                "features": features,
+                "skill_snapshot": skill_snapshot,
+                "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+                "skill_ids": payload.skill_ids,
+            },
+            capability_snapshot=capability_snapshot,
+            pricing_snapshot=pricing_snapshot,
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/regenerate",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def regenerate_message(
+    conversation_id: str,
+    message_id: int,
+    payload: RegenerateRequest,
+    idempotency_key: str = Header(...),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = token_info["project_id"]
+    user_id = token_info["user_id"]
+    conv = await _load_owned_conv(conversation_id, user_id, project_id)
+    try:
+        turn_user = await cs.find_turn_start_user(
+            conversation_id, user_id=user_id, project_id=project_id, message_id=message_id
+        )
+    except (cs.ConversationNotFound, cs.ConversationForbidden) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except cs.ConversationForbidden as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except cs.ChatStorageUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if turn_user is None:
         raise HTTPException(status_code=400, detail="재생성할 사용자 턴을 찾을 수 없습니다")
-
-    agent = await _resolve_agent(payload.agent_id, user_id)
-    model_name = (
-        payload.model or (agent or {}).get("model_name") or conv.get("model_name") or settings.chat_default_model
-    )
-    resolved = await _resolve_model(model_name)
-
+    features = _features_payload(payload.features)
+    intent = {
+        "endpoint": "regenerate",
+        "conversation_id": conversation_id,
+        "parent_id": str(turn_user["id"]),
+        "model_id": payload.model_id,
+        "features": features,
+        "reasoning_effort": payload.reasoning_effort,
+    }
     try:
-        path_msgs = await cs.path_ending_at(conversation_id, user_id=user_id, message_id=turn_user["id"])
-    except cs.ChatStorageUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    input_messages = _model_input(path_msgs)  # 경로 마지막이 turn_user(role=user)
-    workspace_instr, memories = await _load_context(conv, user_id)
-    input_messages, temperature, max_tokens_req = _apply_context(
-        agent, workspace_instr, memories, input_messages, payload.temperature, payload.max_tokens
+        existing = await durable_runs.existing_run_for_intent(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
+        )
+        if existing is not None:
+            return existing
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+    resolved = await _resolve_model(payload.model_id)
+    feature_routes = await _resolve_feature_routes(payload.features)
+    _require_execution_capability(payload.features, resolved, feature_routes=feature_routes)
+    reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    path_messages = await cs.path_ending_at(
+        conversation_id, user_id=user_id, project_id=project_id, message_id=turn_user["id"]
     )
-    max_tokens = min(max_tokens_req or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
-    _sel_tools, _sel_mcps = _tool_selection(agent, payload.tool_ids, payload.mcp_ids)
-
-    gen = _stream_and_persist(
-        conversation_id=conversation_id,
-        project_id=project_id,
-        user_id=user_id,
-        model_name=model_name,
-        resolved=resolved,
-        input_messages=input_messages,
-        start_parent_id=turn_user["id"],
-        max_tokens=max_tokens,
-        temperature=temperature,
-        reasoning_effort=payload.reasoning_effort,
-        selected_tool_ids=_sel_tools,
-        selected_mcp_ids=_sel_mcps,
+    workspace_instr, memories = await _load_context(conv, user_id, project_id, include_memory=payload.features.memory)
+    input_messages, temperature, max_tokens = _apply_context(
+        None, workspace_instr, memories, _model_input(path_messages), None, None, skill_instructions=[]
     )
-    return StreamingResponse(gen, media_type="text/event-stream")
+    capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
+    try:
+        return await durable_runs.create_run(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
+            temp_thread_id=None,
+            model_name=payload.model_id,
+            agent_id=None,
+            user_message_id=turn_user["id"],
+            request_payload={
+                "input_messages": input_messages,
+                "features": features,
+                "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+            },
+            capability_snapshot=capability_snapshot,
+            pricing_snapshot=pricing_snapshot,
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
 
 
-@router.post("/temp-completions")
-async def temp_completion(payload: TempCompletionRequest, token_info: dict = Depends(get_token_info)):
-    """임시 채팅 — conversation 없이 메시지 배열로 스트리밍. 미저장, 과금은 유지(source=web)."""
-    settings = get_settings()
-    project_id = token_info["project_id"]
+@router.post("/temp-completions", status_code=status.HTTP_202_ACCEPTED)
+async def temp_completion(
+    payload: TempCompletionRequest,
+    idempotency_key: str = Header(...),
+    token_info: dict = Depends(get_token_info),
+):
     user_id = token_info["user_id"]
-
+    project_id = token_info["project_id"]
     try:
+        message_text = text_projection_from_user_input_parts(payload.parts)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    features = _features_payload(payload.features)
+    intent = {
+        "endpoint": "temp_completion",
+        "temp_thread_id": payload.temp_thread_id,
+        "model_id": payload.model_id,
+        "parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+        "features": features,
+        "reasoning_effort": payload.reasoning_effort,
+        "skill_ids": payload.skill_ids,
+    }
+    try:
+        existing = await durable_runs.existing_run_for_intent(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=None,
+        )
+        if existing is not None:
+            return existing
         await credit.precheck(user_id, project_id)
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
     except credit.QuotaExceeded as exc:
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except credit.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    model_name = payload.model or settings.chat_default_model
-    resolved = await _resolve_model(model_name)
-
-    input_messages = [{"role": m.role, "content": m.content} for m in payload.messages]
-    input_messages = await _apply_attachments(input_messages, payload.attachments, resolved, token_info)
-    max_tokens = min(payload.max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP)
-    _sel_tools, _sel_mcps = _tool_selection(None, payload.tool_ids, payload.mcp_ids)
-
-    gen = _stream_and_persist(
-        conversation_id=None,
-        project_id=project_id,
-        user_id=user_id,
-        model_name=model_name,
-        resolved=resolved,
-        input_messages=input_messages,
-        start_parent_id=None,
-        max_tokens=max_tokens,
-        temperature=payload.temperature,
-        persist=False,
-        reasoning_effort=payload.reasoning_effort,
-        selected_tool_ids=_sel_tools,
-        selected_mcp_ids=_sel_mcps,
+    resolved = await _resolve_model(payload.model_id)
+    feature_routes = await _resolve_feature_routes(payload.features)
+    _require_execution_capability(payload.features, resolved, parts=payload.parts, feature_routes=feature_routes)
+    reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
+    skill_instructions, skill_snapshot = await _load_skill_snapshot(None, payload.skill_ids, user_id, project_id)
+    input_messages, temperature, max_tokens = _apply_context(
+        None,
+        None,
+        [],
+        [{"role": "user", "content": message_text}],
+        None,
+        None,
+        skill_instructions=skill_instructions,
     )
-    return StreamingResponse(gen, media_type="text/event-stream")
+    try:
+        return await durable_runs.create_temp_run(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            temp_thread_id=payload.temp_thread_id,
+            model_name=payload.model_id,
+            request_payload={
+                "input_messages": input_messages,
+                "input_parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+                "features": features,
+                "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+                "skill_snapshot": skill_snapshot,
+                "skill_ids": payload.skill_ids,
+            },
+            capability_snapshot=capability_snapshot,
+            pricing_snapshot=pricing_snapshot,
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+def _cursor(last_event_id: str | None, after_seq: int | None, run_id: str) -> int:
+    if last_event_id and after_seq is not None:
+        try:
+            cursor_run, cursor_seq = last_event_id.rsplit(":", 1)
+            if cursor_run != run_id or int(cursor_seq) != after_seq:
+                raise ValueError
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="SSE cursors disagree") from exc
+    if last_event_id:
+        try:
+            cursor_run, cursor_seq = last_event_id.rsplit(":", 1)
+            if cursor_run != run_id:
+                raise ValueError
+            return int(cursor_seq)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid Last-Event-ID") from exc
+    return after_seq or 0
+
+
+@router.get("/runs/{run_id}/events")
+async def run_events(
+    run_id: str,
+    after_seq: int | None = Query(default=None, ge=0),
+    last_event_id: str | None = Header(default=None),
+    token_info: dict = Depends(get_token_info),
+):
+    cursor = _cursor(last_event_id, after_seq, run_id)
+    try:
+        pending, terminal = await durable_runs.owned_events(
+            run_id=run_id,
+            project_id=token_info["project_id"],
+            user_id=token_info["user_id"],
+            after_seq=cursor,
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+    async def generate():
+        nonlocal cursor, pending, terminal
+        while True:
+            for event in pending:
+                cursor = event.seq
+                data = event.model_dump(mode="json")
+                yield f"id: {event.event_id}\nevent: {event.type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            if terminal:
+                return
+            yield ": keepalive\n\n"
+            await asyncio.sleep(1)
+            try:
+                pending, terminal = await durable_runs.owned_events(
+                    run_id=run_id,
+                    project_id=token_info["project_id"],
+                    user_id=token_info["user_id"],
+                    after_seq=cursor,
+                )
+            except durable_runs.DurableRunNotFound:
+                return
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/conversations/{conversation_id}/runs")
+async def list_conversation_runs(
+    conversation_id: str,
+    active: bool = Query(default=False),
+    token_info: dict = Depends(get_token_info),
+):
+    await _load_owned_conv(conversation_id, token_info["user_id"], token_info["project_id"])
+    descriptors = await durable_runs.active_run_descriptors(
+        conversation_id=conversation_id,
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+    )
+    return descriptors if active else descriptors
+
+
+@router.get("/temp-threads/{temp_thread_id}")
+async def get_temp_thread(temp_thread_id: str, token_info: dict = Depends(get_token_info)):
+    try:
+        return await durable_runs.owned_temp_thread(
+            thread_id=temp_thread_id,
+            project_id=token_info["project_id"],
+            user_id=token_info["user_id"],
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.get("/runs")
+async def list_active_runs(
+    active: bool = Query(default=True),
+    token_info: dict = Depends(get_token_info),
+):
+    """Server-authoritative active-run snapshot for reload/device reconciliation."""
+
+    if not active:
+        return []
+    return await durable_runs.active_run_descriptors_for_owner(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+    )
+
+
+@router.get("/runs/{run_id}")
+async def get_run(run_id: str, token_info: dict = Depends(get_token_info)):
+    try:
+        return await durable_runs.owned_run_response(
+            run_id=run_id, project_id=token_info["project_id"], user_id=token_info["user_id"]
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str, token_info: dict = Depends(get_token_info)):
+    try:
+        return await durable_runs.request_cancelled(
+            run_id=run_id, project_id=token_info["project_id"], user_id=token_info["user_id"]
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc

@@ -298,4 +298,4 @@ OCCM이 활성화된 클러스터 삭제 시, Kubernetes LoadBalancer 서비스�
 
 ### kubeconfig 존재 확인 (HEAD)
 
-`HEAD /api/k3s/clusters/{id}/kubeconfig` 요청으로 kubeconfig 파일 존재 여부만 확인할 수 있습니다. 이는 파일을 다운로드하지 않고 클러스터 준비 상태를 확인할 때 유용합니다.
+`HEAD /api/v1/k3s/clusters/{id}/kubeconfig` 요청으로 kubeconfig 파일 존재 여부만 확인할 수 있습니다. 이는 파일을 다운로드하지 않고 클러스터 준비 상태를 확인할 때 유용합니다.

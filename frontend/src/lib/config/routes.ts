@@ -44,7 +44,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   buckets: '버킷',
 
   // Chat
-  chat: 'AI 채팅',
+  chat: 'Lumen',
 
   // Network
   network: '네트워크',
@@ -54,6 +54,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   topology: '토폴로지',
   'floating-ips': 'Floating IP',
   ports: '포트',
+  waygate: 'Waygate',
 
   // Library (Union Mount)
   library: '라이브러리',

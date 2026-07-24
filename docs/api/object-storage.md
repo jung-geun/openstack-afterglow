@@ -1,0 +1,356 @@
+---
+title: 오브젝트 스토리지 (Swift)
+parent: API 레퍼런스
+nav_order: 63
+---
+
+# 오브젝트 스토리지 (Object Storage / Swift) API
+
+> 태그: `object-storage`, `object-storage-upload`
+> 기본 경로: `/api/v1/object-storage`
+
+OpenStack Swift(Ceph RGW) 기반의 오브젝트 스토리지를 관리합니다. 컨테이너(버킷)와 오브젝트의 CRUD, 스트리밍 업로드/다운로드, 복사·이동·이름변경, 그리고 소프트 삭제(휴지통) 기능을 제공합니다.
+
+> **활성화 조건:** `config.toml [services] swift = true`
+> 비활성화 상태에서 이 엔드포인트에 접근하면 라우터가 등록되지 않습니다.
+
+---
+
+## 인증 헤더
+
+| 헤더 | 설명 |
+|------|------|
+| `Authorization` | `Bearer <access_token>` (로그인 응답의 access JWT) |
+| `X-Project-Id` | (선택) 프로젝트 UUID — 생략 시 토큰의 프로젝트로 처리, 다른 값이면 rescope |
+
+> 예외: `GET .../download` 는 헤더 대신 단발 다운로드 토큰(`?token=`)으로 인증합니다(아래 [다운로드 토큰](#다운로드-토큰-흐름) 참조).
+
+---
+
+## 개요
+
+### 테넌트 격리와 소유권 모델
+
+오브젝트 스토리지의 접근 제어는 **Swift account 모델이 1차 방어선**입니다. 각 요청은 Keystone 프로젝트에 스코프된 연결(`get_os_conn`)로 처리되며, Swift/RGW 계정은 프로젝트 단위로 분리되어 있어 다른 프로젝트의 컨테이너에 접근할 수 없습니다. 즉 앱 DB 소유권 검증(`project_id == token_info["project_id"]`)을 별도로 수행하지 않고, Keystone 스코핑이 격리를 보장합니다.
+
+방어 심화(defense-in-depth)를 위해, 신규 컨테이너 생성 시 호출자의 프로젝트 ID를 `X-Container-Meta-Owner-Project-Id` 메타데이터로 부착합니다. 실제 RBAC는 Swift account 모델이 담당하며, 이 owner 메타데이터는 admin/operator 도구가 컨테이너 소유자를 식별·검증하는 보조 수단입니다. (근거: `docs/security.md`, 아키텍처 문서)
+
+### 소프트 삭제(휴지통)
+
+컨테이너와 오브젝트 삭제는 기본적으로 **소프트 삭제**입니다.
+
+- **컨테이너 삭제**: 기본값(`permanent=false`)은 소프트 삭제로, Redis sorted-set과 컨테이너 메타데이터에 삭제 시각을 기록합니다. 설정된 보관 기간(`os_trash_retention_days`, 기본 30일) 동안 복구할 수 있습니다. 소프트 삭제 대기 중인 이름과 동일한 컨테이너를 재생성하면 `409`가 반환됩니다.
+- **오브젝트 삭제**: 기본값은 `{container}-trash` 버킷으로 이동하며, 보관 기간 내 복구할 수 있습니다.
+- `permanent=true` 지정 시 즉시 영구 삭제(복구 불가)합니다.
+
+### 오브젝트 이름(`object_name:path`)
+
+오브젝트 이름은 `/`를 포함할 수 있으므로(가상 디렉토리), 개별 오브젝트 경로 파라미터는 FastAPI `:path` 타입을 사용합니다. 서버는 업로드 시 오브젝트 키를 정규화합니다: ASCII 제어문자/DEL/NUL 제거, path traversal segment(`.`, `..`) 제거, leading/trailing/연속 slash 정리, 최대 1024자. 정규화 후 유효한 이름이 없으면 `unnamed`으로 대체됩니다.
+
+---
+
+## 엔드포인트 목록
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/object-storage/account` | 계정 사용량 메타데이터 |
+| `GET` | `/api/v1/object-storage` | 컨테이너 목록 |
+| `POST` | `/api/v1/object-storage` | 컨테이너 생성 |
+| `GET` | `/api/v1/object-storage/{container}` | 컨테이너 메타데이터 |
+| `DELETE` | `/api/v1/object-storage/{container}` | 컨테이너 삭제(소프트/영구) |
+| `GET` | `/api/v1/object-storage/{container}/objects` | 오브젝트 목록 |
+| `POST` | `/api/v1/object-storage/{container}/objects` | 오브젝트 업로드(multipart) |
+| `PUT` | `/api/v1/object-storage/{container}/objects/{object_name}` | 오브젝트 업로드(streaming) |
+| `POST` | `/api/v1/object-storage/{container}/upload` | 백엔드 프록시 업로드(quarantine 경유) |
+| `POST` | `/api/v1/object-storage/{container}/objects/{object_name}/download-token` | 단발 다운로드 토큰 발급 |
+| `GET` | `/api/v1/object-storage/{container}/objects/{object_name}/download` | 오브젝트 다운로드 |
+| `GET` | `/api/v1/object-storage/{container}/objects/{object_name}/metadata` | 오브젝트 메타데이터 |
+| `GET` | `/api/v1/object-storage/{container}/objects/{object_name}/preview` | 오브젝트 인라인 미리보기 |
+| `DELETE` | `/api/v1/object-storage/{container}/objects/{object_name}` | 오브젝트 삭제(소프트/영구) |
+| `POST` | `/api/v1/object-storage/{container}/objects/bulk-delete` | 오브젝트 일괄 삭제 |
+| `POST` | `/api/v1/object-storage/{container}/objects/directory` | 가상 디렉토리 생성 |
+| `POST` | `/api/v1/object-storage/{container}/objects/copy` | 오브젝트 복사 |
+| `POST` | `/api/v1/object-storage/{container}/objects/move` | 오브젝트 이동 |
+| `POST` | `/api/v1/object-storage/{container}/objects/rename` | 오브젝트 이름 변경 |
+| `GET` | `/api/v1/object-storage/{container}/trash` | 휴지통 오브젝트 목록 |
+| `POST` | `/api/v1/object-storage/{container}/trash/restore` | 휴지통 오브젝트 복구 |
+| `DELETE` | `/api/v1/object-storage/{container}/trash/{trash_key}` | 휴지통 오브젝트 영구 삭제 |
+| `GET` | `/api/v1/object-storage/trash/containers` | 소프트 삭제 컨테이너 목록 |
+| `POST` | `/api/v1/object-storage/trash/containers/{container}/restore` | 컨테이너 복구 |
+| `DELETE` | `/api/v1/object-storage/trash/containers/{container}` | 컨테이너 영구 삭제 |
+
+---
+
+## 1. 계정 / 컨테이너
+
+### GET /api/v1/object-storage/account
+
+현재 계정의 Swift 오브젝트 스토리지 사용량 메타데이터(컨테이너 수, 총 오브젝트 수, 총 바이트 등)를 반환합니다.
+
+### GET /api/v1/object-storage
+
+컨테이너(버킷) 목록을 반환합니다.
+
+| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `all_projects` | query | boolean | `false` | **admin 전용.** 모든 프로젝트의 버킷을 병렬 집계 |
+| `include_quarantine` | query | boolean | `false` | **admin 전용.** `*-quarantine` 버킷 포함 |
+| `include_trash` | query | boolean | `false` | **admin 전용.** `*-trash` 버킷 포함 |
+| `include_deleted` | query | boolean | `false` | 소프트 삭제 대기 버킷을 `is_deleted`/`deleted_at` 필드와 함께 포함(모든 사용자) |
+
+> `all_projects`/`include_quarantine`/`include_trash`는 시스템 admin이 아니면 `403`을 반환합니다. `include_deleted`는 인증된 모든 사용자가 자신의 삭제 대기 버킷을 조회할 때 사용합니다.
+
+### POST /api/v1/object-storage
+
+컨테이너를 생성합니다.
+
+**요청 본문**
+
+```json
+{ "name": "my-bucket" }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `name` | string | 예 | 버킷 이름 (1–255자) |
+
+- 이름 검증: `validate_bucket_name`이 시스템 예약어/S3 형식 위반(점·하이픈 시작 등)을 차단합니다. 위반 시 `400` + 한국어 사유.
+- 소프트 삭제 대기 중인 동명 버킷이 있으면 `409`(휴지통에서 복구하거나 영구 삭제 후 재생성).
+- 생성 시 `X-Container-Meta-Owner-Project-Id` owner 메타데이터를 부착합니다.
+
+**응답**: `201 Created`
+
+### GET /api/v1/object-storage/{container}
+
+컨테이너 메타데이터(오브젝트 수, 총 바이트 등)를 반환합니다. 없으면 `404`.
+
+### DELETE /api/v1/object-storage/{container}
+
+컨테이너를 삭제합니다.
+
+| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `permanent` | query | boolean | `false` | `true` 시 즉시 영구 삭제. 기본값은 보관 기간(기본 30일) 동안 복구 가능한 소프트 삭제 |
+
+**응답**: `204 No Content`
+
+---
+
+## 2. 오브젝트 목록 / 업로드
+
+### GET /api/v1/object-storage/{container}/objects
+
+컨테이너 내 오브젝트 목록을 반환합니다.
+
+| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `prefix` | query | string | `""` | 조회할 경로 prefix |
+| `delimiter` | query | string | `"/"` | `/`(기본): 현재 prefix의 직속 파일·서브디렉토리만. `""`: 전체 오브젝트를 flat하게 반환 |
+
+Afterglow는 세 가지 업로드 방식을 제공합니다. 용도에 맞게 선택합니다.
+
+### POST /api/v1/object-storage/{container}/objects — multipart 업로드
+
+`multipart/form-data`로 파일을 수신해 Swift에 스트리밍 업로드합니다. 1 GiB 초과 시 Swift SLO가 자동 적용됩니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `file` | form-data | file | 예 | 업로드할 파일 |
+
+**응답**: `201 Created`
+
+### PUT /api/v1/object-storage/{container}/objects/{object_name} — streaming 업로드
+
+디스크 spool 없이 raw body를 Swift에 직접 forward합니다.
+
+| 헤더 | 필수 | 설명 |
+|------|------|------|
+| `Content-Length` | 예 | 없으면 `411`. 값이 잘못되면 `400` |
+| `Content-Type` | 아니오 | 기본값 `application/octet-stream` |
+
+- `Content-Length`가 `app_max_upload_gb`(설정값, 0이면 무제한)를 초과하면 `413`.
+- `Content-Length > 1 GiB`이면 Swift SLO 자동 적용.
+
+**응답**: `201 Created`
+
+### POST /api/v1/object-storage/{container}/upload — 백엔드 프록시 업로드
+
+브라우저 → RGW 직접 PUT의 CORS 차단을 회피하기 위한 프록시 흐름입니다. 클라이언트가 backend로 form 업로드하면, 백엔드가 `{container}-quarantine` 버킷으로 스트리밍 업로드(boto3, 5 GB+ 자동 multipart) → 보안 스캔(placeholder) → target 버킷으로 server-side copy → quarantine 원본 삭제를 수행합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `file` | form-data | file | 예 | 업로드할 파일 |
+| `prefix` | form-data | string | 아니오 | 오브젝트 키 앞에 붙일 prefix |
+
+- 파일 이름이 비었거나 정규화 후 `unnamed`이면 `400`.
+- 크기가 `app_max_upload_gb`(기본 10 GB)를 초과하면 `413`.
+- 클라이언트 disconnect 감지 시 진행 중인 multipart 업로드를 abort하고 quarantine을 정리합니다(`499`).
+- 컨테이너 검증 실패 시 `404`.
+
+---
+
+## 다운로드 토큰 흐름
+
+브라우저 네이티브 다운로더는 커스텀 인증 헤더를 붙일 수 없으므로, 단발 토큰을 먼저 발급받아 URL 쿼리로 전달합니다.
+
+### POST /api/v1/object-storage/{container}/objects/{object_name}/download-token
+
+단발 다운로드 토큰을 발급합니다(TTL 60초, 1회 사용). 발급된 토큰은 Redis에 저장되며, 요청한 `{container}`/`{object_name}`과 일치할 때만 유효합니다.
+
+**응답 (200 OK)**
+
+```json
+{
+  "url": "/api/v1/object-storage/my-bucket/objects/dir%2Ffile.txt/download?token=...",
+  "expires_in": 60
+}
+```
+
+### GET /api/v1/object-storage/{container}/objects/{object_name}/download
+
+오브젝트를 스트리밍 다운로드합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `token` | query | string | 예 | 위에서 발급받은 단발 다운로드 토큰 |
+
+- 토큰은 Redis에서 `getdel`로 원자적 1회 소비되며, 요청 리소스와 일치하지 않으면 `403`.
+- 응답 헤더에 RFC 5987 형식의 `Content-Disposition: attachment`(한글 파일명 처리)를 포함합니다.
+
+> 보안: 다운로드 토큰 비교는 `hmac.compare_digest` 기반 타이밍 안전 비교와 Redis 원자적 소비로 보호됩니다.
+
+---
+
+## 3. 개별 오브젝트
+
+### GET /api/v1/object-storage/{container}/objects/{object_name}/metadata
+
+오브젝트 상세 메타데이터를 반환합니다. 없으면 `404`.
+
+### GET /api/v1/object-storage/{container}/objects/{object_name}/preview
+
+오브젝트를 인라인으로 미리보기합니다(`Content-Disposition: inline`). 이미지·텍스트 등 브라우저 내장 뷰어용. 없으면 `404`.
+
+### DELETE /api/v1/object-storage/{container}/objects/{object_name}
+
+오브젝트를 삭제합니다.
+
+| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `permanent` | query | boolean | `false` | `true` 시 즉시 영구 삭제. 기본값은 `{container}-trash`로 이동 |
+
+**응답**: `204 No Content`
+
+---
+
+## 4. 일괄 삭제 / 디렉토리 / 복사·이동·이름변경
+
+### POST /api/v1/object-storage/{container}/objects/bulk-delete
+
+오브젝트를 일괄 삭제합니다.
+
+| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `permanent` | query | boolean | `false` | `true` 시 즉시 영구 삭제. 기본값은 휴지통 이동 |
+
+**요청 본문**
+
+```json
+{ "objects": ["a/b.txt", "a/c/"], "recursive": false }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `objects` | array[string] | 예 | 삭제 대상 (1–1000개) |
+| `recursive` | boolean | 아니오 | `true`이면 `/`로 끝나는 디렉토리 하위 전체 삭제 |
+
+**응답 (200 OK)**: `{ "deleted": [...], "failed": [{"name": ..., "error": ...}] }`
+
+### POST /api/v1/object-storage/{container}/objects/directory
+
+가상 디렉토리를 생성합니다.
+
+```json
+{ "path": "folder/subfolder/" }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `path` | string | 예 | 디렉토리 경로 (1–1024자) |
+
+**응답**: `201 Created`
+
+### POST /api/v1/object-storage/{container}/objects/copy
+
+오브젝트를 복사합니다.
+
+```json
+{ "source": "a/b.txt", "destination": "a/b-copy.txt", "dest_container": null }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `source` | string | 예 | 원본 오브젝트 키 |
+| `destination` | string | 예 | 대상 오브젝트 키 |
+| `dest_container` | string\|null | 아니오 | 대상 컨테이너. 생략 시 동일 컨테이너 |
+
+### POST /api/v1/object-storage/{container}/objects/move
+
+오브젝트를 이동합니다. `destination`이 `/`로 끝나면 원본 파일명을 자동으로 붙입니다(예: `source="a/b.txt"`, `destination="folder/"` → `folder/b.txt`).
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `source` | string | 예 | 원본 오브젝트 키 |
+| `destination` | string | 예 | 대상 오브젝트 키 또는 디렉토리 경로 |
+| `dest_container` | string\|null | 아니오 | 대상 컨테이너. 생략 시 동일 컨테이너 |
+
+### POST /api/v1/object-storage/{container}/objects/rename
+
+오브젝트 이름을 변경합니다.
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `source` | string | 예 | 원본 오브젝트 키 |
+| `new_name` | string | 예 | 새 이름 |
+
+---
+
+## 5. 휴지통
+
+### 오브젝트 단위
+
+#### GET /api/v1/object-storage/{container}/trash
+
+버킷 휴지통(`{container}-trash`)의 오브젝트 목록을 반환합니다. 각 항목에 `trash_key`, `original_name`, `deleted_at`(epoch seconds)를 포함합니다.
+
+#### POST /api/v1/object-storage/{container}/trash/restore
+
+휴지통 오브젝트를 원본 버킷으로 복구합니다.
+
+```json
+{ "trash_key": "{epoch}/{uuid8}/{original_name}" }
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `trash_key` | string | 예 | 휴지통 목록에서 얻은 키. 형식 오류 시 `400` |
+
+#### DELETE /api/v1/object-storage/{container}/trash/{trash_key}
+
+휴지통 오브젝트를 영구 삭제합니다(복구 불가). **응답**: `204 No Content`
+
+### 컨테이너 단위
+
+#### GET /api/v1/object-storage/trash/containers
+
+소프트 삭제 대기 중인 버킷 목록을 반환합니다(Redis sorted-set 기반). 각 항목에 `is_deleted`/`deleted_at`를 포함합니다.
+
+#### POST /api/v1/object-storage/trash/containers/{container}/restore
+
+소프트 삭제된 버킷을 복구합니다(다시 목록에 노출). 삭제 대기 상태가 아니면 `404`.
+
+**응답 (200 OK)**: `{ "name": "...", "restored": true }`
+
+#### DELETE /api/v1/object-storage/trash/containers/{container}
+
+소프트 삭제된 버킷을 내용물까지 영구 삭제합니다(복구 불가). 삭제 대기 상태가 아니면 `404`. **응답**: `204 No Content`

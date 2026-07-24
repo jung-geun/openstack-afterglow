@@ -10,6 +10,7 @@
 	import AdminUsersTable from '$lib/components/admin/users/AdminUsersTable.svelte';
 	import AdminUserCreateModal from '$lib/components/admin/users/AdminUserCreateModal.svelte';
 	import AdminUserEditModal from '$lib/components/admin/users/AdminUserEditModal.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	let allUsers = $state<User[]>([]);
 	let loading = $state(true);
@@ -192,6 +193,7 @@
 		},
 		{
 			storageKey: 'admin-users',
+			invokeOnMount: false,
 			defaultActive: true,
 			defaultInterval: 60,
 			intervalOptions: [30, 60]
@@ -208,8 +210,10 @@
 <AdminUserEditModal bind:user={editUser} onUpdate={update} />
 
 <div class="p-4 md:p-6 max-w-7xl mx-auto">
+	<div data-tour="admin-identity-header">
 	<PageHeader breadcrumb="IDENTITY / USERS" title="사용자">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-identity" compactOnMobile />
 			<button
 				onclick={() => {
 					showCreate = true;
@@ -229,12 +233,14 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
 		<!-- 통계 카드 + 최근 변경 로그 카드 -->
-		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5" data-tour="admin-identity-overview">
+			<span class="sr-only" data-tour="admin-identity-overview-ready">사용자 현황 준비됨</span>
 			<!-- 집계 통계 -->
 			<div class="md:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-4">
 				<p class="text-xs font-semibold text-gray-400 mb-3">사용자 현황</p>
@@ -278,7 +284,7 @@
 		</div>
 
 		<!-- 검색 · 정렬 · 필터 바 -->
-		<div class="flex flex-wrap gap-2 mb-3">
+		<div class="flex flex-wrap gap-2 mb-3" data-tour="admin-identity-filters">
 			<input
 				bind:value={search}
 				type="text"
@@ -288,6 +294,7 @@
 			<select
 				bind:value={filterStatus}
 				class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none"
+				data-tour="admin-identity-status-filter"
 			>
 				<option value="all">전체 상태</option>
 				<option value="enabled">활성만</option>
@@ -308,10 +315,11 @@
 			>{sortDir === 'asc' ? '오름차순' : '내림차순'}</button>
 		</div>
 
-		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5" data-tour="admin-identity-list">
 			{#if pagedUsers.length === 0}
-				<p class="text-xs text-gray-600 text-center py-6">검색 결과가 없습니다.</p>
+				<p class="text-xs text-gray-600 text-center py-6" data-tour="admin-identity-list-ready">검색 결과가 없습니다.</p>
 			{:else}
+				<div data-tour="admin-identity-list-ready">
 				<AdminUsersTable
 					users={pagedUsers}
 					{refreshing}
@@ -328,6 +336,7 @@
 						currentPage = Math.min(totalPages, currentPage + 1);
 					}}
 				/>
+				</div>
 			{/if}
 		</div>
 	{/if}

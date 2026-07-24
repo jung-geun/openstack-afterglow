@@ -305,4 +305,4 @@ When scaling down worker nodes, Kubernetes node objects are deleted before the V
 
 ### Checking kubeconfig Existence (HEAD)
 
-You can use `HEAD /api/k3s/clusters/{id}/kubeconfig` to check whether a kubeconfig file exists without downloading it. This is useful for verifying cluster readiness without transferring the full file.
+You can use `HEAD /api/v1/k3s/clusters/{id}/kubeconfig` to check whether a kubeconfig file exists without downloading it. This is useful for verifying cluster readiness without transferring the full file.

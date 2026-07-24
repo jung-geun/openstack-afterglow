@@ -22,6 +22,7 @@ Afterglow는 OpenStack 클라우드 환경을 위한 오픈소스 웹 대시보�
 | [시작하기](deployment.md) | Docker Compose / Kubernetes 배포 |
 | [kolla-ansible 배포](deployment.md#kolla-ansible-배포) | OpenStack 환경 내 단일 플레이북 배포 |
 | [k3s 클러스터](k3s.md) | k3s 프로비저닝 및 노드 관리 |
+| [유니온 레이어 API](api/union.md) | Content-addressable OverlayFS 공유 라이브러리 레이어 (seal/fork/build) |
 | [Drover 동작 명세](drover-workflow.md) | Drover 클러스터 생성의 계획 대비 현재 동작과 실제 프로비저닝 워크플로우 |
 | [아키텍처](architecture.md) | 시스템 설계 및 플로우 |
 | [API 레퍼런스](api-reference.md) | REST API 전체 명세 |
@@ -80,8 +81,8 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — 모든 핵심 서비스를 �
   - volume transfer 전 VM 자동 detach + rollback (A4)
   - NFS export root_squash / sec_flavor 보안 강제 (A5)
 - **모니터링 통합**
-  - Grafana 임베드 JWT 발급 엔드포인트 (`POST /api/grafana/token`)
-  - Prometheus http_sd 타깃 엔드포인트 (`GET /api/sd/prometheus/targets`) — VM 고정 IP 기반 노드 익스포터 자동 노출
+  - Grafana 임베드 지원 엔드포인트 (`GET /api/v1/grafana/dashboards` — 대시보드 UID·기본 URL 반환)
+  - Prometheus http_sd 타깃 엔드포인트 (`GET /api/v1/sd/prometheus/targets`) — VM 고정 IP 기반 노드 익스포터 자동 노출
   - 신규 프로젝트/인스턴스 생성 시 Monitoring ingress SG 자동 연결
 - **Octavia Ingress**: per-project 관리 사용자 + App Credential 인증 모델, k8s 클러스터별 격리
 - **계정 설정 페이지** (`/dashboard/account`) 신설 — 프로필, 비밀번호, 테마, 프로젝트, 키페어 통합 관리

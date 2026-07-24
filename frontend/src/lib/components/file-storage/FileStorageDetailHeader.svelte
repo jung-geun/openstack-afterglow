@@ -5,9 +5,10 @@
 	interface Props {
 		onClose?: () => void;
 		ar: { active: boolean; intervalSeconds: number; intervalOptions: number[] };
+		onManualRefresh: () => Promise<void>;
 	}
 
-	let { onClose, ar }: Props = $props();
+	let { onClose, ar, onManualRefresh }: Props = $props();
 	const s = useFileStorageDetailController();
 </script>
 
@@ -18,6 +19,6 @@
 		bind:intervalSeconds={ar.intervalSeconds}
 		intervalOptions={ar.intervalOptions}
 		refreshing={s.loading}
-		onManualRefresh={() => s.fetchAll()}
+		onManualRefresh={onManualRefresh}
 	/>
 </div>

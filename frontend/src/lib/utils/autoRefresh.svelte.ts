@@ -13,6 +13,7 @@ export interface AutoRefreshController {
 	intervalSeconds: number;
 	readonly intervalOptions: number[];
 	setBoost(seconds: number | null): void;
+	refresh(): Promise<void>;
 }
 
 export function createAutoRefresh(
@@ -37,12 +38,48 @@ export function createAutoRefresh(
 	let _boost = $state<number | null>(null);
 	function setBoost(seconds: number | null) { _boost = seconds; }
 
-	// 이전 라운드가 끝나기 전 다음 라운드가 겹쳐 실행되지 않도록 in-flight 가드
+	// 자동 라운드는 겹치지 않고, 실행 중 요청된 강제 새로고침은 한 번만 후행 실행한다.
 	let _running = false;
-	async function tick() {
-		if (_running) return;
+	let _forceQueued = false;
+	let _queuedForce: {
+		promise: Promise<void>;
+		resolve: () => void;
+		reject: (reason: unknown) => void;
+	} | null = null;
+
+	async function tick(force = false): Promise<void> {
+		if (_running) {
+			if (!force) return;
+			_forceQueued = true;
+			if (!_queuedForce) {
+				let resolve!: () => void;
+				let reject!: (reason: unknown) => void;
+				const promise = new Promise<void>((done, fail) => {
+					resolve = done;
+					reject = fail;
+				});
+				_queuedForce = { promise, resolve, reject };
+			}
+			return _queuedForce.promise;
+		}
+
 		_running = true;
-		try { await fn(); } finally { _running = false; }
+		try {
+			await fn();
+		} finally {
+			_running = false;
+			if (_forceQueued && _queuedForce) {
+				_forceQueued = false;
+				const queued = _queuedForce;
+				_queuedForce = null;
+				try {
+					await tick();
+					queued.resolve();
+				} catch (error) {
+					queued.reject(error);
+				}
+			}
+		}
 	}
 
 	// Restore saved preferences from localStorage (client-only via $effect)
@@ -113,5 +150,6 @@ export function createAutoRefresh(
 		set intervalSeconds(v: number) { state.intervalSeconds = v; },
 		get intervalOptions() { return state.intervalOptions; },
 		setBoost,
+		refresh: () => tick(true),
 	};
 }

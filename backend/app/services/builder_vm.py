@@ -198,12 +198,19 @@ async def create_ephemeral_vm(svc_conn) -> EphemeralBuilderVM:
     """
     settings = get_settings()
 
-    image_id = settings.builder_image_id
-    flavor_id = settings.builder_flavor_id
-    network_id = settings.builder_network_id or settings.default_network_id
+    from app.services import resource_policy_store
+    from app.services.resource_policies import ResourcePolicyValidationError
 
-    if not image_id or not flavor_id:
-        raise RuntimeError("Ephemeral Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)")
+    try:
+        policies = await resource_policy_store.resolve_policies(
+            conn=svc_conn,
+            keys=("builder.image", "builder.flavor", "builder.network"),
+        )
+    except (ResourcePolicyValidationError, resource_policy_store.ResourcePolicyStorageUnavailable) as exc:
+        raise RuntimeError("임시 빌더 리소스 정책이 유효하지 않습니다") from exc
+    image_id = policies["builder.image"]
+    flavor_id = policies["builder.flavor"]
+    network_id = policies["builder.network"]
 
     keypair_name = await _ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
     userdata_b64 = base64.b64encode(_EPHEMERAL_CLOUD_INIT.encode()).decode()

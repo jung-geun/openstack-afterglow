@@ -6,6 +6,10 @@ DB 없이 provider_store 서비스 함수를 monkeypatch 하여 라우터 계약
 - 예외 → HTTP 상태 매핑(404/400/503)
 """
 
+from decimal import Decimal
+
+import pytest
+
 from app.services.chat import provider_store as ps
 
 _PROVIDERS_URL = "/api/v1/chat/admin/providers"
@@ -82,6 +86,14 @@ class TestProviderCrud:
         monkeypatch.setattr(ps, "update_provider", fake_update)
         resp = await admin_client.patch(f"{_PROVIDERS_URL}/999", json={"is_active": False})
         assert resp.status_code == 404
+
+    async def test_update_active_executor_route_is_conflict(self, admin_client, monkeypatch):
+        async def fake_update(provider_id, patch):
+            raise ps.ActiveRunConfigurationConflict("run active")
+
+        monkeypatch.setattr(ps, "update_provider", fake_update)
+        resp = await admin_client.patch(f"{_PROVIDERS_URL}/1", json={"is_active": False})
+        assert resp.status_code == 409
 
     async def test_create_validation_400(self, admin_client, monkeypatch):
         async def fake_create(**kwargs):
@@ -165,3 +177,106 @@ class TestTitleModel:
         monkeypatch.setattr(ps, "set_title_model", fake_set)
         resp = await admin_client.put(self._URL, json={"model_id": 999})
         assert resp.status_code == 404
+
+
+class TestModelPricingContract:
+    async def test_create_uses_decimal_per_million_price_pair(self, admin_client, monkeypatch):
+        captured = {}
+
+        async def fake_create(**kwargs):
+            captured.update(kwargs)
+            return {
+                "id": 5,
+                "provider_id": kwargs["provider_id"],
+                "model_name": kwargs["model_name"],
+                "display_name": None,
+                "is_active": True,
+                "input_price_per_million": kwargs["input_price_per_million"],
+                "output_price_per_million": kwargs["output_price_per_million"],
+                "price_source": "manual",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+
+        monkeypatch.setattr(ps, "create_model", fake_create)
+        resp = await admin_client.post(
+            _MODELS_URL,
+            json={
+                "provider_id": 1,
+                "model_name": "gpt-4o",
+                "input_price_per_million": "2",
+                "output_price_per_million": "8",
+            },
+        )
+
+        assert resp.status_code == 201
+        assert str(captured["input_price_per_million"]) == "2"
+        assert str(captured["output_price_per_million"]) == "8"
+        assert resp.json()["input_price_per_million"] == "2"
+        assert resp.json()["output_price_per_million"] == "8"
+        assert "input_price" not in resp.json()
+        assert "output_price" not in resp.json()
+
+    async def test_manual_price_requires_complete_pair(self, admin_client):
+        resp = await admin_client.post(
+            _MODELS_URL,
+            json={"provider_id": 1, "model_name": "gpt-4o", "input_price_per_million": "2"},
+        )
+        assert resp.status_code == 422
+
+    async def test_update_rejects_legacy_price_alias(self, admin_client):
+        resp = await admin_client.patch(f"{_MODELS_URL}/5", json={"input_price": "0.000002"})
+        assert resp.status_code == 422
+
+    async def test_update_accepts_explicit_free_price_pair(self, admin_client, monkeypatch):
+        captured = {}
+
+        async def fake_update(model_id, patch):
+            captured.update(patch)
+            return {
+                "id": model_id,
+                "provider_id": 1,
+                "model_name": "gpt-4o",
+                "display_name": None,
+                "is_active": True,
+                "input_price_per_million": patch["input_price_per_million"],
+                "output_price_per_million": patch["output_price_per_million"],
+                "price_source": "manual",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+
+        monkeypatch.setattr(ps, "update_model", fake_update)
+        resp = await admin_client.patch(
+            f"{_MODELS_URL}/5",
+            json={"input_price_per_million": "0", "output_price_per_million": "0"},
+        )
+
+        assert resp.status_code == 200
+        assert str(captured["input_price_per_million"]) == "0"
+        assert str(captured["output_price_per_million"]) == "0"
+        assert resp.json()["price_source"] == "manual"
+
+    async def test_precision_underflow_is_422_before_store(self, admin_client):
+        resp = await admin_client.post(
+            _MODELS_URL,
+            json={
+                "provider_id": 1,
+                "model_name": "tiny",
+                "input_price_per_million": "0.00004",
+                "output_price_per_million": "0.00004",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_store_conversion_preserves_or_rejects_precision(self):
+        assert ps._per_token_price(Decimal("2"), "price") == Decimal("0.0000020000")
+        with pytest.raises(ps.ProviderValidationError):
+            ps._per_token_price(Decimal("0.00004"), "price")
+
+    async def test_update_rejects_mixed_null_price_pair(self, admin_client):
+        response = await admin_client.patch(
+            f"{_MODELS_URL}/5",
+            json={"input_price_per_million": None, "output_price_per_million": "8"},
+        )
+        assert response.status_code == 422

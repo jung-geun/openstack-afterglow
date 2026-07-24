@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from app.config import get_settings
-from app.services import manila, neutron, nova
+from app.services import cloudinit, manila, neutron, nova
 from app.services.builder_vm import _ensure_ephemeral_keypair
 from app.services.cloud_init_builder import render_user_data
 from app.services.k3s_cloudinit import _validate_ssh_public_key
@@ -39,6 +39,7 @@ from app.services.recipe_blocks import (
     squashfs_system_apt_layer,
     squashfs_uv_layer,
 )
+from app.services.ssh_access import normalize_github_username
 
 _logger = logging.getLogger(__name__)
 
@@ -512,6 +513,7 @@ def render_layer_consume_user_data(
     mounts: list[tuple[str, str]],
     ssh_public_key: str | None = None,
     ssh_username: str | None = None,
+    github_username: str | None = None,
 ) -> str:
     """소비 VM cloud-init YAML 문자열을 반환한다 (per-layer-share 방식).
 
@@ -548,6 +550,9 @@ def render_layer_consume_user_data(
             raise ValueError(f"유효하지 않은 SSH 사용자명: {ssh_username!r}")
         if ssh_username == "root":
             raise ValueError("root SSH 사용자는 허용되지 않습니다")
+    github_username = normalize_github_username(github_username)
+    if github_username and (ssh_public_key or ssh_username):
+        raise ValueError("github_username은 ssh_public_key 또는 ssh_username과 함께 사용할 수 없습니다")
 
     activate_b64 = base64.b64encode(_LAYER_ACTIVATE_SH.encode()).decode()
 
@@ -625,6 +630,14 @@ def render_layer_consume_user_data(
         "packages:",
         *(f"  - {pkg}" for pkg in LAYER_CONSUME_IMAGE_PACKAGES),
         *ssh_lines,
+        *(
+            [
+                "ssh_import_id:",
+                f"  - {json.dumps(f'gh:{github_username}')}",
+            ]
+            if github_username
+            else []
+        ),
         "write_files:",
         "  - path: /usr/local/bin/layer-activate.sh",
         "    encoding: b64",
@@ -1101,6 +1114,8 @@ async def run_layer_consume(
     network_id: str | None = None,
     ssh_public_key: str | None = None,
     ssh_username: str | None = None,
+    github_username: str | None = None,
+    custom_userdata: str | None = None,
     *,
     compute_conn=None,
     share_conn=None,
@@ -1277,8 +1292,12 @@ async def run_layer_consume(
             mounts_child_first,
             ssh_public_key=ssh_public_key,
             ssh_username=ssh_username,
+            github_username=github_username,
         )
-        user_data_b64 = base64.b64encode(user_data_str.encode()).decode()
+        user_data_b64 = cloudinit.compose_userdata(
+            base64.b64encode(user_data_str.encode()).decode(),
+            custom_userdata,
+        )
 
         server = await asyncio.to_thread(
             owned_compute_conn.compute.create_server,

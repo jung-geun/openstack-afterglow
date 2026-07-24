@@ -26,7 +26,20 @@ const TUTORIAL_ALLOWED_PATHS = [
 	'/dashboard',
 ] as const;
 
-const ADMIN_ALLOWED_PATHS = ['/', '/login', '/admin'] as const;
+export const ADMIN_ALLOWED_PATHS = [
+	'/',
+	'/login',
+	'/admin',
+	'/admin/instances',
+	'/admin/volumes',
+	'/admin/libraries',
+	'/admin/topology',
+	'/admin/containers',
+	'/admin/secrets',
+	'/admin/monitoring',
+	'/admin/services',
+	'/admin/users',
+] as const;
 
 const PROFILE_ALLOWED_PATHS: Record<MockupProfileId, readonly string[]> = {
 	on: TUTORIAL_ALLOWED_PATHS,
@@ -56,6 +69,8 @@ export const MOCKUP_SERVICE_OVERRIDES = {
 	trove: true,
 	swift: true,
 	barbican: true,
+	waygate: false,
+	chat: false,
 } as const;
 
 export function isMockupProfileId(value: unknown): value is MockupProfileId {

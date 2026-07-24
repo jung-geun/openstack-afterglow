@@ -57,6 +57,39 @@ class TestDiscover:
         assert "gpt-4o" in out["models"]
         assert "gpt-4o-mini" in out["models"]
 
+    async def test_perplexity_uses_its_default_models_endpoint(self, monkeypatch):
+        import httpx
+
+        seen = {}
+
+        class _Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"data": [{"id": "sonar-pro"}]}
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url, *, headers):
+                seen.update(url=url, headers=headers)
+                return _Response()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: _Client())
+
+        out = await model_discovery._fetch_openai_compatible("perplexity", None, "pplx-key")
+
+        assert out == ["sonar-pro"]
+        assert seen == {
+            "url": "https://api.perplexity.ai/models",
+            "headers": {"Authorization": "Bearer pplx-key"},
+        }
+
     async def test_non_openai_uses_litellm(self, monkeypatch):
         async def fake_get(pid):
             return {"provider_type": "anthropic", "api_base": None, "api_key": "sk"}

@@ -28,7 +28,8 @@ describe('beta-gated feature surfaces', () => {
 
 	it('keeps command palette navigation filtered by beta preferences', () => {
 		const source = readSource('src/lib/components/CmdPalette.svelte');
-		expect(source).toContain('allNavItems($isAdmin, $betaFeatures)');
+		expect(source).toContain('allNavItems($isAdmin, paletteBetaFeatures)');
+		expect(source).toContain('mockupAdminActive');
 	});
 
 	it('keeps direct routes guarded by beta feature state', () => {

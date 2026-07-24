@@ -12,11 +12,14 @@ import json
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import aliased
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
-from app.models.chat_db import ChatConversation, ChatMessage
+from app.models.chat_db import ChatConversation, ChatMessage, ChatWorkspace
+from app.models.chat_runs import ChatRun, ChatRunTurn
+from app.services.chat.message_parts import deserialize_parts, serialize_parts
 from app.services.k3s_crypto import decrypt_chat_content, encrypt_chat_content
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,14 @@ class ConversationForbidden(PermissionError):
     """대화 소유자 불일치(타 프로젝트/타 사용자) — 403."""
 
 
+class WorkspaceNotFound(LookupError):
+    """대상 프로젝트 미존재 — 404."""
+
+
+class WorkspaceForbidden(PermissionError):
+    """대상 프로젝트 소유자 불일치 — 403."""
+
+
 def _require_db():
     if not is_db_available():
         raise ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
@@ -91,7 +102,13 @@ def _conv_public(row: ChatConversation) -> dict:
     }
 
 
-def _msg_public(row: ChatMessage) -> dict:
+def _msg_public(row: ChatMessage, *, execution: dict | None = None) -> dict:
+    parts = (
+        [part.model_dump(by_alias=True, exclude_none=True) for part in deserialize_parts(row.parts)]
+        if row.parts is not None
+        else None
+    )
+    citations = [part for part in parts or [] if part["type"] == "citation"] or _dec_json(row.citations)
     return {
         "id": row.id,
         "conversation_id": row.conversation_id,
@@ -99,27 +116,36 @@ def _msg_public(row: ChatMessage) -> dict:
         "parent_id": row.parent_id,
         "content": _dec(row.content),
         "tool_calls": _dec_json(row.tool_calls),
-        "citations": _dec_json(row.citations),
+        "citations": citations,
         "reasoning": _dec(row.reasoning),
         "attachments": _dec_json(row.attachments),
+        "parts": parts,
+        "status": row.status,
         "token_prompt": row.token_prompt,
         "token_completion": row.token_completion,
+        "execution": execution,
         "model_name": row.model_name,
         "created_at": _iso(row.created_at),
     }
 
 
-async def _load_owned(session, conv_id: str, user_id: str) -> ChatConversation:
-    """대화를 로드하고 소유권(user_id)을 검증. 프로젝트 무관 — 사용자 소유 기준.
-
-    미존재→NotFound, 소유자(user_id) 불일치→Forbidden. project_id 는 소유권 판정에서 제외한다
-    (한 사용자의 대화는 프로젝트가 달라도 본인 것). project_id 는 생성 시점 메타로만 보존된다.
-    """
+async def _load_owned(session, conv_id: str, user_id: str, project_id: str) -> ChatConversation:
+    """Load a conversation only when both the user and requested project own it."""
     row = await session.get(ChatConversation, conv_id)
     if row is None:
         raise ConversationNotFound(f"대화 {conv_id} 를 찾을 수 없습니다")
-    if row.user_id != user_id:
+    if row.user_id != user_id or row.project_id != project_id:
         raise ConversationForbidden("대화에 접근할 권한이 없습니다")
+    return row
+
+
+async def _load_owned_workspace(session, workspace_id: int, user_id: str) -> ChatWorkspace:
+    """Validate the selected workspace in the caller's transaction."""
+    row = await session.get(ChatWorkspace, workspace_id)
+    if row is None:
+        raise WorkspaceNotFound(f"프로젝트 {workspace_id} 를 찾을 수 없습니다")
+    if row.owner_user_id != user_id:
+        raise WorkspaceForbidden("프로젝트에 접근할 권한이 없습니다")
     return row
 
 
@@ -137,6 +163,8 @@ async def create_conversation(
     )
     try:
         async with factory() as session, session.begin():
+            if workspace_id is not None:
+                await _load_owned_workspace(session, workspace_id, user_id)
             session.add(row)
             await session.flush()
             return _conv_public(row)
@@ -145,14 +173,14 @@ async def create_conversation(
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_conversations(*, user_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
-    """사용자 소유 대화 목록(프로젝트 무관). updated_at desc."""
+async def list_conversations(*, user_id: str, project_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    """Project-and-user scoped conversation list."""
     factory = _require_db()
     try:
         async with factory() as session:
             stmt = (
                 select(ChatConversation)
-                .where(ChatConversation.user_id == user_id)
+                .where(ChatConversation.user_id == user_id, ChatConversation.project_id == project_id)
                 .order_by(ChatConversation.updated_at.desc())
                 .limit(min(limit, 200))
                 .offset(max(offset, 0))
@@ -164,34 +192,62 @@ async def list_conversations(*, user_id: str, limit: int = 50, offset: int = 0) 
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def get_conversation(conv_id: str, *, user_id: str) -> dict:
+async def search_conversations(*, user_id: str, project_id: str, query: str, limit: int = 20) -> list[dict]:
+    """Search decrypted titles only after owner/project scoping in the database."""
+    normalized_query = query.strip().casefold()
     factory = _require_db()
     try:
         async with factory() as session:
-            row = await _load_owned(session, conv_id, user_id)
+            rows = (
+                await session.execute(
+                    select(ChatConversation)
+                    .where(ChatConversation.user_id == user_id, ChatConversation.project_id == project_id)
+                    .order_by(ChatConversation.updated_at.desc())
+                )
+            ).scalars()
+            results: list[dict] = []
+            for row in rows:
+                public = _conv_public(row)
+                title = (public.get("title") or "새 대화").casefold()
+                if normalized_query and normalized_query not in title:
+                    continue
+                results.append(public)
+                if len(results) >= min(max(limit, 1), 50):
+                    break
+            return results
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def get_conversation(conv_id: str, *, user_id: str, project_id: str) -> dict:
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            row = await _load_owned(session, conv_id, user_id, project_id)
             return _conv_public(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def delete_conversation(conv_id: str, *, user_id: str) -> None:
+async def delete_conversation(conv_id: str, *, user_id: str, project_id: str) -> None:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load_owned(session, conv_id, user_id)
+            row = await _load_owned(session, conv_id, user_id, project_id)
             await session.delete(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def update_title(conv_id: str, *, user_id: str, title: str | None) -> dict:
+async def update_title(conv_id: str, *, user_id: str, project_id: str, title: str | None) -> dict:
     """대화 제목 갱신(소유권 검증 + 암호화 저장). 제목 자동 요약 경로용."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load_owned(session, conv_id, user_id)
+            row = await _load_owned(session, conv_id, user_id, project_id)
             row.title = _enc(title or None)
             await session.flush()
             return _conv_public(row)
@@ -200,12 +256,14 @@ async def update_title(conv_id: str, *, user_id: str, title: str | None) -> dict
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def set_workspace(conv_id: str, *, user_id: str, workspace_id: int | None) -> dict:
-    """대화를 프로젝트(workspace)에 배정/해제(소유권 검증). workspace 소유 검증은 완료 경로가 별도 수행."""
+async def set_workspace(conv_id: str, *, user_id: str, project_id: str, workspace_id: int | None) -> dict:
+    """Assign or unassign a conversation after validating workspace ownership."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load_owned(session, conv_id, user_id)
+            row = await _load_owned(session, conv_id, user_id, project_id)
+            if workspace_id is not None:
+                await _load_owned_workspace(session, workspace_id, user_id)
             row.workspace_id = workspace_id
             await session.flush()
             return _conv_public(row)
@@ -214,11 +272,13 @@ async def set_workspace(conv_id: str, *, user_id: str, workspace_id: int | None)
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_messages(conv_id: str, *, user_id: str, limit: int = 200, offset: int = 0) -> list[dict]:
+async def list_messages(
+    conv_id: str, *, user_id: str, project_id: str, limit: int = 200, offset: int = 0
+) -> list[dict]:
     factory = _require_db()
     try:
         async with factory() as session:
-            await _load_owned(session, conv_id, user_id)  # 소유권 검증
+            await _load_owned(session, conv_id, user_id, project_id)  # 소유권 검증
             stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.conversation_id == conv_id)
@@ -227,7 +287,38 @@ async def list_messages(conv_id: str, *, user_id: str, limit: int = 200, offset:
                 .offset(max(offset, 0))
             )
             rows = (await session.execute(stmt)).scalars().all()
-            return [_msg_public(r) for r in rows]
+            message_ids = [row.id for row in rows]
+            execution_by_message: dict[int, dict] = {}
+            if message_ids:
+                turn_rows = (
+                    await session.execute(
+                        select(ChatRunTurn, ChatRun)
+                        .join(ChatRun, ChatRun.id == ChatRunTurn.run_id)
+                        .where(ChatRunTurn.assistant_message_id.in_(message_ids))
+                    )
+                ).all()
+                for turn, run in turn_rows:
+                    try:
+                        request = json.loads(_dec(run.request_payload) or "{}")
+                        skill_ids = request.get("skill_ids", [])
+                        skill_snapshot = request.get("skill_snapshot", [])
+                    except (TypeError, ValueError):
+                        skill_ids = []
+                        skill_snapshot = []
+                    skills = [
+                        {"id": item["id"], "name": item["name"]}
+                        for item in skill_snapshot
+                        if isinstance(item, dict)
+                        and isinstance(item.get("id"), int)
+                        and isinstance(item.get("name"), str)
+                    ]
+                    execution_by_message[int(turn.assistant_message_id)] = {
+                        "run_id": run.id,
+                        "agent_id": run.agent_id,
+                        "skill_ids": skill_ids if isinstance(skill_ids, list) else [],
+                        "skills": skills,
+                    }
+            return [_msg_public(row, execution=execution_by_message.get(row.id)) for row in rows]
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -242,6 +333,8 @@ async def add_message(
     citations: list | None = None,
     reasoning: str | None = None,
     attachments: list | None = None,
+    parts: list[dict] | None = None,
+    status: str = "complete",
     token_prompt: int = 0,
     token_completion: int = 0,
     parent_id: int | None = None,
@@ -263,6 +356,9 @@ async def add_message(
         citations=_enc_json(citations),
         reasoning=_enc(reasoning),
         attachments=_enc_json(attachments),
+        parts=serialize_parts(parts) if parts is not None else None,
+        parts_version=1 if parts is not None else None,
+        status=status,
         token_prompt=int(token_prompt),
         token_completion=int(token_completion),
         model_name=model_name,
@@ -276,6 +372,71 @@ async def add_message(
                 if conv is not None:
                     conv.active_leaf_id = row.id
             return _msg_public(row)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def complete_message_in_transaction(
+    session,
+    conv_id: str,
+    *,
+    message_id: int,
+    content: str,
+    reasoning: str | None,
+    model_name: str,
+    canonical_parts: list[dict] | None = None,
+    status: str = "complete",
+    token_prompt: int = 0,
+    token_completion: int = 0,
+) -> None:
+    """Finalize an assistant placeholder in the caller's transaction."""
+    from app.services.chat.message_parts import serialize_parts
+
+    if status not in {"complete", "failed", "canceled"}:
+        raise ValueError("assistant message status is invalid")
+    parts = canonical_parts
+    if parts is None:
+        parts = []
+        if content:
+            parts.append({"type": "text", "text": content})
+        if reasoning:
+            parts.append({"type": "reasoning", "text": reasoning, "visibility": "user"})
+    message = await session.get(ChatMessage, message_id)
+    conv = await session.get(ChatConversation, conv_id)
+    if message is None or message.conversation_id != conv_id or conv is None:
+        raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
+    message.content = _enc(content)
+    message.reasoning = _enc(reasoning)
+    message.parts = serialize_parts(parts) if parts else None
+    message.parts_version = 1 if parts else None
+    message.status = status
+    message.model_name = model_name
+    message.token_prompt = token_prompt
+    message.token_completion = token_completion
+    conv.active_leaf_id = message.id
+
+
+async def complete_message(
+    conv_id: str,
+    *,
+    message_id: int,
+    content: str,
+    reasoning: str | None,
+    model_name: str,
+) -> None:
+    """Finalize the worker-created assistant placeholder with canonical dual-write data."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            await complete_message_in_transaction(
+                session,
+                conv_id,
+                message_id=message_id,
+                content=content,
+                reasoning=reasoning,
+                model_name=model_name,
+            )
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -295,12 +456,12 @@ def _backtrack(rows: list[ChatMessage], leaf_id: int | None) -> list[ChatMessage
     return path
 
 
-async def get_active_path(conv_id: str, *, user_id: str) -> dict:
+async def get_active_path(conv_id: str, *, user_id: str, project_id: str) -> dict:
     """active_leaf 에서 역추적한 활성 경로(모델 입력·재개용). {"messages":[오름차순], "active_leaf_id"}."""
     factory = _require_db()
     try:
         async with factory() as session:
-            conv = await _load_owned(session, conv_id, user_id)
+            conv = await _load_owned(session, conv_id, user_id, project_id)
             rows = (
                 (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
                 .scalars()
@@ -313,12 +474,12 @@ async def get_active_path(conv_id: str, *, user_id: str) -> dict:
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def path_ending_at(conv_id: str, *, user_id: str, message_id: int) -> list[dict]:
+async def path_ending_at(conv_id: str, *, user_id: str, project_id: str, message_id: int) -> list[dict]:
     """message_id 를 리프로 한 경로(루트→message_id 오름차순). 재생성 모델 입력용."""
     factory = _require_db()
     try:
         async with factory() as session:
-            await _load_owned(session, conv_id, user_id)
+            await _load_owned(session, conv_id, user_id, project_id)
             rows = (
                 (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
                 .scalars()
@@ -330,33 +491,119 @@ async def path_ending_at(conv_id: str, *, user_id: str, message_id: int) -> list
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_message_tree(conv_id: str, *, user_id: str) -> dict:
-    """전체 메시지(트리, parent_id 포함) + active_leaf_id. 프론트가 활성 경로·형제 수를 계산."""
+async def list_message_tree(
+    conv_id: str,
+    *,
+    user_id: str,
+    project_id: str,
+    before_id: int | None = None,
+    limit: int = 40,
+) -> dict:
+    """Fetch one backwards page through the conversation index in a single normal-path query."""
     factory = _require_db()
+    page_size = max(1, min(limit, 100))
     try:
         async with factory() as session:
-            conv = await _load_owned(session, conv_id, user_id)
-            rows = (
-                (
-                    await session.execute(
-                        select(ChatMessage).where(ChatMessage.conversation_id == conv_id).order_by(ChatMessage.id.asc())
-                    )
+            conversation = aliased(ChatConversation)
+            parent = aliased(ChatMessage)
+            seed_id = before_id if before_id is not None else conversation.active_leaf_id
+            active_path = (
+                select(
+                    ChatMessage.id.label("id"),
+                    ChatMessage.parent_id.label("parent_id"),
+                    literal(0).label("depth"),
                 )
-                .scalars()
-                .all()
+                .join(conversation, ChatMessage.conversation_id == conversation.id)
+                .where(
+                    ChatMessage.id == seed_id,
+                    conversation.id == conv_id,
+                    conversation.user_id == user_id,
+                    conversation.project_id == project_id,
+                )
+                .cte("active_path", recursive=True)
             )
-            return {"messages": [_msg_public(r) for r in rows], "active_leaf_id": conv.active_leaf_id}
+            active_path = active_path.union_all(
+                select(
+                    parent.id.label("id"),
+                    parent.parent_id.label("parent_id"),
+                    (active_path.c.depth + 1).label("depth"),
+                )
+                .join(active_path, parent.id == active_path.c.parent_id)
+                .where(active_path.c.depth < page_size)
+            )
+            rows = (
+                await session.execute(
+                    select(ChatMessage, conversation.active_leaf_id)
+                    .join(active_path, ChatMessage.id == active_path.c.id)
+                    .join(conversation, ChatMessage.conversation_id == conversation.id)
+                    .where(
+                        conversation.id == conv_id,
+                        conversation.user_id == user_id,
+                        conversation.project_id == project_id,
+                    )
+                    .order_by(active_path.c.depth.asc())
+                    .limit(page_size + 1)
+                )
+            ).all()
+            if not rows:
+                # Preserve 404/403 semantics for empty conversations without penalizing
+                # the normal non-empty history page.
+                conv = await _load_owned(session, conv_id, user_id, project_id)
+                return {
+                    "messages": [],
+                    "tree_nodes": [],
+                    "active_leaf_id": conv.active_leaf_id,
+                    "has_more": False,
+                    "next_before_id": None,
+                }
+            tree_nodes: list[dict] = []
+            if before_id is None:
+                # Full-tree metadata is sent only with the initial page. Older pages
+                # carry text only; the client retains this lightweight branch map.
+                tree_rows = (
+                    await session.execute(
+                        select(
+                            ChatMessage.id,
+                            ChatMessage.parent_id,
+                            ChatMessage.role,
+                            ChatMessage.created_at,
+                        )
+                        .where(ChatMessage.conversation_id == conv_id)
+                        .order_by(ChatMessage.id.asc())
+                    )
+                ).all()
+                tree_nodes = [
+                    {
+                        "id": row.id,
+                        "parent_id": row.parent_id,
+                        "role": row.role,
+                        "created_at": _iso(row.created_at),
+                    }
+                    for row in tree_rows
+                ]
+            has_more = len(rows) > page_size
+            page = rows[:page_size]
+            page.reverse()
+            active_leaf_id = page[-1][1]
+            messages = [_msg_public(message) for message, _leaf in page]
+            return {
+                "messages": messages,
+                "tree_nodes": tree_nodes,
+                "active_leaf_id": active_leaf_id,
+                "has_more": has_more,
+                "next_before_id": messages[0]["parent_id"] if has_more and messages else None,
+            }
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def set_active_leaf(conv_id: str, *, user_id: str, message_id: int) -> dict:
+async def set_active_leaf(conv_id: str, *, user_id: str, project_id: str, message_id: int) -> dict:
     """활성 리프를 지정 메시지로 이동(형제 버전 전환). 메시지가 이 대화 소속이어야 함."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            conv = await _load_owned(session, conv_id, user_id)
+            conv = await _load_owned(session, conv_id, user_id, project_id)
             msg = await session.get(ChatMessage, message_id)
             if msg is None or msg.conversation_id != conv_id:
                 raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
@@ -367,12 +614,12 @@ async def set_active_leaf(conv_id: str, *, user_id: str, message_id: int) -> dic
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def get_message_owned(conv_id: str, *, user_id: str, message_id: int) -> ChatMessage:
+async def get_message_owned(conv_id: str, *, user_id: str, project_id: str, message_id: int) -> ChatMessage:
     """소유권 검증 후 대화 소속 메시지 raw row 반환(재생성 parent 탐색용, 내부 전용)."""
     factory = _require_db()
     try:
         async with factory() as session:
-            await _load_owned(session, conv_id, user_id)
+            await _load_owned(session, conv_id, user_id, project_id)
             msg = await session.get(ChatMessage, message_id)
             if msg is None or msg.conversation_id != conv_id:
                 raise ConversationNotFound(f"메시지 {message_id} 를 대화에서 찾을 수 없습니다")
@@ -382,12 +629,12 @@ async def get_message_owned(conv_id: str, *, user_id: str, message_id: int) -> C
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def find_turn_start_user(conv_id: str, *, user_id: str, message_id: int) -> dict | None:
+async def find_turn_start_user(conv_id: str, *, user_id: str, project_id: str, message_id: int) -> dict | None:
     """message_id 에서 위로 걸어 가장 가까운 role='user' 메시지(재생성 분기점). 없으면 None."""
     factory = _require_db()
     try:
         async with factory() as session:
-            await _load_owned(session, conv_id, user_id)
+            await _load_owned(session, conv_id, user_id, project_id)
             rows = (
                 (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
                 .scalars()
@@ -407,12 +654,12 @@ async def find_turn_start_user(conv_id: str, *, user_id: str, message_id: int) -
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def fork_conversation(conv_id: str, *, user_id: str, message_id: int) -> dict:
+async def fork_conversation(conv_id: str, *, user_id: str, project_id: str, message_id: int) -> dict:
     """message_id 까지의 경로를 새 대화로 복사(분기). 소유자 동일, 원본 독립."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            conv = await _load_owned(session, conv_id, user_id)
+            conv = await _load_owned(session, conv_id, user_id, project_id)
             rows = list(
                 (await session.execute(select(ChatMessage).where(ChatMessage.conversation_id == conv_id)))
                 .scalars()

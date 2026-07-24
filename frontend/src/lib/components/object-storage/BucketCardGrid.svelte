@@ -1,24 +1,37 @@
 <script lang="ts">
 	import type { SwiftContainer } from '$lib/types/objectStorage';
 	import { formatStorage } from '$lib/utils/format';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	let {
 		containers,
 		deleting,
 		refreshing,
+		selectedIds,
+		selectionDisabled = false,
+		onToggleSelect,
 		onDelete,
 	}: {
 		containers: SwiftContainer[];
 		deleting: string | null;
 		refreshing: boolean;
+		selectedIds: ReadonlySet<string>;
+		selectionDisabled?: boolean;
+		onToggleSelect: (name: string) => void;
 		onDelete: (name: string) => Promise<void>;
 	} = $props();
 </script>
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-	{#each containers as c}
-		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+	{#each containers as c (c.name)}
+		<article class="resource-selection-surface bg-gray-900 border border-gray-800 rounded-2xl p-5" data-selected={selectedIds.has(c.name)}>
 			<div class="flex items-center gap-2.5 mb-3">
+				<SelectionCheckbox
+					checked={selectedIds.has(c.name)}
+					disabled={selectionDisabled}
+					ariaLabel={`${c.name} 선택`}
+					onclick={() => onToggleSelect(c.name)}
+				/>
 				<div class="w-10 h-10 rounded-[10px] bg-violet-500/15 border border-violet-500/30 text-violet-400 flex items-center justify-center shrink-0">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
@@ -46,10 +59,10 @@
 				>상세 보기 →</a>
 				<button
 					onclick={() => onDelete(c.name)}
-					disabled={deleting === c.name}
+					disabled={deleting === c.name || selectionDisabled}
 					class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors"
 				>{deleting === c.name ? '삭제 중...' : '삭제'}</button>
 			</div>
-		</div>
+		</article>
 	{/each}
 </div>

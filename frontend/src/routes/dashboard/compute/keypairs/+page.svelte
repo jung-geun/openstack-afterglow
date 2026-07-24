@@ -43,6 +43,7 @@
 
   const ar = createAutoRefresh(() => fetchKeypairs(), {
     storageKey: 'dashboard-compute-keypairs',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 60,
     intervalOptions: [10, 15, 30, 60],

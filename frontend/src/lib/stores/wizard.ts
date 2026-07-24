@@ -57,8 +57,9 @@ export interface WizardState {
 	networkId: string | null;
 	networkName: string | null;
 	keyName: string | null;
+	sshAccessMode: 'keypair' | 'github';
+	githubUsername: string;
 	securityGroups: string[];
-	availabilityZone: string | null;
 	cloudInit: string;
 	bootVolumeSizeGb: number;
 	deleteBootVolumeOnTermination: boolean;
@@ -90,8 +91,9 @@ const initial: WizardState = {
 	networkId: null,
 	networkName: null,
 	keyName: null,
+	sshAccessMode: 'keypair',
+	githubUsername: '',
 	securityGroups: [],
-	availabilityZone: null,
 	cloudInit: '',
 	bootVolumeSizeGb: 20,
 	deleteBootVolumeOnTermination: false,

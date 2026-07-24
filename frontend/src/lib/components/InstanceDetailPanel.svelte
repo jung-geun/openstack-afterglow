@@ -110,7 +110,7 @@
 <div class="p-8">
 	<div class="mb-6 flex items-center justify-between">
 		{#if onClose}
-			<button onclick={onClose} class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
+			<button data-tour="admin-compute-detail-close" onclick={onClose} class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
 				✕ 닫기
 			</button>
 		{:else}

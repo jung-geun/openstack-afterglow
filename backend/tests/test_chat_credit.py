@@ -37,6 +37,30 @@ class TestCreditsForCost:
         assert result.as_tuple().exponent == -8
 
 
+class TestSnapshotUsageCost:
+    def test_uses_only_frozen_unit_prices(self):
+        cost = credit.usage_cost_from_pricing_snapshot(
+            {
+                "input_price_per_token": "0.000001",
+                "output_price_per_token": "0.000002",
+            },
+            prompt_tokens=3,
+            completion_tokens=5,
+        )
+
+        assert cost.raw_cost == Decimal("0.000013")
+        assert cost.input_cost == Decimal("0.000003")
+        assert cost.output_cost == Decimal("0.000010")
+
+    def test_rejects_invalid_frozen_prices(self):
+        with pytest.raises(ValueError):
+            credit.usage_cost_from_pricing_snapshot(
+                {"input_price_per_token": "invalid", "output_price_per_token": "0"},
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+
+
 class TestPrecheckFailClosed:
     async def test_raises_when_db_unavailable(self, monkeypatch):
         monkeypatch.setattr("app.services.chat.credit.is_db_available", lambda: False)

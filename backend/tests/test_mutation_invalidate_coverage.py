@@ -77,15 +77,21 @@ EXEMPT_ROUTERS: set[str] = {
     "storage/file_storage.py",  # TODO: Phase C/D — access rule sub-resources
     "storage/volumes.py",  # TODO: Phase C/D — volume transfer sub-resources
     "storage/volume_backups.py",  # TODO: Phase C/D — backup / restore
-    # VPN 서버/클라이언트는 vpn_db.py가 SQLAlchemy select()로 DB를 직접 읽고
-    # cached_call 등 app 캐시 레이어를 전혀 거치지 않는다(announcements/site
-    # branding과 동일 사유 — "TODO Phase C/D 캐시 미연동"이 아니라 애초에
-    # 무효화할 캐시가 없음).
-    "vpn/servers.py",
-    "vpn/clients.py",
-    # 에이전트(VM 내부) 대면 — 사용자 캐시가 아닌 Redis 상태 캐시(vpn_agent_auth)를
-    # 직접 갱신하며, 이 파일의 mutation invalidation 검사 대상(app 캐시)과는 무관.
-    "vpn/agent.py",
+    # Waygate server/client state is read directly from its SQLAlchemy store;
+    # it bypasses the OpenStack resource-cache layer entirely.
+    "waygate/servers.py",
+    "waygate/clients.py",
+    # Agent endpoints update their dedicated Redis status/token store, not the
+    # application resource cache covered by this invariant.
+    "waygate/agent.py",
+    # Admin resource policy and AI compatibility routes own application data
+    # read directly from their stores; no OpenStack cache key is affected.
+    "identity/admin_resource_policies.py",
+    "ai_compat/openai.py",
+    "ai_compat/anthropic.py",
+    "chat/api_keys.py",
+    "chat/assets.py",
+    "chat/memory.py",
     # 빌트인 AI 채팅(chat/*) — 프로바이더/모델/대화/메시지는 provider_store·
     # conversation_store 가 SQLAlchemy select()로 DB를 매 요청 직접 읽으며
     # cached_call/app 캐시 레이어를 전혀 거치지 않는다(announcements/site branding/
@@ -138,6 +144,19 @@ EXEMPT_HANDLERS: set[str] = {
     # cached_call/app 캐시 레이어를 거치지 않으며 per-project OpenStack 리소스 캐시와도
     # 무관하다(announcements 읽음표시와 동일 사유).
     "set_my_tutorial_status",
+    # Chat agent, memory, and workspace mutations are DB-backed application
+    # state read directly by their stores; no per-project OpenStack resource
+    # cache or mutation-count key exists for them.
+    "clone_agent",
+    "create_agent",
+    "delete_agent",
+    "update_agent",
+    "create_memory",
+    "delete_memory",
+    "update_memory",
+    "create_workspace",
+    "delete_workspace",
+    "update_workspace",
 }
 
 # ---------------------------------------------------------------------------

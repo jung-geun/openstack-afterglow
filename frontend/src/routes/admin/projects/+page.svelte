@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createIntentPrefetchScheduler } from '$lib/utils/intentPrefetch';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import AdminProjectTable from '$lib/components/admin/projects/AdminProjectTable.svelte';
 	import Pagination from '$lib/components/ui/Pagination.svelte';
@@ -29,9 +30,22 @@
 	let accessProject = $state<Project | null>(null);
 
 	let copiedId = $state<string | null>(null);
+	let loadGeneration = 0;
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+	const nextPrefetch = createIntentPrefetchScheduler();
+	function listPath(marker?: string): string {
+		const params = new URLSearchParams({ limit: String(pageSize) });
+		if (marker) params.set('marker', marker);
+		return `/api/v1/admin/projects?${params}`;
+	}
+	function prefetchNext() {
+		if (!nextMarker) return;
+		const path = listPath(nextMarker);
+		const key = JSON.stringify([path, token ?? null, projectId ?? null]);
+		nextPrefetch.intent(key, (signal) => api.prefetch(path, token, projectId, { signal }));
+	}
 
 	function copyId(id: string) {
 		navigator.clipboard.writeText(id).then(() => {
@@ -41,20 +55,42 @@
 	}
 
 	async function load(marker?: string) {
+		const generation = ++loadGeneration;
+		const requestToken = $auth.token ?? undefined;
+		const requestProjectId = $auth.projectId ?? undefined;
+		const requestPageSize = pageSize;
+		const requestPath = listPath(marker);
+		const owns = () => generation === loadGeneration
+			&& ($auth.token ?? undefined) === requestToken
+			&& ($auth.projectId ?? undefined) === requestProjectId
+			&& pageSize === requestPageSize
+			&& listPath(marker) === requestPath;
+		nextPrefetch.cancel();
 		if (projects.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			let url = `/api/v1/admin/projects?limit=${pageSize}`;
-			if (marker) url += `&marker=${marker}`;
-			const res = await api.get<PagedResponse<Project>>(url, token, projectId);
-			projects = res.items; nextMarker = res.next_marker;
-		} catch { projects = []; } finally { loading = false; refreshing = false; }
+			const res = await api.get<PagedResponse<Project>>(requestPath, requestToken, requestProjectId);
+			if (!owns()) return;
+			projects = res.items;
+			nextMarker = res.next_marker;
+			const path = nextMarker ? listPath(nextMarker) : null;
+			const key = path ? JSON.stringify([path, requestToken ?? null, requestProjectId ?? null]) : null;
+			nextPrefetch.schedule(key, (signal) => path ? api.prefetch(path, requestToken, requestProjectId, { signal }) : undefined);
+		} catch {
+			if (owns()) projects = [];
+		} finally {
+			if (owns()) {
+				loading = false;
+				refreshing = false;
+			}
+		}
 	}
 
 	function autoRefreshLoad() { load(markerStack[markerStack.length - 1]); }
 
 	const ar = createAutoRefresh(autoRefreshLoad, {
 		storageKey: 'admin-projects',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 60,
 		intervalOptions: [30, 60],
@@ -64,6 +100,8 @@
 		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
 		load();
 	});
+
+	onDestroy(() => { loadGeneration += 1; nextPrefetch.cancel(); });
 </script>
 
 <div class="p-4 md:p-6 max-w-7xl mx-auto">
@@ -111,6 +149,7 @@
 			hasNext={!!nextMarker}
 			onPrev={() => { const prev = markerStack.slice(0, -1); markerStack = prev; load(prev[prev.length - 1]); }}
 			onNext={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
+			onintent={prefetchNext}
 		/>
 	{/if}
 </div>

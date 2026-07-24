@@ -18,17 +18,17 @@ describe('citationDomain', () => {
 
 describe('citationLabel', () => {
 	it('title 우선', () => {
-		expect(citationLabel({ url: 'https://a.com', title: 'A 제목' })).toBe('A 제목');
+		expect(citationLabel({ source_kind: 'web', url: 'https://a.com', title: 'A 제목' })).toBe('A 제목');
 	});
 	it('title 없으면 도메인', () => {
-		expect(citationLabel({ url: 'https://www.a.com/x' })).toBe('a.com');
+		expect(citationLabel({ source_kind: 'web', url: 'https://www.a.com/x' })).toBe('a.com');
 	});
 });
 
 describe('normalizeCitations', () => {
 	it('url 있는 항목만, 방어적', () => {
 		expect(normalizeCitations([{ url: 'https://a.com', title: 'A' }, { title: 'no url' }, null, 5])).toEqual([
-			{ url: 'https://a.com', title: 'A', snippet: null }
+			{ source_kind: 'web', url: 'https://a.com', title: 'A', snippet: null }
 		]);
 	});
 	it('배열 아니면 빈 목록', () => {
@@ -41,7 +41,17 @@ describe('normalizeCitations', () => {
 				{ url: 'data:text/html,x' },
 				{ url: 'https://ok.com', title: 'OK' }
 			])
-		).toEqual([{ url: 'https://ok.com', title: 'OK', snippet: null }]);
+		).toEqual([{ source_kind: 'web', url: 'https://ok.com', title: 'OK', snippet: null }]);
+	});
+
+	it('LiteLLM document citations retain their index without a fabricated URL', () => {
+		expect(
+			normalizeCitations([
+				{ source_kind: 'document', document_index: 2, title: '운영 가이드', snippet: '문서의 근거' }
+			])
+		).toEqual([
+			{ source_kind: 'document', document_index: 2, title: '운영 가이드', snippet: '문서의 근거' }
+		]);
 	});
 });
 
@@ -58,6 +68,6 @@ describe('aggregateCitations', () => {
 			{ citations: [{ url: 'https://a.com' }] },
 			{ citations: [{ url: 'https://a.com', title: 'A', snippet: 's' }] }
 		]);
-		expect(agg[0]).toEqual({ url: 'https://a.com', title: 'A', snippet: 's' });
+		expect(agg[0]).toEqual({ source_kind: 'web', url: 'https://a.com', title: 'A', snippet: 's' });
 	});
 });

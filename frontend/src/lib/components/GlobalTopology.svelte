@@ -21,6 +21,9 @@
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
 		onSelectLoadBalancer = undefined,
+		onIntentInstance = undefined,
+		onIntentRouter = undefined,
+		onCancelIntent = undefined,
 	}: {
 		data: TopologyData;
 		projectId?: string | null;
@@ -31,6 +34,9 @@
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
 		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
+		onIntentInstance?: (id: string) => void;
+		onIntentRouter?: (id: string) => void;
+		onCancelIntent?: () => void;
 	} = $props();
 
 	// selectedId: 부모가 prop 으로 전달하면 controlled, 아니면 내부 상태 사용
@@ -122,7 +128,13 @@
 		scheduleMeasure();
 	});
 
+
+	function intentRow(row: ItemRow) {
+		if (row.type === 'instance') onIntentInstance?.(row.id);
+		else if (row.type === 'router') onIntentRouter?.(row.id);
+	}
 	function selectRow(row: ItemRow) {
+		onCancelIntent?.();
 		if (selectedIdProp === undefined) {
 			_selectedId = _selectedId === row.id ? null : row.id;
 		}
@@ -133,6 +145,7 @@
 	}
 
 	function selectLb(lb: TopologyLoadBalancer) {
+		onCancelIntent?.();
 		if (selectedIdProp === undefined) {
 			_selectedId = _selectedId === lb.id ? null : lb.id;
 		}
@@ -197,6 +210,8 @@
 					onSelectRow={selectRow}
 					onSelectLb={selectLb}
 					onScheduleMeasure={scheduleMeasure}
+					onIntentRow={intentRow}
+					{onCancelIntent}
 				/>
 			</div>
 

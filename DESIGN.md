@@ -45,6 +45,13 @@ Afterglow는 dark-first cloud operations UI다. 기본 감성은 고밀도 운�
 - Approved external SVG plates may retain their equivalent embedded palette only when loaded through `<img>`.
 - Approved panel composition: `Card surface="subtle"` is the visual surface around semantic outer capability/workflow articles; the method matrix is one Card around direct semantic step articles.
 
+## Resource selection
+
+- 선택 가능한 행과 카드는 체크박스를 데스크톱·터치 환경 모두에서 항상 보이게 하며, hover로만 노출하지 않는다.
+- 선택 불가 리소스는 같은 위치에 비활성화 원형 X 마크를 표시하고 이유를 `title`로 설명한다. square checkbox를 흐리게 재사용하지 않으며, select-all은 선택 가능한 ID만 포함한다.
+- 한 화면에서 동시에 보이는 여러 리소스 도메인은 하나만 선택 상태를 소유한다. 탭·필터·프로젝트·도메인 전환은 현재 조회 결과에 없는 선택을 정리한다.
+- 선택 작업은 `BulkSelectionOverlay` 하나로 고정한다. 페이지는 `bulk-selection-page` bottom clearance를 적용하고, 선택 surface는 `resource-selection-surface` 및 `data-selected`로 `--accent-soft`를 사용한다.
+
 ## New UI entity rules
 
 1. 새 색상·gradient·badge tone·table density·form control·card treatment가 필요하면 feature file 작성 전에 `layout.css`, `frontend/src/lib/design/tokens.ts`, `frontend/src/lib/components/ui/*`, tests, `DESIGN.md`를 먼저 갱신한다.

@@ -73,7 +73,7 @@ def _parse_ops(text: str) -> list[dict]:
     return parsed if isinstance(parsed, list) else []
 
 
-async def _apply_ops(ops: list[dict], user_id: str, existing_ids: set[int]) -> None:
+async def _apply_ops(ops: list[dict], user_id: str, project_id: str, existing_ids: set[int]) -> None:
     for op in ops[:_MAX_OPS]:
         if not isinstance(op, dict):
             continue
@@ -84,11 +84,16 @@ async def _apply_ops(ops: list[dict], user_id: str, existing_ids: set[int]) -> N
         content = content.strip()[:_MAX_CONTENT_CHARS]
         try:
             if kind == "add":
-                await ms.create_memory(user_id=user_id, content=content)
+                await ms.create_memory(
+                    user_id=user_id,
+                    project_id=project_id,
+                    scope="project",
+                    content=content,
+                )
             elif kind == "update":
                 mid = op.get("id")
                 if isinstance(mid, int) and mid in existing_ids:
-                    await ms.update_memory(mid, user_id=user_id, patch={"content": content})
+                    await ms.update_memory(mid, user_id=user_id, project_id=project_id, patch={"content": content})
         except Exception:
             logger.warning("메모리 op 반영 실패 user=%s op=%s", user_id, kind, exc_info=True)
 
@@ -104,13 +109,14 @@ async def generate_memory_if_applicable(*, conversation_id: str, project_id: str
         return  # 메모리 모델 미지정 — 기능 비활성
 
     try:
-        existing = await ms.list_memories(user_id=user_id)
-        msgs = await cs.list_messages(conversation_id, user_id=user_id, limit=8)
+        existing = await ms.list_memories(user_id=user_id, project_id=project_id)
+        msgs = await cs.list_messages(conversation_id, user_id=user_id, project_id=project_id, limit=8)
     except Exception:
         return
     active = [m for m in existing if m.get("is_active", True)][:_MAX_EXISTING]
     existing_ids = {m["id"] for m in active}
-    convo = [m for m in msgs if m.get("role") in ("user", "assistant") and m.get("content")]
+    # Assistant, tool, and fetched web text are not user-authored facts.
+    convo = [m for m in msgs if m.get("role") == "user" and m.get("content")]
     if not convo:
         return
 
@@ -139,7 +145,7 @@ async def generate_memory_if_applicable(*, conversation_id: str, project_id: str
     text = _resp_text(resp)
     ops = _parse_ops(text)
     if ops:
-        await _apply_ops(ops, user_id, existing_ids)
+        await _apply_ops(ops, user_id, project_id, existing_ids)
 
     # 시스템 부담 과금 — 원장만 기록, 사용자 지갑 미차감. event_id 는 실행마다 고유.
     try:

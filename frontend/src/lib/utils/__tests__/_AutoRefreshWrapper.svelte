@@ -2,7 +2,7 @@
 	import { createAutoRefresh } from '../autoRefresh.svelte';
 
 	interface Props {
-		fn?: () => void;
+		fn?: () => void | Promise<void>;
 		storageKey?: string;
 		defaultActive?: boolean;
 		defaultInterval?: number;
@@ -27,3 +27,4 @@
 
 <div data-testid="active">{state.active}</div>
 <div data-testid="interval">{state.intervalSeconds}</div>
+<button data-testid="force-refresh" onclick={() => state.refresh()}>refresh</button>

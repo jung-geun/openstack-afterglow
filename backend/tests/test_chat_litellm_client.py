@@ -202,14 +202,18 @@ class TestReasoningParams:
         monkeypatch.setattr(litellm, "supports_reasoning", lambda model: False)
         assert litellm_client._reasoning_params("gpt-4o", "low", "openai") == {}
 
-    def test_disabled_or_invalid_effort_returns_empty(self, monkeypatch):
+    def test_auto_omits_and_supported_levels_are_forwarded(self, monkeypatch):
         import litellm
 
-        # supports_reasoning 을 호출하기 전에 effort 로 먼저 컷 — True 여도 빈 dict.
         monkeypatch.setattr(litellm, "supports_reasoning", lambda model: True)
         assert litellm_client._reasoning_params("claude-sonnet-5", "", "anthropic") == {}
+        assert litellm_client._reasoning_params("claude-sonnet-5", "auto", "anthropic") == {}
         assert litellm_client._reasoning_params("claude-sonnet-5", "off", "anthropic") == {}
-        assert litellm_client._reasoning_params("claude-sonnet-5", "ultra", "anthropic") == {}
+        assert litellm_client._reasoning_params("claude-sonnet-5", "ultra", "anthropic") == {
+            "reasoning_effort": "ultra"
+        }
+        assert litellm_client._reasoning_params("gpt-5.6-terra", "none", "openai") == {"reasoning_effort": "none"}
+        assert litellm_client._reasoning_params("claude-sonnet-5", "unknown", "anthropic") == {}
         assert litellm_client._reasoning_params("claude-sonnet-5", None, "anthropic") == {}
 
     def test_supports_reasoning_error_is_safe(self, monkeypatch):

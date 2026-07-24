@@ -758,8 +758,12 @@ def _server_to_info(s) -> InstanceInfo:
         metadata=meta,
         union_libraries=meta.get("union_libraries", "").split(",") if meta.get("union_libraries") else [],
         union_strategy=meta.get("union_strategy"),
-        union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
-        union_upper_volume_id=meta.get("union_upper_volume_id"),
+        union_share_ids=[
+            share_id for share_id in meta.get("union_share_ids", "").split(",") if share_id and share_id != "none"
+        ],
+        union_upper_volume_id=(
+            meta.get("union_upper_volume_id") if meta.get("union_upper_volume_id") not in {None, "", "none"} else None
+        ),
         scheduling=meta.get("scheduling"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),

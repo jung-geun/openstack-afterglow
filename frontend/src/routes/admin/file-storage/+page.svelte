@@ -7,6 +7,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createCoalescedRefresh } from '$lib/utils/coalescedRefresh';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import AdminFileStorageTimeseries from '$lib/components/admin/file-storage/AdminFileStorageTimeseries.svelte';
@@ -33,10 +34,15 @@
 		fileStorages.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
 	);
 
-	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
+	async function loadTimeseries(range: string, opts?: { background?: boolean; refresh?: boolean }) {
 		if (!opts?.background) tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/file_storage?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(
+				`/api/v1/admin/timeseries/file_storage?range=${range}`,
+				token,
+				projectId,
+				opts?.refresh ? { refresh: true } : undefined
+			);
 		} catch {
 			if (!opts?.background) tsData = [];
 		} finally {
@@ -67,18 +73,26 @@
 	}
 
 	async function handleDeleted() {
-		await load({ refresh: true });
+		closeDetail();
+		await refresh.invalidate();
 	}
 
+	const refresh = createCoalescedRefresh(async (force) => {
+		if (selectedFileStorageId && !force) return;
+		await Promise.allSettled([
+			load(force ? { refresh: true } : undefined),
+			loadTimeseries(tsRange, { background: true, refresh: force }),
+		]);
+	});
+
 	const ar = createAutoRefresh(
-		() => { load(); loadTimeseries(tsRange, { background: true }); },
-		{ storageKey: 'admin-file-storage', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+		() => refresh.run(false),
+		{ storageKey: 'admin-file-storage', defaultInterval: 30, intervalOptions: [15, 30, 60], invokeOnMount: false }
 	);
 
 	onMount(() => {
-		load();
-		loadTimeseries(tsRange);
-		projectNames.load(token, projectId);
+		void refresh.run();
+		void projectNames.load(token, projectId);
 	});
 </script>
 
@@ -99,7 +113,7 @@
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
 				refreshing={loading || refreshing}
-				onManualRefresh={() => load({ refresh: true })}
+				onManualRefresh={() => refresh.run(true)}
 			/>
 		{/snippet}
 	</PageHeader>

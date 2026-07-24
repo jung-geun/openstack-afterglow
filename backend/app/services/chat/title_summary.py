@@ -59,7 +59,7 @@ def _resp_usage(resp, model: str, messages: list[dict], text: str) -> tuple[int,
 async def generate_title_if_absent(*, conversation_id: str, project_id: str, user_id: str) -> None:
     """제목이 없고 요약 모델이 지정돼 있으면 요약·저장(시스템 과금). 모든 실패는 무시."""
     try:
-        conv = await cs.get_conversation(conversation_id, user_id=user_id)
+        conv = await cs.get_conversation(conversation_id, user_id=user_id, project_id=project_id)
     except Exception:
         return
     if conv.get("title"):
@@ -74,7 +74,7 @@ async def generate_title_if_absent(*, conversation_id: str, project_id: str, use
         return  # 요약 모델 미지정 — 기능 비활성
 
     try:
-        msgs = await cs.list_messages(conversation_id, user_id=user_id, limit=6)
+        msgs = await cs.list_messages(conversation_id, user_id=user_id, project_id=project_id, limit=6)
     except Exception:
         return
     convo = [m for m in msgs if m.get("role") in ("user", "assistant") and m.get("content")]
@@ -106,7 +106,7 @@ async def generate_title_if_absent(*, conversation_id: str, project_id: str, use
         return
 
     try:
-        await cs.update_title(conversation_id, user_id=user_id, title=title)
+        await cs.update_title(conversation_id, user_id=user_id, project_id=project_id, title=title)
     except Exception:
         logger.warning("제목 저장 실패 conv=%s", conversation_id, exc_info=True)
         return
@@ -114,16 +114,25 @@ async def generate_title_if_absent(*, conversation_id: str, project_id: str, use
     # 시스템 부담 과금 — 원장만 기록, 사용자 지갑 미차감.
     try:
         pt, ct = _resp_usage(resp, model, messages, title)
-        raw_cost = litellm_client.cost_from_usage(model, pt, ct)
+        usage_cost = litellm_client.cost_from_usage(
+            model,
+            pt,
+            ct,
+            input_price_per_token=resolved.get("input_price_per_token"),
+            output_price_per_token=resolved.get("output_price_per_token"),
+            price_source=resolved.get("price_source"),
+            provider_type=resolved.get("provider_type"),
+        )
         await credit.apply_usage(
+            event_id=f"title:{conversation_id}",
             user_id=user_id,
             project_id=project_id,
             model_name=model,
             provider=resolved.get("provider_name"),
             prompt_tokens=pt,
             completion_tokens=ct,
-            raw_cost=raw_cost,
-            margin_multiplier=resolved.get("margin_multiplier", 1.0),
+            usage_cost=usage_cost,
+            margin_multiplier=resolved["margin_multiplier"],
             conversation_id=conversation_id,
             source="system",
             charge_wallet=False,

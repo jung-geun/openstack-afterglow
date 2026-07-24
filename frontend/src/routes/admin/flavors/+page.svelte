@@ -84,6 +84,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-flavors',
+		invokeOnMount: false,
 		defaultInterval: 60,
 		intervalOptions: [30, 60],
 	});

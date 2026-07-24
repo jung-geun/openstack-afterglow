@@ -36,8 +36,11 @@
 	const storageKey = mode === 'user' ? 'object-browser-user' : 'object-browser-admin';
 
 	const ar = createAutoRefresh(
-		() => mode === 'user' ? s.refreshAll({ silent: true }) : s.load({ silent: true }),
-		{ storageKey, defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
+		() => {
+			if (s.loading) return;
+			return mode === 'user' ? s.refreshAll({ silent: true }) : s.load({ silent: true });
+		},
+		{ storageKey, defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60], invokeOnMount: false }
 	);
 
 	const onManualRefresh = mode === 'user'
@@ -88,26 +91,26 @@
 
 <ObjectDragOverlay />
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class:bulk-selection-page={mode === 'user'} class="p-4 md:p-8 max-w-7xl mx-auto">
 	<ObjectBrowserHeader />
 
 	<!-- 탭 전환: 파일 목록 / 휴지통 -->
 	<div class="flex items-center gap-2 mb-3">
 		<button
-			onclick={() => { showTrash = false; }}
+			onclick={() => { showTrash = false; s.selected = new Set(); }}
 			class="text-xs px-3 py-1 rounded transition-colors {!showTrash ? 'bg-indigo-700 text-white' : 'text-gray-400 hover:text-gray-200 border border-gray-700'}"
 		>파일</button>
 		<button
-			onclick={() => { showTrash = true; }}
+			onclick={() => { showTrash = true; s.selected = new Set(); }}
 			class="text-xs px-3 py-1 rounded transition-colors {showTrash ? 'bg-orange-800 text-orange-200' : 'text-gray-400 hover:text-gray-200 border border-gray-700'}"
 		>🗑 휴지통</button>
 	</div>
 
 	{#if showTrash}
-		<ObjectTrashView {containerName} {token} {projectId} />
+		<ObjectTrashView {containerName} {token} {projectId} selectionEnabled={mode === 'user'} />
 	{:else}
 		<ObjectBrowserToolbar {ar} {onManualRefresh} />
-		<ObjectBulkActionBar />
+		<ObjectBulkActionBar {mode} />
 
 		{#if s.showUpload}
 			<UploadModal

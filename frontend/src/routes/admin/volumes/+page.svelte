@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import type { PagedResponse, TsPoint } from '$lib/types/common';
@@ -8,6 +8,7 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createIntentPrefetchScheduler } from '$lib/utils/intentPrefetch';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { openWizard } from '$lib/stores/wizard';
 	import AdminVolumeFilters from '$lib/components/admin/volumes/AdminVolumeFilters.svelte';
@@ -23,6 +24,7 @@
 	import AdminVolumePageSizeToggle from '$lib/components/admin/volumes/AdminVolumePageSizeToggle.svelte';
 	import AdminVolumeDetailSlide from '$lib/components/admin/volumes/AdminVolumeDetailSlide.svelte';
 	import AdminVolumeStatusSummary from '$lib/components/admin/volumes/AdminVolumeStatusSummary.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
@@ -51,9 +53,25 @@
 	let resetVolume = $state<AdminVolume | null>(null);
 	let forceDeleteVolume = $state<AdminVolume | null>(null);
 	let transferVolume = $state<AdminVolume | null>(null);
+	let loadGeneration = 0;
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+	const nextPrefetch = createIntentPrefetchScheduler();
+	function listPath(marker?: string): string {
+		const params = new URLSearchParams({ limit: String(pageSize) });
+		if (marker) params.set('marker', marker);
+		if (projectFilter) params.set('project_id', projectFilter);
+		if (statusFilter) params.set('status', statusFilter);
+		if (nameSearch) params.set('name', nameSearch);
+		return `/api/v1/admin/all-volumes?${params}`;
+	}
+	function prefetchNext() {
+		if (!nextMarker) return;
+		const path = listPath(nextMarker);
+		const key = JSON.stringify([path, token ?? null, projectId ?? null]);
+		nextPrefetch.intent(key, (signal) => api.prefetch(path, token, projectId, { signal }));
+	}
 
 	function copyProjectId(id: string) {
 		navigator.clipboard.writeText(id).then(() => {
@@ -92,28 +110,46 @@
 	}
 
 	async function load(marker?: string) {
+		const generation = ++loadGeneration;
+		const requestToken = $auth.token ?? undefined;
+		const requestProjectId = $auth.projectId ?? undefined;
+		const requestPageSize = pageSize;
+		const requestProjectFilter = projectFilter;
+		const requestStatusFilter = statusFilter;
+		const requestNameSearch = nameSearch;
+		const requestPath = listPath(marker);
+		const owns = () => generation === loadGeneration
+			&& ($auth.token ?? undefined) === requestToken
+			&& ($auth.projectId ?? undefined) === requestProjectId
+			&& pageSize === requestPageSize
+			&& projectFilter === requestProjectFilter
+			&& statusFilter === requestStatusFilter
+			&& nameSearch === requestNameSearch
+			&& listPath(marker) === requestPath;
+		nextPrefetch.cancel();
 		if (allVolumes.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			let url = `/api/v1/admin/all-volumes?limit=${pageSize}`;
-			if (marker) url += `&marker=${marker}`;
-			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
-			if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
-			if (nameSearch) url += `&name=${encodeURIComponent(nameSearch)}`;
-			const res = await api.get<PagedResponse<AdminVolume>>(url, token, projectId);
+			const res = await api.get<PagedResponse<AdminVolume>>(requestPath, requestToken, requestProjectId);
+			if (!owns()) return;
 			allVolumes = res.items;
 			nextMarker = res.next_marker;
+			const path = nextMarker ? listPath(nextMarker) : null;
+			const key = path ? JSON.stringify([path, requestToken ?? null, requestProjectId ?? null]) : null;
+			nextPrefetch.schedule(key, (signal) => path ? api.prefetch(path, requestToken, requestProjectId, { signal }) : undefined);
 		} catch {
-			allVolumes = [];
+			if (owns()) allVolumes = [];
 		} finally {
-			loading = false;
-			refreshing = false;
+			if (owns()) {
+				loading = false;
+				refreshing = false;
+			}
 		}
 	}
 
 	const ar = createAutoRefresh(
 		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange, { background: true }); loadStatusSummary({ background: true }); },
-		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60] },
+		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60], invokeOnMount: false },
 	);
 
 	onMount(() => {
@@ -123,11 +159,15 @@
 		loadStatusSummary();
 		projectNames.load(token, projectId);
 	});
+
+	onDestroy(() => { loadGeneration += 1; nextPrefetch.cancel(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
+	<div data-tour="admin-storage-header">
 	<PageHeader breadcrumb="STORAGE / VOLUMES" title="전체 볼륨">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-storage" compactOnMobile />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -146,21 +186,27 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
+	<div data-tour="admin-storage-timeseries">
 	<AdminVolumeTimeseries
 		data={tsData}
 		loading={tsLoading}
 		range={tsRange}
 		onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
 	/>
+	</div>
 
+	<div data-tour="admin-storage-status">
 	<AdminVolumeStatusSummary
 		summary={statusSummary}
 		activeStatus={statusFilter}
 		loading={statusSummaryLoading}
 		onSelect={applyStatusFilter}
 	/>
+	</div>
 
+	<div data-tour="admin-storage-filters">
 	<AdminVolumeFilters
 		bind:projectFilter
 		bind:projectSearchText
@@ -168,10 +214,13 @@
 		bind:nameSearch
 		onChange={() => { markerStack = []; nextMarker = null; load(); }}
 	/>
+	</div>
 
+	<div data-tour="admin-storage-list">
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div data-tour="admin-storage-ready">
 			<AdminVolumeTable
 				volumes={allVolumes}
 				{selectedVolumeId}
@@ -208,8 +257,11 @@
 				markerStack = [...markerStack, nextMarker];
 				load(nextMarker);
 			}}
+			onintent={prefetchNext}
 		/>
+		</div>
 	{/if}
+	</div>
 </div>
 
 {#if selectedVolumeId}

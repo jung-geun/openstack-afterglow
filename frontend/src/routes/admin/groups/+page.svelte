@@ -18,6 +18,7 @@
 
 	const ar = createAutoRefresh(ctrl.load, {
 		storageKey: 'admin-groups',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 60,
 		intervalOptions: [30, 60]

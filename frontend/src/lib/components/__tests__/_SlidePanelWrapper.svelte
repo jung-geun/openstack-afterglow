@@ -5,11 +5,12 @@
 		onClose: () => void;
 		content?: string;
 		dataTour?: string;
+		storageKey?: string;
 	}
 
-	let { onClose, content = '테스트 내용', dataTour }: Props = $props();
+	let { onClose, content = '테스트 내용', dataTour, storageKey }: Props = $props();
 </script>
 
-<SlidePanel {onClose} {dataTour}>
+<SlidePanel {onClose} {dataTour} {storageKey}>
 	{content}
 </SlidePanel>

@@ -11,7 +11,10 @@
 - precheck 쿼터 차단
 """
 
+import asyncio
+import json
 import os
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -21,13 +24,37 @@ from sqlalchemy import select, text
 
 import app.models.db  # noqa: F401 — side-effect: Base 에 ORM 모델 등록
 from app.models.chat_db import ChatUsageLog, LlmProvider, UserWallet
+from app.services.chat.litellm_client import UsageCost
 
 pytestmark = [pytest.mark.db, pytest.mark.asyncio]
 
 _DB_URL_ENV = "AFTERGLOW_TEST_DATABASE_URL"
 _KEY_HEX = "a" * 64
+
+
+def _usage_cost(raw: Decimal) -> UsageCost:
+    return UsageCost(
+        raw_cost=raw,
+        input_cost=raw,
+        output_cost=Decimal("0"),
+        pricing_status="priced",
+        pricing_snapshot={"model": "test"},
+    )
+
+
 _CHAT_TABLES = (
+    "chat_run_segments",
+    "chat_run_turns",
+    "chat_tool_approvals",
+    "chat_run_events",
+    "chat_run_providers",
+    "chat_runs",
+    "chat_temp_threads",
+    "chat_api_keys",
     "chat_usage_logs",
+    "resource_policies",
+    "chat_memory_provenance",
+    "chat_memory_outbox",
     "chat_messages",
     "chat_conversations",
     "chat_agents",
@@ -37,6 +64,44 @@ _CHAT_TABLES = (
     "llm_models",
     "llm_providers",
 )
+
+
+@pytest_asyncio.fixture
+async def execution_snapshots(chat_db):
+    """Immutable executor route snapshots backed by real provider/model rows."""
+    from app.services.chat import provider_store as ps
+
+    provider = await ps.create_provider(name="executor-provider", api_key="executor-secret")
+    await ps.create_model(
+        provider_id=provider["id"],
+        model_name="m",
+        input_price_per_million=1,
+        output_price_per_million=2,
+    )
+    resolved = await ps.resolve_model("m")
+    assert resolved is not None
+    return (
+        {
+            "effective_features": {},
+            "provider_id": resolved["provider_id"],
+            "model_id": resolved["model_id"],
+            "provider_name": resolved["provider_name"],
+            "model_name": resolved["model_name"],
+            "config_version_hash": resolved["config_version_hash"],
+            "capabilities": resolved["capabilities"],
+        },
+        {
+            "input_price_per_token": str(resolved["input_price_per_token"]),
+            "output_price_per_token": str(resolved["output_price_per_token"]),
+            "component_prices": {},
+            "price_source": resolved["price_source"],
+            "provider_name": resolved["provider_name"],
+            "model_name": resolved["model_name"],
+            "margin_multiplier": str(resolved["margin_multiplier"]),
+            "chat_credit_per_usd": "1000",
+            "rounding_version": "half_even_v1",
+        },
+    )
 
 
 @pytest.fixture(scope="module")
@@ -64,8 +129,8 @@ async def chat_db(db_url, monkeypatch):
         "app.services.chat.credit.get_settings",
         lambda: SimpleNamespace(chat_credit_per_usd=1000.0, chat_default_monthly_quota=100000.0),
     )
-
     database.init_db(db_url)
+    database._db_unhealthy_until = 0.0
     async with database._engine.begin() as conn:
         await conn.run_sync(database.Base.metadata.create_all)
     # 이전 실행 잔여 정리
@@ -98,13 +163,16 @@ async def test_provider_model_conversation_usage_roundtrip(chat_db):
     prov = await ps.create_provider(name="openai", api_base=None, api_key="sk-secret-123", margin_multiplier=1.0)
     assert prov["has_api_key"] is True
     assert "api_key" not in prov  # 응답 마스킹
-    await ps.create_model(provider_id=prov["id"], model_name="gpt-4o", display_name="GPT-4o")
+    model = await ps.create_model(provider_id=prov["id"], model_name="gpt-4o", display_name="GPT-4o")
 
     # 2. resolve_model — JOIN + 복호화 왕복
     resolved = await ps.resolve_model("gpt-4o")
     assert resolved is not None
     assert resolved["api_key"] == "sk-secret-123"
     assert resolved["provider_name"] == "openai"
+    resolved_by_id = await ps.resolve_model_by_id(model["id"])
+    assert resolved_by_id is not None
+    assert resolved_by_id["model_id"] == model["id"]
 
     # 3. 저장 시 ciphertext 는 v3:, 평문 미포함
     async with factory() as s:
@@ -118,22 +186,23 @@ async def test_provider_model_conversation_usage_roundtrip(chat_db):
     # 5. 대화/메시지 + 소유권(user_id 기준, 프로젝트 무관)
     conv = await cs.create_conversation(project_id="p1", user_id="u1", title="t", model_name="gpt-4o")
     await cs.add_message(conv["id"], role="user", content="안녕하세요")
-    msgs = await cs.list_messages(conv["id"], user_id="u1")
+    msgs = await cs.list_messages(conv["id"], user_id="u1", project_id="p1")
     assert len(msgs) == 1
     assert msgs[0]["content"] == "안녕하세요"
     with pytest.raises(cs.ConversationForbidden):
-        await cs.get_conversation(conv["id"], user_id="other-user")
+        await cs.get_conversation(conv["id"], user_id="other-user", project_id="p1")
 
     # 6. apply_usage — 원자적 used_quota UPDATE + 원장 append
     credited = await credit.apply_usage(
+        event_id="usage-1",
         user_id="u1",
         project_id="p1",
         model_name="gpt-4o",
         provider="openai",
         prompt_tokens=100,
         completion_tokens=50,
-        raw_cost=0.002,
-        margin_multiplier=1.5,
+        usage_cost=_usage_cost(Decimal("0.002")),
+        margin_multiplier=Decimal("1.5"),
         conversation_id=conv["id"],
         source="web",
     )
@@ -146,23 +215,43 @@ async def test_provider_model_conversation_usage_roundtrip(chat_db):
         assert len(logs) == 1
         assert logs[0].credited_cost == Decimal("3.00000000")
         assert logs[0].provider == "openai"
+        assert logs[0].event_id == "usage-1"
+        assert logs[0].pricing_status == "priced"
+        assert logs[0].pricing_snapshot["credited_cost"] == "3.00000000"
 
     # 7. 두 번째 과금 → 누적(원자적 증가)
     await credit.apply_usage(
+        event_id="usage-2",
         user_id="u1",
         project_id="p1",
         model_name="gpt-4o",
         provider="openai",
         prompt_tokens=10,
         completion_tokens=10,
-        raw_cost=0.001,
-        margin_multiplier=1.0,
+        usage_cost=_usage_cost(Decimal("0.001")),
+        margin_multiplier=Decimal("1"),
         conversation_id=conv["id"],
         source="web",
     )
+    duplicate = await credit.apply_usage(
+        event_id="usage-2",
+        user_id="u1",
+        project_id="p1",
+        model_name="gpt-4o",
+        provider="openai",
+        prompt_tokens=10,
+        completion_tokens=10,
+        usage_cost=_usage_cost(Decimal("99")),
+        margin_multiplier=Decimal("9"),
+        conversation_id=conv["id"],
+        source="web",
+    )
+    assert duplicate == Decimal("1.00000000")
     async with factory() as s:
         wallet = await s.get(UserWallet, "u1")
         assert wallet.used_quota_this_month == Decimal("4.00000000")  # 3 + 1
+        logs = (await s.execute(select(ChatUsageLog).where(ChatUsageLog.user_id == "u1"))).scalars().all()
+        assert len(logs) == 2
 
     # 8. 쿼터 상한을 사용량 아래로 낮추면 precheck 차단
     async with factory() as s, s.begin():
@@ -180,27 +269,990 @@ async def test_provider_name_unique(chat_db):
         await ps.create_provider(name="dup", api_key=None)
 
 
-async def test_conversation_user_scope_cross_project(chat_db):
-    """대화 소유는 user_id 기준(프로젝트 무관): 다른 project 로 만든 대화도 같은 user 는 조회, 타 user 는 403."""
+async def test_conversation_project_scope_cross_project(chat_db):
+    """The same user cannot access a conversation through another project scope."""
     from app.services.chat import conversation_store as cs
 
     c1 = await cs.create_conversation(project_id="projA", user_id="u1", title="A", model_name="m")
     c2 = await cs.create_conversation(project_id="projB", user_id="u1", title="B", model_name="m")
     await cs.create_conversation(project_id="projA", user_id="u2", title="타인", model_name="m")
 
-    # u1 목록 → 프로젝트 무관하게 본인 대화 2개(타 user 것 제외)
-    ids = {c["id"] for c in await cs.list_conversations(user_id="u1")}
-    assert c1["id"] in ids and c2["id"] in ids
-    assert len(ids) == 2
+    assert {c["id"] for c in await cs.list_conversations(user_id="u1", project_id="projA")} == {c1["id"]}
+    assert {c["id"] for c in await cs.list_conversations(user_id="u1", project_id="projB")} == {c2["id"]}
 
-    # u1 은 projB 대화도 조회 가능(프로젝트 무관)
-    assert (await cs.get_conversation(c2["id"], user_id="u1"))["id"] == c2["id"]
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.get_conversation(c2["id"], user_id="u1", project_id="projA")
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.get_conversation(c1["id"], user_id="u2", project_id="projA")
+    with pytest.raises(cs.ConversationForbidden):
+        await cs.delete_conversation(c1["id"], user_id="u1", project_id="projB")
 
-    # 타 user 는 소유권 없음 → Forbidden (IDOR 경계)
-    with pytest.raises(cs.ConversationForbidden):
-        await cs.get_conversation(c1["id"], user_id="u2")
-    with pytest.raises(cs.ConversationForbidden):
-        await cs.delete_conversation(c1["id"], user_id="u2")
+
+async def test_persistent_run_creation_is_atomic(chat_db, execution_snapshots):
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunProvider
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conv = await cs.create_conversation(project_id="projA", user_id="u1", title="A", model_name="m")
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="4af6725e-bf56-4a57-a5a3-0e750112340f",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+        },
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="hello",
+        user_parts=[{"type": "text", "text": "hello"}],
+        request_payload={"input_messages": [{"role": "user", "content": "hello"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        messages = await cs.list_messages(conv["id"], user_id="u1", project_id="projA")
+        events = (
+            (
+                await session.execute(
+                    select(ChatRunEventRow)
+                    .where(ChatRunEventRow.run_id == descriptor.run_id)
+                    .order_by(ChatRunEventRow.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        provider_rows = (
+            (await session.execute(select(ChatRunProvider).where(ChatRunProvider.run_id == descriptor.run_id)))
+            .scalars()
+            .all()
+        )
+    assert run is not None and run.user_message_id == messages[-1]["id"]
+    assert messages[-1]["content"] == "hello"
+    assert [event.event_type for event in events] == ["run.started", "run.stage.changed"]
+    assert run.capability_snapshot == capability_snapshot
+    assert run.pricing_snapshot == pricing_snapshot
+    assert [(row.provider_id, row.model_id, row.config_version_hash) for row in provider_rows] == [
+        (
+            capability_snapshot["provider_id"],
+            capability_snapshot["model_id"],
+            capability_snapshot["config_version_hash"],
+        )
+    ]
+
+
+async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunSegment, ChatRunTurn
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+
+    conv = await cs.create_conversation(project_id="projA", user_id="u1", title="A", model_name="m")
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="59b6a901-0965-4ae4-818c-76ca4a01e6a7",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+        },
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="hello",
+        user_parts=[{"type": "text", "text": "hello"}],
+        request_payload={"input_messages": [{"role": "user", "content": "hello"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def fake_resolve_model(_capability_snapshot):
+        return {
+            "provider_type": "openai",
+            "api_base": None,
+            "api_key": "test",
+            "model_name": "m",
+            "provider_name": "executor-provider",
+        }
+
+    async def fake_stream(**kwargs):
+        hooks = kwargs["execution_hooks"]
+        assert await hooks.provider_started(round_index=0, attempt=1) is None
+        await hooks.provider_completed(
+            round_index=0,
+            attempt=1,
+            usage={"prompt_tokens": 1, "completion_tokens": 400},
+            result_payload={
+                "text": "x" * 400,
+                "tool_calls": [],
+                "citations": [],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 400},
+            },
+        )
+        assert (
+            await hooks.tool_started(
+                round_index=0,
+                tool_index=0,
+                tool_call_id="call_1",
+                tool_name="list_my_conversations",
+            )
+            is None
+        )
+        await hooks.tool_completed(
+            round_index=0,
+            tool_index=0,
+            tool_call_id="call_1",
+            tool_name="list_my_conversations",
+            result_payload={"content": "[]"},
+        )
+        provider_replay = await hooks.provider_started(round_index=0, attempt=1)
+        assert provider_replay is not None
+        assert provider_replay["text"] == "x" * 400
+        tool_replay = await hooks.tool_started(
+            round_index=0,
+            tool_index=0,
+            tool_call_id="call_1",
+            tool_name="list_my_conversations",
+        )
+        assert tool_replay == {"content": "[]", "_durable_replay": True}
+        for _ in range(400):
+            yield {"type": "token", "text": "x"}
+        yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 400}}
+
+    part_delta_writes = 0
+    original_append = durable_runs._append
+
+    async def slow_append(run_id, event_type, payload, *, owner):
+        nonlocal part_delta_writes
+        if event_type == "part.delta":
+            part_delta_writes += 1
+            await asyncio.sleep(0.001)
+        await original_append(run_id, event_type, payload, owner=owner)
+
+    monkeypatch.setattr(durable_runs.ps, "resolve_model_snapshot", fake_resolve_model)
+    monkeypatch.setattr(durable_runs.engine, "stream", fake_stream)
+    monkeypatch.setattr(durable_runs, "_append", slow_append)
+
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-test") is True
+    assert part_delta_writes <= 4
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        segment = await session.get(ChatRunSegment, (descriptor.run_id, "provider:0:1"))
+        tool_segment = await session.get(ChatRunSegment, (descriptor.run_id, "tool:0:0"))
+        turn = await session.get(ChatRunTurn, (descriptor.run_id, 0))
+        rows = (
+            await session.execute(
+                select(ChatRunEventRow)
+                .where(ChatRunEventRow.run_id == descriptor.run_id, ChatRunEventRow.event_type == "part.delta")
+                .order_by(ChatRunEventRow.seq)
+            )
+        ).scalars()
+        deltas = [json.loads(decrypt_chat_content(row.payload))["delta"] for row in rows]
+        stage_rows = (
+            await session.execute(
+                select(ChatRunEventRow)
+                .where(
+                    ChatRunEventRow.run_id == descriptor.run_id,
+                    ChatRunEventRow.event_type == "run.stage.changed",
+                )
+                .order_by(ChatRunEventRow.seq)
+            )
+        ).scalars()
+        stages = [json.loads(decrypt_chat_content(row.payload))["stage"] for row in stage_rows]
+    assert run.status == "completed"
+    assert segment is not None and segment.status == "completed"
+    assert tool_segment is not None and tool_segment.status == "completed"
+    assert turn is not None and turn.assistant_message_id == run.assistant_message_id
+    assert turn.message_event_seq is not None
+    assert "".join(deltas) == "x" * 400
+    assert stages == ["queued", "model_request", "model_response", "response_writing", "finalizing"]
+
+    async def failing_stream(**_kwargs):
+        for _ in range(50):
+            yield {"type": "token", "text": "y"}
+        yield {"type": "error", "message": "upstream stopped"}
+
+    failed = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="6932b5f2-9c46-46d8-9b0b-edb1d973b878",
+        intent={"endpoint": "completion", "model_id": "m", "parts": [{"type": "text", "text": "fail"}], "features": {}},
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="fail",
+        user_parts=[{"type": "text", "text": "fail"}],
+        request_payload={"input_messages": [{"role": "user", "content": "fail"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+    monkeypatch.setattr(durable_runs.engine, "stream", failing_stream)
+    assert await durable_runs.execute_queued_run(failed.run_id, owner="worker-test") is True
+
+    async with factory() as session:
+        failed_run = await session.get(ChatRun, failed.run_id)
+        failed_rows = (
+            await session.execute(
+                select(ChatRunEventRow)
+                .where(ChatRunEventRow.run_id == failed.run_id, ChatRunEventRow.event_type == "part.delta")
+                .order_by(ChatRunEventRow.seq)
+            )
+        ).scalars()
+        failed_deltas = [json.loads(decrypt_chat_content(row.payload))["delta"] for row in failed_rows]
+    assert failed_run.status == "failed"
+    assert "".join(failed_deltas) == "y" * 50
+
+    async def indeterminate_stream(**_kwargs):
+        yield {
+            "type": "error",
+            "code": "provider_result_unknown",
+            "message": "provider result is indeterminate",
+        }
+
+    indeterminate = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="0d3d93ba-4f06-44f1-bef0-f4cce391f97f",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "indeterminate"}],
+            "features": {},
+        },
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="indeterminate",
+        user_parts=[{"type": "text", "text": "indeterminate"}],
+        request_payload={"input_messages": [{"role": "user", "content": "indeterminate"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+    monkeypatch.setattr(durable_runs.engine, "stream", indeterminate_stream)
+    assert await durable_runs.execute_queued_run(indeterminate.run_id, owner="worker-test") is True
+
+    async with factory() as session:
+        error_row = (
+            await session.execute(
+                select(ChatRunEventRow)
+                .where(
+                    ChatRunEventRow.run_id == indeterminate.run_id,
+                    ChatRunEventRow.event_type == "run.failed",
+                )
+                .order_by(ChatRunEventRow.seq.desc())
+            )
+        ).scalar_one()
+    assert json.loads(decrypt_chat_content(error_row.payload))["error_code"] == "provider_result_unknown"
+
+    async def reasoning_only_stream(**_kwargs):
+        yield {"type": "reasoning", "text": "reasoning only"}
+        yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 0}}
+
+    reasoning_run = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="31d7a03d-0d3d-46fb-8a87-53bf7be443db",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "reason"}],
+            "features": {},
+        },
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="reason",
+        user_parts=[{"type": "text", "text": "reason"}],
+        request_payload={"input_messages": [{"role": "user", "content": "reason"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+    monkeypatch.setattr(durable_runs.engine, "stream", reasoning_only_stream)
+    assert await durable_runs.execute_queued_run(reasoning_run.run_id, owner="worker-test") is True
+
+    async with factory() as session:
+        reasoning_rows = (
+            await session.execute(
+                select(ChatRunEventRow)
+                .where(
+                    ChatRunEventRow.run_id == reasoning_run.run_id,
+                    ChatRunEventRow.event_type.in_(("part.delta", "part.completed")),
+                )
+                .order_by(ChatRunEventRow.seq)
+            )
+        ).scalars()
+        reasoning_events = [json.loads(decrypt_chat_content(row.payload)) for row in reasoning_rows]
+    assert [event["part_index"] for event in reasoning_events] == [1, 1]
+
+    async def usage_only_stream(**_kwargs):
+        yield {"type": "usage", "usage": {"prompt_tokens": 0, "completion_tokens": 0}}
+
+    canceled = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="8ca1cbde-785f-4e5f-bc51-3bfc7f4c2ac4",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "cancel"}],
+            "features": {},
+        },
+        conversation_id=conv["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="cancel",
+        user_parts=[{"type": "text", "text": "cancel"}],
+        request_payload={"input_messages": [{"role": "user", "content": "cancel"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def cancel_requested(_run_id):
+        return True
+
+    monkeypatch.setattr(durable_runs.engine, "stream", usage_only_stream)
+    monkeypatch.setattr(durable_runs, "_cancel_requested", cancel_requested)
+    assert await durable_runs.execute_queued_run(canceled.run_id, owner="worker-test") is True
+    async with factory() as session:
+        canceled_run = await session.get(ChatRun, canceled.run_id)
+    assert canceled_run.status == "canceled"
+
+
+async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_db import ChatMessage, ChatUsageLog
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunSegment, ChatRunTurn
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.chat.message_parts import deserialize_parts
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(project_id="projA", user_id="u1", title="turns", model_name="m")
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="fcb64a38-47a2-4c5a-a0a1-ae1fefcd3699",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "turns"}],
+            "features": {},
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="turns",
+        user_parts=[{"type": "text", "text": "turns"}],
+        request_payload={"input_messages": [{"role": "user", "content": "turns"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def fake_resolve_model(_snapshot):
+        return {
+            "provider_type": "openai",
+            "api_base": None,
+            "api_key": "test",
+            "model_name": "m",
+            "provider_name": "executor-provider",
+        }
+
+    async def fake_stream(**kwargs):
+        hooks = kwargs["execution_hooks"]
+        assert await hooks.provider_started(round_index=0, attempt=1) is None
+        yield {"type": "token", "text": "draft"}
+        await hooks.provider_completed(
+            round_index=0,
+            attempt=1,
+            usage={"prompt_tokens": 1, "completion_tokens": 1},
+            result_payload={"text": "draft", "tool_calls": [], "citations": [], "usage": {}},
+        )
+        assert (
+            await hooks.tool_started(
+                round_index=0,
+                tool_index=0,
+                tool_call_id="call_1",
+                tool_name="list_my_conversations",
+                arguments={},
+            )
+            is None
+        )
+        yield {
+            "type": "tool_call",
+            "tool_call_id": "call_1",
+            "name": "list_my_conversations",
+            "args": "{}",
+            "_durable_journaled": True,
+        }
+        await hooks.tool_completed(
+            round_index=0,
+            tool_index=0,
+            tool_call_id="call_1",
+            tool_name="list_my_conversations",
+            result_payload={"content": "[]"},
+        )
+        yield {
+            "type": "tool_result",
+            "tool_call_id": "call_1",
+            "name": "list_my_conversations",
+            "content": "[]",
+            "_durable_journaled": True,
+        }
+        assert await hooks.provider_started(round_index=1, attempt=1) is None
+        yield {"type": "token", "text": "final"}
+        await hooks.provider_completed(
+            round_index=1,
+            attempt=1,
+            usage={"prompt_tokens": 2, "completion_tokens": 2},
+            result_payload={"text": "final", "tool_calls": [], "citations": [], "usage": {}},
+        )
+        yield {"type": "usage", "usage": {"prompt_tokens": 3, "completion_tokens": 3}}
+
+    monkeypatch.setattr(durable_runs.ps, "resolve_model_snapshot", fake_resolve_model)
+    monkeypatch.setattr(durable_runs.engine, "stream", fake_stream)
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-test") is True
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        turns = (
+            (
+                await session.execute(
+                    select(ChatRunTurn).where(ChatRunTurn.run_id == descriptor.run_id).order_by(ChatRunTurn.ordinal)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        messages = [await session.get(ChatMessage, turn.assistant_message_id) for turn in turns]
+        tool_segment = await session.get(ChatRunSegment, (descriptor.run_id, "tool:0:0"))
+        tool_events = (
+            (
+                await session.execute(
+                    select(ChatRunEventRow.event_type)
+                    .where(
+                        ChatRunEventRow.run_id == descriptor.run_id,
+                        ChatRunEventRow.event_type.in_(("tool.call.started", "tool.call.completed")),
+                    )
+                    .order_by(ChatRunEventRow.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        usage_log = (
+            await session.execute(select(ChatUsageLog).where(ChatUsageLog.event_id == f"run:{descriptor.run_id}"))
+        ).scalar_one()
+        persisted_parts = [
+            [part.model_dump(by_alias=True, exclude_none=True) for part in deserialize_parts(message.parts)]
+            for message in messages
+        ]
+    public_messages = await cs.list_messages(conversation["id"], user_id="u1", project_id="projA")
+    assert [turn.ordinal for turn in turns] == [0, 1]
+    assert all(turn.message_event_seq is not None for turn in turns)
+    assert all(turn.completion_event_seq is not None for turn in turns)
+    assert [decrypt_chat_content(message.content) for message in messages] == ["draft", "final"]
+    assert [message.status for message in messages] == ["complete", "complete"]
+    assert [(message.token_prompt, message.token_completion) for message in messages] == [(0, 0), (3, 3)]
+    assert run.assistant_message_id == turns[-1].assistant_message_id
+    assert tool_segment is not None
+    assert tool_segment.started_event_seq is not None
+    assert tool_segment.completed_event_seq is not None
+    assert tool_events == ["tool.call.started", "tool.call.completed"]
+    assert [component["kind"] for component in usage_log.usage_components] == ["input_tokens", "output_tokens"]
+    assert [part["type"] for part in persisted_parts[0]] == ["text", "tool_call", "tool_result"]
+    assert persisted_parts[0][1]["name"] == "list_my_conversations"
+    assert persisted_parts[0][2]["content"] == [{"type": "text", "text": "[]"}]
+    assert public_messages[1]["parts"] == persisted_parts[0]
+    assert public_messages[1]["execution"] == {
+        "run_id": descriptor.run_id,
+        "agent_id": None,
+        "skill_ids": [],
+        "skills": [],
+    }
+    assert (public_messages[2]["token_prompt"], public_messages[2]["token_completion"]) == (3, 3)
+
+
+async def test_worker_persists_valid_structured_output_parts(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_db import ChatMessage
+    from app.models.chat_runs import ChatRun
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.chat.message_parts import deserialize_parts
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(project_id="projA", user_id="u1", title="structured", model_name="m")
+    response_format = {
+        "kind": "json_schema",
+        "name": "answer",
+        "version": "1",
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    }
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="99584a88-b96a-4fef-a114-f520eb6cbef5",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "structured"}],
+            "features": response_format,
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="structured",
+        user_parts=[{"type": "text", "text": "structured"}],
+        request_payload={
+            "input_messages": [{"role": "user", "content": "structured"}],
+            "features": {"response_format": response_format},
+        },
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def fake_resolve_model(_snapshot):
+        return {
+            "provider_type": "openai",
+            "api_base": None,
+            "api_key": "test",
+            "model_name": "m",
+            "provider_name": "executor",
+        }
+
+    async def fake_stream(**kwargs):
+        assert kwargs["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {"name": "answer", "strict": True, "schema": response_format["schema"]},
+        }
+        hooks = kwargs["execution_hooks"]
+        assert await hooks.provider_started(round_index=0, attempt=1) is None
+        yield {"type": "reasoning", "text": "visible analysis"}
+        yield {"type": "citations", "items": [{"citation_id": "source-1", "url": "https://example.test/source"}]}
+        yield {"type": "token", "text": '{"answer":"ok"}'}
+        await hooks.provider_completed(
+            round_index=0,
+            attempt=1,
+            usage={"prompt_tokens": 1, "completion_tokens": 2},
+            result_payload={
+                "text": '{"answer":"ok"}',
+                "reasoning": "visible analysis",
+                "tool_calls": [],
+                "citations": [],
+                "usage": {},
+            },
+        )
+        yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 2}}
+
+    monkeypatch.setattr(durable_runs.ps, "resolve_model_snapshot", fake_resolve_model)
+    monkeypatch.setattr(durable_runs.engine, "stream", fake_stream)
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker") is True
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        message = await session.get(ChatMessage, run.assistant_message_id)
+    stored_parts = [part.model_dump(by_alias=True, exclude_none=True) for part in deserialize_parts(message.parts)]
+    assert stored_parts == [
+        {
+            "type": "structured",
+            "schema_name": "answer",
+            "schema_version": "1",
+            "value": {"answer": "ok"},
+            "valid": True,
+        },
+        {"type": "reasoning", "text": "visible analysis", "visibility": "user"},
+        {"type": "citation", "citation_id": "source-1", "url": "https://example.test/source", "source_kind": "web"},
+    ]
+    public_messages = await cs.list_messages(conversation["id"], user_id="u1", project_id="projA")
+    assert public_messages[1]["parts"] == stored_parts
+    assert public_messages[1]["citations"] == [stored_parts[-1]]
+
+
+async def test_worker_replays_completed_provider_without_duplicate_projection(
+    chat_db, execution_snapshots, monkeypatch
+):
+    from app.models.chat_db import ChatMessage
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunTurn
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(project_id="projA", user_id="u1", title="replay", model_name="m")
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="88b4a88b-31d8-4fef-a114-f520eb6cbef5",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "replay"}],
+            "features": {},
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="replay",
+        user_parts=[{"type": "text", "text": "replay"}],
+        request_payload={"input_messages": [{"role": "user", "content": "replay"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def fake_resolve_model(_snapshot):
+        return {
+            "provider_type": "openai",
+            "api_base": None,
+            "api_key": "test",
+            "model_name": "m",
+            "provider_name": "executor-provider",
+        }
+
+    async def crash_after_provider_checkpoint(**kwargs):
+        hooks = kwargs["execution_hooks"]
+        assert await hooks.provider_started(round_index=0, attempt=1) is None
+        await hooks.provider_completed(
+            round_index=0,
+            attempt=1,
+            usage={"prompt_tokens": 1, "completion_tokens": 1},
+            result_payload={"text": "durable reply", "tool_calls": [], "citations": [], "usage": {}},
+        )
+        yield {"type": "token", "text": "durable reply"}
+        yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+        raise durable_runs.DurableRunLeaseLost("simulated worker crash")
+
+    async def replay_checkpointed_provider(**kwargs):
+        hooks = kwargs["execution_hooks"]
+        replay = await hooks.provider_started(round_index=0, attempt=1)
+        assert replay is not None and replay["_durable_replay"] is True
+        yield {"type": "token", "text": replay["text"], "_durable_replay": True}
+        yield {"type": "usage", "usage": replay["usage"]}
+
+    monkeypatch.setattr(durable_runs.ps, "resolve_model_snapshot", fake_resolve_model)
+    monkeypatch.setattr(durable_runs.engine, "stream", crash_after_provider_checkpoint)
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-one") is True
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        run = await session.get(ChatRun, descriptor.run_id, with_for_update=True)
+        assert run is not None and run.status == "running"
+        run.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert await durable_runs.recover_stale_runs(owner="worker-two") == [descriptor.run_id]
+
+    monkeypatch.setattr(durable_runs.engine, "stream", replay_checkpointed_provider)
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-two") is True
+
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        turn = await session.get(ChatRunTurn, (descriptor.run_id, 0))
+        message = await session.get(ChatMessage, run.assistant_message_id)
+        rows = (
+            (
+                await session.execute(
+                    select(ChatRunEventRow)
+                    .where(
+                        ChatRunEventRow.run_id == descriptor.run_id,
+                        ChatRunEventRow.event_type.in_(("part.delta", "part.completed")),
+                    )
+                    .order_by(ChatRunEventRow.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    payloads = [json.loads(decrypt_chat_content(row.payload)) for row in rows]
+    assert run.status == "completed"
+    assert turn is not None and turn.completion_event_seq is not None
+    assert decrypt_chat_content(message.content) == "durable reply"
+    assert [payload["delta"] for payload in payloads if "delta" in payload] == ["durable reply"]
+    assert len([payload for payload in payloads if "part" in payload]) == 1
+
+
+async def test_worker_shutdown_leaves_started_segment_for_recovery(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_db import ChatMessage
+    from app.models.chat_runs import ChatRun, ChatRunSegment, ChatRunTurn
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(project_id="projA", user_id="u1", title="shutdown", model_name="m")
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="1f4c2cb6-9e23-4b89-baf7-d856379c7e3b",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "shutdown"}],
+            "features": {},
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="shutdown",
+        user_parts=[{"type": "text", "text": "shutdown"}],
+        request_payload={"input_messages": [{"role": "user", "content": "shutdown"}], "features": {}},
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    async def fake_resolve_model(_snapshot):
+        return {
+            "provider_type": "openai",
+            "api_base": None,
+            "api_key": "test",
+            "model_name": "m",
+            "provider_name": "executor-provider",
+        }
+
+    async def canceled_stream(**kwargs):
+        await kwargs["execution_hooks"].provider_started(round_index=0, attempt=1)
+        yield {"type": "token", "text": "partial " * 32}
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(durable_runs.ps, "resolve_model_snapshot", fake_resolve_model)
+    monkeypatch.setattr(durable_runs.engine, "stream", canceled_stream)
+    with pytest.raises(asyncio.CancelledError):
+        await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-test")
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        run = await session.get(ChatRun, descriptor.run_id)
+        segment = await session.get(ChatRunSegment, (descriptor.run_id, "provider:0:1"))
+        run.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert run.status == "running"
+    assert segment.status == "provider_started"
+
+    assert await durable_runs.recover_stale_runs(owner="recovery-worker") == []
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        turn = await session.get(ChatRunTurn, (descriptor.run_id, 0))
+        message = await session.get(ChatMessage, turn.assistant_message_id)
+    assert run.status == "failed"
+    assert message.status == "failed"
+    assert decrypt_chat_content(message.content).strip() == ("partial " * 32).strip()
+
+
+async def test_stale_run_recovery_requeues_pre_io_and_fails_started_boundaries(chat_db, execution_snapshots):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunSegment
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.chat.run_store import (
+        begin_segment_io,
+        claim_queued_run,
+        complete_segment_io,
+        prepare_segment,
+    )
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+
+    async def create_run(client_request_id: str, content: str):
+        conversation = await cs.create_conversation(
+            project_id="projA",
+            user_id="u1",
+            title=content,
+            model_name="m",
+        )
+        return await durable_runs.create_persistent_run(
+            project_id="projA",
+            user_id="u1",
+            client_request_id=client_request_id,
+            intent={
+                "endpoint": "completion",
+                "model_id": "m",
+                "parts": [{"type": "text", "text": content}],
+                "features": {},
+            },
+            conversation_id=conversation["id"],
+            model_name="m",
+            agent_id=None,
+            user_content=content,
+            user_parts=[{"type": "text", "text": content}],
+            request_payload={"input_messages": [{"role": "user", "content": content}], "features": {}},
+            capability_snapshot=capability_snapshot,
+            pricing_snapshot=pricing_snapshot,
+        )
+
+    started = await create_run("63ff0845-e7f8-4b3d-937f-90ab89c3843f", "started")
+    completed = await create_run("a2c7cb55-e175-4eb9-8e8d-b13a5436fc2f", "completed")
+    pre_io = await create_run("35de29f2-7ae6-484a-8f4c-60b32f7b95a2", "pre-io")
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        started_run = await claim_queued_run(session, started.run_id, owner="lost-worker")
+        completed_run = await claim_queued_run(session, completed.run_id, owner="lost-worker")
+        pre_io_run = await claim_queued_run(session, pre_io.run_id, owner="lost-worker")
+        assert started_run is not None and completed_run is not None and pre_io_run is not None
+        segment = await prepare_segment(
+            session,
+            started_run,
+            segment_id="provider:0:1",
+            ordinal=1,
+            endpoint="chat_completions",
+            turn_ordinal=0,
+        )
+        begin_segment_io(segment)
+        completed_segment = await prepare_segment(
+            session,
+            completed_run,
+            segment_id="provider:0:1",
+            ordinal=1,
+            endpoint="chat_completions",
+            turn_ordinal=0,
+        )
+        begin_segment_io(completed_segment)
+        complete_segment_io(completed_segment, result_payload={"text": "complete"}, usage_payload=None)
+        expired_at = datetime.now(UTC) - timedelta(seconds=1)
+        started_run.lease_expires_at = expired_at
+        pre_io_run.lease_expires_at = expired_at
+        completed_run.lease_expires_at = expired_at
+
+    assert set(await durable_runs.recover_stale_runs(owner="recovery-worker")) == {completed.run_id, pre_io.run_id}
+
+    async with factory() as session:
+        started_run = await session.get(ChatRun, started.run_id)
+        pre_io_run = await session.get(ChatRun, pre_io.run_id)
+        completed_run = await session.get(ChatRun, completed.run_id)
+        segment = await session.get(ChatRunSegment, (started.run_id, "provider:0:1"))
+        completed_segment = await session.get(ChatRunSegment, (completed.run_id, "provider:0:1"))
+        failed_events = (
+            (await session.execute(select(ChatRunEventRow.event_type).where(ChatRunEventRow.run_id == started.run_id)))
+            .scalars()
+            .all()
+        )
+    assert started_run.status == "failed"
+    assert pre_io_run.status == "queued"
+    assert completed_run.status == "queued"
+    assert completed_segment.status == "completed"
+    assert segment.status == "failed"
+    assert "run.failed" in failed_events
+
+
+async def test_first_temp_run_idempotency_reuses_thread(chat_db, execution_snapshots):
+    from app.services.chat import durable_runs
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+
+    kwargs = {
+        "project_id": "projA",
+        "user_id": "u1",
+        "client_request_id": "39e906a7-68a7-46ed-b56c-632d3a9a9c87",
+        "intent": {
+            "endpoint": "temp_completion",
+            "temp_thread_id": None,
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+        },
+        "temp_thread_id": None,
+        "model_name": "m",
+        "request_payload": {
+            "input_messages": [{"role": "user", "content": "hello"}],
+            "input_parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+        },
+        "capability_snapshot": capability_snapshot,
+        "pricing_snapshot": pricing_snapshot,
+    }
+    first = await durable_runs.create_temp_run(**kwargs)
+    second = await durable_runs.create_temp_run(**kwargs)
+
+    assert second.run_id == first.run_id
+    assert second.temp_thread_id == first.temp_thread_id
+
+
+async def test_next_temp_run_includes_completed_thread_history(chat_db, execution_snapshots):
+    from app.models.chat_runs import ChatRun
+    from app.services.chat import durable_runs
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+
+    first_payload = {
+        "input_messages": [{"role": "user", "content": "first question"}],
+        "input_parts": [{"type": "text", "text": "first question"}],
+        "features": {},
+    }
+    first = await durable_runs.create_temp_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="3dcedea4-e155-49d6-8b8d-0c08f21d8b8a",
+        intent={
+            "endpoint": "temp_completion",
+            "temp_thread_id": None,
+            "model_id": "m",
+            "parts": first_payload["input_parts"],
+            "features": {},
+        },
+        temp_thread_id=None,
+        model_name="m",
+        request_payload=first_payload,
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+    factory = chat_db.get_session_factory()
+    owner = "worker-test"
+    async with factory() as session, session.begin():
+        assert await durable_runs.claim_queued_run(session, first.run_id, owner=owner) is not None
+    await durable_runs._append_temp_history(
+        first.run_id,
+        first_payload,
+        [{"type": "text", "text": "first answer"}],
+        owner=owner,
+    )
+    await durable_runs._finish(first.run_id, status="completed", message_id=None, owner=owner)
+
+    second_payload = {
+        "input_messages": [{"role": "user", "content": "second question"}],
+        "input_parts": [{"type": "text", "text": "second question"}],
+        "features": {},
+    }
+    second = await durable_runs.create_temp_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="6e0cc363-2c69-4652-bfa6-6e93d8ef09e3",
+        intent={
+            "endpoint": "temp_completion",
+            "temp_thread_id": first.temp_thread_id,
+            "model_id": "m",
+            "parts": second_payload["input_parts"],
+            "features": {},
+        },
+        temp_thread_id=first.temp_thread_id,
+        model_name="m",
+        request_payload=second_payload,
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+    )
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, second.run_id)
+    assert durable_runs._payload(run)["input_messages"] == [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "second question"},
+    ]
 
 
 async def test_message_version_tree(chat_db):
@@ -214,41 +1266,162 @@ async def test_message_version_tree(chat_db):
     a1 = await cs.add_message(cid, role="assistant", content="A1", parent_id=u1["id"], model_name="m1", set_leaf=True)
 
     # 활성 경로 = [Q1, A1], leaf=a1
-    path = await cs.get_active_path(cid, user_id="u")
+    path = await cs.get_active_path(cid, user_id="u", project_id="p")
     assert [m["content"] for m in path["messages"]] == ["Q1", "A1"]
     assert path["active_leaf_id"] == a1["id"]
 
     # 재생성: 대상 A1 의 턴-시작 user = Q1
-    turn_user = await cs.find_turn_start_user(cid, user_id="u", message_id=a1["id"])
+    turn_user = await cs.find_turn_start_user(cid, user_id="u", project_id="p", message_id=a1["id"])
     assert turn_user["id"] == u1["id"]
     a2 = await cs.add_message(cid, role="assistant", content="A2", parent_id=u1["id"], model_name="m2", set_leaf=True)
 
     # 활성 경로가 형제 A2 로 이동
-    path2 = await cs.get_active_path(cid, user_id="u")
+    path2 = await cs.get_active_path(cid, user_id="u", project_id="p")
     assert [m["content"] for m in path2["messages"]] == ["Q1", "A2"]
     assert path2["active_leaf_id"] == a2["id"]
 
     # 버전 전환: active_leaf 를 A1 로
-    await cs.set_active_leaf(cid, user_id="u", message_id=a1["id"])
-    path3 = await cs.get_active_path(cid, user_id="u")
+    await cs.set_active_leaf(cid, user_id="u", project_id="p", message_id=a1["id"])
+    path3 = await cs.get_active_path(cid, user_id="u", project_id="p")
     assert [m["content"] for m in path3["messages"]] == ["Q1", "A1"]
 
-    # 트리 전체 = 3 메시지(Q1, A1, A2 형제)
-    tree = await cs.list_message_tree(cid, user_id="u")
-    assert len(tree["messages"]) == 3
-
+    # Initial page carries only the selected active branch, while lightweight
+    # node metadata preserves the complete version tree for sibling controls.
+    tree = await cs.list_message_tree(cid, user_id="u", project_id="p")
+    assert [message["content"] for message in tree["messages"]] == ["Q1", "A1"]
+    assert {node["id"] for node in tree["tree_nodes"]} == {u1["id"], a1["id"], a2["id"]}
     # 분기: A1 지점까지 새 대화로 복사(독립)
-    forked = await cs.fork_conversation(cid, user_id="u", message_id=a1["id"])
+    forked = await cs.fork_conversation(cid, user_id="u", project_id="p", message_id=a1["id"])
     assert forked["parent_conversation_id"] == cid
     assert forked["forked_from_message_id"] == a1["id"]
-    ftree = await cs.list_message_tree(forked["id"], user_id="u")
+    ftree = await cs.list_message_tree(forked["id"], user_id="u", project_id="p")
     assert [m["content"] for m in ftree["messages"]] == ["Q1", "A1"]
+    assert len(ftree["tree_nodes"]) == 2
     assert forked["active_leaf_id"] == ftree["messages"][-1]["id"]
-    # 원본 불변(여전히 3 메시지)
-    assert len((await cs.list_message_tree(cid, user_id="u"))["messages"]) == 3
+    # The original branch map remains intact, although its page stays active-only.
+    original_tree = await cs.list_message_tree(cid, user_id="u", project_id="p")
+    assert [message["content"] for message in original_tree["messages"]] == ["Q1", "A1"]
+    assert {node["id"] for node in original_tree["tree_nodes"]} == {u1["id"], a1["id"], a2["id"]}
 
     # 콘텐츠 복호화 왕복(복사본도 평문 복원)
     assert ftree["messages"][0]["content"] == "Q1"
+
+
+async def test_message_history_pages_active_branch_without_scanning_inactive_newer_versions(chat_db):
+    """A newer inactive sibling must not evict the selected branch from the first page."""
+    from app.services.chat import conversation_store as cs
+
+    conv = await cs.create_conversation(project_id="p", user_id="u", title="paged", model_name="m")
+    cid = conv["id"]
+    parent_id = None
+    root_id = None
+    active_leaf = None
+    for index in range(45):
+        role = "user" if index % 2 == 0 else "assistant"
+        message = await cs.add_message(
+            cid,
+            role=role,
+            content=f"active-{index}",
+            parent_id=parent_id,
+            model_name="m" if role == "assistant" else None,
+            set_leaf=True,
+        )
+        parent_id = message["id"]
+        active_leaf = message["id"]
+        if index == 0:
+            root_id = message["id"]
+
+    # Higher ID, but not the active branch. Old id-based paging would select it.
+    await cs.add_message(
+        cid, role="assistant", content="inactive-newer", parent_id=root_id, model_name="other", set_leaf=False
+    )
+
+    first = await cs.list_message_tree(cid, user_id="u", project_id="p", limit=40)
+    assert first["active_leaf_id"] == active_leaf
+    assert first["messages"][-1]["id"] == active_leaf
+    assert first["has_more"] is True
+    assert first["next_before_id"] == first["messages"][0]["parent_id"]
+    assert any(node["id"] > active_leaf for node in first["tree_nodes"])
+
+    older = await cs.list_message_tree(cid, user_id="u", project_id="p", before_id=first["next_before_id"], limit=40)
+    assert [message["content"] for message in older["messages"]] == [f"active-{index}" for index in range(5)]
+
+
+async def test_memory_outbox_claims_change_sequences_in_global_order(chat_db):
+    """A later memory mutation cannot overtake an active earlier mutation."""
+    from app.models.chat_db import ChatMemory
+    from app.models.chat_jobs import ChatMemoryOutbox
+    from app.services.chat.memory_outbox import claim_next
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        memory = ChatMemory(user_id="outbox-user", scope="account", content="ciphertext")
+        session.add(memory)
+        await session.flush()
+        session.add_all(
+            [
+                ChatMemoryOutbox(
+                    event_key="outbox-order-first",
+                    memory_id=memory.id,
+                    mutation="upsert",
+                    content_hash="a" * 64,
+                    required_generations=[1],
+                    applied_generations=[],
+                    status="queued",
+                ),
+                ChatMemoryOutbox(
+                    event_key="outbox-order-second",
+                    memory_id=memory.id,
+                    mutation="upsert",
+                    content_hash="b" * 64,
+                    required_generations=[1],
+                    applied_generations=[],
+                    status="queued",
+                ),
+            ]
+        )
+
+    async with factory() as session, session.begin():
+        first = await claim_next(session, owner="first")
+        assert first is not None
+        first_sequence = first.change_seq
+
+    async with factory() as session, session.begin():
+        assert await claim_next(session, owner="second") is None
+
+    async with factory() as session, session.begin():
+        first = await session.get(ChatMemoryOutbox, first_sequence, with_for_update=True)
+        first.status = "completed"
+        first.lease_owner = None
+        first.lease_expires_at = None
+
+    async with factory() as session, session.begin():
+        second = await claim_next(session, owner="second")
+        assert second is not None
+        assert second.change_seq > first_sequence
+
+
+async def test_resource_policy_schema_persists_global_selection(chat_db):
+    from app.models.db import ResourcePolicy
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        session.add(
+            ResourcePolicy(
+                policy_key="builder.image",
+                resource_kind="image",
+                resource_id="image-id",
+                resource_name="Ubuntu 24.04",
+                constraints={"external_only": False},
+                updated_by_user_id="admin",
+            )
+        )
+
+    async with factory() as session:
+        row = await session.get(ResourcePolicy, "builder.image")
+        assert row is not None
+        assert row.resource_id == "image-id"
+        assert row.resource_name == "Ubuntu 24.04"
 
 
 async def test_agent_crud_hub_clone(chat_db):
@@ -331,9 +1504,9 @@ async def test_chat_content_encryption_at_rest(chat_db):
         assert "list_instances" not in msgs[0].tool_calls
 
     # 서비스 조회 시 평문 복원
-    got = await cs.get_conversation(conv["id"], user_id="u1")
+    got = await cs.get_conversation(conv["id"], user_id="u1", project_id="p1")
     assert got["title"] == "비밀 제목"
-    out = await cs.list_messages(conv["id"], user_id="u1")
+    out = await cs.list_messages(conv["id"], user_id="u1", project_id="p1")
     assert out[0]["content"] == "비밀 응답"
     assert out[0]["tool_calls"] == [{"id": "c1", "name": "list_instances"}]
 
@@ -346,14 +1519,15 @@ async def test_system_charge_does_not_debit_wallet(chat_db):
 
     await credit.precheck("sysu", "p1")  # 지갑 생성(used=0)
     await credit.apply_usage(
+        event_id="title:system-test",
         user_id="sysu",
         project_id="p1",
         model_name="gpt-4o-mini",
         provider="openai",
         prompt_tokens=10,
         completion_tokens=4,
-        raw_cost=0.0001,
-        margin_multiplier=1.0,
+        usage_cost=_usage_cost(Decimal("0.0001")),
+        margin_multiplier=Decimal("1"),
         source="system",
         charge_wallet=False,
     )
@@ -394,14 +1568,15 @@ async def test_stats_aggregation(chat_db):
     # 사용자 u1(web), u2(web) + system 부담 1건을 원장에 적재
     async def log(user, model, pt, ct, raw, source="web"):
         await credit.apply_usage(
+            event_id=f"{source}:{user}:{model}:{pt}:{ct}",
             user_id=user,
             project_id="p1",
             model_name=model,
             provider="openai",
             prompt_tokens=pt,
             completion_tokens=ct,
-            raw_cost=raw,
-            margin_multiplier=1.0,
+            usage_cost=_usage_cost(Decimal(str(raw))),
+            margin_multiplier=Decimal("1"),
             conversation_id=f"conv-{user}",
             source=source,
             charge_wallet=(source != "system"),
@@ -456,15 +1631,261 @@ async def test_workspace_and_memory_roundtrip(chat_db):
     # 대화를 워크스페이스에 배정
     conv = await cs.create_conversation(project_id="p", user_id="wu", title="t", model_name="m", workspace_id=wsp["id"])
     assert conv["workspace_id"] == wsp["id"]
-    moved = await cs.set_workspace(conv["id"], user_id="wu", workspace_id=None)
+    moved = await cs.set_workspace(conv["id"], user_id="wu", project_id="p", workspace_id=None)
     assert moved["workspace_id"] is None
+    other_wsp = await ws.create_workspace(owner_user_id="other", name="타인 프로젝트")
+    with pytest.raises(cs.WorkspaceForbidden):
+        await cs.create_conversation(
+            project_id="p", user_id="wu", title="차단", model_name="m", workspace_id=other_wsp["id"]
+        )
+    with pytest.raises(cs.WorkspaceForbidden):
+        await cs.set_workspace(conv["id"], user_id="wu", project_id="p", workspace_id=other_wsp["id"])
 
     # 메모리 암호화 왕복 + 활성 주입 조회(비활성 제외)
     m1 = await ms.create_memory(user_id="wu", content="사용자는 Python 선호")
     m2 = await ms.create_memory(user_id="wu", content="다크모드")
     await ms.update_memory(m2["id"], user_id="wu", patch={"is_active": False})
-    active = await ms.active_contents_for_run(user_id="wu")
+    active = await ms.active_contents_for_run(user_id="wu", project_id="project-a")
     assert "사용자는 Python 선호" in active
     assert "다크모드" not in active  # 비활성 제외
     with pytest.raises(ms.MemoryForbidden):
         await ms.update_memory(m1["id"], user_id="other", patch={"content": "탈취"})
+
+
+async def test_models_dev_import_is_atomic_and_remap_safe(chat_db):
+    """Exact catalog keys only; a conflicting remap cannot alter stored prices."""
+    import json
+
+    from app.models.chat_db import LlmModel
+    from app.services.chat import models_dev
+    from app.services.chat import provider_store as ps
+
+    def catalog(provider_id: str, model_ids: list[str]):
+        return models_dev.parse_catalog(
+            json.dumps(
+                {
+                    "providers": {
+                        provider_id: {
+                            "id": provider_id,
+                            "models": {
+                                model_id: {"id": model_id, "cost": {"input": 2, "output": 8}} for model_id in model_ids
+                            },
+                        }
+                    }
+                }
+            ),
+            "2026-07-20T00:00:00+00:00",
+        )
+
+    provider = await ps.create_provider(name="catalog-provider")
+    first = await ps.create_model(provider_id=provider["id"], model_name="first")
+    second = await ps.create_model(provider_id=provider["id"], model_name="second")
+    manual = await ps.create_model(
+        provider_id=provider["id"],
+        model_name="manual",
+        input_price_per_million=Decimal("3"),
+        output_price_per_million=Decimal("9"),
+    )
+
+    imported = await ps.import_models_dev_prices(
+        local_provider_id=provider["id"],
+        models_dev_provider_id="openai",
+        selections=[
+            {"local_model_id": first["id"], "models_dev_model_id": "openai/first"},
+            {"local_model_id": second["id"], "models_dev_model_id": "openai/second"},
+        ],
+        catalog=catalog("openai", ["openai/first", "openai/second"]),
+    )
+    assert {row["id"] for row in imported} == {first["id"], second["id"]}
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        rows = {
+            row.id: row
+            for row in (await session.execute(select(LlmModel).where(LlmModel.provider_id == provider["id"]))).scalars()
+        }
+        assert rows[first["id"]].input_price == Decimal("0.0000020000")
+        assert rows[first["id"]].output_price == Decimal("0.0000080000")
+        assert rows[first["id"]].price_source == "models.dev"
+        assert rows[first["id"]].price_metadata["cost"]["input"] == "2"
+        rows[manual["id"]].models_dev_model_id = "stale/manual"
+        await session.commit()
+
+    with pytest.raises(ps.ModelsDevImportConflictError):
+        await ps.import_models_dev_prices(
+            local_provider_id=provider["id"],
+            models_dev_provider_id="anthropic",
+            selections=[{"local_model_id": first["id"], "models_dev_model_id": "anthropic/first"}],
+            catalog=catalog("anthropic", ["anthropic/first"]),
+        )
+
+    async with factory() as session:
+        provider_row = await session.get(LlmProvider, provider["id"])
+        first_row = await session.get(LlmModel, first["id"])
+        assert provider_row.models_dev_provider_id == "openai"
+        assert first_row.models_dev_model_id == "openai/first"
+        assert first_row.input_price == Decimal("0.0000020000")
+
+    await ps.import_models_dev_prices(
+        local_provider_id=provider["id"],
+        models_dev_provider_id="anthropic",
+        selections=[
+            {"local_model_id": first["id"], "models_dev_model_id": "anthropic/first"},
+            {"local_model_id": second["id"], "models_dev_model_id": "anthropic/second"},
+        ],
+        catalog=catalog("anthropic", ["anthropic/first", "anthropic/second"]),
+    )
+    async with factory() as session:
+        manual_row = await session.get(LlmModel, manual["id"])
+        assert manual_row.models_dev_model_id is None
+
+
+async def test_api_key_create_verify_revoke_roundtrip(chat_db):
+    """API 키: 발급(평문 1회) → 해시 저장(평문 미포함) → verify 왕복 → 폐기 후 verify None."""
+    from app.services.chat import api_key_store as aks
+
+    factory = chat_db.get_session_factory()
+
+    issued = await aks.create_key("u-api", "p-api", "my key")
+    raw = issued["key"]
+    assert raw.startswith("sk-afgl-")
+    key_id = issued["id"]
+
+    # 저장은 해시만 — 평문 미포함
+    from app.models.chat_db import ChatApiKey
+
+    async with factory() as s:
+        row = await s.get(ChatApiKey, key_id)
+        assert row.key_hash != raw and raw not in row.key_hash
+        assert len(row.key_hash) == 64
+
+    # verify 왕복
+    info = await aks.verify_key(raw)
+    assert info == {"user_id": "u-api", "project_id": "p-api", "api_key_id": key_id}
+
+    # 잘못된 키 → None
+    assert await aks.verify_key("sk-afgl-wrong") is None
+
+    # 타 소유자 폐기 → 403
+    with pytest.raises(aks.ApiKeyForbidden):
+        await aks.revoke_key(key_id, "other-user", "p-api")
+
+    # 소유자 폐기 → 이후 verify None
+    await aks.revoke_key(key_id, "u-api", "p-api")
+    assert await aks.verify_key(raw) is None
+
+
+async def test_usage_source_and_key_aggregation(chat_db):
+    """web/api source + api_key_id 원장 → user 요약 by_source, stats.timeseries, by_api_key 집계."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from app.models.chat_db import ChatApiKey
+    from app.services.chat import stats as stats_service
+    from app.services.chat import usage as usage_service
+
+    factory = chat_db.get_session_factory()
+    async with factory() as s, s.begin():
+        s.add(
+            ChatApiKey(
+                id=100,
+                owner_user_id="u-agg",
+                owner_project_id="p-agg",
+                name="cli",
+                key_prefix="sk-afgl-AAAA",
+                key_hash="a" * 64,
+                is_active=True,
+            )
+        )
+        now = datetime.now(UTC)
+        for src, kid, tok in (("web", None, 100), ("api", 100, 40), ("api", 100, 20), ("system", None, 5)):
+            s.add(
+                ChatUsageLog(
+                    event_id=f"e-{src}-{kid}-{tok}",
+                    project_id="p-agg",
+                    user_id="u-agg",
+                    model_name="gpt-4o",
+                    prompt_tokens=tok,
+                    completion_tokens=0,
+                    raw_cost=Decimal("0.01"),
+                    credited_cost=Decimal("0.02"),
+                    source=src,
+                    api_key_id=kid,
+                    created_at=now,
+                )
+            )
+
+    # 사용자 요약 by_source — system 제외, web/api 분리
+    summary = await usage_service.user_usage_summary("u-agg", "p-agg")
+    by_source = {r["source"]: r for r in summary["by_source"]}
+    assert by_source["web"]["tokens"] == 100
+    assert by_source["api"]["tokens"] == 60
+    assert "system" not in by_source
+
+    # timeseries(day) — source별 버킷 집계(본인, 시스템 제외)
+    ts = await stats_service.timeseries("day", "all", None, user_id="u-agg", include_system=False)
+    api_rows = [r for r in ts if r["source"] == "api"]
+    assert sum(r["total_tokens"] for r in api_rows) == 60
+
+    # by_api_key — 키 이름 조인 + api 만
+    keys = await stats_service.by_api_key("all", None, user_id="u-agg")
+    assert keys and keys[0]["api_key_id"] == 100 and keys[0]["name"] == "cli"
+    assert keys[0]["total_tokens"] == 60
+
+
+async def test_timeseries_fine_buckets_round_and_filter_in_mysql(chat_db):
+    """5분/15분 집계는 MySQL에서 분 하한과 모델 필터를 정확히 적용한다."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from app.services.chat import stats as stats_service
+
+    factory = chat_db.get_session_factory()
+    hour_start = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    rows = (
+        ("fine-1", "alpha", hour_start.replace(minute=2), 10, 1),
+        ("fine-2", "beta", hour_start.replace(minute=6), 20, 2),
+        ("fine-3", "alpha", hour_start.replace(minute=17), 30, 3),
+        ("fine-other-project", "alpha", hour_start.replace(minute=4), 99, 9),
+        ("fine-stale", "alpha", hour_start - timedelta(days=8), 999, 1),
+    )
+    async with factory() as session, session.begin():
+        for event_id, model_name, created_at, prompt_tokens, completion_tokens in rows:
+            session.add(
+                ChatUsageLog(
+                    event_id=event_id,
+                    project_id="p-fine" if event_id != "fine-other-project" else "p-other",
+                    user_id="u-fine",
+                    model_name=model_name,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    raw_cost=Decimal("0"),
+                    credited_cost=Decimal("0"),
+                    source="web",
+                    created_at=created_at,
+                )
+            )
+
+    async def totals(bucket: str, *, model_name: str | None = None) -> dict[str, int]:
+        result = await stats_service.timeseries(bucket, "all", "p-fine", model_name=model_name)
+        aggregated: dict[str, int] = {}
+        for row in result:
+            aggregated[row["bucket"]] = aggregated.get(row["bucket"], 0) + row["total_tokens"]
+        return aggregated
+
+    def bucket(minutes: int) -> str:
+        return f"{hour_start:%Y-%m-%d %H:}{minutes:02}:00"
+
+    assert await totals("5m") == {
+        bucket(0): 11,
+        bucket(5): 22,
+        bucket(15): 33,
+    }
+    assert await totals("15m") == {
+        bucket(0): 33,
+        bucket(15): 33,
+    }
+    assert await totals("5m", model_name="alpha") == {
+        bucket(0): 11,
+        bucket(15): 33,
+    }

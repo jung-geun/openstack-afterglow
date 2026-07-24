@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.services import tutorial_status as tutorial_status_service
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -28,6 +30,25 @@ async def test_post_rejects_invalid_status(client):
 async def test_post_rejects_unknown_tour(client):
     resp = await client.post("/api/v1/tutorials/not-a-tour/status", json={"status": "completed"})
     assert resp.status_code == 422
+
+
+async def test_all_administrator_tour_ids_are_whitelisted():
+    administrator_tour_ids = (
+        "admin-compute",
+        "admin-storage",
+        "admin-library",
+        "admin-network",
+        "admin-containers",
+        "admin-key-manager",
+        "admin-monitoring",
+        "admin-system",
+        "admin-identity",
+    )
+
+    assert (
+        tuple(tutorial_status_service.validate_tour_id(tour_id) for tour_id in administrator_tour_ids)
+        == administrator_tour_ids
+    )
 
 
 @pytest.mark.parametrize("status", ["completed", "dismissed"])

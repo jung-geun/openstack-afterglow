@@ -91,7 +91,7 @@ docker compose --profile monitoring up -d
 
 ```bash
 # 헬스체크
-curl http://localhost:8000/api/health
+curl http://localhost:8000/api/v1/health
 
 # 브라우저
 open http://localhost:3000

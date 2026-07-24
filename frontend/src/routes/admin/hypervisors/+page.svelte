@@ -134,6 +134,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-hypervisors',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]

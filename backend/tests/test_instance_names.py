@@ -47,6 +47,38 @@ def test_empty_instance_name_generates_unique_project_name() -> None:
     assert len(generated) <= 63
 
 
-def test_invalid_nonempty_instance_name_still_fails_validation() -> None:
+def test_whitespace_in_instance_name_normalizes_to_hyphens() -> None:
+    req = CreateInstanceRequest(name="  team vm\tblue  ", image_id="img-1", flavor_id="flavor-1")
+    assert req.name == "team-vm-blue"
+
+
+def test_normalized_instance_name_still_enforces_length() -> None:
     with pytest.raises(ValidationError):
-        CreateInstanceRequest(name="bad name", image_id="img-1", flavor_id="flavor-1")
+        CreateInstanceRequest(name=f"{'a' * 32} {'b' * 32}", image_id="img-1", flavor_id="flavor-1")
+
+
+@pytest.mark.parametrize("username", ["octocat", "octo-cat-7", "OCTOCAT"])
+def test_create_request_accepts_valid_github_ssh_username(username: str) -> None:
+    req = CreateInstanceRequest(
+        image_id="img-1",
+        flavor_id="flavor-1",
+        github_username=f"  {username}  ",
+    )
+    assert req.github_username == username
+    assert req.key_name is None
+
+
+@pytest.mark.parametrize("username", ["-octocat", "octocat-", "octo--cat", "octo cat", "octo\nruncmd", "한글"])
+def test_create_request_rejects_invalid_github_ssh_username(username: str) -> None:
+    with pytest.raises(ValidationError):
+        CreateInstanceRequest(image_id="img-1", flavor_id="flavor-1", github_username=username)
+
+
+def test_create_request_rejects_github_and_keypair_together() -> None:
+    with pytest.raises(ValidationError, match="함께 사용할 수 없습니다"):
+        CreateInstanceRequest(
+            image_id="img-1",
+            flavor_id="flavor-1",
+            github_username="octocat",
+            key_name="existing-keypair",
+        )

@@ -28,7 +28,7 @@
 			class="text-xs text-gray-400 hover:text-blue-300 px-2 py-1 rounded border border-gray-700 hover:border-blue-700 transition-colors"
 		>전체 보기 →</button>
 		{#if onClose}
-			<button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none px-2">✕</button>
+			<button data-tour="admin-network-detail-close" onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none px-2">✕</button>
 		{/if}
 	</div>
 </div>

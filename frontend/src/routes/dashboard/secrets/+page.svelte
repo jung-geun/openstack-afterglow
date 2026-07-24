@@ -12,8 +12,15 @@
 	import { untrack } from 'svelte';
 	import { betaFeatures } from '$lib/stores/betaFeatures';
 	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
+	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
+	import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
+	import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+	import { executeBulkMutations } from '$lib/utils/bulkActions';
 
 	type Tab = 'secrets' | 'containers' | 'orders' | 'quota';
+	const selection = createResourceSelection();
+	let selectionBusy = $state(false);
 
 	let activeTab = $state<Tab>('secrets');
 	let secrets = $state<SecretInfo[]>([]);
@@ -48,6 +55,16 @@
 	let payloadVisible = $state<Record<string, string>>({});
 	let payloadLoading = $state<string | null>(null);
 
+	function selectableIds(tab: Tab = activeTab): string[] {
+		if (tab === 'secrets') return secrets.filter((item) => !item.system_managed).map((item) => item.id);
+		if (tab === 'containers') return containers.map((item) => item.id);
+		return [];
+	}
+
+	function setActiveTab(tab: Tab) {
+		if (activeTab !== tab) selection.clear();
+		activeTab = tab;
+	}
 	const SECRET_TYPES = ['passphrase', 'certificate', 'symmetric', 'public', 'private', 'opaque'];
 	const keyManagerEnabled = $derived($betaFeatures.keyManager);
 
@@ -57,10 +74,13 @@
 		orders = [];
 		quota = null;
 		error = '';
+		selection.clear();
 	}
 
 
 	async function fetchAll() {
+		const requestToken = $auth.token ?? undefined;
+		const requestProject = $auth.projectId ?? undefined;
 		if (!keyManagerEnabled) {
 			clearKeyManagerState();
 			loading = false;
@@ -68,20 +88,24 @@
 		}
 		try {
 			const [s, c, o, q] = await Promise.allSettled([
-				secretsApi.listSecrets($auth.token ?? undefined, $auth.projectId ?? undefined),
-				secretsApi.listContainers($auth.token ?? undefined, $auth.projectId ?? undefined),
-				secretsApi.listOrders($auth.token ?? undefined, $auth.projectId ?? undefined),
-				secretsApi.getEffectiveQuota($auth.token ?? undefined, $auth.projectId ?? undefined),
+				secretsApi.listSecrets(requestToken, requestProject),
+				secretsApi.listContainers(requestToken, requestProject),
+				secretsApi.listOrders(requestToken, requestProject),
+				secretsApi.getEffectiveQuota(requestToken, requestProject),
 			]);
+			if ($auth.projectId !== requestProject || !keyManagerEnabled) return;
 			if (s.status === 'fulfilled') secrets = s.value;
 			if (c.status === 'fulfilled') containers = c.value;
 			if (o.status === 'fulfilled') orders = o.value;
 			if (q.status === 'fulfilled') quota = q.value;
+			selection.retain(selectableIds());
 			error = '';
 		} catch (e) {
-			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
+			if ($auth.projectId === requestProject && keyManagerEnabled) {
+				error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
+			}
 		} finally {
-			loading = false;
+			if ($auth.projectId === requestProject && keyManagerEnabled) loading = false;
 		}
 	}
 
@@ -93,6 +117,7 @@
 
 	const ar = createAutoRefresh(() => fetchAll(), {
 		storageKey: 'dashboard-secrets',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],
@@ -105,8 +130,15 @@
 			loading = false;
 			return;
 		}
-		if (!pid) return;
-		untrack(() => fetchAll());
+		if (!pid) {
+			clearKeyManagerState();
+			loading = false;
+			return;
+		}
+		untrack(() => {
+			selection.clear();
+			fetchAll();
+		});
 	});
 
 	async function handleCreateSecret() {
@@ -203,6 +235,30 @@
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		}
+	}
+	async function runBulkDelete() {
+		const actionTab = activeTab;
+		const submitted = [...selection.ids];
+		if (submitted.length === 0 || (actionTab !== 'secrets' && actionTab !== 'containers')) return;
+		const label = actionTab === 'secrets' ? '비밀' : '컨테이너';
+		if (!(await confirmDialog(`${submitted.length}개 ${label}를 삭제하시겠습니까?`))) return;
+		selectionBusy = true;
+		const requestToken = $auth.token ?? undefined;
+		const requestProject = $auth.projectId ?? undefined;
+		const results = await executeBulkMutations(submitted, (id) =>
+			actionTab === 'secrets'
+				? secretsApi.deleteSecret(id, requestToken, requestProject)
+				: secretsApi.deleteContainer(id, requestToken, requestProject)
+		);
+		if ($auth.projectId === requestProject && activeTab === actionTab && keyManagerEnabled) {
+			selection.remove(results.filter((result) => result.ok).map((result) => result.id));
+			await fetchAll();
+		}
+		const successCount = results.filter((result) => result.ok).length;
+		const failureCount = results.length - successCount;
+		if (successCount) toast.success(`${successCount}개 ${label} 요청을 완료했습니다.`);
+		if (failureCount) toast.error(`${failureCount}개 ${label}에 실패했습니다.`);
+		selectionBusy = false;
 	}
 
 	async function handleCreateOrder() {
@@ -336,7 +392,7 @@
 	</div>
 </FormModal>
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
 	<PageHeader breadcrumb="KEY MANAGER / 비밀 관리" title="Key Manager">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -360,7 +416,8 @@
 	<div class="flex gap-1 mb-0 border-b border-gray-700">
 		{#each (['secrets', 'containers', 'orders', 'quota'] as Tab[]) as tab}
 			<button
-				onclick={() => activeTab = tab}
+				onclick={() => setActiveTab(tab)}
+				disabled={selectionBusy}
 				class="px-4 py-2 text-sm font-medium transition-colors {activeTab === tab ? 'text-white border-b-2 border-blue-500' : 'text-gray-400 hover:text-gray-200'}"
 			>
 				{tab === 'secrets' ? '비밀' : tab === 'containers' ? '컨테이너' : tab === 'orders' ? 'Key Orders' : '쿼터'}
@@ -424,10 +481,22 @@
 				<button onclick={() => showCreateSecret = true} class="mt-4 text-blue-400 hover:text-blue-300 text-sm">+ 비밀 생성</button>
 			</div>
 		{:else}
+			<div class="mb-3">
+				<SelectionToolbar
+					label="비밀"
+					ariaLabel="비밀 전체 선택"
+					checked={selection.count === selectableIds('secrets').length && selection.count > 0}
+					indeterminate={selection.count > 0 && selection.count < selectableIds('secrets').length}
+					selectedCount={selection.count}
+					disabled={selectionBusy}
+					onToggle={() => selection.toggleAll(selectableIds('secrets'))}
+				/>
+			</div>
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
 					<thead>
 						<tr class="text-left text-gray-400 border-b border-gray-700">
+							<th class="pb-3 pr-4 font-medium w-10">선택</th>
 							<th class="pb-3 pr-4 font-medium">이름</th>
 							<th class="pb-3 pr-4 font-medium">타입</th>
 							<th class="pb-3 pr-4 font-medium">상태</th>
@@ -437,41 +506,37 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-800">
-						{#each secrets as s}
-							<tr class="hover:bg-gray-800/30">
+						{#each secrets as s (s.id)}
+							<tr class="resource-selection-surface hover:bg-gray-800/30" data-selected={selection.has(s.id)}>
+								<td class="py-3 pr-4">
+									<SelectionCheckbox
+										checked={selection.has(s.id)}
+										disabled={s.system_managed || selectionBusy}
+										unavailable={s.system_managed}
+										title={s.system_managed ? '시스템 관리 Secret은 삭제할 수 없습니다.' : undefined}
+										ariaLabel={`${s.name ?? s.id} 선택`}
+										onclick={() => selection.toggle(s.id)}
+									/>
+								</td>
 								<td class="py-3 pr-4 font-mono text-xs">
 									<div class="flex items-center gap-2 max-md:max-w-[66vw]">
 										<span class="max-md:truncate" title={s.name ?? s.id}>{s.name ?? s.id}</span>
-										{#if s.system_managed}
-											<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">시스템</span>
-										{/if}
+										{#if s.system_managed}<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">시스템</span>{/if}
 									</div>
 									<div class="text-gray-500 text-xs mt-0.5">{s.id}</div>
 								</td>
 								<td class="py-3 pr-4 text-gray-300">{SECRET_TYPE_LABEL[s.secret_type] ?? s.secret_type}</td>
-								<td class="py-3 pr-4">
-									<span class="px-2 py-0.5 rounded text-xs {STATUS_CLASS[s.status ?? ''] ?? 'bg-gray-700 text-gray-300'}">{s.status ?? '-'}</span>
-								</td>
+								<td class="py-3 pr-4"><span class="px-2 py-0.5 rounded text-xs {STATUS_CLASS[s.status ?? ''] ?? 'bg-gray-700 text-gray-300'}">{s.status ?? '-'}</span></td>
 								<td class="py-3 pr-4 text-gray-400 text-xs">{s.created ? new Date(s.created).toLocaleDateString('ko') : '-'}</td>
 								<td class="py-3 pr-4 text-gray-400 text-xs">{s.expires ? new Date(s.expires).toLocaleDateString('ko') : '없음'}</td>
 								<td class="py-3">
 									<div class="flex gap-2">
-										<button
-											onclick={() => handleShowPayload(s)}
-											disabled={payloadLoading === s.id}
-											class="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50"
-										>
-											{payloadLoading === s.id ? '로딩...' : payloadVisible[s.id] ? '숨기기' : '값 보기'}
-										</button>
-										{#if !s.system_managed}
-											<button onclick={() => handleDeleteSecret(s)} class="text-xs text-red-400 hover:text-red-300">삭제</button>
-										{/if}
+										<button onclick={() => handleShowPayload(s)} disabled={payloadLoading === s.id} class="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50">{payloadLoading === s.id ? '로딩...' : payloadVisible[s.id] ? '숨기기' : '값 보기'}</button>
+										{#if !s.system_managed}<button onclick={() => handleDeleteSecret(s)} class="text-xs text-red-400 hover:text-red-300">삭제</button>{/if}
 									</div>
 									{#if payloadVisible[s.id]}
 										<div class="mt-2 flex items-center gap-2">
-											<code class="text-xs bg-gray-900 border border-gray-700 rounded px-2 py-1 font-mono max-w-xs overflow-x-auto block">
-												{payloadVisible[s.id].substring(0, 60)}{payloadVisible[s.id].length > 60 ? '...' : ''}
-											</code>
+											<code class="text-xs bg-gray-900 border border-gray-700 rounded px-2 py-1 font-mono max-w-xs overflow-x-auto block">{payloadVisible[s.id].substring(0, 60)}{payloadVisible[s.id].length > 60 ? '...' : ''}</code>
 											<button onclick={() => copyPayload(payloadVisible[s.id])} class="text-xs text-gray-400 hover:text-gray-200 shrink-0">복사</button>
 										</div>
 									{/if}
@@ -491,10 +556,22 @@
 				<button onclick={() => showCreateContainer = true} class="mt-4 text-blue-400 hover:text-blue-300 text-sm">+ 컨테이너 생성</button>
 			</div>
 		{:else}
+			<div class="mb-3">
+				<SelectionToolbar
+					label="컨테이너"
+					ariaLabel="컨테이너 전체 선택"
+					checked={selection.count === containers.length && selection.count > 0}
+					indeterminate={selection.count > 0 && selection.count < containers.length}
+					selectedCount={selection.count}
+					disabled={selectionBusy}
+					onToggle={() => selection.toggleAll(selectableIds('containers'))}
+				/>
+			</div>
 			<div class="overflow-x-auto">
 				<table class="w-full text-sm">
 					<thead>
 						<tr class="text-left text-gray-400 border-b border-gray-700">
+							<th class="pb-3 pr-4 font-medium w-10">선택</th>
 							<th class="pb-3 pr-4 font-medium">이름</th>
 							<th class="pb-3 pr-4 font-medium">타입</th>
 							<th class="pb-3 pr-4 font-medium">상태</th>
@@ -503,20 +580,14 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-800">
-						{#each containers as c}
-							<tr class="hover:bg-gray-800/30">
-								<td class="py-3 pr-4">
-									<div class="max-md:max-w-[66vw] max-md:truncate" title={c.name ?? c.id}>{c.name ?? '-'}</div>
-									<div class="text-xs text-gray-500 font-mono max-md:max-w-[66vw] max-md:truncate">{c.id}</div>
-								</td>
+						{#each containers as c (c.id)}
+							<tr class="resource-selection-surface hover:bg-gray-800/30" data-selected={selection.has(c.id)}>
+								<td class="py-3 pr-4"><SelectionCheckbox checked={selection.has(c.id)} disabled={selectionBusy} ariaLabel={`${c.name ?? c.id} 선택`} onclick={() => selection.toggle(c.id)} /></td>
+								<td class="py-3 pr-4"><div class="max-md:max-w-[66vw] max-md:truncate" title={c.name ?? c.id}>{c.name ?? '-'}</div><div class="text-xs text-gray-500 font-mono max-md:max-w-[66vw] max-md:truncate">{c.id}</div></td>
 								<td class="py-3 pr-4 text-gray-300">{c.type}</td>
-								<td class="py-3 pr-4">
-									<span class="px-2 py-0.5 rounded text-xs {STATUS_CLASS[c.status ?? ''] ?? 'bg-gray-700 text-gray-300'}">{c.status ?? '-'}</span>
-								</td>
+								<td class="py-3 pr-4"><span class="px-2 py-0.5 rounded text-xs {STATUS_CLASS[c.status ?? ''] ?? 'bg-gray-700 text-gray-300'}">{c.status ?? '-'}</span></td>
 								<td class="py-3 pr-4 text-gray-400">{c.secret_refs.length}개</td>
-								<td class="py-3">
-									<button onclick={() => handleDeleteContainer(c.id, c.name)} class="text-xs text-red-400 hover:text-red-300">삭제</button>
-								</td>
+								<td class="py-3"><button onclick={() => handleDeleteContainer(c.id, c.name)} disabled={selectionBusy} class="text-xs text-red-400 hover:text-red-300">삭제</button></td>
 							</tr>
 						{/each}
 					</tbody>
@@ -577,5 +648,12 @@
 			<div class="text-center py-8 text-gray-500 text-sm">쿼터 정보를 불러올 수 없습니다.</div>
 		{/if}
 	{/if}
+	<BulkSelectionOverlay
+		count={activeTab === 'secrets' || activeTab === 'containers' ? selection.count : 0}
+		ariaLabel={activeTab === 'secrets' ? '선택한 비밀 일괄 작업' : '선택한 컨테이너 일괄 작업'}
+		busy={selectionBusy}
+		actions={[{ key: 'delete', label: '삭제', tone: 'danger', onAction: runBulkDelete }]}
+		onClear={() => selection.clear()}
+	/>
 </div>
 {/if}

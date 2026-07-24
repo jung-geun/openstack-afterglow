@@ -6,6 +6,8 @@ import { uploadQueue } from '$lib/stores/uploadQueue';
 import type { SwiftContainer } from '$lib/types/common';
 import type { SwiftObject, SwiftObjectMeta } from '$lib/types/objectStorage';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { pruneSelectionByIds } from '$lib/utils/selectionSet';
+import { executeBulkMutations } from '$lib/utils/bulkActions';
 import { toast } from '$lib/stores/toast';
 
 export type TreeRow = {
@@ -59,6 +61,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 	let moveTarget = $state('');
 	let moveDest = $state('');
 	let moveDestContainer = $state('');
+	let moveDestinationChosen = $state(false);
 	let moving = $state(false);
 	let moveError = $state('');
 	let moveContainers = $state<SwiftContainer[]>([]);
@@ -139,7 +142,6 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		} catch { containerMeta = null; }
 	}
 
-	// admin: 단일 GET
 	async function load(o: { silent?: boolean } = {}) {
 		if (!o.silent) loading = true;
 		try {
@@ -149,6 +151,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects?${qs}`,
 				opts.token(), opts.projectId()
 			);
+			pruneSelected(objects.map((item) => item.name));
 		} catch { if (!o.silent) objects = []; }
 		finally { if (!o.silent) loading = false; }
 	}
@@ -196,17 +199,20 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			if (searchScope === 'all' && filterText.trim()) {
 				await fetchAllObjects({ silent: true });
 			}
+			const available = searchScope === 'all' && filterText.trim() && allObjectsCache
+				? allObjectsCache
+				: [...dirCache.values()].flat();
+			pruneSelected(available.map((item) => item.name));
 		} catch { /* ignore per-dir failures */ }
 		finally { if (!o.silent) loading = false; }
 	}
-
-	// 현재 prefix 로드 (mode 분기)
 	async function loadCurrent(o: { silent?: boolean } = {}) {
 		if (opts.mode() === 'user') {
 			if (!o.silent) loading = true;
 			try {
 				const items = await fetchDir(prefix);
 				objects = items;
+				pruneSelected(items.map((item) => item.name));
 			} catch { if (!o.silent) objects = []; }
 			finally { if (!o.silent) loading = false; }
 		} else {
@@ -237,6 +243,9 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		return objects.find(o => o.name === name);
 	}
 
+	function pruneSelected(ids: Iterable<string>) {
+		selected = pruneSelectionByIds(selected, ids);
+	}
 	// ——— 네비게이션 ———
 	function navigatePrefix(newPrefix: string) {
 		prefix = newPrefix;
@@ -260,6 +269,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 	}
 
 	function toggleSelect(name: string) {
+		if (bulkDeleting || bulkMoving) return;
 		const next = new Set(selected);
 		if (next.has(name)) next.delete(name);
 		else next.add(name);
@@ -390,39 +400,55 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		}));
 	});
 
+	function visibleObjectNames(): string[] {
+		return opts.mode() === 'user'
+			? treeRows().map((row) => row.obj.name)
+			: filteredObjects().map((object) => object.name);
+	}
+
+	function visibleSelectedCount(): number {
+		return visibleObjectNames().filter((name) => selected.has(name)).length;
+	}
+
 	function toggleSelectAll() {
-		if (opts.mode() === 'user') {
-			const all = treeRows();
-			if (selected.size === all.length && all.length > 0) selected = new Set();
-			else selected = new Set(all.map(r => r.obj.name));
-		} else {
-			const all = filteredObjects();
-			if (selected.size === all.length && all.length > 0) selected = new Set();
-			else selected = new Set(all.map(o => o.name));
-		}
+		if (bulkDeleting || bulkMoving) return;
+		const visibleNames = visibleObjectNames();
+		selected = visibleNames.length > 0 && visibleNames.every((name) => selected.has(name))
+			? new Set()
+			: new Set(visibleNames);
 	}
 
 	// ——— 액션 ———
 	async function bulkDelete() {
-		const dirs = [...selected].filter(n => {
+		const submitted = [...selected];
+		const requestContainer = opts.containerName();
+		const requestToken = opts.token();
+		const requestProject = opts.projectId();
+		const dirs = submitted.filter(n => {
 			const obj = findObject(n);
 			return obj && isDirectory(obj);
 		});
-		let msg = `${selected.size}개 항목을 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다.`;
+		let msg = `${submitted.length}개 항목을 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다.`;
 		if (dirs.length > 0) msg += `\n\n⚠️ ${dirs.length}개 디렉토리 포함 — 하위 파일이 모두 휴지통으로 이동됩니다.`;
 		if (!(await confirmDialog(msg))) return;
 		bulkDeleting = true;
 		try {
-			await api.post(
-				`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/bulk-delete`,
-				{ objects: [...selected], recursive: true },
-				opts.token(), opts.projectId()
+			const result = await api.post<{ deleted?: string[]; failed?: { name: string; error?: string }[] }>(
+				`/api/v1/object-storage/${encodeURIComponent(requestContainer)}/objects/bulk-delete`,
+				{ objects: submitted, recursive: true },
+				requestToken, requestProject
 			);
-			selected = new Set();
-			await doRefresh();
-			loadContainerMeta();
-		} catch (e) {
-			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			const deleted = result.deleted ?? [];
+			const failedCount = result.failed?.length ?? Math.max(0, submitted.length - deleted.length);
+			if (deleted.length) toast.success(`${deleted.length}개 휴지통 이동 요청을 완료했습니다.`);
+			if (failedCount) toast.error(`${failedCount}개 휴지통 이동에 실패했습니다.`);
+			if (opts.projectId() === requestProject && opts.containerName() === requestContainer) {
+				selected = pruneSelectionByIds(selected, submitted.filter((name) => !deleted.includes(name)));
+				await doRefresh();
+				loadContainerMeta();
+			}
+		} catch {
+			toast.error('삭제 요청에 실패했습니다.');
 		} finally { bulkDeleting = false; }
 	}
 
@@ -564,6 +590,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 
 	async function openMove(name: string) {
 		moveTarget = name; moveDest = ''; moveDestContainer = opts.containerName();
+		moveDestinationChosen = false;
 		moveSelectedDir = ''; moveError = ''; showMove = true;
 		await Promise.all([loadMoveContainers(), loadMoveDirectories(opts.containerName())]);
 	}
@@ -574,15 +601,23 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		const filename = moveTarget.endsWith('/') ? bname + '/' : bname;
 		if (dir === '/ (루트)') { moveSelectedDir = ''; moveDest = filename; }
 		else { moveSelectedDir = dir; moveDest = dir + filename; }
+		moveDestinationChosen = true;
+	}
+
+	function selectBulkMoveDir(dir: string) {
+		moveSelectedDir = dir === '/ (루트)' ? '' : dir;
+		moveDest = moveSelectedDir;
+		moveDestinationChosen = true;
 	}
 
 	async function onMoveContainerChange(newContainer: string) {
 		moveDestContainer = newContainer; moveSelectedDir = ''; moveDest = '';
+		moveDestinationChosen = false;
 		await loadMoveDirectories(newContainer);
 	}
 
 	async function doMove() {
-		if (!moveDest.trim()) { moveError = '대상 경로를 선택하세요.'; return; }
+		if (!moveDestinationChosen) { moveError = '대상 경로를 선택하세요.'; return; }
 		moving = true; moveError = '';
 		try {
 			await api.post(
@@ -599,34 +634,45 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 
 	async function openBulkMove() {
 		moveDest = ''; moveDestContainer = opts.containerName();
+		moveDestinationChosen = false;
 		moveSelectedDir = ''; moveError = ''; showBulkMove = true;
 		await Promise.all([loadMoveContainers(), loadMoveDirectories(opts.containerName())]);
 	}
 
 	async function doBulkMove() {
-		if (!moveDest.trim()) { moveError = '대상 경로를 선택하세요.'; return; }
+		if (!moveDestinationChosen) { moveError = '대상 경로를 선택하세요.'; return; }
+		const requestDest = moveDest.trim();
+		const submitted = [...selected];
+		const requestContainer = opts.containerName();
+		const requestToken = opts.token();
+		const requestProject = opts.projectId();
+		const requestDestContainer = moveDestContainer;
 		bulkMoving = true; moveError = '';
 		try {
-			for (const name of selected) {
+			const results = await executeBulkMutations(submitted, async (name) => {
 				const isDir2 = isDirectory(findObject(name) ?? { name, bytes: 0, content_type: '', last_modified: '', etag: '' });
-				let dest: string;
-				if (isDir2) {
-					const dirname = name.replace(/\/$/, '').split('/').pop() || name;
-					dest = moveDest ? moveDest.replace(/\/$/, '') + '/' + dirname + '/' : dirname + '/';
-				} else {
-					const filename = name.split('/').pop() || name;
-					dest = moveDest ? moveDest.replace(/\/$/, '') + '/' + filename : filename;
-				}
+				const basename = isDir2
+					? `${name.replace(/\/$/, '').split('/').pop() || name}/`
+					: name.split('/').pop() || name;
+				const destination = requestDest
+					? `${requestDest.replace(/\/$/, '')}/${basename}`
+					: basename;
 				await api.post(
-					`/api/v1/object-storage/${encodeURIComponent(opts.containerName())}/objects/move`,
-					{ source: name, destination: dest, dest_container: moveDestContainer || null },
-					opts.token(), opts.projectId()
+					`/api/v1/object-storage/${encodeURIComponent(requestContainer)}/objects/move`,
+					{ source: name, destination, dest_container: requestDestContainer || null },
+					requestToken, requestProject
 				);
+			});
+			const moved = results.filter((result) => result.ok).map((result) => result.id);
+			const failedCount = results.length - moved.length;
+			if (moved.length) toast.success(`${moved.length}개 이동 요청을 완료했습니다.`);
+			if (failedCount) toast.error(`${failedCount}개 이동에 실패했습니다.`);
+			if (opts.projectId() === requestProject && opts.containerName() === requestContainer) {
+				showBulkMove = false;
+				selected = pruneSelectionByIds(selected, submitted.filter((name) => !moved.includes(name)));
+				await doRefresh();
+				loadContainerMeta();
 			}
-			showBulkMove = false; selected = new Set();
-			await doRefresh(); loadContainerMeta();
-		} catch (e) {
-			moveError = e instanceof ApiError ? e.message : '이동 실패';
 		} finally { bulkMoving = false; }
 	}
 
@@ -671,7 +717,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 
 	$effect(() => {
 		const cn = opts.containerName();
-		if (!cn) return;
+		const pid = opts.projectId();
 		prefix = '';
 		objects = [];
 		selected = new Set();
@@ -679,12 +725,21 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		selectedMeta = null;
 		showPreview = false;
 		containerMeta = null;
+		showMove = false;
+		showBulkMove = false;
+		moveDest = '';
+		moveSelectedDir = '';
+		moveDestinationChosen = false;
+		moveError = '';
+		moveContainers = [];
+		moveDirectories = [];
 		if (opts.mode() === 'user') {
 			searchScope = 'current';
 			expandedDirs.clear();
 			dirCache.clear();
 			allObjectsCache = null;
 		}
+		if (!cn || !pid) return;
 		loadCurrent();
 		loadContainerMeta();
 	});
@@ -702,7 +757,10 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		set selected(v: Set<string>) { selected = v; },
 		get bulkDeleting() { return bulkDeleting; },
 		get filterText() { return filterText; },
-		set filterText(v: string) { filterText = v; },
+		set filterText(v: string) {
+			if (filterText !== v) selected = new Set();
+			filterText = v;
+		},
 		get sortKey() { return sortKey; },
 		get sortAsc() { return sortAsc; },
 		get showUpload() { return showUpload; },
@@ -728,6 +786,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		get moveTarget() { return moveTarget; },
 		get moveDest() { return moveDest; },
 		get moveDestContainer() { return moveDestContainer; },
+		get moveDestinationChosen() { return moveDestinationChosen; },
 		set moveDestContainer(v: string) { moveDestContainer = v; },
 		get moving() { return moving; },
 		get moveError() { return moveError; },
@@ -752,7 +811,10 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		get colWidths() { return colWidths; },
 		// user-only
 		get searchScope() { return searchScope; },
-		set searchScope(v: 'current' | 'expanded' | 'all') { searchScope = v; },
+		set searchScope(v: 'current' | 'expanded' | 'all') {
+			if (searchScope !== v) selected = new Set();
+			searchScope = v;
+		},
 		get expandedDirs() { return expandedDirs; },
 		get dirCache() { return dirCache; },
 		get dirLoading() { return dirLoading; },
@@ -763,6 +825,8 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		get filteredObjects() { return filteredObjects(); },
 		get treeRows() { return treeRows(); },
 		get selectedCount() { return selected.size; },
+		get visibleObjectCount() { return visibleObjectNames().length; },
+		get visibleSelectedCount() { return visibleSelectedCount(); },
 		// helpers
 		isDirectory,
 		isPreviewable,
@@ -793,6 +857,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		doRename,
 		openMove,
 		selectMoveDir,
+		selectBulkMoveDir,
 		onMoveContainerChange,
 		doMove,
 		openBulkMove,

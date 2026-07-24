@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { auth } from '$lib/stores/auth';
-	import type { FlavorInfo } from '$lib/types/flavor';
+	import type { FlavorOption as FlavorInfo } from '$lib/types/flavor';
 
 	interface GpuTypeAvailability {
 		device_name: string;

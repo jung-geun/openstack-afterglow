@@ -68,9 +68,7 @@
 					) as dir}
 						{@const isSelected = (dir === '/ (루트)' && s.moveSelectedDir === '') || dir === s.moveSelectedDir}
 						<button
-							onclick={() => bulk
-								? (() => { if (dir === '/ (루트)') { s.moveDestContainer = s.moveDestContainer; } s.selectMoveDir(dir); })()
-								: s.selectMoveDir(dir)}
+							onclick={() => bulk ? s.selectBulkMoveDir(dir) : s.selectMoveDir(dir)}
 							class="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors {isSelected ? 'bg-indigo-600/20 text-indigo-300 border-l-2 border-indigo-500' : 'text-gray-300 hover:bg-gray-700/50'}"
 						>
 							<svg class="w-4 h-4 shrink-0 {isSelected ? 'text-indigo-400' : 'text-amber-400'}" viewBox="0 0 20 20" fill="currentColor">
@@ -90,7 +88,7 @@
 				</div>
 			{/if}
 
-			{#if s.moveDest}
+			{#if s.moveDestinationChosen}
 				<div class="bg-gray-800/50 border border-gray-700 rounded px-3 py-2 mb-4">
 					<p class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">{bulk ? '이동 위치' : '이동 경로'}</p>
 					<p class="text-white text-sm font-mono break-all">{s.moveDestContainer} / {s.moveDest || '(루트)'}</p>
@@ -104,7 +102,7 @@
 				>취소</button>
 				<button
 					onclick={bulk ? s.doBulkMove : s.doMove}
-					disabled={bulk ? s.bulkMoving : (s.moving || !s.moveDest.trim())}
+					disabled={bulk ? s.bulkMoving || !s.moveDestinationChosen : (s.moving || !s.moveDestinationChosen)}
 					class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 px-4 py-2 rounded-lg border border-indigo-500 disabled:border-gray-600 transition-colors"
 				>
 					{#if bulk}

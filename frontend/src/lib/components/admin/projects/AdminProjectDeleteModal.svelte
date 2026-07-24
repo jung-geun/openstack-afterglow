@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	interface Project {
 		id: string;
@@ -35,8 +36,11 @@
 		if (!project) return;
 		deleting = true;
 		deleteError = '';
+		const namesScope = projectNames.scope(token, projectId);
+		projectNames.invalidate(namesScope);
 		try {
 			await api.delete(`/api/v1/admin/projects/${project.id}`, token, projectId);
+			projectNames.invalidate(namesScope);
 			onSuccess();
 			onClose();
 		} catch (e) {

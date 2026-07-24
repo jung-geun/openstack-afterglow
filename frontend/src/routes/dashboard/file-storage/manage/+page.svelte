@@ -5,6 +5,7 @@
   import type { FileStorage } from '$lib/types/fileStorage';
   import type { LibraryConfig } from '$lib/types/library';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import { createCoalescedRefresh } from '$lib/utils/coalescedRefresh';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -23,18 +24,18 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
-  async function loadData() {
+  async function loadData(opts?: { refresh?: boolean }) {
     if (fileStorages.length === 0) loading = true;
     else refreshing = true;
     await Promise.allSettled([
-      api.get<FileStorage[]>('/api/v1/admin/file-storage', token, projectId)
+      api.get<FileStorage[]>('/api/v1/admin/file-storage', token, projectId, opts)
         .then(v => { fileStorages = v; loading = false; })
         .catch(e => {
           error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
           fileStorages = [];
           loading = false;
         }),
-      api.get<LibraryConfig[]>('/api/v1/libraries', token, projectId)
+      api.get<LibraryConfig[]>('/api/v1/libraries', token, projectId, opts)
         .then(v => { libraries = v; })
         .catch(() => {}),
     ]);
@@ -57,7 +58,7 @@
       } else {
         message = `파일 스토리지 생성 시작됨 (ID: ${res.file_storage_id})`;
       }
-      await loadData();
+      await refresh.invalidate();
     } catch (e) {
       error = e instanceof ApiError ? `빌드 실패: ${e.message}` : '서버 오류';
     } finally {
@@ -65,17 +66,20 @@
     }
   }
 
+  const refresh = createCoalescedRefresh((force) => loadData(force ? { refresh: true } : undefined));
+
   $effect(() => {
     if (!$auth.projectId) return;
     fileStorages = [];
-    untrack(() => loadData());
+    untrack(() => void refresh.run(false));
   });
 
-  const ar = createAutoRefresh(loadData, {
+  const ar = createAutoRefresh(() => refresh.run(false), {
     storageKey: 'dashboard-file-storage',
     defaultActive: true,
     defaultInterval: 30,
-    intervalOptions: [15, 30, 60]
+    intervalOptions: [15, 30, 60],
+    invokeOnMount: false
   });
 </script>
 
@@ -91,7 +95,7 @@
         bind:intervalSeconds={ar.intervalSeconds}
         intervalOptions={ar.intervalOptions}
         refreshing={loading || refreshing}
-        onManualRefresh={loadData}
+        onManualRefresh={() => refresh.run(true)}
       />
     {/snippet}
   </PageHeader>

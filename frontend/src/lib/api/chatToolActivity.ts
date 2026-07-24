@@ -78,3 +78,39 @@ export function formatToolArgs(args: string | null | undefined): string {
 		return trimmed;
 	}
 }
+
+
+/** Canonical persisted parts → reloaded tool cards, preserving call/result linkage. */
+export function toolActivityFromCanonicalParts(value: unknown): ToolActivityItem[] {
+	const parts = asArray(value);
+	const items = new Map<string, ToolActivityItem>();
+	for (const raw of parts) {
+		if (!raw || typeof raw !== 'object') continue;
+		const part = raw as Record<string, unknown>;
+		const type = str(part.type);
+		const id = str(part.call_id);
+		const name = str(part.name);
+		if (!id || !name) continue;
+		if (type === 'tool_call') {
+			const argumentsValue = part.arguments;
+			let args: string | null = null;
+			try {
+				args = argumentsValue === undefined ? null : JSON.stringify(argumentsValue);
+			} catch {
+				args = null;
+			}
+			items.set(id, { id, name, args, result: null, running: part.status === 'running' || part.status === 'pending' });
+		} else if (type === 'tool_result') {
+			const content = asArray(part.content)
+				.map((entry) => {
+					if (!entry || typeof entry !== 'object') return '[unsupported]';
+					const resultPart = entry as Record<string, unknown>;
+					return resultPart.type === 'text' && typeof resultPart.text === 'string' ? resultPart.text : `[${String(resultPart.type ?? 'unknown')}]`;
+				})
+				.join('\n');
+			const existing = items.get(id);
+			items.set(id, { id, name, args: existing?.args ?? null, result: content, running: false });
+		}
+	}
+	return [...items.values()];
+}

@@ -6,18 +6,21 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import (
+    CacheMode,
     _check_session_timeout,
+    cache_mode,
     get_token_info,
     invalidate_token_cache,
 )
 from app.config import get_settings
 from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
 from app.rate_limit import limiter
-from app.services import jwt_service, keystone, login_guard, session_store
-from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+from app.services import cache, jwt_service, keystone, login_guard, session_store
+from app.services.cache import cached_call, keys, ttl_fast, ttl_normal, ttl_static
 from app.services.recent_projects import get_recent_project_ids, record_project_access
 
 _logger = logging.getLogger(__name__)
+_PROJECTS_TTL = 120  # 프로젝트 목록 캐시 2분
 
 
 class GroupInfo(BaseModel):
@@ -197,22 +200,28 @@ async def me(token_info: dict = Depends(get_token_info)):
 
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
-    """로그아웃: refresh 세션 삭제 + Keystone 토큰 폐기 + 검증/세션 캐시 invalidate."""
+    """Delete the refresh session, then revoke its Keystone token when one exists."""
     token = token_info["token"]
     pid = token_info.get("project_id") or "noscope"
-
-    # JWT 경로: refresh 세션 삭제
     refresh_jti = token_info.get("refresh_jti")
+    keystone_token = token if not refresh_jti else None
+
     if refresh_jti:
         try:
+            session = await session_store.get_session(refresh_jti)
+            if session and session.get("user_id") == token_info["user_id"]:
+                keystone_token = session.get("keystone_token") or None
+            elif session:
+                _logger.warning("logout session ownership mismatch (jti=%s)", refresh_jti)
             await session_store.delete_session(refresh_jti)
         except Exception:
             _logger.warning("refresh 세션 삭제 실패 (jti=%s)", refresh_jti, exc_info=True)
 
-    try:
-        await asyncio.to_thread(keystone.revoke_token, token)
-    except Exception:
-        _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
+    if keystone_token:
+        try:
+            await asyncio.to_thread(keystone.revoke_token, keystone_token)
+        except Exception:
+            _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
     await invalidate_token_cache(token, pid)
     return {"message": "로그아웃 완료"}
 
@@ -376,11 +385,22 @@ async def list_my_groups(token_info: dict = Depends(get_token_info)):
 
 
 @router.get("/projects", response_model=list[ProjectInfo])
-async def list_projects(token_info: dict = Depends(get_token_info)):
+async def list_projects(
+    token_info: dict = Depends(get_token_info),
+    cm: CacheMode = Depends(cache_mode),
+):
     """사용자가 접근 가능한 프로젝트 목록 반환."""
+    user_id = token_info["user_id"]
+    key = keys.user_key(user_id, "projects")
     try:
-        projects = keystone.list_projects(token_info["token"])
-        return [ProjectInfo(**p) for p in projects]
+        data = await cache.cached_call(
+            key,
+            _PROJECTS_TTL,
+            lambda: keystone.list_projects(token_info["token"]),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
+        )
+        return [ProjectInfo(**p) for p in data]
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 

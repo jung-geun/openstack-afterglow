@@ -74,17 +74,18 @@ class TestExtractFixedIp:
 
 class TestCreateEphemeralVm:
     @pytest.mark.asyncio
-    async def test_raises_without_image_id(self):
-        """builder_image_id 미설정 시 RuntimeError."""
+    async def test_raises_when_builder_policies_are_invalid(self):
+        """Builder policies must be present and usable in the service project."""
         from app.services.builder_vm import create_ephemeral_vm
+        from app.services.resource_policies import ResourcePolicyValidationError
 
-        svc_conn = MagicMock()
         with patch(
-            "app.services.builder_vm.get_settings",
-            return_value=_make_settings(builder_image_id=""),
+            "app.services.resource_policy_store.resolve_policies",
+            new_callable=AsyncMock,
+            side_effect=ResourcePolicyValidationError("missing policy"),
         ):
-            with pytest.raises(RuntimeError, match="image_id"):
-                await create_ephemeral_vm(svc_conn)
+            with pytest.raises(RuntimeError, match="리소스 정책"):
+                await create_ephemeral_vm(MagicMock())
 
     @pytest.mark.asyncio
     async def test_create_returns_ephemeral_vm(self):
@@ -107,12 +108,22 @@ class TestCreateEphemeralVm:
                 return_value=_make_settings(),
             ),
             patch(
+                "app.services.resource_policy_store.resolve_policies",
+                new_callable=AsyncMock,
+                return_value={
+                    "builder.image": "policy-image",
+                    "builder.flavor": "policy-flavor",
+                    "builder.network": "policy-network",
+                },
+            ),
+            patch(
                 "app.services.builder_vm._ensure_ephemeral_keypair",
                 new_callable=AsyncMock,
                 return_value="afterglow-ephemeral-key",
             ),
             patch("app.services.builder_vm._wait_for_active", new_callable=AsyncMock),
             patch("app.services.builder_vm._wait_for_ssh", new_callable=AsyncMock),
+            patch("app.services.builder_vm._wait_for_cloud_init", new_callable=AsyncMock),
         ):
             vm = await create_ephemeral_vm(svc_conn)
 
@@ -139,6 +150,15 @@ class TestCreateEphemeralVm:
             patch(
                 "app.services.builder_vm.get_settings",
                 return_value=_make_settings(),
+            ),
+            patch(
+                "app.services.resource_policy_store.resolve_policies",
+                new_callable=AsyncMock,
+                return_value={
+                    "builder.image": "policy-image",
+                    "builder.flavor": "policy-flavor",
+                    "builder.network": "policy-network",
+                },
             ),
             patch(
                 "app.services.builder_vm._ensure_ephemeral_keypair",

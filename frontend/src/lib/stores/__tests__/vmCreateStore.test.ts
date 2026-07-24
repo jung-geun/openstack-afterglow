@@ -1,30 +1,27 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_BETA_FEATURES, betaFeatures } from '../betaFeatures';
-import { resetWizard, wizard } from '../wizard';
-import VmCreateStoreWrapper from './_VmCreateStoreWrapper.svelte';
+import { describe, expect, it } from 'vitest';
 
-describe('vmCreateStore 자동 단계 진행', () => {
-	beforeEach(() => {
-		betaFeatures.set(DEFAULT_BETA_FEATURES);
-		resetWizard();
+import { nextSquashfsSelection } from '../vmCreateStore.svelte';
+
+const empty = { squashfsMode: null, layerProfileName: null, layerArtifactIds: [] };
+
+describe('nextSquashfsSelection', () => {
+	it('clears a profile when it is selected again', () => {
+		const selected = nextSquashfsSelection(empty, { type: 'profile', name: 'ml-stack' });
+		expect(nextSquashfsSelection(selected, { type: 'profile', name: 'ml-stack' })).toEqual(empty);
 	});
 
-	it('이미지 선택 시 다음 visible 단계로 진행하고 이전으로 돌아올 수 있다', async () => {
-		render(VmCreateStoreWrapper);
-
-		await fireEvent.click(screen.getByTestId('select-image'));
-		expect(screen.getByTestId('wizard-step').textContent).toBe('2');
-
-		await fireEvent.click(screen.getByTestId('previous-step'));
-		expect(screen.getByTestId('wizard-step').textContent).toBe('1');
+	it('clears an active mode when it is selected again', () => {
+		const selected = nextSquashfsSelection(empty, { type: 'mode', mode: 'artifacts' });
+		expect(nextSquashfsSelection(selected, { type: 'mode', mode: 'artifacts' })).toEqual(empty);
 	});
 
-	it('플레이버 선택 시 다음 visible 단계로 진행', async () => {
-		wizard.update((w) => ({ ...w, step: 2 }));
-		render(VmCreateStoreWrapper);
-
-		await fireEvent.click(screen.getByTestId('select-flavor'));
-		expect(screen.getByTestId('wizard-step').textContent).toBe('5');
+	it('returns to ordinary VM mode when the final artifact is removed', () => {
+		const selected = nextSquashfsSelection(empty, { type: 'artifact', id: 7, lineageIds: [1, 7] });
+		expect(nextSquashfsSelection(selected, { type: 'artifact', id: 7, lineageIds: [1, 7] })).toEqual({
+			squashfsMode: 'artifacts',
+			layerProfileName: null,
+			layerArtifactIds: [1],
+		});
+		expect(nextSquashfsSelection({ squashfsMode: 'artifacts', layerProfileName: null, layerArtifactIds: [7] }, { type: 'artifact', id: 7, lineageIds: [7] })).toEqual(empty);
 	});
 });

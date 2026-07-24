@@ -26,6 +26,6 @@
 			refreshing={s.loading}
 			onManualRefresh={() => s.fetchContainer()}
 		/>
-		<button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none" aria-label="닫기">×</button>
+		<button data-tour="admin-containers-detail-close" onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none" aria-label="닫기">×</button>
 	</div>
 </div>

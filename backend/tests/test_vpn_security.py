@@ -2,7 +2,7 @@
 
 client name/allowed_ips/dns 에 개행·쉘 메타문자·YAML 구조 파괴 시도 문자열이 들어왔을 때
 Pydantic validator(app/models/vpn.py)가 422(ValidationError)로 거부하는지 확인한다.
-또한 cloud-init 렌더 함수(app/services/vpn_config.py:render_agent_userdata)에 안전하지
+또한 cloud-init 렌더 함수(app/services/waygate_config.py:render_agent_userdata)에 안전하지
 않은 값을 억지로 통과시켰을 때도 `| shlex_quote`/`| tojson` 이 적용되어 원본 위험 문자열이
 템플릿 출력에 raw 로 노출되지 않는지 검증한다.
 
@@ -14,13 +14,13 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from app.models.vpn import (
-    VpnAgentRegisterRequest,
-    VpnClientCreateRequest,
-    VpnClientUpdateRequest,
-    VpnServerCreateRequest,
+from app.models.waygate import (
+    WaygateAgentRegisterRequest,
+    WaygateClientCreateRequest,
+    WaygateClientUpdateRequest,
+    WaygateServerCreateRequest,
 )
-from app.services import vpn_config
+from app.services import waygate_config
 
 # ---------------------------------------------------------------------------
 # 악성 페이로드 셋 — 개행/쉘 메타문자/YAML 구조 파괴 시도
@@ -47,23 +47,23 @@ class TestClientNameInjection:
     @pytest.mark.parametrize("malicious", _INJECTION_PAYLOADS)
     def test_malicious_name_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name=malicious)
+            WaygateClientCreateRequest(name=malicious)
 
     def test_valid_name_accepted(self):
-        req = VpnClientCreateRequest(name="my-client-01")
+        req = WaygateClientCreateRequest(name="my-client-01")
         assert req.name == "my-client-01"
 
     def test_empty_name_rejected(self):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="")
+            WaygateClientCreateRequest(name="")
 
     def test_name_starting_with_hyphen_rejected(self):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="-leading-hyphen")
+            WaygateClientCreateRequest(name="-leading-hyphen")
 
     def test_name_over_63_chars_rejected(self):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="a" * 64)
+            WaygateClientCreateRequest(name="a" * 64)
 
 
 # ---------------------------------------------------------------------------
@@ -85,19 +85,19 @@ class TestClientAllowedIpsInjection:
     )
     def test_malicious_allowed_ips_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="valid-name", allowed_ips=[malicious])
+            WaygateClientCreateRequest(name="valid-name", allowed_ips=[malicious])
 
     def test_valid_allowed_ips_accepted(self):
-        req = VpnClientCreateRequest(name="valid-name", allowed_ips=["10.8.0.0/24", "192.168.1.0/24"])
+        req = WaygateClientCreateRequest(name="valid-name", allowed_ips=["10.8.0.0/24", "192.168.1.0/24"])
         assert req.allowed_ips == ["10.8.0.0/24", "192.168.1.0/24"]
 
     def test_too_many_allowed_ips_rejected(self):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="valid-name", allowed_ips=[f"10.{i}.0.0/24" for i in range(21)])
+            WaygateClientCreateRequest(name="valid-name", allowed_ips=[f"10.{i}.0.0/24" for i in range(21)])
 
     def test_non_string_allowed_ip_rejected(self):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="valid-name", allowed_ips=[12345])
+            WaygateClientCreateRequest(name="valid-name", allowed_ips=[12345])
 
 
 # ---------------------------------------------------------------------------
@@ -119,22 +119,22 @@ class TestClientDnsInjection:
     )
     def test_malicious_dns_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnClientCreateRequest(name="valid-name", dns=malicious)
+            WaygateClientCreateRequest(name="valid-name", dns=malicious)
 
     def test_valid_ipv4_dns_accepted(self):
-        req = VpnClientCreateRequest(name="valid-name", dns="8.8.8.8")
+        req = WaygateClientCreateRequest(name="valid-name", dns="8.8.8.8")
         assert req.dns == "8.8.8.8"
 
     def test_valid_hostname_dns_accepted(self):
-        req = VpnClientCreateRequest(name="valid-name", dns="dns.example.com")
+        req = WaygateClientCreateRequest(name="valid-name", dns="dns.example.com")
         assert req.dns == "dns.example.com"
 
     def test_valid_multi_dns_accepted(self):
-        req = VpnClientCreateRequest(name="valid-name", dns="8.8.8.8,1.1.1.1")
+        req = WaygateClientCreateRequest(name="valid-name", dns="8.8.8.8,1.1.1.1")
         assert req.dns == "8.8.8.8,1.1.1.1"
 
     def test_none_dns_accepted(self):
-        req = VpnClientCreateRequest(name="valid-name", dns=None)
+        req = WaygateClientCreateRequest(name="valid-name", dns=None)
         assert req.dns is None
 
 
@@ -147,10 +147,10 @@ class TestClientUpdateNameInjection:
     @pytest.mark.parametrize("malicious", _INJECTION_PAYLOADS)
     def test_malicious_name_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnClientUpdateRequest(name=malicious)
+            WaygateClientUpdateRequest(name=malicious)
 
     def test_none_name_accepted(self):
-        req = VpnClientUpdateRequest(name=None, enabled=False)
+        req = WaygateClientUpdateRequest(name=None, enabled=False)
         assert req.name is None
 
 
@@ -163,12 +163,12 @@ class TestServerNameInjection:
     @pytest.mark.parametrize("malicious", _INJECTION_PAYLOADS)
     def test_malicious_name_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnServerCreateRequest(name=malicious)
+            WaygateServerCreateRequest(name=malicious)
 
     def test_empty_name_generates_default(self):
         """빈 이름은 거부가 아니라 uuid 기반 기본값으로 대체된다."""
-        req = VpnServerCreateRequest(name="")
-        assert req.name.startswith("vpn-")
+        req = WaygateServerCreateRequest(name="")
+        assert req.name.startswith("waygate-")
 
 
 # ---------------------------------------------------------------------------
@@ -188,14 +188,14 @@ class TestAgentPublicKeyInjection:
     )
     def test_malicious_public_key_rejected(self, malicious):
         with pytest.raises(ValidationError):
-            VpnAgentRegisterRequest(public_key=malicious)
+            WaygateAgentRegisterRequest(public_key=malicious)
 
     def test_valid_public_key_accepted(self):
         # 유효한 X25519 base64 44자 형식
-        from app.services import vpn_keys
+        from app.services import waygate_keys
 
-        _, pub = vpn_keys.generate_keypair()
-        req = VpnAgentRegisterRequest(public_key=pub)
+        _, pub = waygate_keys.generate_keypair()
+        req = WaygateAgentRegisterRequest(public_key=pub)
         assert req.public_key == pub
 
 
@@ -222,10 +222,10 @@ class TestCloudInitRenderQuoting:
         """
         import shlex
 
-        from app.services.vpn_config import _jinja
+        from app.services.waygate_config import _jinja
 
-        rendered = _jinja.get_template("vpn_agent.yaml.j2").render(
-            server_name="vpn-test",
+        rendered = _jinja.get_template("waygate_agent.yaml.j2").render(
+            server_name="waygate-test",
             listen_port=51820,
             register_url="https://backend.example.com/register",
             desired_state_url="https://backend.example.com/desired-state",
@@ -243,10 +243,10 @@ class TestCloudInitRenderQuoting:
     def test_register_url_with_shell_meta_is_quoted_by_filter(self):
         import shlex
 
-        from app.services.vpn_config import _jinja
+        from app.services.waygate_config import _jinja
 
-        rendered = _jinja.get_template("vpn_agent.yaml.j2").render(
-            server_name="vpn-test",
+        rendered = _jinja.get_template("waygate_agent.yaml.j2").render(
+            server_name="waygate-test",
             listen_port=51820,
             register_url="https://backend.example.com/register;rm -rf /",
             desired_state_url="https://backend.example.com/desired-state",
@@ -261,12 +261,12 @@ class TestCloudInitRenderQuoting:
 
     def test_desired_state_and_status_url_are_json_encoded(self):
         """Python 스크립트(vpn-reconcile.py) 내에서는 tojson 필터로 안전하게 문자열 리터럴화된다."""
-        encoded = vpn_config.render_agent_userdata(
-            server_name="vpn-test",
+        encoded = waygate_config.render_agent_userdata(
+            server_name="waygate-test",
             listen_port=51820,
-            register_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/register",
-            desired_state_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/desired-state",
-            status_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/status",
+            register_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/register",
+            desired_state_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/desired-state",
+            status_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/status",
             bootstrap_token="safe-token-1234567890",
         )
         yaml_str = self._decode(encoded)
@@ -275,12 +275,12 @@ class TestCloudInitRenderQuoting:
         assert 'BOOTSTRAP_TOKEN = "safe-token-1234567890"' in yaml_str
 
     def test_listen_port_is_quoted_string(self):
-        encoded = vpn_config.render_agent_userdata(
-            server_name="vpn-test",
+        encoded = waygate_config.render_agent_userdata(
+            server_name="waygate-test",
             listen_port=51820,
-            register_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/register",
-            desired_state_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/desired-state",
-            status_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/status",
+            register_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/register",
+            desired_state_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/desired-state",
+            status_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/status",
             bootstrap_token="safe-token-1234567890",
         )
         yaml_str = self._decode(encoded)
@@ -288,7 +288,7 @@ class TestCloudInitRenderQuoting:
 
     def test_validate_cloudinit_inputs_rejects_bad_server_name(self):
         with pytest.raises(ValueError):
-            vpn_config.render_agent_userdata(
+            waygate_config.render_agent_userdata(
                 server_name="evil\nruncmd: rm -rf /",
                 listen_port=51820,
                 register_url="https://backend.example.com/register",
@@ -299,8 +299,8 @@ class TestCloudInitRenderQuoting:
 
     def test_validate_cloudinit_inputs_rejects_bad_url(self):
         with pytest.raises(ValueError):
-            vpn_config.render_agent_userdata(
-                server_name="vpn-test",
+            waygate_config.render_agent_userdata(
+                server_name="waygate-test",
                 listen_port=51820,
                 register_url="not-a-valid-url\nruncmd: evil",
                 desired_state_url="https://backend.example.com/desired-state",
@@ -310,8 +310,8 @@ class TestCloudInitRenderQuoting:
 
     def test_validate_cloudinit_inputs_rejects_bad_token(self):
         with pytest.raises(ValueError):
-            vpn_config.render_agent_userdata(
-                server_name="vpn-test",
+            waygate_config.render_agent_userdata(
+                server_name="waygate-test",
                 listen_port=51820,
                 register_url="https://backend.example.com/register",
                 desired_state_url="https://backend.example.com/desired-state",
@@ -321,8 +321,8 @@ class TestCloudInitRenderQuoting:
 
     def test_validate_cloudinit_inputs_rejects_bad_listen_port(self):
         with pytest.raises(ValueError):
-            vpn_config.render_agent_userdata(
-                server_name="vpn-test",
+            waygate_config.render_agent_userdata(
+                server_name="waygate-test",
                 listen_port=70000,
                 register_url="https://backend.example.com/register",
                 desired_state_url="https://backend.example.com/desired-state",
@@ -332,14 +332,14 @@ class TestCloudInitRenderQuoting:
 
     def test_valid_inputs_render_successfully(self):
         """정상 입력은 예외 없이 렌더되고 base64 로 인코딩된다."""
-        encoded = vpn_config.render_agent_userdata(
-            server_name="vpn-prod-01",
+        encoded = waygate_config.render_agent_userdata(
+            server_name="waygate-prod-01",
             listen_port=51820,
-            register_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/register",
-            desired_state_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/desired-state",
-            status_url="https://backend.example.com/api/v1/vpn/servers/s1/agent/status",
+            register_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/register",
+            desired_state_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/desired-state",
+            status_url="https://backend.example.com/api/v1/waygate/servers/s1/agent/status",
             bootstrap_token="safe-token-1234567890",
         )
         yaml_str = self._decode(encoded)
-        assert "vpn-prod-01" in yaml_str
+        assert "waygate-prod-01" in yaml_str
         assert "wg-quick@wg0" in yaml_str

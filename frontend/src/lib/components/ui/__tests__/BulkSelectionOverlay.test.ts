@@ -1,39 +1,56 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import BulkSelectionOverlay from '../BulkSelectionOverlay.svelte';
+import BulkSelectionOverlay, { type BulkSelectionAction } from '../BulkSelectionOverlay.svelte';
 
-const handlers = () => ({
-	onStart: vi.fn(),
-	onStop: vi.fn(),
-	onDelete: vi.fn(),
-	onClear: vi.fn(),
-});
+type OverlayTestProps = {
+	count: number;
+	ariaLabel: string;
+	actions: BulkSelectionAction[];
+	busy: boolean;
+	onClear: () => void;
+};
+
+function props(overrides: Partial<OverlayTestProps> = {}): OverlayTestProps {
+	const actions: BulkSelectionAction[] = [
+		{ key: 'delete', label: '삭제', tone: 'danger', onAction: vi.fn() },
+		{ key: 'activate', label: '활성화', tone: 'success', onAction: vi.fn(), disabled: true },
+	];
+	return {
+		count: 2,
+		ariaLabel: '선택한 볼륨 일괄 작업',
+		actions,
+		busy: false,
+		onClear: vi.fn(),
+		...overrides,
+	};
+}
 
 describe('BulkSelectionOverlay', () => {
 	it('does not render when no rows are selected', () => {
-		render(BulkSelectionOverlay, { count: 0, ...handlers() });
-		expect(screen.queryByRole('region', { name: '선택한 인스턴스 일괄 작업' })).toBeNull();
+		render(BulkSelectionOverlay, props({ count: 0 }));
+		expect(screen.queryByRole('region', { name: '선택한 볼륨 일괄 작업' })).toBeNull();
 	});
 
-	it('renders fixed bulk actions when rows are selected', () => {
-		render(BulkSelectionOverlay, { count: 3, ...handlers() });
-		expect(screen.getByText('3')).toBeTruthy();
-		expect(screen.getByRole('button', { name: '시작' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: '종료' })).toBeTruthy();
+	it('renders arbitrary actions with the supplied region label and tone', () => {
+		render(BulkSelectionOverlay, props());
+		expect(screen.getByRole('region', { name: '선택한 볼륨 일괄 작업' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: '삭제' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: '취소' })).toBeTruthy();
+		expect((screen.getByRole('button', { name: '활성화' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it('forwards bulk action clicks', async () => {
-		const actions = handlers();
-		render(BulkSelectionOverlay, { count: 1, ...actions });
-		await fireEvent.click(screen.getByRole('button', { name: '시작' }));
-		await fireEvent.click(screen.getByRole('button', { name: '종료' }));
+	it('forwards enabled actions and clear clicks', async () => {
+		const view = props();
+		render(BulkSelectionOverlay, view);
 		await fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 		await fireEvent.click(screen.getByRole('button', { name: '취소' }));
-		expect(actions.onStart).toHaveBeenCalledOnce();
-		expect(actions.onStop).toHaveBeenCalledOnce();
-		expect(actions.onDelete).toHaveBeenCalledOnce();
-		expect(actions.onClear).toHaveBeenCalledOnce();
+		expect(view.actions[0].onAction).toHaveBeenCalledOnce();
+		expect(view.onClear).toHaveBeenCalledOnce();
+	});
+
+	it('marks the region busy and disables every control while executing', () => {
+		render(BulkSelectionOverlay, props({ busy: true }));
+		expect(screen.getByRole('region', { name: '선택한 볼륨 일괄 작업' }).getAttribute('aria-busy')).toBe('true');
+		expect((screen.getByRole('button', { name: '삭제' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '취소' }) as HTMLButtonElement).disabled).toBe(true);
 	});
 });

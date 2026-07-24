@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import vpn_keys
+from app.services import waygate_keys
 
 _VALID_KEY_HEX = "a" * 64  # 32바이트 (64 hex characters)
 _OTHER_KEY_HEX = "b" * 64
@@ -15,20 +15,20 @@ _WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,43}=\Z")
 
 
 # ---------------------------------------------------------------------------
-# X25519 키쌍 생성 (vpn_keys.py)
+# X25519 키쌍 생성 (waygate_keys.py)
 # ---------------------------------------------------------------------------
 
 
 class TestGenerateKeypair:
     def test_returns_two_distinct_base64_44_char_keys(self):
-        priv, pub = vpn_keys.generate_keypair()
+        priv, pub = waygate_keys.generate_keypair()
         assert isinstance(priv, str)
         assert isinstance(pub, str)
         assert priv != pub
 
     def test_keys_match_wireguard_base64_format(self):
         """WireGuard 표준 base64 44자 형식(32바이트 + 패딩)과 일치해야 한다."""
-        priv, pub = vpn_keys.generate_keypair()
+        priv, pub = waygate_keys.generate_keypair()
         assert len(priv) == 44
         assert len(pub) == 44
         assert priv.endswith("=")
@@ -37,12 +37,12 @@ class TestGenerateKeypair:
         assert _WG_KEY_RE.match(pub)
 
     def test_keys_decode_to_32_raw_bytes(self):
-        priv, pub = vpn_keys.generate_keypair()
+        priv, pub = waygate_keys.generate_keypair()
         assert len(base64.b64decode(priv)) == 32
         assert len(base64.b64decode(pub)) == 32
 
     def test_each_call_generates_unique_keypair(self):
-        pairs = [vpn_keys.generate_keypair() for _ in range(5)]
+        pairs = [waygate_keys.generate_keypair() for _ in range(5)]
         privs = {p[0] for p in pairs}
         pubs = {p[1] for p in pairs}
         assert len(privs) == 5
@@ -53,7 +53,7 @@ class TestGenerateKeypair:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
-        priv_b64, pub_b64 = vpn_keys.generate_keypair()
+        priv_b64, pub_b64 = waygate_keys.generate_keypair()
         priv_bytes = base64.b64decode(priv_b64)
         priv_obj = X25519PrivateKey.from_private_bytes(priv_bytes)
         recomputed_pub = priv_obj.public_key().public_bytes(
@@ -65,13 +65,13 @@ class TestGenerateKeypair:
 
 class TestGeneratePresharedKey:
     def test_returns_base64_44_char_key(self):
-        psk = vpn_keys.generate_preshared_key()
+        psk = waygate_keys.generate_preshared_key()
         assert len(psk) == 44
         assert psk.endswith("=")
         assert _WG_KEY_RE.match(psk)
 
     def test_each_call_is_unique(self):
-        keys = {vpn_keys.generate_preshared_key() for _ in range(5)}
+        keys = {waygate_keys.generate_preshared_key() for _ in range(5)}
         assert len(keys) == 5
 
 
@@ -102,7 +102,7 @@ class TestWgClientKeyRoundtrip:
     def test_encrypt_decrypt_roundtrip(self, valid_key):
         from app.services.k3s_crypto import decrypt_wg_client_key, encrypt_wg_client_key
 
-        plaintext_priv_key, _ = vpn_keys.generate_keypair()
+        plaintext_priv_key, _ = waygate_keys.generate_keypair()
         ciphertext = encrypt_wg_client_key(plaintext_priv_key)
         assert ciphertext != plaintext_priv_key
         assert decrypt_wg_client_key(ciphertext) == plaintext_priv_key

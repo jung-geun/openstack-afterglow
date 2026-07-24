@@ -558,3 +558,19 @@ body {
 .plate-graphic .ps-accent { stroke: var(--color-accent); }
 .plate-graphic .ps-violet { stroke: var(--color-accent-2); }
 .plate-graphic .ps-green { stroke: var(--color-state-success); }
+
+/* Shared selectable resource treatment. */
+.resource-selection-surface[data-selected='true'] {
+  background-color: var(--accent-soft);
+}
+
+/* Keeps content reachable above the fixed bulk-selection overlay. */
+.bulk-selection-page {
+  padding-bottom: max(7rem, calc(7rem + env(safe-area-inset-bottom)));
+}
+
+@media (min-width: 768px) {
+  .bulk-selection-page {
+    padding-bottom: max(8rem, calc(8rem + env(safe-area-inset-bottom)));
+  }
+}

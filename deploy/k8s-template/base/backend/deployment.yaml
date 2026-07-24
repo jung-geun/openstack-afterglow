@@ -78,6 +78,16 @@ spec:
                 secretKeyRef:
                   name: afterglow-secrets
                   key: DATABASE_URL
+            - name: CHAT_CHECKPOINTER_POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: CHAT_CHECKPOINTER_POSTGRES_URL
+            - name: CHAT_MEMORY_PGVECTOR_URL
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: CHAT_MEMORY_PGVECTOR_URL
             - name: PROMETHEUS_PASSWORD
               valueFrom:
                 secretKeyRef:

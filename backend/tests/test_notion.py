@@ -299,6 +299,8 @@ async def test_collect_instance_data_resolves_normalized_gpu_alias_for_notion_re
         vcpus=8,
         ram=16384,
         extra_specs={"pci_passthrough:alias": "RTX-3060-LHR:1"},
+        disk=100,
+        is_public=True,
     )
     server = SimpleNamespace(
         id="inst-3060",
@@ -350,6 +352,59 @@ async def test_collect_instance_data_resolves_normalized_gpu_alias_for_notion_re
     assert rows[0]["gpu_name"] == "RTX 3060 LHR"
     assert rows[0]["gpu_spec_page_id"] == "page-3060"
     assert rows[0]["gpu_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_gpu_specs_creates_system_name_when_exact_page_missing():
+    from app.services.notion_sync import sync_gpu_specs_to_notion
+
+    schema = {"Name": {"type": "title"}}
+    existing_pages = [
+        {
+            "id": "legacy-rtx-3060",
+            "properties": {
+                "Name": {
+                    "type": "title",
+                    "title": [{"plain_text": "RTX-3060"}],
+                }
+            },
+        }
+    ]
+    mock_httpx_client = AsyncMock()
+    mock_httpx_client.get = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: {"properties": schema}))
+    mock_httpx_client.post = AsyncMock(
+        side_effect=[
+            MagicMock(
+                status_code=200,
+                json=lambda: {"results": existing_pages, "has_more": False},
+            ),
+            MagicMock(status_code=200),
+        ]
+    )
+    mock_httpx_client.patch = AsyncMock(return_value=MagicMock(status_code=200))
+    mock_httpx_client.__aenter__ = AsyncMock(return_value=mock_httpx_client)
+    mock_httpx_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_httpx_client):
+        stats = await sync_gpu_specs_to_notion(
+            "api-key",
+            "gpu-db",
+            [
+                {
+                    "name": "RTX 3060",
+                    "vendor_id": "10DE",
+                    "device_id": "2487",
+                    "is_audio": False,
+                    "vendor_name": "NVIDIA",
+                    "aliases": ["RTX-3060"],
+                }
+            ],
+        )
+
+    assert stats == {"created": 1, "updated": 0, "archived": 1, "errors": 0}
+    create_payload = mock_httpx_client.post.await_args_list[1].kwargs["json"]
+    assert create_payload["parent"] == {"database_id": "gpu-db"}
+    assert create_payload["properties"]["Name"]["title"][0]["text"]["content"] == "RTX 3060"
 
 
 def test_build_gpu_usage_by_gpu_excludes_shelved_statuses():

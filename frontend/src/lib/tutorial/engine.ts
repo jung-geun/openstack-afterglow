@@ -128,7 +128,41 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 	cleanupClickListener();
 	const step = tour.steps[index];
 
-	// 조건부 step: 현재 화면 상태에 해당 단계가 없으면 진행 방향을 유지한 채 건너뛴다
+	currentIndex = index;
+	persistTour(tour.id, index);
+
+	if (step.route && window.location.pathname !== step.route) {
+		try {
+			await goto(step.route);
+		} catch {
+			// mockup 레이어의 beforeNavigate가 쿼리를 붙여 재시도할 수 있음 — 요소 대기로 흡수
+		}
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	const timeout = step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000);
+
+	// 숨겨진 탭 내부가 settlement anchor인 경우 먼저 탭을 연다.
+	if (step.beforeReady) {
+		await tick();
+		await step.beforeReady();
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// 재개된 optional step은 부모 목록의 로딩/빈/오류 상태가 확정된 뒤 skipIf를 평가한다.
+	if (step.skipReadyElement) {
+		await waitForElement(step.skipReadyElement, timeout);
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// route 이동과 settlement 대기가 플러시된 뒤 transient UI를 복원한다.
+	if (step.prepare) {
+		await tick();
+		await step.prepare();
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// 조건부 step: 현재 화면 상태에 해당 단계가 없으면 진행 방향을 유지한 채 건너뛴다.
 	if (step.skipIf?.()) {
 		const next = index + direction;
 		if (next < 0) return;
@@ -142,25 +176,6 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 		return;
 	}
 
-	currentIndex = index;
-	persistTour(tour.id, index);
-
-	if (step.route && window.location.pathname !== step.route) {
-		try {
-			await goto(step.route);
-		} catch {
-			// mockup 레이어의 beforeNavigate가 쿼리를 붙여 재시도할 수 있음 — 요소 대기로 흡수
-		}
-	}
-
-	// route 이동으로 사이드바 auto-close $effect가 먼저 플러시되도록 tick을 기다린 뒤 prepare 실행
-	if (step.prepare) {
-		await tick();
-		await step.prepare();
-		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
-	}
-
-	const timeout = step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000);
 	let el = await waitForElement(step.element, timeout);
 	// 로딩 스피너 등이 걷히고 실제 콘텐츠가 나타난 뒤에 하이라이트한다
 	if (el && step.readyElement) {
@@ -224,11 +239,15 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 		popover: {
 			title: `${step.title} (${index + 1}/${tour.steps.length})`,
 			description: step.description,
-			showButtons: clickDriven || wizardDriven
-				? ['close']
-				: index === 0
-					? ['next', 'close']
-					: ['next', 'previous', 'close'],
+			showButtons: clickDriven
+				? step.showPrevious && index > 0
+					? ['previous', 'close']
+					: ['close']
+				: wizardDriven
+					? ['close']
+					: index === 0
+						? ['next', 'close']
+						: ['next', 'previous', 'close'],
 			nextBtnText: isLast ? '완료' : '다음',
 		},
 	});

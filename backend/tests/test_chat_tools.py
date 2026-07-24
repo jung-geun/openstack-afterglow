@@ -7,6 +7,7 @@
 """
 
 from app.services.chat import conversation_store as cs
+from app.services.chat import tool_runtime
 from app.services.chat.tools import ToolContext, execute_tool, tool_schemas
 
 _CTX = ToolContext(project_id="proj-A", user_id="user-A")
@@ -22,6 +23,11 @@ class TestSchemas:
         for s in schemas:
             assert s["type"] == "function"
             assert "parameters" in s["function"]
+
+    async def test_run_policy_can_disable_all_tool_schemas_and_execution(self):
+        disabled = ToolContext(project_id="proj-A", user_id="user-A", tools_enabled=False)
+        assert await tool_runtime.context_tool_schemas(disabled) == []
+        assert "disabled" in await tool_runtime.context_execute("list_my_conversations", {}, disabled)
 
 
 class TestUnknownAndErrors:
@@ -54,9 +60,8 @@ class TestTenantSafety:
             {"project_id": "EVIL-PROJECT", "user_id": "EVIL-USER"},
             _CTX,
         )
-        # user_id 는 컨텍스트 값(user-A) — LLM 이 주입한 EVIL-USER 는 무시. project_id 는 소유권에서 제외.
         assert captured["user_id"] == "user-A"
-        assert "project_id" not in captured
+        assert captured["project_id"] == "proj-A"
         assert "t" in out
 
     async def test_foreign_conversation_forbidden(self, monkeypatch):
@@ -81,8 +86,8 @@ class TestTenantSafety:
         monkeypatch.setattr(cs, "get_conversation", fake_get)
         monkeypatch.setattr(cs, "list_messages", fake_msgs)
         out = await execute_tool("get_conversation_detail", {"conversation_id": "c1"}, _CTX)
-        assert captured["user_id"] == "user-A"  # 컨텍스트 값(프로젝트 무관 소유)
-        assert "project_id" not in captured
+        assert captured["user_id"] == "user-A"
+        assert captured["project_id"] == "proj-A"
         assert "메시지 1개" in out
 
     async def test_missing_required_arg(self):

@@ -6,7 +6,8 @@ import {
 	lastAssistantModel,
 	resolveLeafFor,
 	siblingLeafInDirection,
-	type ChatMessage
+	type ChatMessage,
+	type ChatUsage
 } from '../chatTree';
 
 function msg(
@@ -134,5 +135,26 @@ describe('lastAssistantModel', () => {
 		expect(
 			lastAssistantModel([withModel(msg('a1', 'assistant', null, '2026-01-01T00:00:01Z'), null)])
 		).toBeNull();
+	});
+});
+
+describe('ChatUsage contract', () => {
+	it('requires the complete ledger-backed monthly and lifetime fields', () => {
+		const usage: ChatUsage = {
+			found: true,
+			total_credited_cost: 7.2,
+			lifetime_prompt_tokens: 1000,
+			lifetime_completion_tokens: 500,
+			lifetime_request_count: 1,
+			month_credited_cost: 7.2,
+			month_prompt_tokens: 1000,
+			month_completion_tokens: 500,
+			month_request_count: 1,
+			quota_used: 7.2,
+			quota_max: 1000
+		};
+
+		expect(usage.month_prompt_tokens + usage.month_completion_tokens).toBe(1500);
+		expect(usage.quota_used).toBe(usage.month_credited_cost);
 	});
 });

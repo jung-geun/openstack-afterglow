@@ -1,0 +1,100 @@
+- generic [ref=e2]:
+  - navigation [ref=e174]:
+    - generic [ref=e175]: Lumen
+    - button "검색 (⌘K)" [ref=e177]:
+      - generic [ref=e180]: 리소스 검색...
+      - generic [ref=e181]: ⌘K
+    - generic [ref=e182]:
+      - button "Sample Cloud Demo" [ref=e185]
+      - button "시스템 테마" [ref=e191]
+      - button "알림" [ref=e195]
+      - link "DE" [ref=e198] [cursor=pointer]:
+        - /url: /dashboard/account
+      - button "로그아웃" [ref=e199]
+  - status [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: 튜토리얼
+      - generic [ref=e7]: 체험 모드입니다. 실제 리소스는 생성되지 않습니다.
+    - button "종료" [ref=e9] [cursor=pointer]
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - complementary [ref=e12]:
+        - link "DMS Cloud" [ref=e15] [cursor=pointer]:
+          - /url: /dashboard
+        - button "VM 생성" [ref=e17] [cursor=pointer]
+        - navigation [ref=e20]:
+          - button "대시보드 ▸" [ref=e22]:
+            - generic [ref=e23]: 대시보드
+            - generic [ref=e27]: ▸
+          - link "토폴로지" [ref=e28] [cursor=pointer]:
+            - /url: /dashboard/network/topology
+          - button "Compute ▸" [ref=e32]:
+            - generic [ref=e33]: Compute
+            - generic [ref=e37]: ▸
+          - button "볼륨 ▸" [ref=e39]:
+            - generic [ref=e40]: 볼륨
+            - generic [ref=e44]: ▸
+          - button "File Storage ▸" [ref=e46]:
+            - generic [ref=e47]: File Storage
+            - generic [ref=e51]: ▸
+          - button "컨테이너 ▸" [ref=e53]:
+            - generic [ref=e54]: 컨테이너
+            - generic [ref=e58]: ▸
+          - button "Database ▸" [ref=e60]:
+            - generic [ref=e61]: Database
+            - generic [ref=e65]: ▸
+          - button "Object Storage ▸" [ref=e67]:
+            - generic [ref=e68]: Object Storage
+            - generic [ref=e72]: ▸
+          - button "네트워크 ▸" [ref=e74]:
+            - generic [ref=e75]: 네트워크
+            - generic [ref=e79]: ▸
+        - generic [ref=e81]:
+          - generic [ref=e82]: 프로젝트
+          - generic [ref=e83]: Sample Cloud Demo
+          - link "프로젝트 설정" [ref=e84] [cursor=pointer]:
+            - /url: /dashboard/project-settings
+      - main [ref=e88]:
+        - generic [ref=e89]:
+          - complementary [ref=e90]:
+            - generic [ref=e91]:
+              - generic [ref=e92]: Lumen
+              - button "사이드바 접기" [ref=e93] [cursor=pointer]
+            - generic [ref=e96]:
+              - button "새 채팅" [ref=e97] [cursor=pointer]
+              - button "프로젝트" [ref=e100] [cursor=pointer]
+            - button "대화 검색" [ref=e103] [cursor=pointer]:
+              - generic [ref=e108]: ⌘ I
+            - paragraph [ref=e110]: 대화가 없습니다
+            - button "에이전트" [ref=e112] [cursor=pointer]
+            - button "DE demo-user" [ref=e202] [cursor=pointer]:
+              - generic [ref=e118]: DE
+              - generic [ref=e119]: demo-user
+          - generic [ref=e124]:
+            - generic [ref=e125]:
+              - generic [ref=e127]:
+                - button "모델 선택" [active] [ref=e128] [cursor=pointer]
+                - button "에이전트" [ref=e133] [cursor=pointer]
+              - button "저장되지 않는 임시 채팅" [ref=e141] [cursor=pointer]
+            - generic [ref=e144]:
+              - generic [ref=e145]:
+                - generic [ref=e147]:
+                  - heading "무엇을 도와드릴까요?" [level=2] [ref=e151]
+                  - paragraph [ref=e152]: 아래에 메시지를 입력해 대화를 시작하세요.
+                - alert [ref=e203]: 튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.
+              - generic [ref=e154]:
+                - group [ref=e155]:
+                  - textbox "메시지를 입력하세요 (Enter 전송 · Shift+Enter 줄바꿈)" [ref=e156]:
+                    - /placeholder: 메시지를 입력하세요  (Enter 전송 · Shift+Enter 줄바꿈)
+                  - generic [ref=e157]:
+                    - button "추가" [disabled] [ref=e160]
+                    - button "전송" [disabled] [ref=e164]
+                - button "프로젝트 선택" [ref=e169] [cursor=pointer]
+                - paragraph [ref=e173]: AI 응답은 부정확할 수 있습니다. 중요한 내용은 확인하세요.
+        - button "닫기" [ref=e205]
+        - dialog "모델 선택" [ref=e206]:
+          - generic [ref=e207]:
+            - heading "모델 선택" [level=2] [ref=e208]
+            - button "닫기" [ref=e209] [cursor=pointer]
+          - textbox "모델 검색 (이름·프로바이더)" [ref=e216]
+          - paragraph [ref=e218]: 검색 결과가 없습니다

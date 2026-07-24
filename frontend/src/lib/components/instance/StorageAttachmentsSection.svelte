@@ -24,6 +24,9 @@
 	let attachments = $state<StorageAttachment[]>([]);
 	let fileStorages = $state<FileStorage[]>([]);
 	let loading = $state(false);
+	let attachmentError = $state('');
+	let catalogStatus = $state<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+	let catalogError = $state('');
 	let showForm = $state(false);
 	let selectedStorageId = $state('');
 	let mountPoint = $state('');
@@ -32,70 +35,163 @@
 	let detaching = $state<string | null>(null);
 	let lastMountInfo = $state<{ mount_command: string; keyring_file: string | null } | null>(null);
 	let copied = $state(false);
+	let attachmentScopeGeneration = 0;
+	let attachmentRequestId = 0;
+	let catalogGeneration = 0;
+	let catalogProjectId: string | null = null;
+	let catalogPromise: Promise<void> | null = null;
+	let observedInstanceId: string | null | undefined;
+	let observedProjectId: string | null | undefined;
+
+	interface StorageScope {
+		instanceId: string;
+		projectId: string;
+	}
 
 	function tok() { return get(auth).token ?? undefined; }
-	function pid() { return get(auth).projectId ?? undefined; }
+	function currentScope(): StorageScope | null {
+		const instanceId = s.instanceId;
+		const projectId = s.effectiveProjectId;
+		if (!instanceId || !projectId) return null;
+		return { instanceId, projectId };
+	}
 
-	async function loadAttachments() {
-		if (!s.instance) return;
-		loading = true;
+	function isCurrentAttachment(scope: StorageScope, generation: number, requestId: number) {
+		return attachmentScopeGeneration === generation
+			&& attachmentRequestId === requestId
+			&& s.instanceId === scope.instanceId
+			&& s.effectiveProjectId === scope.projectId;
+	}
+
+	function isCurrentMutation(scope: StorageScope, generation: number) {
+		return attachmentScopeGeneration === generation
+			&& s.instanceId === scope.instanceId
+			&& s.effectiveProjectId === scope.projectId;
+	}
+
+	function isCurrentCatalog(projectId: string, generation: number) {
+		return catalogGeneration === generation && s.effectiveProjectId === projectId;
+	}
+
+	async function loadAttachments(instanceId: string, projectId: string, scopeGeneration: number) {
+		const scope = { instanceId, projectId };
+		const requestId = ++attachmentRequestId;
+		if (isCurrentAttachment(scope, scopeGeneration, requestId)) {
+			loading = true;
+			attachmentError = '';
+		}
 		try {
-			attachments = await api.get<StorageAttachment[]>(
-				`/api/v1/instances/${s.instance.id}/storage-attachments`,
-				tok(), pid()
+			const data = await api.get<StorageAttachment[]>(
+				`/api/v1/instances/${instanceId}/storage-attachments`,
+				tok(),
+				projectId,
 			);
-		} catch {
-			attachments = [];
+			if (isCurrentAttachment(scope, scopeGeneration, requestId)) attachments = data;
+		} catch (error) {
+			if (isCurrentAttachment(scope, scopeGeneration, requestId)) {
+				attachments = [];
+				attachmentError = error instanceof ApiError ? error.message : '연결 정보를 불러오지 못했습니다.';
+			}
 		} finally {
-			loading = false;
+			if (isCurrentAttachment(scope, scopeGeneration, requestId)) loading = false;
 		}
 	}
 
-	async function loadFileStorages() {
-		try {
-			fileStorages = await api.get<FileStorage[]>('/api/v1/storage/file-storages', tok(), pid());
-		} catch {
-			fileStorages = [];
+	function loadFileStorages(projectId = s.effectiveProjectId, generation = catalogGeneration): Promise<void> {
+		if (!projectId) return Promise.resolve();
+		if (catalogProjectId === projectId) {
+			if (catalogStatus === 'loading' && catalogPromise) return catalogPromise;
+			if (catalogStatus === 'loaded') return Promise.resolve();
 		}
+
+		catalogProjectId = projectId;
+		catalogStatus = 'loading';
+		catalogError = '';
+		const promise = (async () => {
+			try {
+				const data = await api.get<FileStorage[]>('/api/v1/file-storage', tok(), projectId);
+				if (isCurrentCatalog(projectId, generation)) {
+					fileStorages = data;
+					catalogStatus = 'loaded';
+				}
+			} catch (error) {
+				if (isCurrentCatalog(projectId, generation)) {
+					fileStorages = [];
+					catalogStatus = 'error';
+					catalogError = error instanceof ApiError ? error.message : '파일 스토리지를 불러오지 못했습니다.';
+				}
+			} finally {
+				if (isCurrentCatalog(projectId, generation)) catalogPromise = null;
+			}
+		})();
+		catalogPromise = promise;
+		return promise;
+	}
+
+	function toggleForm() {
+		showForm = !showForm;
+		selectedStorageId = '';
+		mountPoint = '';
+		readOnly = false;
+		if (showForm) void loadFileStorages();
 	}
 
 	async function handleAttach() {
-		if (!s.instance || !selectedStorageId || !mountPoint.trim()) return;
+		const scope = currentScope();
+		const generation = attachmentScopeGeneration;
+		const selectedId = selectedStorageId;
+		const requestedMountPoint = mountPoint.trim();
+		const requestedReadOnly = readOnly;
+		if (!scope || !selectedId || !requestedMountPoint) return;
 		attaching = true;
 		lastMountInfo = null;
 		try {
 			const result = await api.post<{ mount_command: string; keyring_file: string | null }>(
-				`/api/v1/instances/${s.instance.id}/storage-attachments`,
-				{ file_storage_id: selectedStorageId, mount_point: mountPoint.trim(), read_only: readOnly },
-				tok(), pid()
+				`/api/v1/instances/${scope.instanceId}/storage-attachments`,
+				{ file_storage_id: selectedId, mount_point: requestedMountPoint, read_only: requestedReadOnly },
+				tok(),
+				scope.projectId,
 			);
+			if (!isCurrentMutation(scope, generation)) return;
 			lastMountInfo = result;
 			showForm = false;
 			selectedStorageId = '';
 			mountPoint = '';
 			readOnly = false;
-			await loadAttachments();
-		} catch (e) {
-			toast.error('연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			await loadAttachments(scope.instanceId, scope.projectId, generation);
+		} catch (error) {
+			if (isCurrentMutation(scope, generation)) {
+				toast.error('연결 실패: ' + (error instanceof ApiError ? error.message : String(error)));
+			}
 		} finally {
-			attaching = false;
+			if (isCurrentMutation(scope, generation)) {
+				attaching = false;
+			}
 		}
 	}
 
 	async function handleDetach(fileStorageId: string) {
-		if (!s.instance) return;
+		const scope = currentScope();
+		const generation = attachmentScopeGeneration;
+		if (!scope) return;
 		detaching = fileStorageId;
 		try {
 			await api.delete(
-				`/api/v1/instances/${s.instance.id}/storage-attachments/${fileStorageId}`,
-				tok(), pid()
+				`/api/v1/instances/${scope.instanceId}/storage-attachments/${fileStorageId}`,
+				tok(),
+				scope.projectId,
 			);
-			await loadAttachments();
-			if (lastMountInfo) lastMountInfo = null;
-		} catch (e) {
-			toast.error('연결 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			if (!isCurrentMutation(scope, generation)) return;
+			await loadAttachments(scope.instanceId, scope.projectId, generation);
+			if (s.instanceId === scope.instanceId && s.effectiveProjectId === scope.projectId && attachmentScopeGeneration === generation) {
+				lastMountInfo = null;
+			}
+		} catch (error) {
+			if (isCurrentMutation(scope, generation)) {
+				toast.error('연결 해제 실패: ' + (error instanceof ApiError ? error.message : String(error)));
+			}
 		} finally {
-			detaching = null;
+			if (isCurrentMutation(scope, generation)) detaching = null;
 		}
 	}
 
@@ -110,10 +206,37 @@
 	}
 
 	$effect(() => {
-		if (s.instance) {
-			void loadAttachments();
-			void loadFileStorages();
+		const instanceId = s.instanceId ?? null;
+		const projectId = s.effectiveProjectId ?? null;
+		const attachmentScopeChanged = instanceId !== observedInstanceId || projectId !== observedProjectId;
+		if (!attachmentScopeChanged) return;
+
+		const projectChanged = projectId !== observedProjectId;
+		observedInstanceId = instanceId;
+		observedProjectId = projectId;
+		attachmentScopeGeneration += 1;
+		attachmentRequestId += 1;
+		attachments = [];
+		attachmentError = '';
+		loading = false;
+		attaching = false;
+		detaching = null;
+		lastMountInfo = null;
+		showForm = false;
+		selectedStorageId = '';
+		mountPoint = '';
+		readOnly = false;
+
+		if (projectChanged) {
+			catalogGeneration += 1;
+			catalogProjectId = null;
+			catalogPromise = null;
+			fileStorages = [];
+			catalogStatus = 'idle';
+			catalogError = '';
 		}
+
+		if (instanceId && projectId) void loadAttachments(instanceId, projectId, attachmentScopeGeneration);
 	});
 
 	const availableStorages = $derived(
@@ -125,7 +248,7 @@
 	<div class="flex items-center justify-between mb-4">
 		<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">파일 스토리지</h2>
 		<button
-			onclick={() => { showForm = !showForm; selectedStorageId = ''; mountPoint = ''; readOnly = false; }}
+			onclick={toggleForm}
 			class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
 		>
 			{showForm ? '닫기' : '+ 연결'}
@@ -139,6 +262,7 @@
 					<label class="block text-xs text-gray-400 mb-1">파일 스토리지</label>
 					<select
 						bind:value={selectedStorageId}
+						disabled={catalogStatus === 'loading'}
 						class="w-full bg-gray-700 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
 					>
 						<option value="">선택...</option>
@@ -146,8 +270,12 @@
 							<option value={fs.id}>{fs.name || fs.id.slice(0, 12)} ({fs.share_proto})</option>
 						{/each}
 					</select>
-					{#if availableStorages.length === 0}
-						<p class="text-xs text-amber-400 mt-1">연결 가능한 파일 스토리지가 없습니다.</p>
+					{#if catalogStatus === 'loading'}
+						<p class="text-xs text-gray-400 mt-1">파일 스토리지를 불러오는 중...</p>
+					{:else if catalogStatus === 'error'}
+						<p class="catalog-message">파일 스토리지를 불러오지 못했습니다. 다시 열어 재시도하세요.</p>
+					{:else if catalogStatus === 'loaded' && availableStorages.length === 0}
+						<p class="catalog-message">연결 가능한 파일 스토리지가 없습니다.</p>
 					{/if}
 				</div>
 				<div>
@@ -171,7 +299,7 @@
 			</div>
 			<button
 				onclick={handleAttach}
-				disabled={attaching || !selectedStorageId || !mountPoint.trim()}
+				disabled={catalogStatus === 'loading' || attaching || !selectedStorageId || !mountPoint.trim()}
 				class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors"
 			>
 				{attaching ? '연결 중...' : '연결'}
@@ -229,3 +357,10 @@
 		</div>
 	{/if}
 </div>
+<style>
+	.catalog-message {
+		margin-top: 0.25rem;
+		font-size: 0.75rem;
+		color: var(--color-text-muted);
+	}
+</style>

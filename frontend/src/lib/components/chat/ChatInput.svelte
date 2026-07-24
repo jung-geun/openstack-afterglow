@@ -1,7 +1,14 @@
 <script lang="ts">
-	import type { ModelCapabilities } from '$lib/api/chatTree';
+	import type { Snippet } from 'svelte';
+	import type { ModelCapabilities } from '$lib/api/chatContracts';
 	import { effortLabel, effortOptionsFor } from '$lib/api/chatEffort';
-	import { uploadChatAttachment, type ChatAttachment } from '$lib/api/chatAttachments';
+	import {
+		completeChatAttachment,
+		isChatDocumentMime,
+		isChatImageMime,
+		uploadChatAttachment,
+		type ChatAttachment
+	} from '$lib/api/chatAttachments';
 	import { toast } from '$lib/stores/toast';
 	import ModelCapabilityBadges from './ModelCapabilityBadges.svelte';
 
@@ -12,8 +19,8 @@
 		placeholder?: string;
 		/** 현재 모델 능력 — effort 선택기·배지·첨부 게이팅. */
 		modelCaps?: ModelCapabilities | null;
-		/** 선택된 thinking effort(null=서버 기본). reasoning 지원 모델만 노출. */
-		effort?: string | null;
+	/** 선택된 thinking effort(auto=provider 기본, none=명시적 비활성). */
+	effort?: string | null;
 		/** 첨부(bindable) — 업로드 진행/완료 아이템. 부모가 전송 시 refs 로 변환·초기화. */
 		attachments?: ChatAttachment[];
 		/** 대화별 tool/MCP 선택 — null=활성 전체(기본), 배열=해당 id 만. tool_call 지원 모델만 노출. */
@@ -21,10 +28,14 @@
 		availableMcp?: { id: number; name: string }[];
 		selectedToolIds?: number[] | null;
 		selectedMcpIds?: number[] | null;
+		/** 스킬 선택 — opt-in(기본 미선택 [], 선택된 것만 주입). 모든 모델에서 사용 가능(프롬프트 주입). */
+		availableSkills?: { id: number; name: string }[];
+		selectedSkillIds?: number[];
 		token?: string;
 		projectId?: string;
 		onSend: () => void;
 		onStop: () => void;
+		children?: Snippet;
 	}
 	let {
 		value = $bindable(''),
@@ -38,10 +49,13 @@
 		availableMcp = [],
 		selectedToolIds = $bindable(null),
 		selectedMcpIds = $bindable(null),
+		availableSkills = [],
+		selectedSkillIds = $bindable([]),
 		token,
 		projectId,
 		onSend,
-		onStop
+		onStop,
+		children
 	}: Props = $props();
 
 	let ta = $state<HTMLTextAreaElement | null>(null);
@@ -50,13 +64,34 @@
 	let plusOpen = $state(false);
 	let dragOver = $state(false);
 
-	// vision/attachment 지원 모델에서만 첨부 허용.
-	const canAttach = $derived(Boolean(modelCaps?.vision || modelCaps?.attachment));
+	// The backend disables these gates when the scanned S3/ClamAV pipeline is unavailable.
+	const canAttachImage = $derived(
+		Boolean(modelCaps?.vision) && (modelCaps?.feature_gates?.image_input?.available ?? true)
+	);
+	const canAttachDocument = $derived(
+		Boolean(modelCaps?.feature_gates?.document_input?.available)
+	);
+	const canAttach = $derived(canAttachImage || canAttachDocument);
 	// tool_call 지원 + 사용 가능한 tool/MCP 가 있을 때만 도구 선택 노출.
 	const canUseTools = $derived(
 		Boolean(modelCaps?.tool_call) && availableTools.length + availableMcp.length > 0
 	);
-	const hasPlus = $derived(canAttach || canUseTools);
+	// 스킬은 프롬프트 주입이라 tool_call 없이도 사용 가능.
+	const canUseSkills = $derived(availableSkills.length > 0);
+	const hasPlus = $derived(canAttach || canUseTools || canUseSkills);
+	const attachmentUnavailableReason = $derived.by(() => {
+		if (!modelCaps) return '모델 기능을 확인하는 중입니다';
+		const imageGate = modelCaps.feature_gates?.image_input;
+		const documentGate = modelCaps.feature_gates?.document_input;
+		if (
+			imageGate?.reason_code === 'asset_pipeline_unavailable' ||
+			documentGate?.reason_code === 'asset_pipeline_unavailable'
+		) {
+			return '첨부 저장소와 보안 검사기가 설정되지 않았습니다. 관리자에게 문의하세요.';
+		}
+		return '선택한 모델은 이미지 또는 PDF 입력을 지원하지 않습니다';
+	});
+	const plusTitle = $derived(hasPlus ? '첨부·도구' : attachmentUnavailableReason);
 
 	function isOn(id: number, selected: number[] | null): boolean {
 		return selected === null ? true : selected.includes(id);
@@ -69,30 +104,42 @@
 		const cur = selectedMcpIds ?? availableMcp.map((m) => m.id);
 		selectedMcpIds = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
 	}
+	// 스킬은 opt-in — 빈 목록에서 시작해 선택 시 추가.
+	function toggleSkill(id: number) {
+		selectedSkillIds = selectedSkillIds.includes(id)
+			? selectedSkillIds.filter((x) => x !== id)
+			: [...selectedSkillIds, id];
+	}
 
 	async function addFiles(files: FileList | File[]) {
 		if (!canAttach) return;
 		for (const file of Array.from(files)) {
-			if (!file.type.startsWith('image/')) {
-				toast.error('현재는 이미지 첨부만 지원합니다');
+			const image = isChatImageMime(file.type);
+			const document = isChatDocumentMime(file.type);
+			if ((!image && !document) || (image && !canAttachImage) || (document && !canAttachDocument)) {
+				toast.error('선택한 모델에서 지원하지 않는 첨부입니다');
 				continue;
 			}
 			const item: ChatAttachment = {
 				mime: file.type,
-				name: file.name || 'image',
-				previewUrl: URL.createObjectURL(file),
+				name: file.name || (document ? 'document.pdf' : 'image'),
+				previewUrl: image ? URL.createObjectURL(file) : undefined,
 				status: 'uploading'
 			};
 			attachments.push(item);
+			const pending = attachments.at(-1)!;
 			try {
 				const ref = await uploadChatAttachment(file, { token, projectId });
-				item.key = ref.key;
-				item.status = 'done';
-				attachments = attachments; // 반응성 트리거
+				if (!isChatImageMime(ref.mime_type) && !isChatDocumentMime(ref.mime_type)) {
+					throw new Error('업로드한 파일이 지원되는 이미지 또는 PDF로 확인되지 않았습니다');
+				}
+				attachments = attachments.map((attachment) =>
+					attachment === pending ? completeChatAttachment(attachment, ref) : attachment
+				);
 			} catch (e) {
-				item.status = 'error';
-				attachments = attachments.filter((a) => a !== item);
-				if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+				pending.status = 'error';
+				attachments = attachments.filter((attachment) => attachment !== pending);
+				if (pending.previewUrl) URL.revokeObjectURL(pending.previewUrl);
 				toast.error(e instanceof Error ? e.message : '첨부 업로드 실패');
 			}
 		}
@@ -135,7 +182,7 @@
 		}
 	}
 
-	function chooseEffort(v: string | null) {
+	function chooseEffort(v: string) {
 		effort = v;
 		effortOpen = false;
 	}
@@ -147,7 +194,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept="image/*"
+		accept="image/jpeg,image/png,image/webp,application/pdf"
 		multiple
 		hidden
 		onchange={onFilePick}
@@ -167,10 +214,12 @@
 	>
 		{#if attachments.length}
 			<div class="chips">
-				{#each attachments as a (a.previewUrl ?? a.key ?? a.name)}
+				{#each attachments as a (a.previewUrl ?? a.assetId ?? a.name)}
 					<div class="chip" class:uploading={a.status === 'uploading'}>
 						{#if a.previewUrl}
 							<img src={a.previewUrl} alt={a.name} />
+						{:else}
+							<span class="chip-name">{a.name}</span>
 						{/if}
 						{#if a.status === 'uploading'}
 							<span class="chip-spin"></span>
@@ -195,12 +244,12 @@
 
 		<div class="toolbar">
 			<div class="tb-left">
-				<div class="plus">
+				<div class="plus" title={!hasPlus ? attachmentUnavailableReason : undefined}>
 					<button
 						type="button"
 						class="tool-shell"
 						disabled={!hasPlus || streaming}
-						title={hasPlus ? '첨부·도구' : '이 모델은 첨부·도구를 지원하지 않습니다'}
+						title={plusTitle}
 						aria-label="추가"
 						aria-haspopup="menu"
 						aria-expanded={plusOpen}
@@ -238,6 +287,18 @@
 									</button>
 								{/each}
 							{/if}
+							{#if canUseSkills}
+								{#if canAttach || canUseTools}<div class="plus-sep"></div>{/if}
+								<div class="plus-head">스킬</div>
+								{#each availableSkills as s (s.id)}
+									<button type="button" class="plus-opt toggle" role="menuitemcheckbox" aria-checked={selectedSkillIds.includes(s.id)} onclick={() => toggleSkill(s.id)}>
+										<span class="check" class:on={selectedSkillIds.includes(s.id)}>
+											{#if selectedSkillIds.includes(s.id)}<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
+										</span>
+										<span class="tool-name truncate">{s.name}</span>
+									</button>
+								{/each}
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -250,20 +311,19 @@
 						<button
 							type="button"
 							class="effort-btn"
-							class:on={effort !== null}
+							class:on={effort !== 'auto'}
 							onclick={() => (effortOpen = !effortOpen)}
 							aria-haspopup="listbox"
 							aria-expanded={effortOpen}
 							title="추론 강도"
 						>
 							<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9.5 21h5M12 3a6 6 0 0 1 4 10.5c-.6.6-1 1.4-1 2.2V17H9v-1.3c0-.8-.4-1.6-1-2.2A6 6 0 0 1 12 3z" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							<span>{effort ? effortLabel(effort) : '추론'}</span>
+							<span>{effortLabel(effort ?? 'auto')}</span>
 						</button>
 						{#if effortOpen}
 							<div class="scrim" role="button" tabindex="-1" aria-label="닫기" onclick={() => (effortOpen = false)} onkeydown={(e) => e.key === 'Escape' && (effortOpen = false)}></div>
 							<div class="effort-menu" role="listbox">
 								<div class="effort-head">추론 강도</div>
-								<button type="button" class="effort-opt" class:sel={effort === null} role="option" aria-selected={effort === null} onclick={() => chooseEffort(null)}>기본</button>
 								{#each effortOptions as v (v)}
 									<button type="button" class="effort-opt" class:sel={effort === v} role="option" aria-selected={effort === v} onclick={() => chooseEffort(v)}>{effortLabel(v)}</button>
 								{/each}
@@ -284,6 +344,9 @@
 			</div>
 		</div>
 	</div>
+	{#if children}
+		<div class="composer-footer">{@render children()}</div>
+	{/if}
 	<p class="hint">AI 응답은 부정확할 수 있습니다. 중요한 내용은 확인하세요.</p>
 </div>
 
@@ -300,10 +363,11 @@
 		border: 1px solid var(--color-line);
 		background: var(--color-surface-base);
 		transition: border-color 0.15s, box-shadow 0.15s;
+		box-shadow: 0 14px 32px color-mix(in oklab, var(--color-ink-0) 10%, transparent);
 	}
 	.input-wrap:focus-within {
 		border-color: var(--color-accent);
-		box-shadow: var(--focus-ring);
+		box-shadow: var(--focus-ring), 0 14px 32px color-mix(in oklab, var(--color-ink-0) 10%, transparent);
 	}
 	textarea {
 		resize: none;
@@ -330,7 +394,7 @@
 		align-items: center;
 		gap: 0.4rem;
 		min-width: 0;
-		overflow: hidden;
+		overflow: visible;
 	}
 	.tb-right {
 		display: flex;
@@ -393,7 +457,7 @@
 		border: none;
 		border-radius: 50%;
 		background: color-mix(in oklab, var(--color-ink-0) 55%, transparent);
-		color: #fff;
+		color: var(--color-action-on-accent);
 		cursor: pointer;
 	}
 	.plus {
@@ -441,6 +505,10 @@
 		border-radius: 0.6rem;
 		box-shadow: 0 10px 28px color-mix(in oklab, var(--color-ink-0) 20%, transparent);
 		padding: 0.3rem;
+	}
+	.composer-footer {
+		width: 95%;
+		margin: -1px auto 0;
 	}
 	.plus-opt {
 		display: flex;
@@ -522,8 +590,8 @@
 		border-color: var(--color-line-2);
 	}
 	.effort-btn.on {
-		color: color-mix(in oklab, #a855f7 70%, var(--color-ink-1));
-		border-color: color-mix(in oklab, #a855f7 40%, var(--color-line));
+		color: color-mix(in oklab, var(--color-warm) 70%, var(--color-ink-1));
+		border-color: color-mix(in oklab, var(--color-warm) 40%, var(--color-line));
 	}
 	.scrim {
 		position: fixed;

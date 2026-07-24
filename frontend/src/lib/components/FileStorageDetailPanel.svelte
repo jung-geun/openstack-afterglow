@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createCoalescedRefresh } from '$lib/utils/coalescedRefresh';
 	import { createFileStorageDetailController, provideFileStorageDetailController } from '$lib/stores/fileStorageDetailController.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 	import FileStorageDetailHeader from '$lib/components/file-storage/FileStorageDetailHeader.svelte';
@@ -17,29 +18,33 @@
 
 	let { fileStorageId, onClose, onDeleted }: Props = $props();
 
+	let refresh!: ReturnType<typeof createCoalescedRefresh>;
 	const s = createFileStorageDetailController({
 		fileStorageId: () => fileStorageId,
 		token: () => $auth.token ?? undefined,
 		projectId: () => $auth.projectId ?? undefined,
 		onDeleted: () => onDeleted?.(),
 		onClose: () => onClose?.(),
+		onMutated: () => refresh.invalidate(),
 	});
+	refresh = createCoalescedRefresh((force) => s.fetchAll(force ? { refresh: true } : undefined));
 	provideFileStorageDetailController(s);
 
-	const ar = createAutoRefresh(() => s.fetchAll(), {
+	const ar = createAutoRefresh(() => refresh.run(false), {
 		storageKey: 'file-storage-detail-panel',
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],
+		invokeOnMount: false,
 	});
 
 	$effect(() => {
-		if (fileStorageId && $auth.token) s.fetchAll();
+		if (fileStorageId && $auth.token) void refresh.run(false);
 	});
 </script>
 
 <div class="p-6">
-	<FileStorageDetailHeader {onClose} {ar} />
+	<FileStorageDetailHeader {onClose} {ar} onManualRefresh={() => refresh.run(true)} />
 
 	{#if s.error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{s.error}</div>

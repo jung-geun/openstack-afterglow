@@ -19,6 +19,28 @@ function expandK3sBackendSelectors() {
 	return selectors;
 }
 
+function expandChatBackendSelectors() {
+	const testsDir = path.join(backendDir, "tests");
+	return fs
+		.readdirSync(testsDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && /^test_chat_.*\.py$/.test(entry.name))
+		.map((entry) => `tests/${entry.name}`)
+		.sort();
+}
+
+function expandChatFrontendSelectors() {
+	const apiTestsDir = path.join(frontendDir, "src", "lib", "api", "__tests__");
+	const selectors = fs
+		.readdirSync(apiTestsDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && /^chat.*\.test\.ts$/.test(entry.name))
+		.map((entry) => `src/lib/api/__tests__/${entry.name}`)
+		.sort();
+	selectors.push("src/routes/__tests__/chat-gated-surfaces.test.ts");
+	const componentTests = "src/lib/components/chat/__tests__";
+	if (fs.existsSync(path.join(frontendDir, componentTests))) selectors.push(componentTests);
+	return selectors;
+}
+
 const targets = {
 	auth: {
 		description: "Login/logout, token, session, site-config auth surfaces",
@@ -87,6 +109,16 @@ const targets = {
 		},
 		frontend: {
 			selectors: ["src/lib/config/site.test.ts", "src/lib/server/config.test.ts"]
+		}
+	},
+	chat: {
+		description: "Built-in chat contracts, runs, workers, providers, assets, memory, and typed UI",
+		liveServices: "none",
+		backend: {
+			selectors: expandChatBackendSelectors
+		},
+		frontend: {
+			selectors: expandChatFrontendSelectors
 		}
 	},
 	crypto: {
@@ -173,6 +205,7 @@ const targets = {
 				"src/lib/components/admin/volumes/__tests__/AdminVolumeStatusSummary.test.ts",
 				"src/lib/components/admin/file-storage/__tests__",
 				"src/lib/components/volume/__tests__/VolumeSummaryCards.test.ts",
+				"src/lib/components/volume/__tests__/VolumeBulkSelection.test.ts",
 				"src/lib/api/__tests__/client.upload.test.ts"
 			]
 		}

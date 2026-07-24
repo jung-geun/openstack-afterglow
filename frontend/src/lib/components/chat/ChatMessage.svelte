@@ -128,13 +128,21 @@
 							출처 {citations.length}
 						</div>
 						<ol class="sources-list">
-							{#each citations as c, i (c.url + i)}
+							{#each citations as c, i (`${c.source_kind}:${c.url ?? c.document_index}:${i}`)}
 								<li>
-									<a href={c.url} target="_blank" rel="noopener noreferrer nofollow" title={c.url}>
-										<span class="src-num">{i + 1}</span>
-										<span class="src-label">{citationLabel(c)}</span>
-										<span class="src-domain">{citationDomain(c.url)}</span>
-									</a>
+									{#if c.url}
+										<a href={c.url} target="_blank" rel="noopener noreferrer nofollow" title={c.url}>
+											<span class="src-num">{i + 1}</span>
+											<span class="src-label">{citationLabel(c)}</span>
+											<span class="src-domain">{citationDomain(c.url)}</span>
+										</a>
+									{:else}
+										<div class="source-document" title={c.snippet ?? undefined}>
+											<span class="src-num">{i + 1}</span>
+											<span class="src-label">{citationLabel(c)}</span>
+											<span class="src-domain">입력 문서</span>
+										</div>
+									{/if}
 								</li>
 							{/each}
 						</ol>
@@ -203,6 +211,8 @@
 		align-items: flex-start;
 	}
 	.bubble {
+		position: relative;
+		z-index: 0;
 		max-width: min(85%, 46rem);
 		border-radius: 1.1rem;
 		padding: 0.7rem 1rem;
@@ -210,13 +220,46 @@
 	.bubble.user {
 		background: var(--color-accent);
 		color: var(--color-action-on-accent);
-		border-bottom-right-radius: 0.35rem;
+		border-top-right-radius: 0.35rem;
+	}
+	.bubble.user::after {
+		content: '';
+		position: absolute;
+		top: 0;
+		right: -0.7rem;
+		z-index: -1;
+		width: 1.35rem;
+		height: 1.35rem;
+		background: var(--color-accent);
+		clip-path: polygon(0 0, 100% 0, 0 100%);
 	}
 	.bubble.assistant {
 		max-width: min(92%, 52rem);
 		background: var(--color-surface-raised);
 		border: 1px solid var(--color-line);
-		border-bottom-left-radius: 0.35rem;
+		border-top-left-radius: 0.35rem;
+	}
+	.bubble.assistant::before,
+	.bubble.assistant::after {
+		content: '';
+		position: absolute;
+		clip-path: polygon(0 0, 100% 0, 100% 100%);
+	}
+	.bubble.assistant::before {
+		top: -1px;
+		left: -0.72rem;
+		z-index: -1;
+		width: 1.38rem;
+		height: 1.38rem;
+		background: var(--color-line);
+	}
+	.bubble.assistant::after {
+		top: 0;
+		left: -0.64rem;
+		z-index: -1;
+		width: 1.22rem;
+		height: 1.22rem;
+		background: var(--color-surface-raised);
 	}
 	.user-text {
 		font-size: 0.9rem;
@@ -313,7 +356,8 @@
 		flex-direction: column;
 		gap: 0.15rem;
 	}
-	.sources-list a {
+	.sources-list a,
+	.source-document {
 		display: flex;
 		align-items: baseline;
 		gap: 0.45rem;

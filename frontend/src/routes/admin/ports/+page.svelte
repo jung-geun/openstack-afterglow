@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createIntentPrefetchScheduler } from '$lib/utils/intentPrefetch';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import PortsTable from '$lib/components/admin/ports/PortsTable.svelte';
 	import PortCreateModal from '$lib/components/admin/ports/PortCreateModal.svelte';
@@ -31,9 +32,23 @@
 	let showCreate = $state(false);
 	let creating = $state(false);
 	let createError = $state('');
+	let loadGeneration = 0;
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+	const nextPrefetch = createIntentPrefetchScheduler();
+	function listPath(marker?: string): string {
+		const params = new URLSearchParams({ limit: String(pageSize) });
+		if (marker) params.set('marker', marker);
+		if (projectFilter) params.set('project_id', projectFilter);
+		return `/api/v1/admin/all-ports?${params}`;
+	}
+	function prefetchNext() {
+		if (!nextMarker) return;
+		const path = listPath(nextMarker);
+		const key = JSON.stringify([path, token ?? null, projectId ?? null]);
+		nextPrefetch.intent(key, (signal) => api.prefetch(path, token, projectId, { signal }));
+	}
 
 	const filtered = $derived(
 		filter
@@ -47,25 +62,38 @@
 	);
 
 	async function load(marker?: string) {
+		const generation = ++loadGeneration;
+		const requestToken = $auth.token ?? undefined;
+		const requestProjectId = $auth.projectId ?? undefined;
+		const requestPageSize = pageSize;
+		const requestProjectFilter = projectFilter;
+		const requestPath = listPath(marker);
+		const owns = () => generation === loadGeneration
+			&& ($auth.token ?? undefined) === requestToken
+			&& ($auth.projectId ?? undefined) === requestProjectId
+			&& pageSize === requestPageSize
+			&& projectFilter === requestProjectFilter
+			&& listPath(marker) === requestPath;
+		nextPrefetch.cancel();
 		loading = true;
 		try {
-			let url = `/api/v1/admin/all-ports?limit=${pageSize}`;
-			if (marker) url += `&marker=${marker}`;
-			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
-			const res = await api.get<PagedResponse<PortInfo>>(url, token, projectId);
+			const res = await api.get<PagedResponse<PortInfo>>(requestPath, requestToken, requestProjectId);
+			if (!owns()) return;
 			ports = res.items || [];
 			nextMarker = res.next_marker;
+			const path = nextMarker ? listPath(nextMarker) : null;
+			const key = path ? JSON.stringify([path, requestToken ?? null, requestProjectId ?? null]) : null;
+			nextPrefetch.schedule(key, (signal) => path ? api.prefetch(path, requestToken, requestProjectId, { signal }) : undefined);
 		} catch {
-			ports = [];
+			if (owns()) ports = [];
 		} finally {
-			loading = false;
+			if (owns()) loading = false;
 		}
 	}
 
 	async function loadProjects() {
-		try {
-			allProjects = await api.get<ProjectName[]>('/api/v1/admin/projects/names', token, projectId);
-		} catch { allProjects = []; }
+		const names = await projectNames.load(token, projectId);
+		allProjects = Array.from(names, ([id, name]) => ({ id, name }));
 	}
 
 	async function loadNetworks() {
@@ -111,7 +139,7 @@
 
 	const ar = createAutoRefresh(
 		() => { load(markerStack[markerStack.length - 1]); },
-		{ storageKey: 'admin-ports', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+		{ storageKey: 'admin-ports', defaultInterval: 30, intervalOptions: [15, 30, 60], invokeOnMount: false }
 	);
 
 	onMount(() => {
@@ -119,9 +147,10 @@
 		load();
 		loadProjects();
 		loadNetworks();
-		projectNames.load(token, projectId);
 	});
+	onDestroy(() => { loadGeneration += 1; nextPrefetch.cancel(); });
 </script>
+
 
 <PortCreateModal
 	bind:open={showCreate}
@@ -189,6 +218,7 @@
 				markerStack = [...markerStack, nextMarker];
 				load(nextMarker);
 			}}
+			onintent={prefetchNext}
 		/>
 	{/if}
 </div>

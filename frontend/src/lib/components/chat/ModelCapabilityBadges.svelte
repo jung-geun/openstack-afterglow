@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ModelCapabilities } from '$lib/api/chatTree';
+	import type { ModelCapabilities } from '$lib/api/chatContracts';
 
 	interface Props {
 		caps?: ModelCapabilities | null;
@@ -75,10 +75,10 @@
 		color: color-mix(in oklab, var(--color-accent) 85%, var(--color-ink-1));
 	}
 	.badge.think {
-		color: color-mix(in oklab, #a855f7 70%, var(--color-ink-1));
+		color: color-mix(in oklab, var(--color-accent-2) 70%, var(--color-ink-1));
 	}
 	.badge.tools {
-		color: color-mix(in oklab, #10b981 70%, var(--color-ink-1));
+		color: color-mix(in oklab, var(--color-state-success) 70%, var(--color-ink-1));
 	}
 	.label {
 		display: inline-block;

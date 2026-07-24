@@ -15,6 +15,7 @@
 	import WizardStep3Library from '$lib/components/wizard/WizardStep3Library.svelte';
 	import WizardStep5Config from '$lib/components/wizard/WizardStep5Config.svelte';
 	import WizardStep6Review from '$lib/components/wizard/WizardStep6Review.svelte';
+	import { Alert, Button } from '$lib/components/ui';
 
 	interface Props {
 		adminMode?: boolean;
@@ -48,10 +49,13 @@
 				onClose={closeWizard}
 			/>
 
-			{#if s.loadError}
-				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">
-					{s.loadError}
-				</div>
+			{#if s.hasCurrentStepError}
+				<Alert tone="danger" class="mb-6">
+					현재 단계의 일부 데이터를 불러오지 못했습니다.
+					{#snippet actions()}
+						<Button variant="danger-outline" size="sm" onclick={s.retryCurrentStep}>다시 시도</Button>
+					{/snippet}
+				</Alert>
 			{/if}
 
 			<div data-tour="wizard-stepper">

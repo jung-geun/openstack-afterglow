@@ -9,6 +9,9 @@ has_api_key 불리언만 반환하고, 복호화 평문은 resolve_model 이 서
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
@@ -17,9 +20,12 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.models.chat_db import LlmModel, LlmProvider
+from app.models.chat_runs import ChatRun, ChatRunProvider
+from app.services.chat.capabilities import litellm_capabilities, normalize_capabilities
 from app.services.chat.litellm_client import effective_prices_per_million
 from app.services.chat.models_dev import ModelsDevCatalog
-from app.services.k3s_crypto import decrypt_llm_provider_key, encrypt_llm_provider_key
+from app.services.chat.run_store import NONTERMINAL
+from app.services.k3s_crypto import decrypt_llm_provider_key, derive_encryption_subkey, encrypt_llm_provider_key
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,14 @@ class ModelsDevImportConflictError(RuntimeError):
 
 class ProviderValidationError(ValueError):
     """입력 검증 실패/제약 위반 — 400."""
+
+
+class ProviderConfigurationChangedError(RuntimeError):
+    """Active execution route changed before its durable snapshot was committed."""
+
+
+class ActiveRunConfigurationConflict(RuntimeError):
+    """An admin mutation would alter a nonterminal run's executor route."""
 
 
 def _require_db():
@@ -115,34 +129,12 @@ def _provider_public(row: LlmProvider) -> dict:
     }
 
 
-def _litellm_capabilities(model_name: str, provider_type: str | None) -> dict:
-    """litellm 런타임 능력 판별(저장 override/import 없을 때 fallback). 각 조회는 fail-safe False."""
-
-    def _safe(fn_name: str) -> bool:
-        try:
-            import litellm
-
-            return bool(getattr(litellm, fn_name)(model=model_name))
-        except Exception:
-            return False
-
-    vision = _safe("supports_vision")
-    return {
-        "vision": vision,
-        "reasoning": _safe("supports_reasoning"),
-        "tool_call": _safe("supports_function_calling"),
-        "attachment": vision,  # 이미지 첨부 ≈ vision (litellm은 별도 플래그 없음)
-        "modalities": None,  # litellm은 modality 목록을 주지 않음 — models.dev import 로 채움
-        "reasoning_options": [],
-        "context_limit": None,
-    }
-
-
 def _effective_capabilities(row: LlmModel, provider_type: str | None) -> tuple[dict, str]:
-    """저장 능력(override/models_dev) 우선, 없으면 litellm 런타임. (capabilities, source) 반환."""
+    """Stored override/models.dev data wins over fail-closed LiteLLM detection."""
+    detected = litellm_capabilities(row.model_name, provider_type)
     if row.capabilities:
-        return row.capabilities, (row.capability_source or "override")
-    return _litellm_capabilities(row.model_name, provider_type), "litellm"
+        return normalize_capabilities(row.capabilities, detected), (row.capability_source or "override")
+    return detected, "litellm"
 
 
 def _model_public(
@@ -154,6 +146,22 @@ def _model_public(
     provider_type: str | None = None,
 ) -> dict:
     eff_caps, eff_caps_source = _effective_capabilities(row, provider_type)
+    effective_input = (
+        effective_input_price_per_million / _TOKENS_PER_MILLION
+        if effective_input_price_per_million is not None
+        else row.input_price
+    )
+    effective_output = (
+        effective_output_price_per_million / _TOKENS_PER_MILLION
+        if effective_output_price_per_million is not None
+        else row.output_price
+    )
+    eff_caps = _pricing_aware_capabilities(
+        row,
+        eff_caps,
+        input_price=effective_input,
+        output_price=effective_output,
+    )
     return {
         "id": row.id,
         "provider_id": row.provider_id,
@@ -169,7 +177,6 @@ def _model_public(
         "effective_price_source": effective_price_source,
         "models_dev_model_id": row.models_dev_model_id,
         "price_source": row.price_source,
-        # 능력: 저장(override) + 유효(effective) 를 함께 노출(가격과 동일 패턴)
         "capabilities": row.capabilities,
         "capability_source": row.capability_source,
         "effective_capabilities": eff_caps,
@@ -177,6 +184,145 @@ def _model_public(
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }
+
+
+async def lock_executor_config(session, capability_snapshot: dict) -> None:
+    """Lock and verify the exact route before its run/provider rows are inserted."""
+    provider_id = capability_snapshot.get("provider_id")
+    model_id = capability_snapshot.get("model_id")
+    version_hash = capability_snapshot.get("config_version_hash")
+    if not isinstance(provider_id, int) or not isinstance(model_id, int) or not isinstance(version_hash, str):
+        raise ProviderConfigurationChangedError("executor configuration snapshot is invalid")
+
+    provider = (
+        await session.execute(select(LlmProvider).where(LlmProvider.id == provider_id).with_for_update())
+    ).scalar_one_or_none()
+    model = (
+        await session.execute(
+            select(LlmModel).where(LlmModel.id == model_id, LlmModel.provider_id == provider_id).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if provider is None or model is None or not provider.is_active or not model.is_active:
+        raise ProviderConfigurationChangedError("executor configuration is no longer available")
+    current = _resolved_model(model, provider)
+    if not hmac.compare_digest(current["config_version_hash"], version_hash):
+        raise ProviderConfigurationChangedError("executor configuration changed before run creation")
+
+
+async def lock_provider_config(session, provider_snapshot: dict) -> None:
+    """Lock and verify a provider-only route before a managed-search run is created."""
+    provider_id = provider_snapshot.get("provider_id")
+    version_hash = provider_snapshot.get("config_version_hash")
+    if not isinstance(provider_id, int) or not isinstance(version_hash, str):
+        raise ProviderConfigurationChangedError("provider configuration snapshot is invalid")
+    provider = (
+        await session.execute(select(LlmProvider).where(LlmProvider.id == provider_id).with_for_update())
+    ).scalar_one_or_none()
+    if provider is None or not provider.is_active:
+        raise ProviderConfigurationChangedError("provider configuration is no longer available")
+    current = _resolved_provider(provider)
+    if not hmac.compare_digest(current["config_version_hash"], version_hash):
+        raise ProviderConfigurationChangedError("provider configuration changed before run creation")
+
+
+async def lock_execution_routes(
+    session,
+    *,
+    executor: dict,
+    search: dict | None = None,
+    advisor: dict | None = None,
+) -> None:
+    """Lock all run routes in one global order, then verify their immutable hashes."""
+    routes: list[tuple[str, dict]] = [("executor", executor)]
+    if search is not None:
+        routes.append(("search", search))
+    if advisor is not None:
+        routes.append(("advisor", advisor))
+
+    provider_ids: set[int] = set()
+    model_routes: list[dict] = []
+    for kind, snapshot in routes:
+        provider_id = snapshot.get("provider_id")
+        version_hash = snapshot.get("config_version_hash")
+        if not isinstance(provider_id, int) or not isinstance(version_hash, str):
+            raise ProviderConfigurationChangedError(f"{kind} configuration snapshot is invalid")
+        provider_ids.add(provider_id)
+        if kind != "search":
+            model_id = snapshot.get("model_id")
+            if not isinstance(model_id, int):
+                raise ProviderConfigurationChangedError(f"{kind} model snapshot is invalid")
+            model_routes.append(snapshot)
+
+    providers = {
+        provider.id: provider
+        for provider in (
+            await session.execute(
+                select(LlmProvider).where(LlmProvider.id.in_(provider_ids)).order_by(LlmProvider.id).with_for_update()
+            )
+        ).scalars()
+    }
+    model_ids = {snapshot["model_id"] for snapshot in model_routes}
+    models = (
+        {
+            model.id: model
+            for model in (
+                await session.execute(
+                    select(LlmModel).where(LlmModel.id.in_(model_ids)).order_by(LlmModel.id).with_for_update()
+                )
+            ).scalars()
+        }
+        if model_ids
+        else {}
+    )
+
+    for kind, snapshot in routes:
+        provider = providers.get(snapshot["provider_id"])
+        if provider is None or not provider.is_active:
+            raise ProviderConfigurationChangedError(f"{kind} provider configuration is no longer available")
+        if kind == "search":
+            current = _resolved_provider(provider)
+        else:
+            model = models.get(snapshot["model_id"])
+            if model is None or not model.is_active or model.provider_id != provider.id:
+                raise ProviderConfigurationChangedError(f"{kind} model configuration is no longer available")
+            current = _resolved_model(model, provider)
+        if not hmac.compare_digest(current["config_version_hash"], snapshot["config_version_hash"]):
+            raise ProviderConfigurationChangedError(f"{kind} configuration changed before run creation")
+
+
+async def _lock_mutable_route(
+    session,
+    *,
+    provider_id: int,
+    model_ids: set[int] | None = None,
+) -> tuple[LlmProvider | None, list[LlmModel]]:
+    """Lock provider then models so run creation and configuration mutation serialize."""
+    provider = (
+        await session.execute(select(LlmProvider).where(LlmProvider.id == provider_id).with_for_update())
+    ).scalar_one_or_none()
+    if provider is None:
+        return None, []
+
+    stmt = select(LlmModel).where(LlmModel.provider_id == provider_id).order_by(LlmModel.id).with_for_update()
+    if model_ids is not None:
+        stmt = stmt.where(LlmModel.id.in_(model_ids))
+    models = (await session.execute(stmt)).scalars().all()
+    if model_ids is not None and {model.id for model in models} != model_ids:
+        raise ProviderNotFoundError("모델을 찾을 수 없습니다")
+
+    active_runs = (
+        select(ChatRunProvider.run_id)
+        .join(ChatRun)
+        .where(
+            ChatRunProvider.provider_id == provider_id,
+            ChatRun.status.in_(NONTERMINAL),
+        )
+    )
+    if model_ids is not None:
+        active_runs = active_runs.where(ChatRunProvider.model_id.in_(model_ids))
+    if (await session.execute(active_runs.limit(1).with_for_update())).scalar_one_or_none() is not None:
+        raise ActiveRunConfigurationConflict("실행 중인 채팅 run이 사용하는 provider/model은 변경할 수 없습니다")
+    return provider, models
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +367,7 @@ async def list_providers() -> list[dict]:
     try:
         async with factory() as session:
             rows = (await session.execute(select(LlmProvider).order_by(LlmProvider.id))).scalars().all()
-            return [_provider_public(r) for r in rows]
+            return [_provider_public(row) for row in rows]
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -231,7 +377,7 @@ async def update_provider(provider_id: int, patch: dict) -> dict:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await session.get(LlmProvider, provider_id)
+            row, _ = await _lock_mutable_route(session, provider_id=provider_id)
             if row is None:
                 raise ProviderNotFoundError(f"프로바이더 {provider_id} 를 찾을 수 없습니다")
             if patch.get("name"):
@@ -261,7 +407,7 @@ async def delete_provider(provider_id: int) -> None:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await session.get(LlmProvider, provider_id)
+            row, _ = await _lock_mutable_route(session, provider_id=provider_id)
             if row is None:
                 raise ProviderNotFoundError(f"프로바이더 {provider_id} 를 찾을 수 없습니다")
             await session.delete(row)
@@ -365,9 +511,13 @@ async def update_model(model_id: int, patch: dict) -> dict:
         raise ProviderValidationError("입력·출력 가격은 함께 설정하거나 함께 비워야 합니다")
     try:
         async with factory() as session, session.begin():
-            row = await session.get(LlmModel, model_id)
-            if row is None:
+            provider_id = await session.scalar(select(LlmModel.provider_id).where(LlmModel.id == model_id))
+            if provider_id is None:
                 raise ProviderNotFoundError(f"모델 {model_id} 를 찾을 수 없습니다")
+            provider, models = await _lock_mutable_route(session, provider_id=provider_id, model_ids={model_id})
+            if provider is None:
+                raise ProviderNotFoundError(f"프로바이더 {provider_id} 를 찾을 수 없습니다")
+            row = models[0]
             if patch.get("model_name"):
                 row.model_name = str(patch["model_name"]).strip()
             if "display_name" in patch:
@@ -387,8 +537,7 @@ async def update_model(model_id: int, patch: dict) -> dict:
             if patch.get("is_active") is not None:
                 row.is_active = bool(patch["is_active"])
             await session.flush()
-            provider = await session.get(LlmProvider, row.provider_id)
-            return _model_public(row, provider_type=provider.provider_type if provider else None)
+            return _model_public(row, provider_type=provider.provider_type)
     except IntegrityError as exc:
         raise ProviderValidationError("프로바이더 내 model_name 이 중복됩니다") from exc
     except OperationalError as exc:
@@ -426,16 +575,13 @@ async def import_models_dev_prices(
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            provider = await session.get(LlmProvider, local_provider_id)
+            provider, local_models = await _lock_mutable_route(
+                session,
+                provider_id=local_provider_id,
+                model_ids=set(selected_external),
+            )
             if provider is None:
                 raise ProviderNotFoundError(f"프로바이더 {local_provider_id} 를 찾을 수 없습니다")
-            local_models = (
-                (await session.execute(select(LlmModel).where(LlmModel.id.in_(selected_external)))).scalars().all()
-            )
-            if len(local_models) != len(selected_external) or any(
-                model.provider_id != local_provider_id for model in local_models
-            ):
-                raise ProviderValidationError("선택한 local model이 프로바이더에 속하지 않습니다")
             if any(model.price_source == "manual" for model in local_models):
                 raise ModelsDevImportConflictError("수동 확정 가격 모델은 models.dev import로 덮어쓸 수 없습니다")
 
@@ -474,7 +620,6 @@ async def import_models_dev_prices(
                 row.input_price = _per_token_price(external_model.input_price_per_million, "input_price_per_million")
                 row.output_price = _per_token_price(external_model.output_price_per_million, "output_price_per_million")
                 row.price_source = "models.dev"
-                # 능력 import — 관리자 override 는 보존, 아니면 models.dev 능력으로 갱신.
                 if row.capability_source != "override" and external_model.capabilities is not None:
                     row.capabilities = external_model.capabilities
                     row.capability_source = "models_dev"
@@ -501,17 +646,163 @@ async def delete_model(model_id: int) -> None:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await session.get(LlmModel, model_id)
-            if row is None:
+            provider_id = await session.scalar(select(LlmModel.provider_id).where(LlmModel.id == model_id))
+            if provider_id is None:
                 raise ProviderNotFoundError(f"모델 {model_id} 를 찾을 수 없습니다")
-            await session.delete(row)
+            provider, models = await _lock_mutable_route(session, provider_id=provider_id, model_ids={model_id})
+            if provider is None:
+                raise ProviderNotFoundError(f"프로바이더 {provider_id} 를 찾을 수 없습니다")
+            await session.delete(models[0])
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
+def _pricing_aware_capabilities(
+    model: LlmModel,
+    capabilities: dict,
+    *,
+    input_price: Decimal | None = None,
+    output_price: Decimal | None = None,
+) -> dict:
+    metadata = model.price_metadata if isinstance(model.price_metadata, dict) else {}
+    metadata = metadata.get("cost", metadata) if isinstance(metadata.get("cost", metadata), dict) else {}
+
+    def has_price(*keys: str) -> bool:
+        for key in keys:
+            value = metadata.get(key)
+            if value is None:
+                return False
+            try:
+                if Decimal(str(value)) < 0:
+                    return False
+            except (InvalidOperation, ValueError, TypeError):
+                return False
+        return True
+
+    base_priced = (model.input_price if input_price is None else input_price) is not None and (
+        model.output_price if output_price is None else output_price
+    ) is not None
+    requirements = {
+        "text": base_priced,
+        "structured_output": base_priced,
+        "memory": True,
+        "web_search": has_price(
+            "web_search_request_per_unit",
+            "web_search_context_low_per_unit",
+            "web_search_context_medium_per_unit",
+            "web_search_context_high_per_unit",
+        ),
+        "web_fetch": has_price("web_fetch_request_per_unit", "web_fetch_context_per_unit"),
+        "image_output": has_price("image_per_unit"),
+        "audio_output": has_price("audio_output_per_second"),
+        "video_output": has_price("video_per_second"),
+        "code_interpreter": has_price("sandbox_per_second"),
+        "computer_use": has_price("sandbox_per_second"),
+    }
+    normalized = dict(capabilities)
+    gates = {name: dict(gate) for name, gate in (capabilities.get("feature_gates") or {}).items()}
+    for feature, gate in gates.items():
+        if feature in requirements:
+            gate["pricing_available"] = requirements[feature]
+    from app.services.chat.assets import asset_pipeline_available
+
+    for feature in ("image_input", "document_input"):
+        gate = gates.get(feature)
+        if isinstance(gate, dict) and gate.get("available") and not asset_pipeline_available():
+            gate.update(
+                available=False,
+                mode="none",
+                reason_code="asset_pipeline_unavailable",
+                pricing_available=False,
+            )
+    normalized["feature_gates"] = gates
+    from app.config import get_settings
+    from app.services.chat.sandbox_runtime import sandbox_available
+
+    if not sandbox_available(get_settings()):
+        for feature in ("code_interpreter", "computer_use"):
+            gate = gates.get(feature)
+            if isinstance(gate, dict) and gate.get("available"):
+                gate.update(
+                    available=False,
+                    mode="none",
+                    reason_code="sandbox_unavailable",
+                    pricing_available=False,
+                )
+    return normalized
+
+
+def _resolved_base_prices(
+    model: LlmModel, provider: LlmProvider
+) -> tuple[Decimal | None, Decimal | None, str, str | None]:
+    input_price = Decimal(model.input_price) if model.input_price is not None else None
+    output_price = Decimal(model.output_price) if model.output_price is not None else None
+    fallback_input, fallback_output = (
+        effective_prices_per_million(model.model_name, provider.provider_type)
+        if input_price is None or output_price is None
+        else (None, None)
+    )
+    if input_price is None and fallback_input is not None:
+        input_price = _per_token_price(fallback_input, "litellm_input_price_per_million")
+    if output_price is None and fallback_output is not None:
+        output_price = _per_token_price(fallback_output, "litellm_output_price_per_million")
+    if input_price is not None and output_price is not None:
+        price_source = model.price_source or "litellm"
+    elif input_price is not None or output_price is not None:
+        price_source = "partial"
+    else:
+        price_source = "unpriced"
+    metadata = model.price_metadata if isinstance(model.price_metadata, dict) else {}
+    if price_source == "models.dev":
+        price_version = str(metadata.get("fetched_at") or metadata.get("last_updated") or "models.dev")
+    elif price_source == "litellm":
+        try:
+            import litellm
+
+            price_version = str(getattr(litellm, "__version__", "litellm"))
+        except Exception:
+            price_version = "litellm"
+    elif price_source == "manual":
+        price_version = str(getattr(model, "updated_at", None) or "manual")
+    else:
+        price_version = None
+    return input_price, output_price, price_source, price_version
+
+
 def _resolved_model(model: LlmModel, provider: LlmProvider) -> dict:
     api_key = decrypt_llm_provider_key(provider.encrypted_api_key) if provider.encrypted_api_key else None
+    input_price, output_price, price_source, price_version = _resolved_base_prices(model, provider)
+    capabilities, _ = _effective_capabilities(model, provider.provider_type)
+    capabilities = _pricing_aware_capabilities(
+        model,
+        capabilities,
+        input_price=input_price,
+        output_price=output_price,
+    )
+    config_fingerprint = {
+        "provider_id": provider.id,
+        "model_id": model.id,
+        "provider_name": provider.name,
+        "provider_type": provider.provider_type,
+        "provider_active": provider.is_active,
+        "api_base": provider.api_base,
+        "model_name": model.model_name,
+        "model_active": model.is_active,
+        "margin_multiplier": str(provider.margin_multiplier),
+        "input_price_per_token": str(input_price),
+        "output_price_per_token": str(output_price),
+        "price_source": price_source,
+        "price_version": price_version,
+        "price_metadata": model.price_metadata,
+        "capabilities": capabilities,
+        "api_key": api_key,
+    }
+    config_version_hash = hmac.new(
+        derive_encryption_subkey(b"chat_provider_config"),
+        json.dumps(config_fingerprint, ensure_ascii=False, sort_keys=True, default=str).encode(),
+        hashlib.sha256,
+    ).hexdigest()
     return {
         "model_name": model.model_name,
         "provider_name": provider.name,
@@ -519,11 +810,43 @@ def _resolved_model(model: LlmModel, provider: LlmProvider) -> dict:
         "api_base": provider.api_base,
         "api_key": api_key,
         "margin_multiplier": Decimal(provider.margin_multiplier),
-        "input_price_per_token": Decimal(model.input_price) if model.input_price is not None else None,
-        "output_price_per_token": Decimal(model.output_price) if model.output_price is not None else None,
-        "price_source": model.price_source,
-        # 유효 능력(저장 override/import 우선, 없으면 litellm) — completions 의 vision/tool/effort 게이팅용.
-        "capabilities": _effective_capabilities(model, provider.provider_type)[0],
+        "input_price_per_token": input_price,
+        "output_price_per_token": output_price,
+        "price_source": price_source,
+        "price_version": price_version,
+        "price_metadata": model.price_metadata,
+        "provider_id": provider.id,
+        "model_id": model.id,
+        "config_version_hash": config_version_hash,
+        "capabilities": capabilities,
+    }
+
+
+def _resolved_provider(provider: LlmProvider) -> dict:
+    """Resolve a provider-only execution route (managed search has no model row)."""
+    api_key = decrypt_llm_provider_key(provider.encrypted_api_key) if provider.encrypted_api_key else None
+    config_fingerprint = {
+        "provider_id": provider.id,
+        "provider_name": provider.name,
+        "provider_type": provider.provider_type,
+        "provider_active": provider.is_active,
+        "api_base": provider.api_base,
+        "margin_multiplier": str(provider.margin_multiplier),
+        "api_key": api_key,
+    }
+    config_version_hash = hmac.new(
+        derive_encryption_subkey(b"chat_provider_config"),
+        json.dumps(config_fingerprint, ensure_ascii=False, sort_keys=True, default=str).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "provider_name": provider.name,
+        "provider_type": provider.provider_type,
+        "api_base": provider.api_base,
+        "api_key": api_key,
+        "margin_multiplier": Decimal(provider.margin_multiplier),
+        "provider_id": provider.id,
+        "config_version_hash": config_version_hash,
     }
 
 
@@ -531,27 +854,106 @@ def _resolved_model(model: LlmModel, provider: LlmProvider) -> dict:
 # 완료 경로용 해석 (서버 내부 전용)
 # ---------------------------------------------------------------------------
 async def resolve_model(model_name: str) -> dict | None:
-    """활성 model_name → 완료 호출에 필요한 설정. 미존재/비활성 시 None(화이트리스트 역할).
-
-    ⚠️ 반환 dict 의 api_key 는 복호화 평문이다 — API 응답/로그에 절대 노출 금지.
-    """
+    """Resolve one active configured model for initial request admission."""
     factory = _require_db()
     try:
         async with factory() as session:
-            stmt = (
-                select(LlmModel, LlmProvider)
-                .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
-                .where(
-                    LlmModel.model_name == model_name,
-                    LlmModel.is_active.is_(True),
-                    LlmProvider.is_active.is_(True),
+            row = (
+                await session.execute(
+                    select(LlmModel, LlmProvider)
+                    .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
+                    .where(
+                        LlmModel.model_name == model_name,
+                        LlmModel.is_active.is_(True),
+                        LlmProvider.is_active.is_(True),
+                    )
                 )
-            )
-            res = (await session.execute(stmt)).first()
-            if res is None:
+            ).first()
+            if row is None:
                 return None
-            model, provider = res
+            model, provider = row
             return _resolved_model(model, provider)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def resolve_model_by_id(model_id: int) -> dict | None:
+    """Resolve one active configured model by its stable local identifier."""
+
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    select(LlmModel, LlmProvider)
+                    .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
+                    .where(
+                        LlmModel.id == model_id,
+                        LlmModel.is_active.is_(True),
+                        LlmProvider.is_active.is_(True),
+                    )
+                )
+            ).first()
+            if row is None:
+                return None
+            model, provider = row
+            return _resolved_model(model, provider)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def resolve_model_snapshot(capability_snapshot: dict) -> dict | None:
+    """Resolve only the provider/model version recorded when a durable run was created."""
+    provider_id = capability_snapshot.get("provider_id")
+    model_id = capability_snapshot.get("model_id")
+    version_hash = capability_snapshot.get("config_version_hash")
+    if not isinstance(provider_id, int) or not isinstance(model_id, int) or not isinstance(version_hash, str):
+        return None
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    select(LlmModel, LlmProvider)
+                    .join(LlmProvider, LlmModel.provider_id == LlmProvider.id)
+                    .where(
+                        LlmModel.id == model_id,
+                        LlmModel.provider_id == provider_id,
+                        LlmModel.is_active.is_(True),
+                        LlmProvider.is_active.is_(True),
+                    )
+                )
+            ).first()
+            if row is None:
+                return None
+            model, provider = row
+            resolved = _resolved_model(model, provider)
+            return resolved if hmac.compare_digest(resolved["config_version_hash"], version_hash) else None
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def resolve_provider_snapshot(provider_snapshot: dict) -> dict | None:
+    """Resolve only the provider version recorded when a managed-search run was created."""
+    provider_id = provider_snapshot.get("provider_id")
+    version_hash = provider_snapshot.get("config_version_hash")
+    if not isinstance(provider_id, int) or not isinstance(version_hash, str):
+        return None
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            provider = (
+                await session.execute(
+                    select(LlmProvider).where(LlmProvider.id == provider_id, LlmProvider.is_active.is_(True))
+                )
+            ).scalar_one_or_none()
+            if provider is None:
+                return None
+            resolved = _resolved_provider(provider)
+            return resolved if hmac.compare_digest(resolved["config_version_hash"], version_hash) else None
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -646,6 +1048,21 @@ async def resolve_memory_model() -> dict | None:
                 return None
             model, provider = res
             return _resolved_model(model, provider)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def get_active_provider_route(provider_id: int) -> dict | None:
+    """Resolve an active provider credential for an explicitly selected server-side route."""
+
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            row = await session.get(LlmProvider, provider_id)
+            if row is None or not row.is_active:
+                return None
+            return _resolved_provider(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc

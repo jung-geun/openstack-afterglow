@@ -64,6 +64,46 @@ describe('mockup transport', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it('publishes and reuses warm API-client data entirely inside mock transport', async () => {
+		const { api } = await import('$lib/api/client');
+		await api.prefetch<Array<{ id: string; name: string }>>(
+			'/api/v1/instances',
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+
+		const first = await api.get<Array<{ id: string; name: string }>>(
+			'/api/v1/instances',
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+		first[0].name = 'caller mutation';
+		const second = await api.get<Array<{ id: string; name: string }>>(
+			'/api/v1/instances',
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+
+		expect(second[0].name).not.toBe('caller mutation');
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('serves the direct file-storage catalog with query parameters without network access', async () => {
+		const { maybeMockJson } = await import('./transport');
+		const catalog = await maybeMockJson<Array<{ id: string; share_proto: string }>>(
+			'GET',
+			'/api/v1/file-storage?cache=true',
+			undefined,
+			'mock-token-tutorial-scoped',
+			'mock-project-1',
+		);
+
+		expect(catalog).toEqual(expect.arrayContaining([
+			expect.objectContaining({ id: 'mock-share-1', share_proto: 'CEPHFS' }),
+		]));
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it('streams fake k3s progress and exposes the created cluster on subsequent reads', async () => {
 		// Dynamic import required: transport owns mutable singleton fixture state that each test must reinitialize.
 		const { maybeMockJson, maybeMockK3sStream } = await import('./transport');
@@ -144,21 +184,94 @@ describe('mockup transport', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('keeps administrator privileges when an admin mock changes project', async () => {
+	it('keeps the administrator mock fail-closed when project-token mutation is attempted', async () => {
 		sessionStorage.clear();
 		sessionStorage.setItem(MOCKUP_SESSION_KEY, 'admin');
 		vi.resetModules();
 		// Dynamic import reloads auth and transport against the administrator tab fixture.
 		const { maybeMockJson } = await import('./transport');
-		const token = await maybeMockJson<{
-			is_system_admin: boolean;
-			roles: string[];
-		}>('POST', '/api/v1/auth/token/project', { project_id: 'mock-project-2' });
 
-		expect(token).toMatchObject({ is_system_admin: true, roles: ['admin'] });
+		await expect(
+			maybeMockJson('POST', '/api/v1/auth/token/project', { project_id: 'mock-project-2' }),
+		).rejects.toMatchObject({
+			status: 409,
+			message: '튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.',
+		});
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+
+	it('serves every administrator tour contract with filters and no network access', async () => {
+		sessionStorage.clear();
+		sessionStorage.setItem(MOCKUP_SESSION_KEY, 'admin');
+		vi.resetModules();
+		// Dynamic import reinitializes the administrator fixture for this contract matrix.
+		const { maybeMockJson } = await import('./transport');
+
+		const instances = await maybeMockJson<{ items: Array<{ id: string; status: string }>; count: number }>(
+			'GET', '/api/v1/admin/all-instances?status=SHUTOFF&project_id=mock-project-2',
+		);
+		expect(instances).toMatchObject({ count: 1, items: [{ id: 'mock-instance-4', status: 'SHUTOFF' }] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/instances/health')).toMatchObject({ total: 3, gpu_count: 1 });
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/timeseries/instances')).toHaveLength(7);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/hypervisors')).toHaveLength(3);
+
+		const volumes = await maybeMockJson<{ items: Array<{ id: string; status: string }>; count: number }>(
+			'GET', '/api/v1/admin/all-volumes?status=available',
+		);
+		expect(volumes).toMatchObject({ count: 1, items: [{ id: 'mock-admin-volume-available', status: 'available' }] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/volumes/status-summary')).toMatchObject({ total: 3 });
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/timeseries/volumes')).toHaveLength(7);
+		expect(await maybeMockJson('GET', '/api/v1/admin/volumes/mock-admin-volume-available')).toMatchObject({ status: 'available' });
+
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/base-images')).toHaveLength(1);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/artifacts')).toHaveLength(3);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/profiles')).toHaveLength(1);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/builds')).toHaveLength(1);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/imports')).toHaveLength(1);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/libraries/consumes')).toHaveLength(1);
+
+		expect(await maybeMockJson('GET', '/api/v1/admin/topology')).toMatchObject({ routers: expect.any(Array) });
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/all-containers')).toHaveLength(2);
+		expect(await maybeMockJson('GET', '/api/v1/admin/containers/mock-container-1')).toMatchObject({ status: 'Running' });
+		expect(await maybeMockJson('GET', '/api/v1/admin/containers/mock-container-1/logs')).toMatchObject({ logs: expect.stringContaining('ready') });
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/key-manager/project-quotas')).toHaveLength(2);
+		expect(await maybeMockJson('GET', '/api/v1/admin/monitoring/summary')).toMatchObject({ compute: { running_vms: 46 } });
+		expect(await maybeMockJson('GET', '/api/v1/admin/services?category=compute')).toMatchObject({ compute: [expect.objectContaining({ binary: 'nova-compute' })] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/services?category=network')).toMatchObject({ network: [expect.objectContaining({ alive: true })] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/services?category=endpoints')).toMatchObject({ endpoints: [expect.any(Object)] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/services?category=storage_pools')).toMatchObject({ storage_pools: [expect.any(Object)] });
+		expect(await maybeMockJson('GET', '/api/v1/admin/users')).toMatchObject({ count: 3, items: expect.any(Array) });
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/users/activity')).toHaveLength(2);
+		expect(await maybeMockJson<Array<unknown>>('GET', '/api/v1/admin/projects/names')).toHaveLength(3);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('persists valid tutorial statuses while rejecting administrator resource mutations', async () => {
+		sessionStorage.clear();
+		sessionStorage.setItem(MOCKUP_SESSION_KEY, 'admin');
+		vi.resetModules();
+		const { maybeMockJson } = await import('./transport');
+
+		expect(await maybeMockJson('GET', '/api/v1/tutorials/status')).toEqual({ statuses: {} });
+		expect(await maybeMockJson('POST', '/api/v1/tutorials/admin-compute/status', { status: 'completed' })).toEqual({
+			tour_id: 'admin-compute',
+			status: 'completed',
+		});
+		expect(await maybeMockJson('GET', '/api/v1/tutorials/status')).toEqual({
+			statuses: { 'admin-compute': 'completed' },
+		});
+		await expect(
+			maybeMockJson('POST', '/api/v1/admin/instances/mock-instance-1/action', { action: 'stop' }),
+		).rejects.toMatchObject({ status: 409 });
+		await expect(
+			maybeMockJson('DELETE', '/api/v1/admin/volumes/mock-admin-volume-available'),
+		).rejects.toMatchObject({ status: 409 });
+		await expect(
+			maybeMockJson('POST', '/api/v1/tutorials/not-a-tour/status', { status: 'completed' }),
+		).rejects.toMatchObject({ status: 409 });
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
 	it('intercepts a query-activated mock before auth hydration can reach fetch', async () => {
 		sessionStorage.clear();
 		window.history.replaceState({}, '', '/dashboard?tutorial=on');
@@ -223,7 +336,7 @@ describe('mockup transport', () => {
 		);
 		const overviewSummary = await maybeMockJson<{ recent_instances: unknown[] }>(
 			'GET',
-			'/api/v1/dashboard/summary?view=overview',
+			'/api/v1/dashboard/summary?view=overview&recent_limit=12',
 			undefined,
 			'mock-token-tutorial-scoped',
 			'mock-project-1',
@@ -252,6 +365,7 @@ describe('mockup transport', () => {
 
 		expect(fullSummary).toMatchObject({ gpu_used: expect.any(Number) });
 		expect(overviewSummary).toMatchObject({ recent_instances: expect.any(Array) });
+		expect(overviewSummary.recent_instances).toHaveLength(8);
 		expect(overviewQuotas).toMatchObject({ alerts: expect.any(Array) });
 		expect(k3sStats.total).toBeGreaterThanOrEqual(k3sStats.active);
 		expect(trend.network).toMatchObject({ unit: 'KiB/s', data: [] });

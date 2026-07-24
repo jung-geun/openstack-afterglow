@@ -44,6 +44,7 @@
 			class="status-card status-card-{tone}"
 			class:status-card-active={activeStatus === row.status}
 			aria-pressed={activeStatus === row.status}
+			data-tour={row.status === 'available' ? 'admin-storage-status-available' : undefined}
 			onclick={() => onSelect(row.status)}
 		>
 			<span class="status-card-label">{row.status}</span>

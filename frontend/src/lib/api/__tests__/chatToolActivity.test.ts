@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	formatToolArgs,
 	parseAssistantToolCalls,
+	toolActivityFromCanonicalParts,
 	toolNameFromResultMeta
 } from '../chatToolActivity';
 
@@ -35,6 +36,17 @@ describe('toolNameFromResultMeta', () => {
 	it('식별 불가 시 null', () => {
 		expect(toolNameFromResultMeta([])).toBeNull();
 		expect(toolNameFromResultMeta(null)).toBeNull();
+	});
+});
+
+describe('toolActivityFromCanonicalParts', () => {
+	it('복원된 canonical tool call/result를 하나의 완료 카드로 결합한다', () => {
+		expect(
+			toolActivityFromCanonicalParts([
+				{ type: 'tool_call', call_id: 'c1', name: 'mcp.search', arguments: { q: 'union mount' }, status: 'running' },
+				{ type: 'tool_result', call_id: 'c1', name: 'mcp.search', content: [{ type: 'text', text: 'result' }], is_error: false }
+			])
+		).toEqual([{ id: 'c1', name: 'mcp.search', args: '{"q":"union mount"}', result: 'result', running: false }]);
 	});
 });
 

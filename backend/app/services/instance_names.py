@@ -126,7 +126,7 @@ def normalize_requested_instance_name(value: str | None) -> str | None:
 
     if value is None:
         return None
-    name = value.strip()
+    name = re.sub(r"[^\S\r\n]+", "-", value.strip())
     if not name:
         return None
     if not INSTANCE_NAME_RE.match(name):

@@ -221,7 +221,7 @@ class LayerBuild(Base):
 
 ---
 
-## 설정 (`config.toml`)
+## 설정 (`afterglow.conf`)
 
 ```toml
 [builder]

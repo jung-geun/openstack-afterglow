@@ -1,21 +1,50 @@
 <script lang="ts">
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
+  import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
   import type { FloatingIp } from '$lib/types/networks';
 
   let {
     floatingIps,
     hasExternalNetwork,
+    selectedIds,
+    selectableIds,
+    selectionDisabled,
+    onToggleSelect,
+    onToggleAll,
     onAllocateClick,
   }: {
     floatingIps: FloatingIp[];
     hasExternalNetwork: boolean;
+    selectedIds: ReadonlySet<string>;
+    selectableIds: ReadonlySet<string>;
+    selectionDisabled: boolean;
+    onToggleSelect: (id: string) => void;
+    onToggleAll: () => void;
     onAllocateClick: () => void;
   } = $props();
+
+  const selectedCount = $derived([...selectableIds].filter((id) => selectedIds.has(id)).length);
+  const allSelected = $derived(selectableIds.size > 0 && selectedCount === selectableIds.size);
+  const indeterminate = $derived(selectedCount > 0 && !allSelected);
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
   <div class="flex items-center mb-3.5">
-    <div class="text-white text-[15px] font-semibold">Floating IP</div>
+    <div class="flex items-center gap-3">
+      <div class="text-white text-[15px] font-semibold">Floating IP</div>
+      {#if floatingIps.length > 0}
+        <SelectionToolbar
+          label="Floating IP"
+          ariaLabel="Floating IP 전체 선택"
+          checked={allSelected}
+          indeterminate={indeterminate}
+          selectedCount={selectedCount}
+          disabled={selectionDisabled || selectableIds.size === 0}
+          onToggle={onToggleAll}
+        />
+      {/if}
+    </div>
     <div class="ml-auto flex gap-2">
       <button
         onclick={onAllocateClick}
@@ -30,7 +59,16 @@
   {:else}
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
       {#each floatingIps as fip (fip.id)}
-        <div class="bg-[#0B1220] border border-gray-800 rounded-lg p-3 flex items-center gap-3">
+        <div
+          class="resource-selection-surface bg-[#0B1220] border border-gray-800 rounded-lg p-3 flex items-center gap-3"
+          data-selected={selectedIds.has(fip.id)}
+        >
+          <SelectionCheckbox
+            checked={selectedIds.has(fip.id)}
+            disabled={selectionDisabled}
+            ariaLabel={`${fip.floating_ip_address} 선택`}
+            onclick={() => onToggleSelect(fip.id)}
+          />
           <div class="flex-1 min-w-0">
             <div class="font-mono text-[13px] text-white">{fip.floating_ip_address}</div>
             <div class="text-[11px] text-gray-500 mt-0.5 truncate">

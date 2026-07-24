@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import CreateProjectDialog from './CreateProjectDialog.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import {
 		buildWorkspacePayload,
@@ -23,32 +24,44 @@
 	interface Props {
 		conversations: Conversation[];
 		workspaces: Workspace[];
-		onCreate: (payload: WorkspacePayload) => Promise<void>;
-		onUpdate: (id: number, payload: WorkspacePayload) => Promise<void>;
+		initialMode?: Mode;
+		initialWorkspaceId?: number | null;
+		onCreate: (payload: WorkspacePayload) => Promise<boolean>;
+		onUpdate: (id: number, payload: WorkspacePayload) => Promise<boolean>;
 		onDelete: (w: Workspace) => Promise<boolean>;
 		onAssign: (conv: Conversation, workspaceId: number | null) => void;
 		onOpenConversation: (conv: Conversation) => void;
 		onNewInProject: (workspaceId: number) => void;
+		onNavigate?: (workspaceId: number | null) => void;
 	}
 	let {
 		conversations,
 		workspaces,
+		initialMode = 'grid',
+		initialWorkspaceId = null,
 		onCreate,
 		onUpdate,
 		onDelete,
 		onAssign,
 		onOpenConversation,
-		onNewInProject
+		onNewInProject,
+		onNavigate,
 	}: Props = $props();
 
 	type Mode = 'grid' | 'create' | 'detail';
-	let mode = $state<Mode>('grid');
-	let selectedId = $state<number | null>(null);
+	let mode = $state<Exclude<Mode, 'create'>>(untrack(() => (initialWorkspaceId === null ? 'grid' : 'detail')));
+	let selectedId = $state<number | null>(untrack(() => initialWorkspaceId));
 	let query = $state('');
 	let form = $state<WorkspaceForm>(emptyWorkspaceForm());
 	let saving = $state(false);
-
+	let createDialogOpen = $state(untrack(() => initialWorkspaceId === null && initialMode === 'create'));
 	const selected = $derived(workspaces.find((w) => w.id === selectedId) ?? null);
+
+	$effect(() => {
+		if (initialWorkspaceId === null) return;
+		selectedId = initialWorkspaceId;
+		mode = 'detail';
+	});
 	const canSubmit = $derived(form.name.trim().length > 0 && !saving);
 
 	const filtered = $derived.by(() => {
@@ -81,28 +94,29 @@
 	);
 
 	function openDetail(w: Workspace) {
+		if (onNavigate) {
+			onNavigate(w.id);
+			return;
+		}
 		selectedId = w.id;
 		mode = 'detail';
 	}
 	function openCreate() {
-		form = emptyWorkspaceForm();
-		selectedId = null;
-		mode = 'create';
+		createDialogOpen = true;
+	}
+	function closeCreate() {
+		createDialogOpen = false;
+	}
+	async function createProject(name: string): Promise<boolean> {
+		return onCreate({ name });
 	}
 	function backToGrid() {
+		if (onNavigate) {
+			onNavigate(null);
+			return;
+		}
 		mode = 'grid';
 		selectedId = null;
-	}
-
-	async function submitCreate() {
-		if (!canSubmit) return;
-		saving = true;
-		try {
-			await onCreate(buildWorkspacePayload(form));
-			mode = 'grid';
-		} finally {
-			saving = false;
-		}
 	}
 
 	async function submitUpdate() {
@@ -168,30 +182,6 @@
 				{/each}
 			</div>
 		{/if}
-	{:else if mode === 'create'}
-		<header class="head">
-			<button type="button" class="back" onclick={backToGrid} aria-label="목록으로">
-				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-			</button>
-			<h1 class="title">새 프로젝트</h1>
-		</header>
-		<div class="detail-body">
-			<form
-				class="form"
-				onsubmit={(e) => {
-					e.preventDefault();
-					void submitCreate();
-				}}
-			>
-				{@render fields()}
-				<div class="form-actions">
-					<Button variant="ghost" type="button" onclick={backToGrid}>취소</Button>
-					<Button variant="accent" type="submit" disabled={!canSubmit}>
-						{saving ? '생성 중…' : '프로젝트 생성'}
-					</Button>
-				</div>
-			</form>
-		</div>
 	{:else if selected}
 		<header class="head">
 			<button type="button" class="back" onclick={backToGrid} aria-label="목록으로">
@@ -276,8 +266,20 @@
 				<p class="muted danger-hint">삭제해도 대화는 유지되며 미분류로 이동합니다.</p>
 			</section>
 		</div>
+	{:else}
+		<EmptyState
+			icon="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+			headline="프로젝트를 찾을 수 없습니다"
+			description="삭제되었거나 접근할 수 없는 프로젝트입니다."
+		>
+			{#snippet cta()}
+				<Button variant="secondary" size="sm" onclick={backToGrid}>프로젝트 목록</Button>
+			{/snippet}
+		</EmptyState>
 	{/if}
 </div>
+
+<CreateProjectDialog open={createDialogOpen} onClose={closeCreate} onCreate={createProject} />
 
 {#snippet fields()}
 	<label class="field">

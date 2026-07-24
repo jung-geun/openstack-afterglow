@@ -2,6 +2,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
 	import { auth } from '$lib/stores/auth';
+	import { projectList } from '$lib/stores/projectList';
 	import { wizardOpen } from '$lib/stores/wizard';
 	import { loadTutorialStatuses } from '$lib/tutorial/status';
 	let { children } = $props();
@@ -11,7 +12,10 @@
 	// 준비된 뒤 반응해 조회한다(loadTutorialStatuses 는 멱등 → 최초 1회만 실제 로드).
 	// (status 모듈 import 로 'afterglow:tour-complete' 완료 리스너도 등록된다.)
 	$effect(() => {
-		if ($auth.token) void loadTutorialStatuses();
+		if ($auth.token) {
+			void loadTutorialStatuses();
+			if ($auth.userId) projectList.prefetch($auth.token, $auth.userId);
+		}
 	});
 </script>
 

@@ -1,0 +1,23 @@
+- main [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - heading "Afterglow" [level=1] [ref=e8]
+      - paragraph [ref=e9]: OpenStack VM + OverlayFS 배포 플랫폼
+      - link "메인 홈페이지로 돌아가기" [ref=e10] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e11]: ←
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: 도메인
+        - textbox "도메인" [ref=e17]: Default
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]: 사용자명
+          - generic [ref=e21]: "*"
+        - textbox "사용자명" [ref=e22]
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]: 비밀번호
+          - generic [ref=e26]: "*"
+        - textbox "비밀번호" [ref=e27]
+      - button "로그인" [ref=e28] [cursor=pointer]

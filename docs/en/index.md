@@ -40,7 +40,7 @@ Installs k3s directly onto OpenStack VMs to deliver a Kubernetes environment on 
 Mounts Manila NFS/CephFS shares as OverlayFS lower layers so that AI/ML libraries (Python, PyTorch, vLLM) can be shared across many VMs. Storage efficiency and boot speed improve at the same time.
 
 ### Monitoring Integration
-Issues Grafana embed JWTs (`POST /api/grafana/token`) and exposes VM targets for Prometheus via http_sd (`GET /api/sd/prometheus/targets`). Monitoring ingress security groups are attached automatically on project and instance creation.
+Provides Grafana embed support (`GET /api/v1/grafana/dashboards` — returns dashboard UIDs and base URL) and exposes VM targets for Prometheus via http_sd (`GET /api/v1/sd/prometheus/targets`). Monitoring ingress security groups are attached automatically on project and instance creation.
 
 ### kolla-ansible Integration
 Deploys Afterglow inside an existing OpenStack cluster using a single kolla-ansible playbook (`deploy/kolla/`).

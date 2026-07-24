@@ -440,6 +440,18 @@ def test_render_layer_consume_user_data_injects_key_to_default_user_when_usernam
     assert "users:" not in user_data
 
 
+def test_render_layer_consume_user_data_imports_github_key_for_default_user():
+    from app.services.layer_build import render_layer_consume_user_data
+
+    user_data = render_layer_consume_user_data(
+        "test-python-layer",
+        [("10.0.0.10:/share", "test-python-layer-latest.sqsh")],
+        github_username="octocat",
+    )
+
+    assert 'ssh_import_id:\n  - "gh:octocat"' in user_data
+
+
 def test_render_layer_consume_user_data_starts_activation_on_first_boot():
     from app.services.layer_build import render_layer_consume_user_data
 

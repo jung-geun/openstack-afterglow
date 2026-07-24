@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -9,7 +10,13 @@
   import LoadBalancerDetailPanel from '$lib/components/LoadBalancerDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
+  import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
+  import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+  import { executeBulkMutations } from '$lib/utils/bulkActions';
+  import { toast } from '$lib/stores/toast';
 
 
   let selectedLbId = $state<string | null>(null);
@@ -26,11 +33,38 @@
   let loadbalancers = $state<LoadBalancer[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let selection = createResourceSelection();
+  let busy = $state(false);
+  let selectableIds = $derived(new Set(loadbalancers.map((lb) => lb.id)));
+  const selectedCount = $derived([...selectableIds].filter((id) => selection.ids.has(id)).length);
+  const allSelected = $derived(selectableIds.size > 0 && selectedCount === selectableIds.size);
+  const indeterminate = $derived(selectedCount > 0 && !allSelected);
+
+  async function bulkDelete() {
+    const ids = [...selection.ids];
+    if (ids.length === 0) return;
+    const warning = '리스너·풀·멤버가 함께 삭제될 수 있습니다.';
+    if (!await confirmDialog(`${ids.length}개 로드밸런서를 삭제하시겠습니까?\n${warning}`)) return;
+    const tokenSnapshot = $auth.token ?? undefined;
+    const projectSnapshot = $auth.projectId ?? undefined;
+    busy = true;
+    try {
+      const results = await executeBulkMutations(ids, (id) => api.delete(`/api/v1/loadbalancers/${id}`, tokenSnapshot, projectSnapshot));
+      const succeeded = results.filter((result) => result.ok).map((result) => result.id);
+      if (projectSnapshot === ($auth.projectId ?? undefined)) selection.remove(succeeded);
+      if (succeeded.length > 0) toast.success(`${succeeded.length}개 로드밸런서 삭제 요청을 완료했습니다.`);
+      const failedCount = results.length - succeeded.length;
+      if (failedCount > 0) toast.error(`${failedCount}개 로드밸런서 삭제에 실패했습니다.`);
+      if (projectSnapshot === ($auth.projectId ?? undefined)) await fetchLoadbalancers({ refresh: true });
+    } finally {
+      busy = false;
+    }
+  }
 
   async function fetchLoadbalancers(opts?: { refresh?: boolean }) {
     try {
       loadbalancers = await api.get<LoadBalancer[]>('/api/v1/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
-      error = '';
+      if (selection.count > 0) selection.retain(loadbalancers.map((lb) => lb.id));
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
@@ -43,16 +77,20 @@
     defaultActive: true,
     defaultInterval: 30,
     intervalOptions: [10, 15, 30, 60],
+    invokeOnMount: false,
   });
 
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    untrack(() => fetchLoadbalancers());
+    untrack(() => {
+      selection.clear();
+      void fetchLoadbalancers();
+    });
   });
 </script>
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
   <PageHeader breadcrumb="NETWORK / LOADBALANCERS" title="로드밸런서">
     {#snippet actions()}
       <AutoRefreshControl
@@ -91,9 +129,26 @@
     </div>
   {:else}
     <div class="flex flex-col gap-3.5">
+    <div class="flex justify-end mb-3">
+      <SelectionToolbar
+        label="로드밸런서"
+        ariaLabel="로드밸런서 전체 선택"
+        checked={allSelected}
+        indeterminate={indeterminate}
+        selectedCount={selectedCount}
+        disabled={busy || selectableIds.size === 0}
+        onToggle={() => selection.toggleAll(selectableIds)}
+      />
+    </div>
       {#each loadbalancers as lb (lb.id)}
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="resource-selection-surface bg-gray-900 border border-gray-800 rounded-2xl p-5" data-selected={selection.has(lb.id)}>
           <div class="flex items-center gap-4">
+            <SelectionCheckbox
+              checked={selection.has(lb.id)}
+              disabled={busy}
+              ariaLabel={`${lb.name || lb.id.slice(0, 12)} 선택`}
+              onclick={() => selection.toggle(lb.id)}
+            />
             <!-- Blue icon chip -->
             <div class="shrink-0 w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
               <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -123,6 +178,13 @@
     </div>
   {/if}
 </div>
+<BulkSelectionOverlay
+  count={selection.count}
+  ariaLabel="선택한 로드밸런서 일괄 작업"
+  actions={[{ key: 'delete', label: '삭제', tone: 'danger', onAction: bulkDelete }]}
+  {busy}
+  onClear={() => selection.clear()}
+/>
 
 {#if selectedLbId}
   <SlidePanel onClose={closeLbPanel}>

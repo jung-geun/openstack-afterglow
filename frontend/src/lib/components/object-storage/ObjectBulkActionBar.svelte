@@ -1,9 +1,23 @@
 <script lang="ts">
 	import { useObjectBrowser } from '$lib/stores/objectBrowser.svelte';
+	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
+
+	let { mode }: { mode: 'admin' | 'user' } = $props();
 	const s = useObjectBrowser();
 </script>
 
-{#if s.selectedCount > 0}
+{#if mode === 'user'}
+	<BulkSelectionOverlay
+		count={s.selectedCount}
+		ariaLabel="선택한 오브젝트 일괄 작업"
+		busy={s.bulkDeleting || s.bulkMoving}
+		actions={[
+			{ key: 'move', label: '이동', tone: 'info', onAction: s.openBulkMove },
+			{ key: 'delete', label: '삭제', tone: 'danger', onAction: s.bulkDelete },
+		]}
+		onClear={() => { s.selected = new Set(); }}
+	/>
+{:else if s.selectedCount > 0}
 	<div class="flex items-center gap-3 mb-3 px-3 py-2 bg-indigo-950/40 border border-indigo-800/50 rounded-lg">
 		<span class="text-xs text-indigo-300">{s.selectedCount}개 선택됨</span>
 		<div class="flex-1"></div>

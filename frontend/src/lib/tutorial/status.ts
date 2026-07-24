@@ -21,23 +21,37 @@ export const tutorialStatuses = writable<TutorialStatusMap>({});
 // 로드 전 빈 맵({}) 상태에서 이미 완료/무시한 사용자에게 초대가 깜빡이는 것을 막는다.
 export const tutorialStatusesLoaded = writable(false);
 
-let loaded = false;
+let loadedToken: string | null = null;
+let loadingToken: string | null = null;
+let loadGeneration = 0;
 
-/** 로그인 사용자의 튜토리얼 이력을 한 번에 조회해 스토어에 채운다(멱등). */
+/** 로그인 사용자의 튜토리얼 이력을 토큰별로 한 번 조회해 스토어에 채운다. */
 export async function loadTutorialStatuses(force = false): Promise<void> {
-	if (loaded && !force) return;
 	const { token } = get(auth);
 	if (!token) return;
+	if (!force && (loadedToken === token || loadingToken === token)) return;
+
+	const generation = ++loadGeneration;
+	loadedToken = null;
+	loadingToken = token;
+	tutorialStatuses.set({});
+	tutorialStatusesLoaded.set(false);
+
 	try {
 		const res = await api.get<{ statuses: Record<string, TutorialStatus> }>(
 			'/api/v1/tutorials/status',
-			token
+			token,
 		);
+		if (generation !== loadGeneration || get(auth).token !== token) return;
 		tutorialStatuses.set((res?.statuses ?? {}) as TutorialStatusMap);
-		loaded = true;
+		loadedToken = token;
 		tutorialStatusesLoaded.set(true);
 	} catch {
-		// graceful degrade: 조회 실패 시 강조가 과하게 뜰 수 있으나 기능은 동작.
+		if (generation !== loadGeneration || get(auth).token !== token) return;
+		loadedToken = null;
+		tutorialStatusesLoaded.set(false);
+	} finally {
+		if (generation === loadGeneration) loadingToken = null;
 	}
 }
 

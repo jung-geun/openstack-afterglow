@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings==2.14.2",
     "python-multipart==0.0.31",
     "httpx==0.28.1",
+    "httpcore==1.0.9",  # SafeAsyncTransport uses the pinned connection backend API.
     "aiofiles==24.1.0",
     "redis[hiredis]==5.0.0",
     "sqlalchemy[asyncio]>=2.0.0",
@@ -28,9 +29,15 @@ dependencies = [
     "aiosmtplib>=3.0.0",
     "openpyxl>=3.1.5",
     "litellm==1.93.0",
-    # 빌트인 AI 채팅 Phase 2 — LangGraph 오케스트레이션 + 전용 Postgres 체크포인터
-    # (MCP: langchain-mcp-adapters↔mcp 런타임 버전 비호환 해결 후 별도 추가)
+    # Built-in chat dependencies: durable validation, media inspection, MCP, and pgvector.
     "mcp==1.28.1",
+    "jsonschema==4.26.0",
+    "beautifulsoup4==4.14.3",
+    "puremagic==1.30",
+    "Pillow==12.1.1",
+    "pypdf==6.7.3",
+    "mutagen==1.47.0",
+    "pgvector==0.4.2",
     "langgraph==1.2.2",
     "langchain-core==1.4.9",
     "langgraph-checkpoint-postgres==3.1.0",

@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.api.deps import get_token_info
 from app.config import get_settings
+from app.main import app
 
 
 def make_auth_data() -> dict:
@@ -153,6 +155,37 @@ async def test_logout(client):
 
 
 @pytest.mark.asyncio
+async def test_jwt_logout_revokes_session_keystone_token_not_access_jwt():
+    from app.api.identity import auth
+
+    revoked: list[str] = []
+
+    def revoke(token: str) -> None:
+        revoked.append(token)
+
+    token_info = {
+        **make_auth_data(),
+        "token": "afterglow-access-jwt",
+        "refresh_jti": "refresh-jti",
+    }
+    with (
+        patch(
+            "app.api.identity.auth.session_store.get_session",
+            AsyncMock(return_value={"user_id": "test-user-123", "keystone_token": "keystone-token"}),
+        ),
+        patch("app.api.identity.auth.session_store.delete_session", AsyncMock()) as delete_session,
+        patch("app.api.identity.auth.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *args: fn(*args))),
+        patch("app.api.identity.auth.invalidate_token_cache", new_callable=AsyncMock),
+        patch("app.api.identity.auth.keystone.revoke_token", revoke),
+    ):
+        response = await auth.logout(token_info)
+
+    assert response["message"] == "로그아웃 완료"
+    assert revoked == ["keystone-token"]
+    delete_session.assert_awaited_once_with("refresh-jti")
+
+
+@pytest.mark.asyncio
 async def test_logout_invalidates_token_cache(client):
     """logout 호출 시 invalidate_token_cache 가 호출되어 검증 캐시가 즉시 비워져야 한다."""
     with (
@@ -189,6 +222,74 @@ async def test_list_projects(client):
         resp = await client.get("/api/v1/auth/projects")
     assert resp.status_code == 200
     assert resp.json()[0]["id"] == "proj-1"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_cache_miss_then_hit(client):
+    projects = [{"id": "proj-1", "name": "cached-project", "description": "", "enabled": True}]
+    with patch("app.api.identity.auth.keystone.list_projects", return_value=projects) as mock_list:
+        first = await client.get("/api/v1/auth/projects?cache=true")
+        second = await client.get("/api/v1/auth/projects?cache=true")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert mock_list.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_list_projects_refresh_bypasses_cache(client):
+    cached_projects = [{"id": "proj-old", "name": "old-project", "description": "", "enabled": True}]
+    refreshed_projects = [{"id": "proj-new", "name": "new-project", "description": "", "enabled": True}]
+    with patch(
+        "app.api.identity.auth.keystone.list_projects",
+        side_effect=[cached_projects, refreshed_projects],
+    ) as mock_list:
+        cached = await client.get("/api/v1/auth/projects?cache=true")
+        refreshed = await client.get("/api/v1/auth/projects?refresh=true")
+
+    assert cached.status_code == 200
+    assert refreshed.status_code == 200
+    assert cached.json()[0]["id"] == "proj-old"
+    assert refreshed.json()[0]["id"] == "proj-new"
+    assert mock_list.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_projects_cache_is_isolated_by_user(client, _fake_redis_global):
+    token_info = {
+        "token": "token-a",
+        "project_id": "test-project-123",
+        "project_name": "test-project",
+        "user_id": "user-a",
+        "username": "testuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+    }
+
+    async def override_token_info():
+        return token_info
+
+    app.dependency_overrides[get_token_info] = override_token_info
+
+    def projects_for_token(token: str):
+        project_id = "project-a" if token == "token-a" else "project-b"
+        return [{"id": project_id, "name": project_id, "description": "", "enabled": True}]
+
+    with patch("app.api.identity.auth.keystone.list_projects", side_effect=projects_for_token) as mock_list:
+        response_a = await client.get("/api/v1/auth/projects?cache=true")
+        token_info.update(token="token-b", user_id="user-b")
+        response_b = await client.get("/api/v1/auth/projects?cache=true")
+        token_info.update(token="token-a", user_id="user-a")
+        response_a_cached = await client.get("/api/v1/auth/projects?cache=true")
+
+    assert response_a.json()[0]["id"] == "project-a"
+    assert response_b.json()[0]["id"] == "project-b"
+    assert response_a_cached.json()[0]["id"] == "project-a"
+    assert response_a.status_code == response_b.status_code == response_a_cached.status_code == 200
+    assert await _fake_redis_global.exists("afterglow:user:user-a:projects")
+    assert await _fake_redis_global.exists("afterglow:user:user-b:projects")
+    assert mock_list.call_count == 2
 
 
 # ────── groups ──────

@@ -36,6 +36,8 @@ from app.models.compute import (
     AdminPasswordRequest,
     AttachInterfaceRequest,
     AttachVolumeRequest,
+    CloudInitSnippetLibrary,
+    CreateCloudInitPresetRequest,
     CreateInstanceRequest,
     InstanceInfo,
     StorageAttachRequest,
@@ -44,7 +46,7 @@ from app.models.compute import (
 )
 from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
-from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova
+from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova, vm_cloud_init_library
 from app.services import instance_orchestration as instance_orch
 from app.services import libraries as lib_svc
 from app.services.cache import (
@@ -58,6 +60,15 @@ from app.services.cache import (
 from app.services.cache import invalidation as cache_invalidation
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_cloud_init_history_best_effort(token_info: dict, userdata: str | None) -> None:
+    try:
+        await vm_cloud_init_library.record_history(user_id=token_info["user_id"], content=userdata)
+    except Exception:
+        logger.warning("cloud-init 실행 이력 저장 실패", extra={"user_id": token_info.get("user_id")})
+
+
 router = APIRouter()
 
 
@@ -140,6 +151,47 @@ async def list_availability_zones(
         return zones
     except Exception:
         raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
+
+
+@router.get("/cloud-init/library", response_model=CloudInitSnippetLibrary)
+async def list_cloud_init_library(token_info: dict = Depends(get_token_info)):
+    try:
+        return await vm_cloud_init_library.list_snippets(token_info["user_id"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/cloud-init/presets", status_code=201)
+async def save_cloud_init_preset(
+    req: CreateCloudInitPresetRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        preset = await vm_cloud_init_library.create_preset(
+            user_id=token_info["user_id"],
+            name=req.name,
+            content=req.content,
+        )
+        await invalidate(f"afterglow:vm_cloud_init:{token_info['user_id']}")
+        await cache_invalidation.invalidate_mutation_count("nova", token_info["project_id"])
+        return preset
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422 if isinstance(exc, ValueError) else 503, detail=str(exc)) from exc
+
+
+@router.delete("/cloud-init/library/{snippet_id}", status_code=204)
+async def delete_cloud_init_snippet(
+    snippet_id: int,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        await vm_cloud_init_library.delete_snippet(user_id=token_info["user_id"], snippet_id=snippet_id)
+        await invalidate(f"afterglow:vm_cloud_init:{token_info['user_id']}")
+        await cache_invalidation.invalidate_mutation_count("nova", token_info["project_id"])
+    except vm_cloud_init_library.CloudInitSnippetNotFound as exc:
+        raise HTTPException(status_code=404, detail="cloud-init 항목을 찾을 수 없습니다") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/{instance_id}", response_model=InstanceInfo)
@@ -315,7 +367,10 @@ async def create_instance(
                 report_url=_report_url if _health_token else "",
                 report_token=_health_token,
                 data_mounts=data_mounts_info,
+                github_username=req.github_username,
             )
+
+        userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
@@ -382,6 +437,7 @@ async def create_instance(
                     floating_ip_id = fip.id
                     await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
 
+        await _record_cloud_init_history_best_effort(token_info, req.userdata)
         await rec(
             token_info,
             conn,
@@ -614,8 +670,11 @@ async def create_instance_async(
                     report_url=_sse_report_url if _sse_health_token else "",
                     report_token=_sse_health_token,
                     data_mounts=data_mounts_info,
+                    github_username=req.github_username,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
+
+            userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
@@ -708,6 +767,7 @@ async def create_instance_async(
                         )
 
             # Completed
+            await _record_cloud_init_history_best_effort(token_info, req.userdata)
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
             await rec(
                 token_info,

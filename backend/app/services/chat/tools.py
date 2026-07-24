@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,15 @@ class ToolContext:
 
     project_id: str
     user_id: str
+    tools_enabled: bool = True
     selected_tool_ids: tuple[int, ...] | None = None
     selected_mcp_ids: tuple[int, ...] | None = None
+
+    execution_hooks: object | None = None
+    managed_search: dict[str, Any] | None = None
+    managed_fetch: dict[str, Any] | None = None
+    managed_advisor: dict[str, Any] | None = None
+    advisor_visible_messages: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,7 +62,7 @@ async def _list_my_conversations(args: dict, ctx: ToolContext) -> str:
     from app.services.chat import conversation_store as cs
 
     try:
-        convs = await cs.list_conversations(user_id=ctx.user_id, limit=20)
+        convs = await cs.list_conversations(user_id=ctx.user_id, project_id=ctx.project_id, limit=20)
     except cs.ChatStorageUnavailable:
         return "저장소를 일시적으로 사용할 수 없습니다."
     if not convs:
@@ -71,8 +79,8 @@ async def _get_conversation_detail(args: dict, ctx: ToolContext) -> str:
         return "conversation_id(문자열)가 필요합니다."
     try:
         # 소유권 재검증 — 타 사용자 대화면 Forbidden(프로젝트 무관, user_id 기준).
-        conv = await cs.get_conversation(conv_id, user_id=ctx.user_id)
-        msgs = await cs.list_messages(conv_id, user_id=ctx.user_id)
+        conv = await cs.get_conversation(conv_id, user_id=ctx.user_id, project_id=ctx.project_id)
+        msgs = await cs.list_messages(conv_id, user_id=ctx.user_id, project_id=ctx.project_id)
     except cs.ConversationForbidden:
         return "해당 대화에 접근할 권한이 없습니다."
     except cs.ConversationNotFound:

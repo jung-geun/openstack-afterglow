@@ -6,14 +6,16 @@
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+	import { executeBulkMutations } from '$lib/utils/bulkActions';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import DbBackupsTable from '$lib/components/database/DbBackupsTable.svelte';
+	import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
 	import DbRestoreModal from '$lib/components/database/DbRestoreModal.svelte';
 	import { betaFeatures } from '$lib/stores/betaFeatures';
 	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
-
 	let backups = $state<DbBackup[]>([]);
 	let instances = $state<DbInstance[]>([]);
 	let flavors = $state<DbFlavor[]>([]);
@@ -25,42 +27,25 @@
 	let showRestoreModal = $state(false);
 	let selectedBackup = $state<DbBackup | null>(null);
 	const databaseBackupsEnabled = $derived($betaFeatures.databaseBackups);
+	const selection = createResourceSelection();
+	let bulkBusy = $state(false);
+	const selectableIds = $derived(new Set(backups.map((backup) => backup.id)));
+	const STUCK_MS = 6 * 3600 * 1000;
+	function isStuck(backup: DbBackup): boolean {
+		return backup.status === 'BUILDING' && (Date.now() - new Date(backup.created_at).getTime()) > STUCK_MS;
+	}
 
 	function clearBackupsState() {
 		backups = [];
 		instances = [];
 		flavors = [];
 		error = '';
+		selection.clear();
+		selectedBackup = null;
+		showRestoreModal = false;
 	}
 
 
-	const STUCK_MS = 6 * 3600 * 1000;
-	function isStuck(b: DbBackup): boolean {
-		return b.status === 'BUILDING' && (Date.now() - new Date(b.created_at).getTime()) > STUCK_MS;
-	}
-
-	// client-side join: backup.instance_id → instance
-	function findInstance(b: DbBackup): DbInstance | undefined {
-		if (!b.instance_id) return undefined;
-		return instances.find(i => i.id === b.instance_id);
-	}
-
-	function formatSize(size: number | undefined): string {
-		if (!size) return '-';
-		return `${size} GB`;
-	}
-
-	function formatDate(dt: string | undefined): string {
-		if (!dt) return '-';
-		return dt.slice(0, 10);
-	}
-
-	function datastoreLabel(b: DbBackup): string {
-		const ds = b.datastore;
-		if (!ds) return '-';
-		const parts = [ds.type, ds.version].filter(Boolean);
-		return parts.length > 0 ? parts.join(' ') : '-';
-	}
 
 	async function fetchBackups() {
 		if (!databaseBackupsEnabled) {
@@ -68,13 +53,18 @@
 			loading = false;
 			return;
 		}
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
 		try {
-			backups = await api.get<DbBackup[]>('/api/v1/database-instances/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const nextBackups = await api.get<DbBackup[]>('/api/v1/database-instances/backups', tokenSnapshot, projectSnapshot);
+			if (!databaseBackupsEnabled || $auth.projectId !== projectSnapshot) return;
+			backups = nextBackups;
+			selection.retain(nextBackups.map((backup) => backup.id));
 			error = '';
 		} catch (e) {
-			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
+			if ($auth.projectId === projectSnapshot) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
 		} finally {
-			loading = false;
+			if ($auth.projectId === projectSnapshot) loading = false;
 		}
 	}
 
@@ -83,8 +73,11 @@
 			instances = [];
 			return;
 		}
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
 		try {
-			instances = await api.get<DbInstance[]>('/api/v1/database-instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const nextInstances = await api.get<DbInstance[]>('/api/v1/database-instances', tokenSnapshot, projectSnapshot);
+			if ($auth.projectId === projectSnapshot) instances = nextInstances;
 		} catch { /* ignore */ }
 	}
 
@@ -93,9 +86,17 @@
 			flavors = [];
 			return;
 		}
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
 		try {
-			flavors = await api.get<DbFlavor[]>('/api/v1/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const nextFlavors = await api.get<DbFlavor[]>('/api/v1/database-instances/flavors', tokenSnapshot, projectSnapshot);
+			if ($auth.projectId === projectSnapshot) flavors = nextFlavors;
 		} catch { /* ignore */ }
+	}
+
+	function prefetchFlavors() {
+		if (!databaseBackupsEnabled) return;
+		void api.prefetch('/api/v1/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
 	}
 
 	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
@@ -124,6 +125,34 @@
 			deleting = null;
 		}
 	}
+	async function runBulkDelete() {
+		if (!databaseBackupsEnabled) return;
+		const snapshot = [...selection.ids];
+		if (snapshot.length === 0) return;
+		const stuckCount = backups.filter((backup) => snapshot.includes(backup.id) && isStuck(backup)).length;
+		const stuckNote = stuckCount > 0 ? `\n\n${stuckCount}개 멈춤 백업은 Trove 레코드만 제거되며 Swift 데이터는 이미 없을 수 있습니다.` : '';
+		if (!await confirmDialog(`선택한 백업 ${snapshot.length}개를 삭제하시겠습니까?${stuckNote}`)) return;
+		const tokenSnapshot = $auth.token ?? undefined;
+		const projectSnapshot = $auth.projectId ?? undefined;
+		bulkBusy = true;
+		try {
+			const results = await executeBulkMutations(snapshot, (id) => api.delete(`/api/v1/database-instances/backups/${id}`, tokenSnapshot, projectSnapshot));
+			const successful = results.filter((result) => result.ok).map((result) => result.id);
+			const failed = results.length - successful.length;
+			if (successful.length > 0) toast.success(`${successful.length}개 삭제 요청을 완료했습니다.`);
+			if (failed > 0) toast.error(`${failed}개 삭제에 실패했습니다.`);
+			if ($auth.projectId === projectSnapshot) {
+				selection.remove(successful);
+				await fetchBackups();
+			}
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	const bulkActions: BulkSelectionAction[] = [
+		{ key: 'delete', label: '삭제', tone: 'danger', onAction: runBulkDelete },
+	];
 
 	async function forceRefresh() {
 		refreshing = true;
@@ -136,6 +165,7 @@
 
 	const ar = createAutoRefresh(() => fetchBackups(), {
 		storageKey: 'dashboard-db-backups',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],
@@ -149,10 +179,12 @@
 			return;
 		}
 		if (!pid) return;
+		clearBackupsState();
+		loading = true;
 		untrack(() => {
 			fetchBackups();
 			fetchInstances();
-			fetchFlavors();
+			// Restore-only flavors remain lazy until restore intent.
 		});
 	});
 </script>
@@ -170,7 +202,7 @@
 	onClose={() => { showRestoreModal = false; }}
 />
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
 	<PageHeader breadcrumb="DATABASE / BACKUPS" title="DB 백업">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -195,72 +227,20 @@
 			<p class="text-lg">DB 백업이 없습니다</p>
 		</div>
 	{:else}
-		<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-			<table class="w-full text-sm">
-				<thead>
-					<tr class="border-b border-gray-800 text-gray-500 text-xs">
-						<th class="text-left px-4 py-3 font-medium">이름</th>
-						<th class="text-left px-4 py-3 font-medium">상태</th>
-						<th class="text-left px-4 py-3 font-medium">원본 DB</th>
-						<th class="text-left px-4 py-3 font-medium">Datastore</th>
-						<th class="text-left px-4 py-3 font-medium">크기</th>
-						<th class="text-left px-4 py-3 font-medium">생성일</th>
-						<th class="text-right px-4 py-3 font-medium">액션</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each backups as b}
-						{@const inst = findInstance(b)}
-						{@const stuck = isStuck(b)}
-						<tr class="border-t border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-							<td class="px-4 py-3 text-white font-medium">{b.name || b.id.slice(0, 8)}</td>
-							<td class="px-4 py-3">
-								<div class="flex items-center gap-1">
-									<StatusChip status={b.status} />
-									{#if stuck}
-										<span
-											class="text-xs text-red-400 ml-1"
-											title="Trove guest agent가 백업 업로드를 완료하지 못했습니다. 삭제 후 재시도하세요."
-										>멈춤</span>
-									{/if}
-								</div>
-							</td>
-							<td class="px-4 py-3">
-								{#if inst}
-									<a
-										href="/dashboard/database/instances/{inst.id}"
-										class="text-blue-400 hover:text-blue-300 transition-colors"
-									>{inst.name}</a>
-								{:else if b.instance_id}
-									<span class="text-gray-600 text-xs">원본 삭제됨</span>
-									{#if b.datastore?.type}
-										<span class="text-gray-600 text-xs ml-1">({b.datastore.type})</span>
-									{/if}
-								{:else}
-									<span class="text-gray-600">—</span>
-								{/if}
-							</td>
-							<td class="px-4 py-3 text-gray-400 text-xs">{datastoreLabel(b)}</td>
-							<td class="px-4 py-3 text-gray-400 text-xs">{formatSize(b.size)}</td>
-							<td class="px-4 py-3 text-gray-500 text-xs">{formatDate(b.created_at)}</td>
-							<td class="px-4 py-3">
-								<div class="flex justify-end gap-1">
-									<button
-										onclick={() => { selectedBackup = b; showRestoreModal = true; }}
-										class="text-blue-400 hover:text-blue-300 text-xs px-2 py-0.5 rounded border border-blue-900 hover:border-blue-700 transition-colors"
-									>복원</button>
-									<button
-										onclick={() => deleteBackup(b.id, b.name, stuck)}
-										disabled={deleting === b.id}
-										class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-0.5 rounded border border-red-900 hover:border-red-700 transition-colors"
-									>{deleting === b.id ? '...' : '삭제'}</button>
-								</div>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+		<DbBackupsTable
+			{backups}
+			{instances}
+			selectedIds={selection.ids}
+			selectableIds={selectableIds}
+			selectionDisabled={bulkBusy}
+			{deleting}
+			onToggleSelect={(id) => selection.toggle(id)}
+			onToggleAll={() => selection.toggleAll(selectableIds)}
+			onRestore={(backup) => { selectedBackup = backup; showRestoreModal = true; }}
+			onRestoreIntent={prefetchFlavors}
+			onDelete={deleteBackup}
+		/>
+		<BulkSelectionOverlay count={selection.count} ariaLabel="선택한 DB 백업 일괄 작업" actions={bulkActions} busy={bulkBusy} onClear={() => selection.clear()} />
 	{/if}
 </div>
 {/if}

@@ -3,7 +3,7 @@
 	import { formatStorage } from '$lib/utils/format';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
-
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 	let {
 		volumes,
 		selectedVolumeId,
@@ -11,6 +11,11 @@
 		autoBackupConfigs,
 		autoBackupToggling,
 		openActionMenu,
+		selectedIds,
+		selectableIds,
+		selectionDisabled = false,
+		onToggleSelect,
+		onToggleAll,
 		volumeBackupsEnabled = true,
 		volumeSnapshotsEnabled = true,
 		isSystemAdmin,
@@ -32,6 +37,11 @@
 		autoBackupConfigs: Set<string>;
 		autoBackupToggling: string | null;
 		openActionMenu: string | null;
+		selectedIds: ReadonlySet<string>;
+		selectableIds: ReadonlySet<string>;
+		selectionDisabled?: boolean;
+		onToggleSelect: (id: string) => void;
+		onToggleAll: () => void;
 		volumeBackupsEnabled?: boolean;
 		volumeSnapshotsEnabled?: boolean;
 		isSystemAdmin: boolean;
@@ -49,12 +59,14 @@
 	} = $props();
 
 	const volumeGridClass = $derived(volumeBackupsEnabled
-		? 'grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px]'
-		: 'grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_56px]');
+		? 'grid grid-cols-[32px_1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[32px_1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[32px_1.6fr_70px_90px_100px_1fr_80px_80px_56px]'
+		: 'grid grid-cols-[32px_1fr_60px_0px_32px_0px_0px_0px] sm:grid-cols-[32px_1.6fr_70px_90px_100px_0px_0px_0px] lg:grid-cols-[32px_1.6fr_70px_90px_100px_1fr_80px_56px]');
+	const selectedSelectableCount = $derived([...selectedIds].filter((id) => selectableIds.has(id)).length);
 </script>
 
 <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
 	<div class="{volumeGridClass} px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+		<div><SelectionCheckbox checked={selectableIds.size > 0 && selectedSelectableCount === selectableIds.size} indeterminate={selectedSelectableCount > 0 && selectedSelectableCount < selectableIds.size} disabled={selectionDisabled || selectableIds.size === 0} onclick={onToggleAll} ariaLabel="전체 선택" /></div>
 		<div>이름</div>
 		<div>크기</div>
 		<div class="hidden sm:block">유형</div>
@@ -66,8 +78,17 @@
 	</div>
 	{#each volumes as vol (vol.id)}
 		<div
-			class="{volumeGridClass} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+			class="resource-selection-surface {volumeGridClass} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+			data-selected={selectedIds.has(vol.id)}
 		>
+			<SelectionCheckbox
+				checked={selectedIds.has(vol.id)}
+				disabled={selectionDisabled || !selectableIds.has(vol.id)}
+				unavailable={!selectableIds.has(vol.id)}
+				ariaLabel={`${vol.name || vol.id.slice(0, 8)} 선택`}
+				title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : undefined}
+				onclick={() => onToggleSelect(vol.id)}
+			/>
 			<!-- 이름 -->
 			<button
 				type="button"
@@ -191,7 +212,7 @@
 					{#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && isSystemAdmin}
 						<button
 							onclick={() => { onActionMenuClose(); onForceDelete(vol.id, vol.name); }}
-							disabled={deleting === vol.id}
+							disabled={deleting === vol.id || selectionDisabled}
 							class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-2"
 						>
 							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
@@ -200,8 +221,8 @@
 					{/if}
 					<button
 						onclick={() => { onActionMenuClose(); onDelete(vol.id, vol.name); }}
-						disabled={deleting === vol.id || vol.attachments.length > 0}
-						title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+						disabled={deleting === vol.id || selectionDisabled || vol.attachments.length > 0}
+						title={selectionDisabled ? '일괄 작업이 진행 중입니다' : vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
 						class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>

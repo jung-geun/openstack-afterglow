@@ -31,7 +31,6 @@
 
 		{#if usage}
 			<div class="usage-block">
-				<div class="usage-label">이번 달 사용량</div>
 				<ChatUsageWidget {usage} />
 			</div>
 		{/if}

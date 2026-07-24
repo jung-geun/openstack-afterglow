@@ -35,10 +35,11 @@
         </tr>
       </thead>
       <tbody>
-        {#each users as u (u.id)}
+        {#each users as u, index (u.id)}
           <tr
             class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"
             onclick={() => onEdit(u)}
+            data-tour={index === 0 ? 'admin-identity-row' : undefined}
           >
             <td class="py-2 pr-4 text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={u.name}>{u.name}</span></td>
             <td class="py-2 pr-4 text-gray-400">{u.email || '-'}</td>

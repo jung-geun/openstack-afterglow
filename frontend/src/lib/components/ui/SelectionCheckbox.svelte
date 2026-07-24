@@ -3,6 +3,9 @@
 		checked?: boolean;
 		indeterminate?: boolean;
 		ariaLabel: string;
+		disabled?: boolean;
+		unavailable?: boolean;
+		title?: string;
 		onclick?: (event: MouseEvent) => void;
 		class?: string;
 	}
@@ -11,9 +14,42 @@
 		checked = false,
 		indeterminate = false,
 		ariaLabel,
+		disabled = false,
+		title,
+		unavailable = false,
 		onclick,
 		class: className = '',
 	}: Props = $props();
+
+	function stopLabelClickPropagation(node: HTMLLabelElement) {
+		const onClick = (event: MouseEvent) => {
+			if (event.target instanceof HTMLInputElement) return;
+			event.stopPropagation();
+		};
+		node.addEventListener('click', onClick);
+		return {
+			destroy() {
+				node.removeEventListener('click', onClick);
+			},
+		};
+	}
+
+	function handleCheckboxClick(node: HTMLInputElement, callback: Props['onclick']) {
+		let currentCallback = callback;
+		const onClick = (event: MouseEvent) => {
+			event.stopPropagation();
+			currentCallback?.(event);
+		};
+		node.addEventListener('click', onClick);
+		return {
+			update(nextCallback: Props['onclick']) {
+				currentCallback = nextCallback;
+			},
+			destroy() {
+				node.removeEventListener('click', onClick);
+			},
+		};
+	}
 
 	let inputEl = $state<HTMLInputElement | null>(null);
 
@@ -26,20 +62,30 @@
 	class="selection-checkbox {className}"
 	class:is-checked={checked}
 	class:is-indeterminate={indeterminate}
+	class:is-disabled={disabled}
+	class:is-unavailable={unavailable}
+	title={title}
+	use:stopLabelClickPropagation
 >
 	<input
 		bind:this={inputEl}
 		type="checkbox"
 		checked={checked}
+		disabled={disabled}
 		aria-label={ariaLabel}
-		onclick={(event) => onclick?.(event)}
+		title={title}
+		use:handleCheckboxClick={onclick}
 	/>
-	<span class="selection-box" aria-hidden="true">
-		<svg class="selection-check" width="15" height="14" viewBox="0 0 15 14" fill="none">
-			<path d="M2 8.36364L6.23077 12L13 2" />
-		</svg>
-		<span class="selection-minus"></span>
-	</span>
+	{#if unavailable}
+		<span class="selection-unavailable" aria-hidden="true"></span>
+	{:else}
+		<span class="selection-box" aria-hidden="true">
+			<svg class="selection-check" width="15" height="14" viewBox="0 0 15 14" fill="none">
+				<path d="M2 8.36364L6.23077 12L13 2" />
+			</svg>
+			<span class="selection-minus"></span>
+		</span>
+	{/if}
 </label>
 
 <style>
@@ -142,10 +188,42 @@
 		transition-delay: 0s;
 	}
 
-	.selection-checkbox input:disabled,
-	.selection-checkbox input:disabled + .selection-box {
+	.selection-checkbox.is-disabled {
 		cursor: not-allowed;
-		opacity: 0.5;
+	}
+
+	.selection-unavailable {
+		display: none;
+		width: 18px;
+		height: 18px;
+		border: 1px solid color-mix(in oklab, var(--color-ink-3) 68%, transparent);
+		border-radius: 50%;
+		opacity: 0.7;
+		position: relative;
+	}
+
+	.selection-unavailable::before,
+	.selection-unavailable::after {
+		content: '';
+		position: absolute;
+		top: 7px;
+		left: 2px;
+		width: 12px;
+		height: 1px;
+		background: var(--color-ink-3);
+		transform: rotate(45deg);
+	}
+
+	.selection-unavailable::after {
+		transform: rotate(-45deg);
+	}
+
+	.selection-checkbox.is-unavailable .selection-unavailable {
+		display: block;
+	}
+
+	.selection-checkbox input:disabled {
+		cursor: not-allowed;
 	}
 
 	@keyframes selection-pop {

@@ -325,15 +325,17 @@ def render_secret(cfg: dict) -> str:
         ]
     )
 
-    chat_checkpointer_url = chat.get("checkpointer_postgres_url", "")
-    if chat_checkpointer_url:
-        lines.extend(
-            [
-                "",
-                "  # 빌트인 채팅 LangGraph 전용 Postgres 체크포인터 접속 URL",
-                f"  CHAT_CHECKPOINTER_POSTGRES_URL: {_yaml_str(chat_checkpointer_url)}",
-            ]
-        )
+    lines.extend(
+        [
+            "",
+            "  # Chat worker / PostgreSQL / asset storage secrets",
+            f"  CHAT_CHECKPOINTER_POSTGRES_URL: {_yaml_str(chat.get('checkpointer_postgres_url', ''))}",
+            f"  CHAT_MEMORY_PGVECTOR_URL: {_yaml_str(chat.get('memory_pgvector_url', ''))}",
+            f"  CHAT_ASSET_S3_ACCESS_KEY: {_yaml_str(chat.get('asset_s3_access_key', ''))}",
+            f"  CHAT_ASSET_S3_SECRET_KEY: {_yaml_str(chat.get('asset_s3_secret_key', ''))}",
+            f"  CHAT_SANDBOX_API_KEY: {_yaml_str(chat.get('sandbox_api_key', ''))}",
+        ]
+    )
 
     sd_token = mon.get("sd_token", "")
     if sd_token:
@@ -399,7 +401,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     k3s = cfg.get("k3s", {})
     builder = cfg.get("builder", {})
     union = cfg.get("union", {})
-    vpn = cfg.get("vpn", {})
+    waygate = cfg.get("waygate", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
     public_api_base = _derive_public_api_base_for_k8s(cfg)
@@ -625,22 +627,22 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
 
-    # [vpn] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
-    if vpn:
-        lines.append("[vpn]")
-        lines.append(f"provider_network_id = {_toml_str(vpn.get('provider_network_id', ''))}")
-        lines.append(f"flavor_name = {_toml_str(vpn.get('flavor_name', 'cpu.1c_2g'))}")
-        if "flavor_id" in vpn:
-            lines.append(f"flavor_id = {_toml_str(vpn['flavor_id'])}")
-        lines.append(f"image_id = {_toml_str(vpn.get('image_id', ''))}")
-        lines.append(f"floating_network_id = {_toml_str(vpn.get('floating_network_id', ''))}")
-        lines.append(f"callback_base_url = {_toml_str(vpn.get('callback_base_url', ''))}")
-        if "key_name" in vpn:
-            lines.append(f"key_name = {_toml_str(vpn['key_name'])}")
+    # [waygate] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
+    if waygate:
+        lines.append("[waygate]")
+        lines.append(f"provider_network_id = {_toml_str(waygate.get('provider_network_id', ''))}")
+        lines.append(f"flavor_name = {_toml_str(waygate.get('flavor_name', 'cpu.1c_2g'))}")
+        if "flavor_id" in waygate:
+            lines.append(f"flavor_id = {_toml_str(waygate['flavor_id'])}")
+        lines.append(f"image_id = {_toml_str(waygate.get('image_id', ''))}")
+        lines.append(f"floating_network_id = {_toml_str(waygate.get('floating_network_id', ''))}")
+        lines.append(f"callback_base_url = {_toml_str(waygate.get('callback_base_url', ''))}")
+        if "key_name" in waygate:
+            lines.append(f"key_name = {_toml_str(waygate['key_name'])}")
         lines.append(
-            f"default_tunnel_cidr = {_toml_str(vpn.get('default_tunnel_cidr', '10.8.0.0/24'))}"
+            f"default_tunnel_cidr = {_toml_str(waygate.get('default_tunnel_cidr', '10.8.0.0/24'))}"
         )
-        lines.append(f"default_listen_port = {vpn.get('default_listen_port', 51820)}")
+        lines.append(f"default_listen_port = {waygate.get('default_listen_port', 51820)}")
         lines.append("")
 
     # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
@@ -652,7 +654,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [services]
     lines.append("[services]")
-    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "vpn", "chat"):
+    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "waygate", "chat"):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
     lines.append("")
@@ -901,22 +903,64 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         f"instance_gpu_uid = {_toml_str(dashboards.get('instance_gpu_uid', 'afterglow-instance-gpu'))}"
     )
     lines.append("")
-
-    # [chat] — 빌트인 AI 채팅(litellm/크레딧/쿼터)
+    # [chat] — built-in chat configuration. Secrets are emitted only in secret.yaml.
     if (
         chat.get("default_model")
         or chat.get("credit_per_usd") is not None
         or chat.get("default_monthly_quota") is not None
         or chat.get("stream_enabled") is not None
+        or any(
+            key in chat
+            for key in (
+                "run_event_retention_hours",
+                "semantic_memory_enabled",
+                "memory_embedding_model",
+                "memory_embedding_dimensions",
+                "memory_candidate_limit",
+                "memory_retrieval_token_budget",
+                "memory_retention_days",
+                "asset_s3_endpoint",
+                "asset_s3_bucket",
+                "asset_s3_server_side_encryption",
+                "asset_s3_kms_key_id",
+                "asset_signed_url_ttl_seconds",
+                "clamav_host",
+                "clamav_port",
+                "sandbox_url",
+                "sandbox_image_digest",
+                "sandbox_policy_version",
+                "sandbox_egress_allowlist",
+            )
+        )
     ):
         lines.append("[chat]")
-        # 빌트인 채팅 설정 (비밀 아님 — configmap 평문)
         lines.append(f"default_model = {_toml_str(chat.get('default_model', ''))}")
         lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
         lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
         lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
-        lines.append(f"reasoning_effort = {_toml_str(chat.get('reasoning_effort', 'low'))}")
-        # checkpointer_postgres_url(비밀)은 secret.yaml의 CHAT_CHECKPOINTER_POSTGRES_URL로 주입됩니다
+        lines.append(f"api_hosts = {_toml_str(chat.get('api_hosts', ''))}")
+        lines.append(f"reasoning_effort = {_toml_str(chat.get('reasoning_effort', 'auto'))}")
+        lines.append(f"run_event_retention_hours = {chat.get('run_event_retention_hours', 24)}")
+        lines.append(f"checkpoint_retention_days = {chat.get('checkpoint_retention_days', 7)}")
+        lines.append(f"semantic_memory_enabled = {_toml_bool(chat.get('semantic_memory_enabled', False))}")
+        lines.append(f"memory_embedding_model = {_toml_str(chat.get('memory_embedding_model', ''))}")
+        lines.append(f"memory_embedding_dimensions = {chat.get('memory_embedding_dimensions', 0)}")
+        lines.append(f"memory_candidate_limit = {chat.get('memory_candidate_limit', 20)}")
+        lines.append(f"memory_retrieval_token_budget = {chat.get('memory_retrieval_token_budget', 1200)}")
+        lines.append(f"memory_retention_days = {chat.get('memory_retention_days', 365)}")
+        lines.append(f"asset_s3_endpoint = {_toml_str(chat.get('asset_s3_endpoint', ''))}")
+        lines.append(f"asset_s3_bucket = {_toml_str(chat.get('asset_s3_bucket', ''))}")
+        lines.append(
+            f"asset_s3_server_side_encryption = {_toml_str(chat.get('asset_s3_server_side_encryption', 'AES256'))}"
+        )
+        lines.append(f"asset_s3_kms_key_id = {_toml_str(chat.get('asset_s3_kms_key_id', ''))}")
+        lines.append(f"asset_signed_url_ttl_seconds = {chat.get('asset_signed_url_ttl_seconds', 300)}")
+        lines.append(f"clamav_host = {_toml_str(chat.get('clamav_host', ''))}")
+        lines.append(f"clamav_port = {chat.get('clamav_port', 3310)}")
+        lines.append(f"sandbox_url = {_toml_str(chat.get('sandbox_url', ''))}")
+        lines.append(f"sandbox_image_digest = {_toml_str(chat.get('sandbox_image_digest', ''))}")
+        lines.append(f"sandbox_policy_version = {_toml_str(chat.get('sandbox_policy_version', ''))}")
+        lines.append(f"sandbox_egress_allowlist = {_toml_list_str(chat.get('sandbox_egress_allowlist', []))}")
         lines.append("")
 
     # [notion]

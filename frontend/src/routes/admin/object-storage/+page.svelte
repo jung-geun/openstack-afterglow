@@ -77,6 +77,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-object-storage',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]

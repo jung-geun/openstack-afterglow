@@ -121,7 +121,7 @@ def configured_public_site_config(settings: Settings | None = None) -> dict[str,
             "trove": s.service_trove_enabled,
             "swift": s.service_swift_enabled,
             "barbican": s.service_barbican_enabled,
-            "vpn": bool(s.service_vpn_enabled and s.vpn_provider_network_id and s.vpn_image_id),
+            "waygate": bool(s.service_waygate_enabled and s.waygate_provider_network_id and s.waygate_image_id),
             "chat": bool(s.service_chat_enabled),
         },
     }

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { writable } from 'svelte/store';
 
 // --- module mocks (must be declared before static imports) ---
@@ -26,6 +26,10 @@ import ActivityLogTable from '../ActivityLogTable.svelte';
 
 beforeEach(() => {
 	vi.clearAllMocks();
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe('ActivityLogTable', () => {
@@ -89,4 +93,61 @@ describe('ActivityLogTable', () => {
 		const btn = await screen.findByText('상세');
 		expect(btn).toBeTruthy();
 	});
+	it('debounces filters, aborts the superseded request, and ignores its late response', async () => {
+		vi.useFakeTimers();
+		const first = Promise.withResolvers<unknown[]>();
+		const second = Promise.withResolvers<unknown[]>();
+		mockGet
+			.mockImplementationOnce(() => first.promise)
+			.mockImplementationOnce(() => second.promise);
+		render(ActivityLogTable, { props: { endpoint: '/api/v1/test/activity', storageKey: 'test' } });
+
+		await vi.advanceTimersByTimeAsync(250);
+		expect(mockGet).toHaveBeenCalledOnce();
+		const firstSignal = mockGet.mock.calls[0][3].signal as AbortSignal;
+
+		await fireEvent.input(screen.getByPlaceholderText('액션 필터 (예: instance.create)'), {
+			target: { value: 'instance.create' },
+		});
+		await vi.advanceTimersByTimeAsync(249);
+		expect(mockGet).toHaveBeenCalledOnce();
+		expect(firstSignal.aborted).toBe(true);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockGet).toHaveBeenCalledTimes(2);
+
+		second.resolve([{
+			id: 2,
+			action: 'instance.create',
+			status: 'success',
+			resource_type: 'instance',
+			resource_name: 'new',
+			resource_id: null,
+			created_at: new Date().toISOString(),
+			username: 'user',
+			project_id: 'project',
+			user_id: 'user',
+			error_message: null,
+			extra: null,
+		}]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByText('instance.create')).toBeTruthy();
+
+		first.resolve([{
+			id: 1,
+			action: 'stale.action',
+			status: 'success',
+			resource_type: 'instance',
+			resource_name: 'stale',
+			resource_id: null,
+			created_at: new Date().toISOString(),
+			username: 'user',
+			project_id: 'project',
+			user_id: 'user',
+			error_message: null,
+			extra: null,
+		}]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText('stale.action')).toBeNull();
+	});
+
 });

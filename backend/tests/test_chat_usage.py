@@ -56,3 +56,54 @@ async def test_get_chat_usage_scoped_to_token(client, monkeypatch):
     assert resp.status_code == 200
     assert captured["user_id"] == "test-user-123"
     assert captured["project_id"] == "test-project-123"
+
+
+@pytest.mark.asyncio
+async def test_usage_timeseries(client, monkeypatch):
+    from app.services.chat import stats as stats_service
+
+    captured = {}
+
+    async def fake_ts(bucket, rng, pid, *, user_id, include_system):
+        captured.update(bucket=bucket, rng=rng, user_id=user_id, include_system=include_system)
+        return [{"bucket": "2026-07-21", "source": "api", "total_tokens": 10, "credited_cost": 0.1, "request_count": 2}]
+
+    monkeypatch.setattr(stats_service, "timeseries", fake_ts)
+    resp = await client.get("/api/v1/chat/usage/timeseries?bucket=day&range=30d")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bucket"] == "day" and body["series"][0]["source"] == "api"
+    # 본인 스코프 + 시스템 부담 제외
+    assert captured["user_id"] == "test-user-123" and captured["include_system"] is False
+
+
+@pytest.mark.asyncio
+async def test_usage_timeseries_bucket_normalized(client, monkeypatch):
+    from app.services.chat import stats as stats_service
+
+    seen = {}
+
+    async def fake_ts(bucket, rng, pid, *, user_id, include_system):
+        seen["bucket"] = bucket
+        return []
+
+    monkeypatch.setattr(stats_service, "timeseries", fake_ts)
+    resp = await client.get("/api/v1/chat/usage/timeseries?bucket=bogus")
+    assert resp.status_code == 200 and seen["bucket"] == "day"
+
+
+@pytest.mark.asyncio
+async def test_usage_keys(client, monkeypatch):
+    from app.services.chat import stats as stats_service
+
+    captured = {}
+
+    async def fake_keys(rng, pid, *, user_id, limit=50):
+        captured["user_id"] = user_id
+        return [{"api_key_id": 3, "name": "k", "total_tokens": 5}]
+
+    monkeypatch.setattr(stats_service, "by_api_key", fake_keys)
+    resp = await client.get("/api/v1/chat/usage/keys")
+    assert resp.status_code == 200
+    assert resp.json()["keys"][0]["api_key_id"] == 3
+    assert captured["user_id"] == "test-user-123"

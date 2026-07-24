@@ -7,7 +7,7 @@
  * - shiki 출력은 자체적으로 코드 텍스트를 HTML escape 하므로(XSS 안전) DOMPurify 를
  *   거치지 않고 삽입한다. 이렇게 해야 dual-theme 용 CSS 커스텀 프로퍼티가 제거되지 않는다.
  */
-import { marked } from 'marked';
+import { marked, type TokenizerAndRendererExtension } from 'marked';
 import DOMPurify from 'dompurify';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -17,6 +17,71 @@ marked.setOptions({ breaks: true, gfm: true });
 // 스트리밍 중 partial 은 매번 달라 캐시 이득이 없으므로 캐시를 쓰지 않는다(무한 증가 방지).
 const RENDER_CACHE = new Map<string, string>();
 const RENDER_CACHE_MAX = 200;
+
+const mathBlockExtension: TokenizerAndRendererExtension = {
+	name: 'chatMathBlock',
+	level: 'block',
+	start(src) {
+		const match = /(?:^\n?|\n)(?:\$\$|\\\[)/.exec(src);
+		return match?.index;
+	},
+	tokenizer(src) {
+		const match =
+			/^\$\$([^\n]+?)\$\$(?:\n|$)/.exec(src) ??
+			/^\$\$[ \t]*\n([\s\S]*?)\n\$\$[ \t]*(?:\n|$)/.exec(src) ??
+			/^\\\[[ \t]*\n([\s\S]*?)\n\\\][ \t]*(?:\n|$)/.exec(src);
+		if (!match) return;
+		return { type: 'chatMathBlock', raw: match[0], text: match[1] };
+	},
+	renderer(token) {
+		return `<div class="math-display" data-chat-math="afterglow:${encodeURIComponent(token.text)}"></div>`;
+	}
+};
+
+// CommonMark rejects a closing ** directly after punctuation when the following
+// Korean text has no separator. Only intercept that unsupported shape; ordinary
+// strong tokens continue through Marked's native tokenizer.
+const chatStrongExtension: TokenizerAndRendererExtension = {
+	name: 'chatStrong',
+	level: 'inline',
+	start(src) {
+		const index = src.indexOf('**');
+		return index >= 0 ? index : undefined;
+	},
+	tokenizer(src) {
+		const match = /^\*\*((?:(?!\*\*)[^\n])*?[)\]:;,.!?])\*\*(?=\S)/.exec(src);
+		if (!match) return;
+		return {
+			type: 'chatStrong',
+			raw: match[0],
+			text: match[1],
+			tokens: this.lexer.inlineTokens(match[1])
+		};
+	},
+	renderer(token) {
+		return `<strong>${this.parser.parseInline(token.tokens)}</strong>`;
+	}
+};
+
+const mathInlineExtension: TokenizerAndRendererExtension = {
+	name: 'chatMathInline',
+	level: 'inline',
+	start(src) {
+		const match = /(?<!\\)(?:\$|\\\()/.exec(src);
+		return match?.index;
+	},
+	tokenizer(src) {
+		const match =
+			/^\$((?:\\.|[^$\\\n])+?)\$/.exec(src) ?? /^\\\(([\s\S]*?)\\\)/.exec(src);
+		if (!match) return;
+		return { type: 'chatMathInline', raw: match[0], text: match[1] };
+	},
+	renderer(token) {
+		return `<span class="math-inline" data-chat-math="afterglow:${encodeURIComponent(token.text)}"></span>`;
+	}
+};
+
+marked.use({ extensions: [mathBlockExtension, chatStrongExtension, mathInlineExtension] });
 
 /**
  * 마크다운을 살균된 HTML 로 변환한다. 코드블록은 아직 하이라이트하지 않은
@@ -32,7 +97,7 @@ export function renderMarkdown(source: string, opts?: { cache?: boolean }): stri
 	}
 	const raw = marked.parse(key, { async: false }) as string;
 	const html = DOMPurify.sanitize(raw, {
-		ADD_ATTR: ['target', 'rel'],
+		ADD_ATTR: ['target', 'rel', 'data-chat-math'],
 		FORBID_TAGS: ['style', 'form', 'input', 'button'],
 		FORBID_ATTR: ['onerror', 'onload', 'onclick']
 	});
@@ -71,9 +136,10 @@ function langFromClass(el: Element): string {
  * 완료(스트리밍 종료) 후 한 번만 호출한다. 이미 처리된 블록은 건너뛴다.
  */
 export async function highlightCodeBlocks(container: HTMLElement): Promise<void> {
-	const blocks = Array.from(container.querySelectorAll('pre > code')).filter(
-		(el) => !el.closest('pre')?.hasAttribute('data-shiki')
-	);
+	const blocks = Array.from(container.querySelectorAll('pre > code')).filter((el) => {
+		const pre = el.closest('pre');
+		return !pre?.hasAttribute('data-shiki') && !el.classList.contains('language-mermaid');
+	});
 	if (blocks.length === 0) return;
 
 	const codeToHtml = await getCodeToHtml();

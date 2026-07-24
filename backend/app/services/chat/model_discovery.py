@@ -26,6 +26,7 @@ _DEFAULT_BASES: dict[str, str] = {
     "together_ai": "https://api.together.xyz/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "xai": "https://api.x.ai/v1",
+    "perplexity": "https://api.perplexity.ai",
     "ollama": "http://localhost:11434/v1",
 }
 # OpenAI 호환 /models 엔드포인트를 노출하는 provider_type

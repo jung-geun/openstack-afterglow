@@ -13,11 +13,39 @@ spec:
   tls:
     - hosts:
         - afterglow.example.com      # 실제 도메인으로 변경
+        - api.afterglow.example.com  # 외부 API 전용 서브도메인(아래 규칙과 함께 사용)
       secretName: afterglow-tls      # cert-manager 또는 수동으로 생성한 TLS Secret 이름
   rules:
+    # 기본 host — 웹 앱(/) + 내부 API(/api). 외부 /v1 은 여기서 노출하지 않는다.
     - host: afterglow.example.com # 실제 도메인으로 변경
       http:
         paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3080
+    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)만 백엔드로.
+    # backend 의 [chat] api_hosts 에 이 호스트를 지정해야 앱에서도 허용된다(이중 방어).
+    - host: api.afterglow.example.com # 실제 API 서브도메인으로 변경 (예: api.cloud.dmslab.re.kr)
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:

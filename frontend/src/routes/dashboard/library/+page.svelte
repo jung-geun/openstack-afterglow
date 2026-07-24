@@ -19,32 +19,81 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   let initialLoaded = false;
+  let loadGeneration = 0;
+  let loadController: AbortController | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function loadLayers() {
+  async function loadLayers(opts?: { refresh?: boolean }) {
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+    loadController?.abort();
+    const controller = new AbortController();
+    loadController = controller;
+    const requestToken = token;
+    const requestProjectId = projectId;
+    const requestFilter = nameFilter;
+    const requestPage = currentPage;
+    const generation = ++loadGeneration;
     if (!initialLoaded) loading = true;
     else refreshing = true;
     error = '';
     try {
-      const params = new URLSearchParams({ limit: String(pageSize), offset: String(currentPage * pageSize) });
-      if (nameFilter) params.set('name', nameFilter);
-      layers = await api.get<LayerInfo[]>(`/api/v1/union/layers?${params}`, token, projectId);
+      const params = new URLSearchParams({ limit: String(pageSize), offset: String(requestPage * pageSize) });
+      if (requestFilter) params.set('name', requestFilter);
+      const value = await api.get<LayerInfo[]>(
+        `/api/v1/union/layers?${params}`,
+        requestToken,
+        requestProjectId,
+        { refresh: opts?.refresh, signal: controller.signal },
+      );
+      if (
+        generation !== loadGeneration
+        || token !== requestToken
+        || projectId !== requestProjectId
+        || nameFilter !== requestFilter
+        || currentPage !== requestPage
+      ) return;
+      layers = value;
       initialLoaded = true;
     } catch (e) {
-      error = e instanceof ApiError ? e.message : '레이어 로드 실패';
-      layers = [];
+      if (
+        generation === loadGeneration
+        && token === requestToken
+        && projectId === requestProjectId
+        && !(e instanceof DOMException && e.name === 'AbortError')
+      ) {
+        error = e instanceof ApiError ? e.message : '레이어 로드 실패';
+        if (!initialLoaded) layers = [];
+      }
     } finally {
-      loading = false;
-      refreshing = false;
+      if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) {
+        loading = false;
+        refreshing = false;
+      }
     }
   }
 
   $effect(() => {
-    if (token) loadLayers();
+    const requestToken = token;
+    void projectId;
+    void nameFilter;
+    if (!requestToken) return;
+    currentPage = 0;
+    loadGeneration += 1;
+    loadController?.abort();
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void loadLayers(), 250);
+    return () => {
+      if (searchTimer) clearTimeout(searchTimer);
+      loadController?.abort();
+    };
   });
 
   function handleSearch() {
     currentPage = 0;
-    loadLayers();
+    void loadLayers();
   }
 </script>
 
@@ -62,7 +111,7 @@
           href="/dashboard/library/templates"
           class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
         >템플릿</a>
-        <button onclick={loadLayers} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 flex items-center gap-1.5">새로고침</button>
+        <button onclick={() => loadLayers({ refresh: true })} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 flex items-center gap-1.5">새로고침</button>
       </div>
     {/snippet}
   </PageHeader>
@@ -89,8 +138,8 @@
       {refreshing}
       {currentPage}
       {pageSize}
-      onPrev={() => { currentPage = Math.max(0, currentPage - 1); loadLayers(); }}
-      onNext={() => { currentPage++; loadLayers(); }}
+      onPrev={() => { currentPage = Math.max(0, currentPage - 1); void loadLayers(); }}
+      onNext={() => { currentPage++; void loadLayers(); }}
     />
   {/if}
 </div>

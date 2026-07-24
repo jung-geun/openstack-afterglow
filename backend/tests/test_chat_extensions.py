@@ -10,8 +10,10 @@ from app.services.chat import extensions_store as es
 
 _ADMIN_MCP = "/api/v1/chat/admin/mcp-servers"
 _ADMIN_TOOL = "/api/v1/chat/admin/custom-tools"
+_ADMIN_SKILL = "/api/v1/chat/admin/skills"
 _USER_MCP = "/api/v1/chat/mcp-servers"
 _USER_TOOL = "/api/v1/chat/custom-tools"
+_USER_SKILL = "/api/v1/chat/skills"
 
 
 class TestAdminGate:
@@ -39,6 +41,51 @@ class TestAdminGlobal:
         assert resp.status_code == 201
         assert captured["kind"] == "mcp"
         assert captured["scope"] == "global"
+
+
+class TestSkills:
+    async def test_admin_create_skill_is_global(self, admin_client, monkeypatch):
+        captured = {}
+
+        async def fake_create(kind, fields, **kwargs):
+            captured["kind"] = kind
+            captured["fields"] = fields
+            captured.update(kwargs)
+            return {"id": 1, "scope": kwargs.get("scope"), "name": fields.get("name")}
+
+        monkeypatch.setattr(es, "create", fake_create)
+        resp = await admin_client.post(_ADMIN_SKILL, json={"name": "리뷰어", "instructions": "코드를 리뷰하라"})
+        assert resp.status_code == 201
+        assert captured["kind"] == "skill"
+        assert captured["scope"] == "global"
+        assert captured["fields"]["instructions"] == "코드를 리뷰하라"
+
+    async def test_admin_skill_forbidden_for_non_admin(self, non_admin_client):
+        resp = await non_admin_client.post(_ADMIN_SKILL, json={"name": "x", "instructions": "y"})
+        assert resp.status_code == 403
+
+    async def test_user_create_skill_scoped_to_owner(self, client, monkeypatch):
+        captured = {}
+
+        async def fake_create(kind, fields, **kwargs):
+            captured["kind"] = kind
+            captured.update(kwargs)
+            return {"id": 9, "scope": "user", "name": fields.get("name")}
+
+        monkeypatch.setattr(es, "create", fake_create)
+        resp = await client.post(_USER_SKILL, json={"name": "요약", "instructions": "간결히 요약하라"})
+        assert resp.status_code == 201
+        assert captured["kind"] == "skill"
+        assert captured["scope"] == "user"
+        assert captured["owner_user_id"] == "test-user-123"
+
+    async def test_user_list_skill_graceful_empty(self, client, monkeypatch):
+        async def fake_list(kind, **kwargs):
+            raise es.ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
+
+        monkeypatch.setattr(es, "list_for_user", fake_list)
+        assert (await client.get(_USER_SKILL)).json() == []
+        assert (await client.get(_USER_SKILL)).status_code == 200
 
 
 class TestUserScope:

@@ -21,11 +21,22 @@ user_router = APIRouter()
 
 # --- 요청 모델 ---
 class McpServerBody(BaseModel):
+    """Remote streamable-HTTP MCP server.
+
+    Only HTTPS streamable HTTP is supported. Stdio and legacy SSE are rejected
+    because the runtime uses a DNS-pinned, redirect-free client.
+
+    인증정보는 headers 로 전달한다(예: {"Authorization": "Bearer <token>"} 또는 API key 헤더).
+    headers 값은 시크릿으로 취급되어 AES-256-GCM 으로 암호화 저장되고, 조회 시 마스킹된다.
+    """
+
     name: str | None = Field(default=None, max_length=100)
-    transport: str | None = Field(default=None, max_length=20)
-    url: str | None = Field(default=None, max_length=500)
-    command: str | None = Field(default=None, max_length=500)
-    headers: dict | None = None
+    transport: str | None = Field(default=None, max_length=20)  # http | streamable_http
+    url: str | None = Field(default=None, max_length=500)  # HTTPS remote endpoint
+    headers: dict | None = None  # 공용 인증/커스텀 헤더 (값은 암호화 저장)
+    # 사용자별 인증 요구사항 — 공용 시크릿 대신 각 사용자가 자신의 값을 채우도록 선언(비밀 아님).
+    # 예: [{"key": "Authorization", "label": "Notion Integration Token"}]
+    auth_requirements: list[dict] | None = None
     is_active: bool | None = None
 
 
@@ -39,6 +50,24 @@ class CustomToolBody(BaseModel):
     is_active: bool | None = None
 
     model_config = {"protected_namespaces": ()}
+
+
+class McpCredentialBody(BaseModel):
+    """사용자가 특정 MCP 서버에 채우는 자신의 인증 값 {header_key: value}. 서버 요구사항의 key 만 반영."""
+
+    values: dict = Field(default_factory=dict)
+
+
+class SkillBody(BaseModel):
+    """스킬 정의 — 선택 시 채팅 system 프리앰블에 주입되는 지침(SKILL.md 본문).
+
+    instructions 는 시크릿/프로프라이어터리로 취급되어 AES-256-GCM 으로 암호화 저장된다.
+    """
+
+    name: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    instructions: str | None = Field(default=None, max_length=20000)
+    is_active: bool | None = None
 
 
 def _http(exc: Exception) -> HTTPException:
@@ -121,6 +150,38 @@ async def admin_delete_tool(item_id: int):
         raise _http(exc) from exc
 
 
+@admin_router.get("/admin/skills")
+async def admin_list_skills():
+    try:
+        return await es.list_global("skill")
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@admin_router.post("/admin/skills", status_code=201)
+async def admin_create_skill(body: SkillBody):
+    try:
+        return await es.create("skill", body.model_dump(exclude_unset=True), scope="global")
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@admin_router.patch("/admin/skills/{item_id}")
+async def admin_update_skill(item_id: int, body: SkillBody):
+    try:
+        return await es.update("skill", item_id, body.model_dump(exclude_unset=True), admin=True)
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@admin_router.delete("/admin/skills/{item_id}", status_code=204)
+async def admin_delete_skill(item_id: int):
+    try:
+        await es.delete("skill", item_id, admin=True)
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
 # ---------------------------------------------------------------------------
 # 사용자 (본인 스코프 + 활성 global 열람)
 # ---------------------------------------------------------------------------
@@ -171,6 +232,37 @@ async def user_delete_mcp(item_id: int, token_info: dict = Depends(get_token_inf
         raise _http(exc) from exc
 
 
+# --- 사용자별 MCP 인증 값 (서버 auth_requirements 에 대응) ---
+@user_router.get("/mcp-servers/{item_id}/credentials")
+async def user_get_mcp_credentials(item_id: int, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        return await es.get_mcp_credentials_status(item_id, user_id=uid, project_id=pid)
+    except es.ChatStorageUnavailable:
+        # 선택적 상태 조회 — 저장소 미가용 시 빈 상태로 degrade.
+        return {"mcp_server_id": item_id, "auth_requirements": [], "filled_keys": [], "satisfied": True}
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.put("/mcp-servers/{item_id}/credentials")
+async def user_set_mcp_credentials(item_id: int, body: McpCredentialBody, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        return await es.set_mcp_credentials(item_id, body.values, user_id=uid, project_id=pid)
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.delete("/mcp-servers/{item_id}/credentials", status_code=204)
+async def user_delete_mcp_credentials(item_id: int, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        await es.delete_mcp_credentials(item_id, user_id=uid, project_id=pid)
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
 @user_router.get("/custom-tools")
 async def user_list_tools(token_info: dict = Depends(get_token_info)):
     uid, pid = _owner(token_info)
@@ -210,5 +302,48 @@ async def user_delete_tool(item_id: int, token_info: dict = Depends(get_token_in
     uid, pid = _owner(token_info)
     try:
         await es.delete("tool", item_id, requester_user_id=uid, requester_project_id=pid)
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.get("/skills")
+async def user_list_skills(token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
+    try:
+        return await es.list_for_user("skill", user_id=uid, project_id=pid)
+    except es.ChatStorageUnavailable:
+        return []
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.post("/skills", status_code=201)
+async def user_create_skill(body: SkillBody, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        return await es.create(
+            "skill", body.model_dump(exclude_unset=True), scope="user", owner_user_id=uid, owner_project_id=pid
+        )
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.patch("/skills/{item_id}")
+async def user_update_skill(item_id: int, body: SkillBody, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        return await es.update(
+            "skill", item_id, body.model_dump(exclude_unset=True), requester_user_id=uid, requester_project_id=pid
+        )
+    except _EXC as exc:
+        raise _http(exc) from exc
+
+
+@user_router.delete("/skills/{item_id}", status_code=204)
+async def user_delete_skill(item_id: int, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        await es.delete("skill", item_id, requester_user_id=uid, requester_project_id=pid)
     except _EXC as exc:
         raise _http(exc) from exc

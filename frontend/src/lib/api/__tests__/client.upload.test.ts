@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('$env/dynamic/public', () => ({
 	env: { PUBLIC_API_BASE: 'http://localhost:8000' },
 }));
+vi.mock('$app/environment', () => ({ browser: true }));
+
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -44,6 +46,13 @@ class MockXhr {
 	}
 }
 vi.stubGlobal('XMLHttpRequest', MockXhr);
+function jsonResponse(value: unknown): Response {
+	return new Response(JSON.stringify(value), {
+		status: 200,
+		headers: { 'Content-Type': 'application/json' },
+	});
+}
+
 
 describe('api.upload', () => {
 	beforeEach(() => {
@@ -88,6 +97,20 @@ describe('api.upload', () => {
 		const { api, ApiError } = await import('../client');
 		await expect(api.upload('/api/v1/upload', new FormData())).rejects.toBeInstanceOf(ApiError);
 	});
+	it('invalidates a completed warm GET before and after an upload mutation', async () => {
+		mockFetch
+			.mockResolvedValueOnce(jsonResponse({ source: 'warm' }))
+			.mockResolvedValueOnce(jsonResponse({ id: 'uploaded' }))
+			.mockResolvedValueOnce(jsonResponse({ source: 'visible' }));
+		const { api } = await import('../client');
+
+		await api.prefetch('/api/v1/items', 'token', 'project');
+		await api.upload('/api/v1/upload', new FormData(), 'token', 'project');
+
+		await expect(api.get('/api/v1/items', 'token', 'project')).resolves.toEqual({ source: 'visible' });
+		expect(mockFetch).toHaveBeenCalledTimes(3);
+	});
+
 });
 
 describe('api.uploadWithProgress', () => {
@@ -167,6 +190,22 @@ describe('api.uploadWithProgress', () => {
 		lastXhr.onerror?.();
 		await expect(promise).rejects.toThrow('네트워크 오류');
 	});
+	it('invalidates warm data around XHR progress uploads', async () => {
+		mockFetch.mockReset().mockResolvedValueOnce(jsonResponse({ source: 'warm' }));
+		const { api } = await import('../client');
+		await api.prefetch('/api/v1/items', 'token', 'project');
+
+		const { promise } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn(), 'token', 'project');
+		lastXhr.status = 200;
+		lastXhr.responseText = '{"ok":true}';
+		lastXhr.onload?.();
+		await promise;
+		mockFetch.mockResolvedValueOnce(jsonResponse({ source: 'visible' }));
+
+		await expect(api.get('/api/v1/items', 'token', 'project')).resolves.toEqual({ source: 'visible' });
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+	});
+
 });
 
 describe('api.putWithProgress', () => {
@@ -210,6 +249,22 @@ describe('api.putWithProgress', () => {
 		api.putWithProgress('/api/v1/upload', blob, '', vi.fn());
 		expect(lastXhr._headers['Content-Type']).toBe('application/octet-stream');
 	});
+	it('invalidates warm data around absolute PUT progress uploads', async () => {
+		mockFetch.mockReset().mockResolvedValueOnce(jsonResponse({ source: 'warm' }));
+		const { api } = await import('../client');
+		await api.prefetch('/api/v1/items', 'token', 'project');
+
+		const { promise } = api.putWithProgress('https://upload.example.test/object', new Blob(['data']), 'text/plain', vi.fn(), 'token', 'project');
+		lastXhr.status = 200;
+		lastXhr.responseText = '{"etag":"abc"}';
+		lastXhr.onload?.();
+		await promise;
+		mockFetch.mockResolvedValueOnce(jsonResponse({ source: 'visible' }));
+
+		await expect(api.get('/api/v1/items', 'token', 'project')).resolves.toEqual({ source: 'visible' });
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+	});
+
 });
 
 describe('api.downloadBlob', () => {
@@ -347,6 +402,20 @@ describe('api.postSse', () => {
 		expect(opts.headers['X-Project-Id']).toBe('my-proj');
 		expect(opts.headers['Accept']).toBe('text/event-stream');
 	});
+	it('invalidates warm data before and after POST SSE streams', async () => {
+		mockFetch
+			.mockResolvedValueOnce(jsonResponse({ source: 'warm' }))
+			.mockResolvedValueOnce(makeStreamResponse(['']))
+			.mockResolvedValueOnce(jsonResponse({ source: 'visible' }));
+		const { api } = await import('../client');
+		await api.prefetch('/api/v1/items', 'token', 'project');
+
+		api.postSse('/api/v1/stream', {}, 'token', 'project');
+
+		await expect(api.get('/api/v1/items', 'token', 'project')).resolves.toEqual({ source: 'visible' });
+		expect(mockFetch).toHaveBeenCalledTimes(3);
+	});
+
 });
 
 describe('getBaseUrl', () => {

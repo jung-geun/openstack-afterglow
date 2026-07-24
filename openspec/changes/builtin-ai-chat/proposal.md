@@ -30,3 +30,14 @@
 - 의존성: `litellm`·`langgraph`·`langchain-core`·`langchain-mcp-adapters`·`mcp` 추가(정합성 스파이크 완료 — 기존 하드핀 `pydantic==2.9.2`/`fastapi==0.125.0` 유지, 핀 이동 불필요). `motor`는 LibreChat 제거 후 사용처 소멸 시 제거 검토.
 - 프론트: `LibreChatEmbed.svelte` 제거, `dashboard/chat` 채팅 UI, chat API 클라이언트, 관리자/키 화면, `mockup/transport.ts`·gated-surfaces 테스트 갱신.
 - 테스트: 엔드포인트별 pytest(의무) + 테넌트 격리·인젝션·크레딧 회귀. 기존 baked 레거시 계약·감사 미들웨어는 유지.
+
+## Capability Platform Expansion
+
+The original built-in chat delivery is now expanded into a durable capability platform. The implementation source of truth is `local://chat-capability-platform-plan.md`; this proposal records the OpenSpec ledger scope.
+
+- Replace text-only request, stream, storage, and pricing shapes with canonical typed message parts, run events, feature options, and component usage contracts shared by FastAPI, LangGraph, workers, storage, and the Svelte client.
+- Keep MySQL as the encrypted conversation and financial source of truth. Add a durable MySQL run journal, assets, jobs, derivations, and memory outbox; use separately configured PostgreSQL databases only for encrypted LangGraph checkpoints and content-free pgvector search indexes.
+- Change completion creation to an idempotent `202` descriptor protocol owned by a separate chat worker. SSE replays the durable journal and never treats a disconnect as cancellation; persisted `run.stage.changed` events expose the current execution stage and its start time across reconnects.
+- Add capability- and immutable-pricing-gated structured output, function calling with approval, native/managed search and fetch, advisor calls, secure multimodal assets, semantic memory, MCP streamable HTTP, and provider-managed sandbox support.
+- Migrate the chat UI to typed create-then-follow run ownership, persisted temporary threads, capability-aware composition, typed part rendering, accessibility, and deterministic mock fixtures.
+- Retain the existing unimplemented external OpenAI-compatible API-key work as a separate ledger item; it is not combined with this chat-page capability implementation.

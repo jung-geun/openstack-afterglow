@@ -19,6 +19,7 @@
 
 	const ar = createAutoRefresh(() => ctrl.fetchAll(), {
 		storageKey: 'dashboard-network-lb-detail',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],

@@ -7,6 +7,8 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ChatExtensionsManager from './ChatExtensionsManager.svelte';
+	import ChatApiKeysManager from './ChatApiKeysManager.svelte';
+	import ChatUsagePanel from './ChatUsagePanel.svelte';
 	import type { ChatUsage } from '$lib/api/chatTree';
 	import type { Memory } from '$lib/api/chatWorkspaces';
 
@@ -17,15 +19,17 @@
 	}
 	let { open, onClose, usage }: Props = $props();
 
-	type Section = 'general' | 'usage' | 'memory' | 'mcp' | 'tools';
+	type Section = 'general' | 'usage' | 'apikeys' | 'memory' | 'mcp' | 'tools' | 'skills';
 	let section = $state<Section>('general');
 
 	const sections: { key: Section; label: string }[] = [
 		{ key: 'general', label: '일반' },
 		{ key: 'usage', label: '사용량' },
+		{ key: 'apikeys', label: 'API 키' },
 		{ key: 'memory', label: '메모리' },
 		{ key: 'mcp', label: 'MCP 서버' },
-		{ key: 'tools', label: '도구 (Skill)' }
+		{ key: 'tools', label: '도구' },
+		{ key: 'skills', label: '스킬' }
 	];
 
 	const themeOptions: { key: ThemePreference; label: string }[] = [
@@ -208,6 +212,13 @@
 								월 쿼터 {fmt(quotaUsed)} / {fmt(quotaMax)}
 							</p>
 						{/if}
+						<div class="mt-4">
+							<ChatUsagePanel />
+						</div>
+					</section>
+				{:else if section === 'apikeys'}
+					<section class="sec">
+						<ChatApiKeysManager />
 					</section>
 				{:else if section === 'memory'}
 					<section class="sec">
@@ -284,6 +295,10 @@
 				{:else if section === 'tools'}
 					<section class="sec">
 						<ChatExtensionsManager base="/api/v1/chat" only="tools" />
+					</section>
+				{:else if section === 'skills'}
+					<section class="sec">
+						<ChatExtensionsManager base="/api/v1/chat" only="skills" />
 					</section>
 				{/if}
 			</div>

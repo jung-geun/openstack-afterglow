@@ -1,8 +1,103 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
+	import { api, ApiError } from '$lib/api/client';
+	import { auth } from '$lib/stores/auth';
 	import { wizard } from '$lib/stores/wizard';
 	import { useVmCreate } from '$lib/stores/vmCreateStore.svelte';
+	import { Alert, Button, Field, TextInput, ToggleGroup } from '$lib/components/ui';
+	import {
+		isValidGithubUsername,
+		normalizeRequestedInstanceName,
+	} from '$lib/utils/instanceCreate';
 
 	const s = useVmCreate();
+	const normalizedInstanceName = $derived(normalizeRequestedInstanceName($wizard.instanceName));
+	const githubUsernameError = $derived(
+		$wizard.sshAccessMode === 'github' && !isValidGithubUsername($wizard.githubUsername)
+			? 'GitHub 사용자 ID는 1~39자의 영문자, 숫자, 하이픈만 사용할 수 있습니다.'
+			: undefined,
+	);
+
+	type CloudInitSnippet = {
+		id: number;
+		kind: 'history' | 'preset';
+		name: string | null;
+		content: string;
+		created_at: string | null;
+	};
+
+	let cloudInitHistory = $state<CloudInitSnippet[]>([]);
+	let cloudInitPresets = $state<CloudInitSnippet[]>([]);
+	let cloudInitPresetName = $state('');
+	let cloudInitLibraryError = $state('');
+	let cloudInitLibraryLoading = $state(false);
+	let cloudInitPresetSaving = $state(false);
+
+	async function loadCloudInitLibrary() {
+		const { token, projectId } = get(auth);
+		if (!token) return;
+		cloudInitLibraryLoading = true;
+		cloudInitLibraryError = '';
+		try {
+			const library = await api.get<{ history: CloudInitSnippet[]; presets: CloudInitSnippet[] }>(
+				'/api/v1/instances/cloud-init/library',
+				token,
+				projectId ?? undefined,
+			);
+			cloudInitHistory = library.history;
+			cloudInitPresets = library.presets;
+		} catch (error) {
+			cloudInitLibraryError = error instanceof ApiError ? error.message : 'cloud-init 저장소를 불러오지 못했습니다.';
+		} finally {
+			cloudInitLibraryLoading = false;
+		}
+	}
+
+	async function saveCloudInitPreset() {
+		if (!cloudInitPresetName.trim() || !$wizard.cloudInit.trim()) {
+			cloudInitLibraryError = '저장 이름과 cloud-init 내용을 입력하세요.';
+			return;
+		}
+		const { token, projectId } = get(auth);
+		if (!token) return;
+		cloudInitPresetSaving = true;
+		cloudInitLibraryError = '';
+		try {
+			await api.post(
+				'/api/v1/instances/cloud-init/presets',
+				{ name: cloudInitPresetName, content: $wizard.cloudInit },
+				token,
+				projectId ?? undefined,
+			);
+			cloudInitPresetName = '';
+			await loadCloudInitLibrary();
+		} catch (error) {
+			cloudInitLibraryError = error instanceof ApiError ? error.message : 'cloud-init 프리셋을 저장하지 못했습니다.';
+		} finally {
+			cloudInitPresetSaving = false;
+		}
+	}
+
+	function applyCloudInitSnippet(event: Event) {
+		const id = Number((event.target as HTMLSelectElement).value);
+		const snippet = [...cloudInitPresets, ...cloudInitHistory].find(item => item.id === id);
+		if (snippet) wizard.update(w => ({ ...w, cloudInit: snippet.content }));
+		(event.target as HTMLSelectElement).value = '';
+	}
+
+	async function deleteCloudInitSnippet(snippetId: number) {
+		const { token, projectId } = get(auth);
+		if (!token) return;
+		try {
+			await api.delete(`/api/v1/instances/cloud-init/library/${snippetId}`, token, projectId ?? undefined);
+			await loadCloudInitLibrary();
+		} catch (error) {
+			cloudInitLibraryError = error instanceof ApiError ? error.message : 'cloud-init 항목을 삭제하지 못했습니다.';
+		}
+	}
+
+	onMount(loadCloudInitLibrary);
 </script>
 
 <h2 class="text-lg font-semibold text-white mb-5">인스턴스 설정</h2>
@@ -12,6 +107,11 @@
 	<label for="vm-name" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
 		VM 이름 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
 	</label>
+	{#if normalizedInstanceName}
+		<p class="text-xs mb-1" aria-live="polite">
+			실제 인스턴스 이름: <code class="font-mono">{normalizedInstanceName}</code>
+		</p>
+	{/if}
 	<input
 		id="vm-name"
 		bind:value={$wizard.instanceName}
@@ -22,7 +122,7 @@
 	<p class="text-xs text-gray-500 mt-1">입력하지 않으면 같은 프로젝트 안에서 중복되지 않는 안전한 영문 이름이 자동 생성됩니다.</p>
 </div>
 
-<!-- 네트워크 + 키페어 -->
+<!-- 네트워크 + 보안 그룹 -->
 <div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 	<div>
 		<label for="create-network" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
@@ -43,14 +143,60 @@
 		</select>
 	</div>
 	<div>
-		{#if s.adminMode}
-			<label class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
-				키페어 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
-			</label>
-			<div class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-500 text-sm">
-				없음 (관리자 생성 — 콘솔 비밀번호 사용)
+		<label for="create-sg" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+			보안 그룹 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+		</label>
+		<select
+			id="create-sg"
+			value={$wizard.securityGroups[0] ?? ''}
+			onchange={e => {
+				const v = (e.target as HTMLSelectElement).value;
+				wizard.update(w => ({ ...w, securityGroups: v ? [v] : [] }));
+			}}
+			class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+		>
+			<option value="">기본</option>
+			{#each s.securityGroups as sg}
+				<option value={sg.name}>{sg.name}</option>
+			{/each}
+		</select>
+	</div>
+</div>
+
+<!-- SSH 접근 -->
+<div class="mb-4">
+	{#if s.adminMode}
+		<p class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+			키페어 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+		</p>
+		<div class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-500 text-sm">
+			없음 (관리자 생성 — 콘솔 비밀번호 사용)
+		</div>
+		<p class="text-xs text-amber-400/80 mt-1">admin 모드에서는 대상 프로젝트의 키페어에 접근할 수 없습니다.</p>
+	{:else}
+		{#if s.githubSshEligible}
+			<div class="mb-2">
+				<ToggleGroup
+					value={$wizard.sshAccessMode}
+					options={[
+						{ value: 'keypair', label: '등록 키페어' },
+						{ value: 'github', label: 'GitHub 사용자' },
+					]}
+					onchange={(value) => s.selectSshAccessMode(value as 'keypair' | 'github')}
+					ariaLabel="SSH 접근 방식"
+				/>
 			</div>
-			<p class="text-xs text-amber-400/80 mt-1">admin 모드에서는 대상 프로젝트의 키페어에 접근할 수 없습니다.</p>
+		{/if}
+		{#if $wizard.sshAccessMode === 'github' && s.githubSshEligible}
+			<Field
+				label="GitHub 사용자 ID"
+				for="github-username"
+				required
+				error={githubUsernameError}
+				help="Ubuntu가 첫 부팅 때 GitHub 공개키를 기본 사용자에 1회 가져옵니다. GitHub 연결과 공개키 등록이 필요합니다."
+			>
+				<TextInput id="github-username" bind:value={$wizard.githubUsername} placeholder="예: octocat" />
+			</Field>
 		{:else}
 			<label for="create-keypair" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
 				키페어 <span class="text-red-400">*</span>
@@ -70,49 +216,7 @@
 				<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
 			{/if}
 		{/if}
-	</div>
-</div>
-
-<!-- 보안 그룹 + 가용 영역 -->
-<div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
-	<div>
-		<label for="create-sg" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
-			보안 그룹 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
-		</label>
-		<select
-			id="create-sg"
-			value={$wizard.securityGroups[0] ?? ''}
-			onchange={e => {
-				const v = (e.target as HTMLSelectElement).value;
-				wizard.update(w => ({ ...w, securityGroups: v ? [v] : [] }));
-			}}
-			class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-		>
-			<option value="">기본</option>
-			{#each s.securityGroups as sg}
-				<option value={sg.name}>{sg.name}</option>
-			{/each}
-		</select>
-	</div>
-	<div>
-		<label for="create-az" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
-			가용 영역 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
-		</label>
-		<select
-			id="create-az"
-			value={$wizard.availabilityZone ?? ''}
-			onchange={e => {
-				const v = (e.target as HTMLSelectElement).value;
-				wizard.update(w => ({ ...w, availabilityZone: v || null }));
-			}}
-			class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-		>
-			<option value="">자동 (nova)</option>
-			{#each s.availabilityZones as az}
-				<option value={az.name}>{az.name}</option>
-			{/each}
-		</select>
-	</div>
+	{/if}
 </div>
 
 <!-- 루트 디스크 -->
@@ -159,9 +263,9 @@
 {#if s.fileStorages.length > 0}
 <div class="mb-4">
 	<div class="flex items-center justify-between mb-1.5">
-		<label class="block text-[11.5px] font-semibold text-gray-300 tracking-tight">
+		<p class="block text-[11.5px] font-semibold text-gray-300 tracking-tight">
 			파일 스토리지 마운트 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
-		</label>
+		</p>
 		<button
 			type="button"
 			onclick={() => wizard.update(w => ({ ...w, dataMounts: [...w.dataMounts, { fileStorageId: '', mountPoint: '', readOnly: false }] }))}
@@ -248,5 +352,59 @@
 			placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
 			class="w-full p-3.5 font-mono text-xs bg-[#0f172a] text-slate-200 rounded-lg border border-gray-700 outline-none min-h-[140px] resize-y leading-relaxed focus:border-blue-500"
 		></textarea>
+	</div>
+	<div class="mt-3 border border-gray-700 rounded-lg p-3 space-y-3">
+		<div class="grid grid-cols-1 @lg/panel:grid-cols-[1fr_auto] gap-2 items-end">
+			<Field label="저장 이름" for="cloud-init-preset-name" help="프리셋은 계정에 암호화되어 저장됩니다.">
+				<TextInput id="cloud-init-preset-name" bind:value={cloudInitPresetName} placeholder="예: 초기 패키지 설치" />
+			</Field>
+			<Button type="button" variant="secondary" size="sm" onclick={saveCloudInitPreset} disabled={cloudInitPresetSaving}>
+				{cloudInitPresetSaving ? '저장 중...' : '현재 내용 저장'}
+			</Button>
+		</div>
+
+		<div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-2">
+			<div>
+				<label for="cloud-init-load" class="block text-[11.5px] font-semibold text-gray-300 mb-1">저장된 항목 불러오기</label>
+				<select
+					id="cloud-init-load"
+					onchange={applyCloudInitSnippet}
+					disabled={cloudInitLibraryLoading || (cloudInitPresets.length === 0 && cloudInitHistory.length === 0)}
+					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm disabled:opacity-50"
+				>
+					<option value="">프리셋 또는 최근 실행 선택</option>
+					{#if cloudInitPresets.length > 0}
+						<optgroup label="저장한 프리셋">
+							{#each cloudInitPresets as snippet}
+								<option value={snippet.id}>{snippet.name}</option>
+							{/each}
+						</optgroup>
+					{/if}
+					{#if cloudInitHistory.length > 0}
+						<optgroup label="최근 실행 (최대 20개)">
+							{#each cloudInitHistory as snippet}
+								<option value={snippet.id}>{snippet.created_at ? new Date(snippet.created_at).toLocaleString() : `실행 #${snippet.id}`}</option>
+							{/each}
+						</optgroup>
+					{/if}
+				</select>
+			</div>
+			{#if cloudInitPresets.length > 0}
+				<div>
+					<p class="block text-[11.5px] font-semibold text-gray-300 mb-1">저장한 프리셋 관리</p>
+					<div class="flex flex-wrap gap-1.5">
+						{#each cloudInitPresets as snippet}
+							<Button type="button" variant="subtle" size="sm" onclick={() => deleteCloudInitSnippet(snippet.id)}>
+								{snippet.name} 삭제
+							</Button>
+						{/each}
+					</div>
+				</div>
+			{/if}
+		</div>
+		{#if cloudInitLibraryError}
+			<Alert tone="danger">{cloudInitLibraryError}</Alert>
+		{/if}
+		<p class="text-[11px] text-gray-500">실행에 성공한 비어 있지 않은 cloud-init은 최근 실행 이력에 자동 저장됩니다.</p>
 	</div>
 </div>

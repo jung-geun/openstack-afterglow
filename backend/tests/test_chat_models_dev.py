@@ -71,7 +71,9 @@ class TestModelsDevCatalog:
                                     "reasoning": True,
                                     "tool_call": True,
                                     "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]},
-                                    "reasoning_options": [{"type": "effort", "values": ["low", "high"]}],
+                                    "reasoning_options": [
+                                        {"type": "effort", "values": ["low", "xhigh", "max", "ultra"]}
+                                    ],
                                     "limit": {"context": 200000, "output": 64000},
                                     "cost": {"input": 5, "output": 25},
                                 }
@@ -86,7 +88,7 @@ class TestModelsDevCatalog:
         assert caps["vision"] is True and caps["reasoning"] is True and caps["tool_call"] is True
         assert caps["attachment"] is True
         assert caps["modalities"] == {"input": ["text", "image", "pdf"], "output": ["text"]}
-        assert caps["reasoning_options"] == [{"type": "effort", "values": ["low", "high"]}]
+        assert caps["reasoning_options"] == [{"type": "effort", "values": ["low", "xhigh", "max", "ultra"]}]
         assert caps["context_limit"] == 200000
         # provider_detail 이 능력을 노출
         detail = models_dev.provider_detail(catalog, "anthropic")

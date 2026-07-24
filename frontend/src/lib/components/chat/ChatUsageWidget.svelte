@@ -2,36 +2,27 @@
 	import type { ChatUsage } from '$lib/api/chatTree';
 	let { usage }: { usage: ChatUsage } = $props();
 
-	const monthTokens = $derived(
-		(usage.month_prompt_tokens ?? 0) + (usage.month_completion_tokens ?? 0)
-	);
-	const credit = $derived(usage.month_credited_cost ?? 0);
 	const quotaMax = $derived(usage.quota_max ?? 0);
 	const quotaUsed = $derived(usage.quota_used ?? 0);
 	const hasQuota = $derived(quotaMax > 0);
-	const quotaPct = $derived(hasQuota ? Math.min(100, Math.round((quotaUsed / quotaMax) * 100)) : 0);
-	const quotaTone = $derived(quotaPct >= 90 ? 'danger' : quotaPct >= 70 ? 'warning' : 'ok');
+	const quotaPct = $derived(hasQuota ? Math.max(0, Math.round((quotaUsed / quotaMax) * 100)) : null);
+	const quotaBarPct = $derived(quotaPct === null ? 0 : Math.min(100, quotaPct));
+	const quotaTone = $derived(quotaPct !== null && quotaPct >= 90 ? 'danger' : quotaPct !== null && quotaPct >= 70 ? 'warning' : 'ok');
 
-	function fmt(n: number): string {
-		return n.toLocaleString('en-US');
-	}
-	function fmtCredit(n: number): string {
-		return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+	function fmtPercent(n: number): string {
+		return `${Math.max(0, Math.round(n))}%`;
 	}
 </script>
 
-<div class="usage" title="이번 달 사용량 (입력+출력 토큰 · 크레딧)">
+<div class="usage" title={hasQuota ? `이번 달 월 쿼터 사용률 ${fmtPercent(quotaPct!)}` : '월 쿼터가 설정되지 않았습니다'}>
 	<div class="usage-line">
-		<span class="usage-label">이번 달</span>
-		<span class="usage-val">{fmt(monthTokens)} 토큰</span>
-		<span class="usage-sep">·</span>
-		<span class="usage-val">크레딧 {fmtCredit(credit)}</span>
+		<span class="usage-label">이번 달 쿼터</span>
+		<span class="usage-val">{hasQuota ? `${fmtPercent(quotaPct!)} 사용` : '미설정'}</span>
 	</div>
 	{#if hasQuota}
-		<div class="bar" aria-label="월 쿼터 사용률 {quotaPct}%">
-			<div class="bar-fill" data-tone={quotaTone} style="width: {quotaPct}%"></div>
+		<div class="bar" aria-label="월 쿼터 사용률 {fmtPercent(quotaPct!)}">
+			<div class="bar-fill" data-tone={quotaTone} style="width: {quotaBarPct}%"></div>
 		</div>
-		<div class="quota-txt">{fmt(quotaUsed)} / {fmt(quotaMax)} ({quotaPct}%)</div>
 	{/if}
 </div>
 
@@ -57,9 +48,6 @@
 	.usage-val {
 		font-variant-numeric: tabular-nums;
 	}
-	.usage-sep {
-		color: var(--color-ink-3);
-	}
 	.bar {
 		width: 8rem;
 		height: 0.3rem;
@@ -78,10 +66,5 @@
 	}
 	.bar-fill[data-tone='danger'] {
 		background: var(--color-state-danger);
-	}
-	.quota-txt {
-		font-size: 0.66rem;
-		color: var(--color-ink-3);
-		font-variant-numeric: tabular-nums;
 	}
 </style>

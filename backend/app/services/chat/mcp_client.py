@@ -1,57 +1,71 @@
 """MCP 서버 연동 — 등록된 MCP 서버의 tool 을 발견(list)·실행(call).
 
 우리 그래프는 자체 tool 루프(litellm tools)를 쓰므로 langchain-mcp-adapters 없이 mcp SDK 를 직접 쓴다.
-transport: streamable_http(기본)·sse 지원(stdio 미지원 — 서버 프로세스 spawn 은 보안상 제외).
+transport: streamable HTTP only (legacy SSE·stdio 미지원 — 서버 프로세스 spawn 과 redirect-based auth forwarding을 방지).
 
 ⚠️ 보안:
-- 연결 전 ssrf.validate_url 로 내부/사설/메타데이터 IP 차단(사용자/관리자 등록 URL 신뢰 안 함).
+- SafeAsyncTransport가 실제 socket을 DNS-pinned public address로 열고, redirect·env proxy·압축 응답을 거부한다.
 - 모든 예외는 밖으로 던지지 않고 빈 목록/안전한 문자열 반환(MCP 장애가 채팅을 막지 않음).
-- 연결·호출 타임아웃 + 응답 크기 상한.
+- 연결·호출 타임아웃 + raw response byte 상한.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlsplit
+
+import httpx
 
 from app.services.chat import ssrf
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 15
-_MAX_TOOLS_PER_SERVER = 40
 _MAX_RESULT_CHARS = 6000
+_MAX_TOOLS_PER_SERVER = 40
+_MAX_RESPONSE_BYTES = 1024 * 1024
+
+
+def _safe_http_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Factory required by MCP's streamable transport; never inherit SDK defaults."""
+    request_headers = dict(headers or {})
+    request_headers["Accept-Encoding"] = "identity"
+    return httpx.AsyncClient(
+        transport=ssrf.SafeAsyncTransport(max_response_bytes=_MAX_RESPONSE_BYTES),
+        headers=request_headers,
+        timeout=timeout or httpx.Timeout(_TIMEOUT_SECONDS),
+        follow_redirects=False,
+        trust_env=False,
+        auth=auth,
+    )
 
 
 def _open(server: dict):
-    """transport 에 맞는 mcp 클라이언트 async context manager 반환. 미지원 시 ValueError."""
+    """Return a hardened streamable-HTTP MCP context manager."""
     transport = (server.get("transport") or "http").lower()
+    if transport not in ("http", "streamable_http", "streamable-http"):
+        raise ValueError("streamable HTTP MCP transport is required")
     url = server.get("url") or ""
+    if urlsplit(url).scheme.lower() != "https":
+        raise ValueError("MCP URL must use HTTPS")
     headers = server.get("headers") or {}
-    if transport in ("http", "streamable_http", "streamable-http"):
-        from mcp.client.streamable_http import streamablehttp_client
+    if not isinstance(headers, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
+    ):
+        raise ValueError("MCP headers must be string pairs")
+    from mcp.client.streamable_http import streamablehttp_client
 
-        return streamablehttp_client(url, headers=headers, timeout=_TIMEOUT_SECONDS)
-    if transport == "sse":
-        from mcp.client.sse import sse_client
-
-        return sse_client(url, headers=headers, timeout=_TIMEOUT_SECONDS)
-    raise ValueError(f"지원하지 않는 MCP transport: {transport}")
-
-
-async def _validate(server: dict) -> bool:
-    url = server.get("url") or ""
-    if not url:
-        return False
-    try:
-        await asyncio.to_thread(ssrf.validate_url, url)
-        return True
-    except ssrf.SsrfBlocked:
-        logger.warning("MCP URL SSRF 차단 name=%s", server.get("name"))
-        return False
-    except Exception:
-        logger.warning("MCP URL 검증 실패 name=%s", server.get("name"), exc_info=True)
-        return False
+    return streamablehttp_client(
+        url,
+        headers=headers,
+        timeout=_TIMEOUT_SECONDS,
+        httpx_client_factory=_safe_http_client,
+    )
 
 
 def _content_to_str(result) -> str:
@@ -68,8 +82,6 @@ def _content_to_str(result) -> str:
 
 async def list_tools(server: dict) -> list[dict]:
     """MCP 서버의 tool 목록 → [{name, description, input_schema}]. 실패 시 빈 목록."""
-    if not await _validate(server):
-        return []
 
     async def _run() -> list[dict]:
         from mcp import ClientSession
@@ -99,8 +111,6 @@ async def list_tools(server: dict) -> list[dict]:
 
 async def call_tool(server: dict, tool_name: str, args: dict) -> str:
     """MCP tool 실행 → 결과 텍스트. 실패 시 안전한 문자열."""
-    if not await _validate(server):
-        return "허용되지 않은 MCP 서버 URL 입니다."
 
     async def _run() -> str:
         from mcp import ClientSession

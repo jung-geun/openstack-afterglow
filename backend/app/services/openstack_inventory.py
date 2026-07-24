@@ -58,10 +58,11 @@ async def collect_instance_data(
     try:
 
         def _collect():
-            # 플레이버 맵
-            flavors = {}
-            for f in conn.compute.flavors(details=True):
-                flavors[f.id] = f
+            from app.services.nova import list_flavors
+
+            flavor_infos = list_flavors(conn)
+            flavors_by_id = {flavor.id: flavor for flavor in flavor_infos}
+            flavors_by_name = {flavor.name: flavor for flavor in flavor_infos}
 
             # 프로젝트 맵
             projects = {}
@@ -85,16 +86,18 @@ async def collect_instance_data(
             # 인스턴스 수집
             result = []
             for s in conn.compute.servers(all_projects=True, details=True):
-                # 플레이버 정보
-                fl_id = ""
-                fl_name = ""
-                if isinstance(s.flavor, dict):
-                    fl_id = s.flavor.get("id", "")
-                    fl_name = s.flavor.get("original_name", "") or s.flavor.get("name", "")
-                fl = flavors.get(fl_id)
-                vcpus = fl.vcpus if fl else 0
-                ram_mb = fl.ram if fl else 0
-                extra_specs = fl.extra_specs if fl else {}
+                # 서버 응답의 embedded flavor snapshot을 우선 사용하고, UUID 또는 이름으로
+                # 상세 flavor를 보충한다. Nova 2.47+에서는 id에 original_name이 올 수 있다.
+                server_flavor = s.flavor if hasattr(s.flavor, "get") else {}
+                fl_id = server_flavor.get("id", "")
+                fl_name = server_flavor.get("original_name", "") or server_flavor.get("name", "")
+                fl = flavors_by_id.get(fl_id) or flavors_by_name.get(fl_name) or flavors_by_name.get(fl_id)
+                embedded_vcpus = server_flavor.get("vcpus")
+                embedded_ram = server_flavor.get("ram")
+                embedded_extra_specs = server_flavor.get("extra_specs") or {}
+                vcpus = embedded_vcpus if embedded_vcpus is not None else (fl.vcpus if fl else 0)
+                ram_mb = embedded_ram if embedded_ram is not None else (fl.ram if fl else 0)
+                extra_specs = embedded_extra_specs or (fl.extra_specs if fl else {})
 
                 status = (s.status or "").upper()
                 resource_allocated = notion_sync.is_resource_allocated_status(status)

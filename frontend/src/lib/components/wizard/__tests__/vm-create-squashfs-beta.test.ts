@@ -190,7 +190,7 @@ describe('VM create squashfs beta workflow contract', () => {
 		expect(normalizeSchedulingForBeta({ haDeploy: true }, 'ha')).toBe('ha');
 		expect(storeSource).toContain('/api/v1/libraries/squashfs/consume');
 		expect(storeSource).toContain('normalizeSchedulingForBeta(betaState, w.scheduling)');
-		expect(storeSource).toContain('w.instanceName.trim() || null');
+		expect(storeSource).toContain('normalizeRequestedInstanceName(w.instanceName)');
 	});
 
 	it('hides the HA option in the strategy step unless the beta flag is enabled', async () => {

@@ -61,6 +61,25 @@ async def test_create_security_group_rule(client, mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_create_security_group_rule_rejects_port_in_remote_cidr_field(client, mock_conn):
+    with patch("app.api.network.security_groups.neutron.create_security_group_rule") as create_rule:
+        resp = await client.post(
+            "/api/v1/security-groups/sg-1/rules",
+            json={
+                "direction": "ingress",
+                "protocol": "tcp",
+                "port_range_min": 9000,
+                "port_range_max": 9000,
+                "remote_ip_prefix": "9000",
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "CIDR" in resp.text
+    create_rule.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_delete_security_group_rule(client, mock_conn):
     with patch("app.api.network.security_groups.neutron.delete_security_group_rule", return_value=None):
         resp = await client.delete("/api/v1/security-groups/sg-1/rules/rule-1")

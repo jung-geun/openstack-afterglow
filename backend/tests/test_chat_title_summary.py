@@ -6,6 +6,7 @@
 - 정상 경로: 요약 저장 + 시스템 과금(source="system", charge_wallet=False → 사용자 지갑 미차감)
 """
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -74,7 +75,10 @@ class TestGenerateTitle:
                 "provider_type": "openai",
                 "api_base": None,
                 "api_key": "sk-x",
-                "margin_multiplier": 1.0,
+                "margin_multiplier": Decimal("1.0"),
+                "input_price_per_token": Decimal("0.000002"),
+                "output_price_per_token": Decimal("0.000008"),
+                "price_source": "manual",
             }
 
         async def fake_list(conv_id, **kw):
@@ -112,3 +116,4 @@ class TestGenerateTitle:
         assert charged["charge_wallet"] is False
         assert charged["user_id"] == "u1"
         assert charged["model_name"] == "gpt-4o-mini"
+        assert charged["event_id"] == "title:c1"

@@ -15,8 +15,24 @@ def test_mark_db_unhealthy_blocks_is_db_available():
 
         assert db_mod.is_db_available() is True
 
-        db_mod.mark_db_unhealthy(seconds=30)
+        db_mod.mark_db_unhealthy(RuntimeError(2003, "connection refused"), seconds=30)
         assert db_mod.is_db_available() is False
+    finally:
+        db_mod._engine = original_engine
+        db_mod._db_unhealthy_until = original_until
+
+
+def test_schema_error_does_not_open_database_circuit_breaker():
+    """A missing-column query must not make unrelated DB routes return 503."""
+    import app.database as db_mod
+
+    original_engine = db_mod._engine
+    original_until = db_mod._db_unhealthy_until
+    try:
+        db_mod._engine = MagicMock()
+        db_mod._db_unhealthy_until = 0.0
+        assert db_mod.mark_db_unhealthy(RuntimeError(1054, "unknown column")) is False
+        assert db_mod.is_db_available() is True
     finally:
         db_mod._engine = original_engine
         db_mod._db_unhealthy_until = original_until
@@ -123,7 +139,7 @@ def test_mark_db_unhealthy_uses_init_db_default():
         db_mod._default_unhealthy_seconds = 7
 
         before = time.time()
-        db_mod.mark_db_unhealthy()  # 인자 없이 호출
+        db_mod.mark_db_unhealthy(RuntimeError(2003, "connection refused"))
         elapsed = db_mod._db_unhealthy_until - before
         assert 6.5 <= elapsed <= 7.5
     finally:

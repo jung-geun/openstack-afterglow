@@ -47,6 +47,7 @@
 
 	const ar = createAutoRefresh(() => fetchRouter(), {
 		storageKey: 'dashboard-network-router-detail',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],

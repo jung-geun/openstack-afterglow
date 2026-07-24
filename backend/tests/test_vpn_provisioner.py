@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services import vpn_provisioner
+from app.services import waygate_provisioner as vpn_provisioner
 
 
 def _make_flavor(name: str, flavor_id: str) -> MagicMock:
@@ -22,15 +22,15 @@ def _make_flavor(name: str, flavor_id: str) -> MagicMock:
 
 def _make_settings(**overrides) -> SimpleNamespace:
     base = dict(
-        vpn_provider_network_id="net-provider-1",
-        vpn_flavor_name="cpu.1c_2g",
-        vpn_flavor_id="",
-        vpn_image_id="img-ubuntu-1",
-        vpn_floating_network_id="",
-        vpn_callback_base_url="https://backend.example.com",
-        vpn_key_name="",
-        vpn_default_tunnel_cidr="10.8.0.0/24",
-        vpn_default_listen_port=51820,
+        waygate_provider_network_id="net-provider-1",
+        waygate_flavor_name="cpu.1c_2g",
+        waygate_flavor_id="",
+        waygate_image_id="img-ubuntu-1",
+        waygate_floating_network_id="",
+        waygate_callback_base_url="https://backend.example.com",
+        waygate_key_name="",
+        waygate_default_tunnel_cidr="10.8.0.0/24",
+        waygate_default_listen_port=51820,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -108,7 +108,7 @@ class TestEnsureWireguardSg:
         conn = MagicMock()
         existing_sg = {
             "id": "sg-existing-1",
-            "name": "afterglow-vpn-wireguard",
+            "name": "afterglow-waygate-wireguard",
             "rules": [
                 {
                     "direction": "ingress",
@@ -133,7 +133,7 @@ class TestEnsureWireguardSg:
     def test_adds_rule_when_sg_exists_but_rule_missing(self):
         """SG는 있지만 해당 포트 규칙이 없으면 규칙만 추가한다."""
         conn = MagicMock()
-        existing_sg = {"id": "sg-existing-1", "name": "afterglow-vpn-wireguard", "rules": []}
+        existing_sg = {"id": "sg-existing-1", "name": "afterglow-waygate-wireguard", "rules": []}
         with (
             patch("app.services.neutron.list_security_groups", return_value=[existing_sg]),
             patch("app.services.neutron.create_security_group") as mock_create_sg,
@@ -159,35 +159,35 @@ class TestProvisionVpnServerSuccess:
         fake_server = MagicMock(id="vm-123")
 
         with (
-            patch("app.services.vpn_provisioner.get_settings", return_value=_make_settings()),
+            patch("app.services.waygate_provisioner.get_settings", return_value=_make_settings()),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch(
-                "app.services.vpn_db.get_server_by_id",
-                new=AsyncMock(return_value={"id": "server-1", "name": "vpn-gw-1", "listen_port": 51820}),
+                "app.services.waygate_db.get_server_by_id",
+                new=AsyncMock(return_value={"id": "server-1", "name": "waygate-gw-1", "listen_port": 51820}),
             ),
-            patch("app.services.vpn_provisioner._resolve_flavor_id", return_value="flavor-abc"),
-            patch("app.services.vpn_provisioner._ensure_wireguard_sg", return_value="sg-1"),
+            patch("app.services.waygate_provisioner._resolve_flavor_id", return_value="flavor-abc"),
+            patch("app.services.waygate_provisioner._ensure_wireguard_sg", return_value="sg-1"),
             patch(
                 "app.services.neutron.create_port",
                 return_value={"id": "port-1"},
             ) as mock_create_port,
             patch(
-                "app.services.vpn_agent_auth.issue_report_token",
+                "app.services.waygate_agent_auth.issue_report_token",
                 new=AsyncMock(return_value="bootstrap-token-abc"),
             ),
-            patch("app.services.vpn_config.render_agent_userdata", return_value="base64-userdata"),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_config.render_agent_userdata", return_value="base64-userdata"),
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
         ):
             conn.compute.create_server = MagicMock(return_value=fake_server)
             conn.compute.get_server = MagicMock(return_value=fake_server)
 
             with (
-                patch("app.services.vpn_provisioner._wait_for_active", new=AsyncMock()),
-                patch("app.services.vpn_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
+                patch("app.services.waygate_provisioner._wait_for_active", new=AsyncMock()),
+                patch("app.services.waygate_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
             ):
-                await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+                await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
-        mock_create_port.assert_called_once_with(conn, "net-provider-1", "vpn-gw-1-port", ["sg-1"])
+        mock_create_port.assert_called_once_with(conn, "net-provider-1", "waygate-gw-1-port", ["sg-1"])
         conn.compute.create_server.assert_called_once()
         create_kwargs = conn.compute.create_server.call_args.kwargs
         assert create_kwargs["image_id"] == "img-ubuntu-1"
@@ -211,25 +211,25 @@ class TestProvisionVpnServerSuccess:
 
         with (
             patch(
-                "app.services.vpn_provisioner.get_settings",
-                return_value=_make_settings(vpn_floating_network_id="net-external-1"),
+                "app.services.waygate_provisioner.get_settings",
+                return_value=_make_settings(waygate_floating_network_id="net-external-1"),
             ),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch(
-                "app.services.vpn_db.get_server_by_id",
-                new=AsyncMock(return_value={"id": "server-1", "name": "vpn-gw-1", "listen_port": 51820}),
+                "app.services.waygate_db.get_server_by_id",
+                new=AsyncMock(return_value={"id": "server-1", "name": "waygate-gw-1", "listen_port": 51820}),
             ),
-            patch("app.services.vpn_provisioner._resolve_flavor_id", return_value="flavor-abc"),
-            patch("app.services.vpn_provisioner._ensure_wireguard_sg", return_value="sg-1"),
+            patch("app.services.waygate_provisioner._resolve_flavor_id", return_value="flavor-abc"),
+            patch("app.services.waygate_provisioner._ensure_wireguard_sg", return_value="sg-1"),
             patch("app.services.neutron.create_port", return_value={"id": "port-1"}),
             patch(
-                "app.services.vpn_agent_auth.issue_report_token",
+                "app.services.waygate_agent_auth.issue_report_token",
                 new=AsyncMock(return_value="bootstrap-token-abc"),
             ),
-            patch("app.services.vpn_config.render_agent_userdata", return_value="base64-userdata"),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_config.render_agent_userdata", return_value="base64-userdata"),
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
             patch(
-                "app.services.vpn_provisioner._allocate_new_fip",
+                "app.services.waygate_provisioner._allocate_new_fip",
                 new=AsyncMock(return_value=("203.0.113.9", "fip-1")),
             ) as mock_alloc_fip,
         ):
@@ -237,10 +237,10 @@ class TestProvisionVpnServerSuccess:
             conn.compute.get_server = MagicMock(return_value=fake_server)
 
             with (
-                patch("app.services.vpn_provisioner._wait_for_active", new=AsyncMock()),
-                patch("app.services.vpn_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
+                patch("app.services.waygate_provisioner._wait_for_active", new=AsyncMock()),
+                patch("app.services.waygate_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
             ):
-                await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+                await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
         mock_alloc_fip.assert_called_once_with(conn, "vm-123", "net-external-1")
         status_calls = mock_update_status.call_args_list
@@ -262,21 +262,21 @@ class TestProvisionVpnServerRollback:
         fake_server = MagicMock(id="vm-123")
 
         with (
-            patch("app.services.vpn_provisioner.get_settings", return_value=_make_settings()),
+            patch("app.services.waygate_provisioner.get_settings", return_value=_make_settings()),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch(
-                "app.services.vpn_db.get_server_by_id",
-                new=AsyncMock(return_value={"id": "server-1", "name": "vpn-gw-1", "listen_port": 51820}),
+                "app.services.waygate_db.get_server_by_id",
+                new=AsyncMock(return_value={"id": "server-1", "name": "waygate-gw-1", "listen_port": 51820}),
             ),
-            patch("app.services.vpn_provisioner._resolve_flavor_id", return_value="flavor-abc"),
-            patch("app.services.vpn_provisioner._ensure_wireguard_sg", return_value="sg-1"),
+            patch("app.services.waygate_provisioner._resolve_flavor_id", return_value="flavor-abc"),
+            patch("app.services.waygate_provisioner._ensure_wireguard_sg", return_value="sg-1"),
             patch("app.services.neutron.create_port", return_value={"id": "port-1"}),
             patch(
-                "app.services.vpn_agent_auth.issue_report_token",
+                "app.services.waygate_agent_auth.issue_report_token",
                 new=AsyncMock(return_value="bootstrap-token-abc"),
             ),
-            patch("app.services.vpn_config.render_agent_userdata", return_value="base64-userdata"),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_config.render_agent_userdata", return_value="base64-userdata"),
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
             patch("app.services.nova.delete_server") as mock_delete_server,
             patch("app.services.nova.wait_server_deleted") as mock_wait_deleted,
             patch("app.services.neutron.delete_port") as mock_delete_port,
@@ -284,10 +284,10 @@ class TestProvisionVpnServerRollback:
             conn.compute.create_server = MagicMock(return_value=fake_server)
 
             with patch(
-                "app.services.vpn_provisioner._wait_for_active",
+                "app.services.waygate_provisioner._wait_for_active",
                 new=AsyncMock(side_effect=RuntimeError("VM never became ACTIVE")),
             ):
-                await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+                await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
         # 롤백: VM 삭제 + 포트 삭제 (SG는 idempotent 공유 리소스라 삭제하지 않음)
         mock_delete_server.assert_called_once_with(conn, "vm-123")
@@ -306,18 +306,18 @@ class TestProvisionVpnServerRollback:
 
         with (
             patch(
-                "app.services.vpn_provisioner.get_settings",
-                return_value=_make_settings(vpn_provider_network_id=""),
+                "app.services.waygate_provisioner.get_settings",
+                return_value=_make_settings(waygate_provider_network_id=""),
             ),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch(
-                "app.services.vpn_db.get_server_by_id",
-                new=AsyncMock(return_value={"id": "server-1", "name": "vpn-gw-1", "listen_port": 51820}),
+                "app.services.waygate_db.get_server_by_id",
+                new=AsyncMock(return_value={"id": "server-1", "name": "waygate-gw-1", "listen_port": 51820}),
             ),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
             patch("app.services.neutron.create_port") as mock_create_port,
         ):
-            await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+            await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
         mock_create_port.assert_not_called()
         final_call = mock_update_status.call_args_list[-1]
@@ -327,15 +327,15 @@ class TestProvisionVpnServerRollback:
     async def test_openstack_connection_failure_sets_error_status(self):
         """keystone 연결 자체가 실패하면 리소스 생성 없이 즉시 ERROR."""
         with (
-            patch("app.services.vpn_provisioner.get_settings", return_value=_make_settings()),
+            patch("app.services.waygate_provisioner.get_settings", return_value=_make_settings()),
             patch(
                 "app.services.keystone.get_admin_connection_for_project",
                 side_effect=RuntimeError("keystone unreachable"),
             ),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
             patch("app.services.neutron.create_port") as mock_create_port,
         ):
-            await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+            await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
         mock_create_port.assert_not_called()
         final_call = mock_update_status.call_args_list[-1]
@@ -347,12 +347,12 @@ class TestProvisionVpnServerRollback:
         conn = MagicMock()
         conn.close = MagicMock()
         with (
-            patch("app.services.vpn_provisioner.get_settings", return_value=_make_settings()),
+            patch("app.services.waygate_provisioner.get_settings", return_value=_make_settings()),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
-            patch("app.services.vpn_db.get_server_by_id", new=AsyncMock(return_value=None)),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_db.get_server_by_id", new=AsyncMock(return_value=None)),
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
         ):
-            await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+            await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
         mock_update_status.assert_not_called()
 
     @pytest.mark.asyncio
@@ -364,28 +364,28 @@ class TestProvisionVpnServerRollback:
 
         with (
             patch(
-                "app.services.vpn_provisioner.get_settings",
-                return_value=_make_settings(vpn_floating_network_id="net-external-1"),
+                "app.services.waygate_provisioner.get_settings",
+                return_value=_make_settings(waygate_floating_network_id="net-external-1"),
             ),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch(
-                "app.services.vpn_db.get_server_by_id",
-                new=AsyncMock(return_value={"id": "server-1", "name": "vpn-gw-1", "listen_port": 51820}),
+                "app.services.waygate_db.get_server_by_id",
+                new=AsyncMock(return_value={"id": "server-1", "name": "waygate-gw-1", "listen_port": 51820}),
             ),
-            patch("app.services.vpn_provisioner._resolve_flavor_id", return_value="flavor-abc"),
-            patch("app.services.vpn_provisioner._ensure_wireguard_sg", return_value="sg-1"),
+            patch("app.services.waygate_provisioner._resolve_flavor_id", return_value="flavor-abc"),
+            patch("app.services.waygate_provisioner._ensure_wireguard_sg", return_value="sg-1"),
             patch("app.services.neutron.create_port", return_value={"id": "port-1"}),
             patch(
-                "app.services.vpn_agent_auth.issue_report_token",
+                "app.services.waygate_agent_auth.issue_report_token",
                 new=AsyncMock(return_value="bootstrap-token-abc"),
             ),
-            patch("app.services.vpn_config.render_agent_userdata", return_value="base64-userdata"),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_config.render_agent_userdata", return_value="base64-userdata"),
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
             patch("app.services.nova.delete_server") as mock_delete_server,
             patch("app.services.nova.wait_server_deleted"),
             patch("app.services.neutron.delete_port") as mock_delete_port,
             patch(
-                "app.services.vpn_provisioner._allocate_new_fip",
+                "app.services.waygate_provisioner._allocate_new_fip",
                 new=AsyncMock(side_effect=RuntimeError("no floating IPs available")),
             ),
         ):
@@ -393,10 +393,10 @@ class TestProvisionVpnServerRollback:
             conn.compute.get_server = MagicMock(return_value=fake_server)
 
             with (
-                patch("app.services.vpn_provisioner._wait_for_active", new=AsyncMock()),
-                patch("app.services.vpn_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
+                patch("app.services.waygate_provisioner._wait_for_active", new=AsyncMock()),
+                patch("app.services.waygate_provisioner._extract_fixed_ip", return_value="10.0.0.5"),
             ):
-                await vpn_provisioner.provision_vpn_server("project-1", "server-1", "user-1", "tester")
+                await vpn_provisioner.provision_waygate_server("project-1", "server-1", "user-1", "tester")
 
         mock_delete_server.assert_called_once_with(conn, "vm-123")
         mock_delete_port.assert_called_once_with(conn, "port-1")
@@ -421,16 +421,16 @@ class TestDeleteVpnServer:
         }
 
         with (
-            patch("app.services.vpn_db.get_server", new=AsyncMock(return_value=server_record)),
+            patch("app.services.waygate_db.get_server", new=AsyncMock(return_value=server_record)),
             patch("app.services.keystone.get_admin_connection_for_project", return_value=conn),
             patch("app.services.neutron.cleanup_instance_fips") as mock_cleanup_fips,
             patch("app.services.nova.delete_server") as mock_delete_server,
             patch("app.services.nova.wait_server_deleted") as mock_wait_deleted,
             patch("app.services.neutron.delete_port") as mock_delete_port,
-            patch("app.services.vpn_agent_auth.revoke_report_token_by_server", new=AsyncMock()) as mock_revoke,
-            patch("app.services.vpn_db.soft_delete_server", new=AsyncMock(return_value=True)) as mock_soft_delete,
+            patch("app.services.waygate_agent_auth.revoke_report_token_by_server", new=AsyncMock()) as mock_revoke,
+            patch("app.services.waygate_db.soft_delete_server", new=AsyncMock(return_value=True)) as mock_soft_delete,
         ):
-            await vpn_provisioner.delete_vpn_server("project-1", "server-1", "user-1")
+            await vpn_provisioner.delete_waygate_server("project-1", "server-1", "user-1")
 
         mock_cleanup_fips.assert_called_once_with(conn, "vm-123")
         mock_delete_server.assert_called_once_with(conn, "vm-123")
@@ -443,23 +443,23 @@ class TestDeleteVpnServer:
     @pytest.mark.asyncio
     async def test_delete_noop_when_server_not_found(self):
         with (
-            patch("app.services.vpn_db.get_server", new=AsyncMock(return_value=None)),
+            patch("app.services.waygate_db.get_server", new=AsyncMock(return_value=None)),
             patch("app.services.keystone.get_admin_connection_for_project") as mock_conn,
         ):
-            await vpn_provisioner.delete_vpn_server("project-1", "server-1", "user-1")
+            await vpn_provisioner.delete_waygate_server("project-1", "server-1", "user-1")
         mock_conn.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_connection_failure_sets_error_status(self):
         server_record = {"server_vm_id": "vm-123", "fip_id": None, "provider_port_id": "port-1"}
         with (
-            patch("app.services.vpn_db.get_server", new=AsyncMock(return_value=server_record)),
+            patch("app.services.waygate_db.get_server", new=AsyncMock(return_value=server_record)),
             patch(
                 "app.services.keystone.get_admin_connection_for_project",
                 side_effect=RuntimeError("keystone unreachable"),
             ),
-            patch("app.services.vpn_db.update_server_status", new=AsyncMock()) as mock_update_status,
+            patch("app.services.waygate_db.update_server_status", new=AsyncMock()) as mock_update_status,
         ):
-            await vpn_provisioner.delete_vpn_server("project-1", "server-1", "user-1")
+            await vpn_provisioner.delete_waygate_server("project-1", "server-1", "user-1")
         final_call = mock_update_status.call_args_list[-1]
         assert final_call.args[1] == "ERROR"

@@ -37,6 +37,7 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   creating:            { tone: 'warning', pulse: true },
   PENDING_DELETE:      { tone: 'warning', pulse: true },
   DELETING:            { tone: 'warning', pulse: true },
+  chat_running:        { tone: 'info', pulse: true, label: '실행 중' },
   deleting:            { tone: 'warning', pulse: true },
   detaching:           { tone: 'warning', pulse: true },
   DETACHING:           { tone: 'warning', pulse: true },

@@ -1,5 +1,10 @@
 export function pruneSelection(selected: Set<string>, items: { id: string }[]): Set<string> {
-	return new Set([...selected].filter((id) => items.some((i) => i.id === id)));
+	return pruneSelectionByIds(selected, items.map((item) => item.id));
+}
+
+export function pruneSelectionByIds(selected: Set<string>, ids: Iterable<string>): Set<string> {
+	const availableIds = new Set(ids);
+	return new Set([...selected].filter((id) => availableIds.has(id)));
 }
 
 export function removeFromSelection(selected: Set<string>, ids: string[]): Set<string> {

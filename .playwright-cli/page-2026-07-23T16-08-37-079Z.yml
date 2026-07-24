@@ -1,0 +1,78 @@
+- generic [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: LUMEN / 프로젝트
+      - generic [ref=e6]: "1"
+    - button "검색 (⌘K)" [ref=e7]:
+      - generic [ref=e10]: 리소스 검색...
+      - generic [ref=e11]: ⌘K
+    - generic [ref=e12]:
+      - button "Sample Cloud Demo" [ref=e15]
+      - button "시스템 테마" [ref=e21]
+      - button "알림" [ref=e25]
+      - link "DE" [ref=e28] [cursor=pointer]:
+        - /url: /dashboard/account
+      - button "로그아웃" [ref=e29]
+  - status [ref=e32]:
+    - generic [ref=e33]:
+      - generic [ref=e34]: 튜토리얼
+      - generic [ref=e36]: 체험 모드입니다. 실제 리소스는 생성되지 않습니다.
+    - button "종료" [ref=e38] [cursor=pointer]
+  - main [ref=e39]:
+    - generic [ref=e40]:
+      - complementary [ref=e41]:
+        - link "DMS Cloud" [ref=e44] [cursor=pointer]:
+          - /url: /dashboard
+        - button "VM 생성" [ref=e46] [cursor=pointer]
+        - navigation [ref=e49]:
+          - button "대시보드 ▸" [ref=e51]:
+            - generic [ref=e52]: 대시보드
+            - generic [ref=e56]: ▸
+          - link "토폴로지" [ref=e57] [cursor=pointer]:
+            - /url: /dashboard/network/topology
+          - button "Compute ▸" [ref=e61]:
+            - generic [ref=e62]: Compute
+            - generic [ref=e66]: ▸
+          - button "볼륨 ▸" [ref=e68]:
+            - generic [ref=e69]: 볼륨
+            - generic [ref=e73]: ▸
+          - button "File Storage ▸" [ref=e75]:
+            - generic [ref=e76]: File Storage
+            - generic [ref=e80]: ▸
+          - button "컨테이너 ▸" [ref=e82]:
+            - generic [ref=e83]: 컨테이너
+            - generic [ref=e87]: ▸
+          - button "Database ▸" [ref=e89]:
+            - generic [ref=e90]: Database
+            - generic [ref=e94]: ▸
+          - button "Object Storage ▸" [ref=e96]:
+            - generic [ref=e97]: Object Storage
+            - generic [ref=e101]: ▸
+          - button "네트워크 ▸" [ref=e103]:
+            - generic [ref=e104]: 네트워크
+            - generic [ref=e108]: ▸
+        - generic [ref=e110]:
+          - generic [ref=e111]: 프로젝트
+          - generic [ref=e112]: Sample Cloud Demo
+          - link "프로젝트 설정" [ref=e113] [cursor=pointer]:
+            - /url: /dashboard/project-settings
+      - main [ref=e117]:
+        - generic [ref=e118]:
+          - complementary [ref=e119]:
+            - generic [ref=e120]:
+              - generic [ref=e121]: Lumen
+              - button "사이드바 접기" [ref=e122] [cursor=pointer]
+            - generic [ref=e125]:
+              - button "새 채팅" [ref=e126] [cursor=pointer]
+              - button "프로젝트" [ref=e129] [cursor=pointer]
+            - button "대화 검색" [ref=e132] [cursor=pointer]:
+              - generic [ref=e137]: ⌘ I
+            - paragraph [ref=e139]: 대화가 없습니다
+            - button "에이전트" [ref=e141] [cursor=pointer]
+            - button "DE demo-user" [ref=e146] [cursor=pointer]:
+              - generic [ref=e147]: DE
+              - generic [ref=e148]: demo-user
+          - generic [ref=e155]:
+            - generic [ref=e159]: 프로젝트를 찾을 수 없습니다
+            - generic [ref=e160]: 삭제되었거나 접근할 수 없는 프로젝트입니다.
+            - button "프로젝트 목록" [ref=e162] [cursor=pointer]

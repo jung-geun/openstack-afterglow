@@ -101,6 +101,32 @@ async def test_get_dashboard_summary_overview_exact_shape_and_no_heavy_calls(cli
 
 
 @pytest.mark.asyncio
+async def test_get_dashboard_summary_overview_honors_bounded_recent_limit(client):
+    servers = [
+        {
+            "id": f"server-{index}",
+            "name": f"server-{index}",
+            "status": "ACTIVE",
+            "flavor_name": "small",
+            "created_at": f"2026-01-{index:02d}T00:00:00Z",
+        }
+        for index in range(1, 14)
+    ]
+
+    with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=servers)):
+        response = await client.get("/api/v1/dashboard/summary?view=overview&recent_limit=12")
+
+    assert response.status_code == 200
+    assert [instance["id"] for instance in response.json()["recent_instances"]] == [
+        f"server-{index}" for index in range(13, 1, -1)
+    ]
+
+    response = await client.get("/api/v1/dashboard/summary?view=overview&recent_limit=13")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_dashboard_summary_overview_source_failure_is_503(client):
     with patch(
         "app.api.common.dashboard.cached_call",

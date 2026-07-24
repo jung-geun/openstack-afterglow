@@ -51,6 +51,7 @@
     s.loadHealth();
   }), {
     storageKey: 'k3s-cluster-events',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 15,
     intervalOptions: [10, 15, 30, 60]

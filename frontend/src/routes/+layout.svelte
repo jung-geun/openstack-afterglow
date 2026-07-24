@@ -43,6 +43,7 @@
 	const effectiveBrandTheme = $derived(themeReady ? $resolvedTheme : 'dark');
 	const themedFaviconPath = $derived(resolveFaviconPath($siteConfig, effectiveBrandTheme));
 	const mockup = $derived(data.mockup);
+	const mockupAdminActive = $derived(mockup.active && mockup.profile === 'admin');
 	let lastVerifiedToken: string | null = null;
 
 	replaceSiteConfig(initialSiteConfig);
@@ -379,7 +380,7 @@
 				<div class="hidden lg:block"><ProjectSelector direction="down" /></div>
 			{/if}
 
-			{#if $isAdmin}
+			{#if $isAdmin && !mockupAdminActive}
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
 						class="hidden lg:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-amber-500/15 border-amber-600/50 text-amber-400 hover:bg-amber-500/25">
@@ -474,7 +475,7 @@
 
 			<!-- 유저 아바타 -->
 			<a
-				href="/dashboard/account"
+				href={mockupAdminActive ? '/admin' : '/dashboard/account'}
 				class="w-[30px] h-[30px] rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-300 text-[11px] font-semibold hover:border-gray-600 transition-colors"
 				title={$auth.username}
 			>{initials}</a>
@@ -493,6 +494,8 @@
 	</nav>
 	{#if !mockup.active}
 		<UploadDock />
+	{/if}
+	{#if !mockup.active || mockupAdminActive}
 		<CmdPalette />
 	{/if}
 {/if}
