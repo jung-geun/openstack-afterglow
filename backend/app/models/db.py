@@ -777,6 +777,11 @@ class WaygateServer(Base):
     endpoint_ip: Mapped[str | None] = mapped_column(VARCHAR(45))  # FIP 또는 provider fixed IP
     key_name: Mapped[str | None] = mapped_column(VARCHAR(255))
 
+    # 에이전트 제어채널 자격증명 — AES-256-GCM 암호화 저장(도메인 wg_agent_token).
+    # Redis(휘발성)가 아니라 여기에 durable 하게 보관해, Redis eviction/재시작이나 이전
+    # 7일 TTL 만료 후에도 에이전트 register/desired-state/status 채널이 유지된다.
+    agent_token_encrypted: Mapped[str | None] = mapped_column(TEXT)
+
     # WireGuard 설정
     server_public_key: Mapped[str | None] = mapped_column(VARCHAR(64))  # 에이전트 register가 채움
     listen_port: Mapped[int] = mapped_column(INT, nullable=False, default=51820)

@@ -1,4 +1,4 @@
-"""VPN 클라이언트(peer) 관리 API — 사용자 JWT 인증 + 서버 소유권 검증."""
+"""Waygate 클라이언트(peer) 관리 API — 사용자 JWT 인증 + 서버 소유권 검증."""
 
 import logging
 import uuid
@@ -29,7 +29,7 @@ async def _get_owned_server(project_id: str, server_id: str) -> dict:
     """서버 소유권 검증. 없거나 타 프로젝트 소유면 404 (정보 노출 방지)."""
     server = await waygate_db.get_server(project_id, server_id)
     if not server:
-        raise HTTPException(status_code=404, detail="VPN 서버를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 서버를 찾을 수 없습니다")
     return server
 
 
@@ -64,9 +64,9 @@ async def create_waygate_client(
     project_id = token_info["project_id"]
     server = await _get_owned_server(project_id, server_id)
     if server["status"] != "ACTIVE":
-        raise HTTPException(status_code=409, detail="VPN 서버가 ACTIVE 상태가 아닙니다 (에이전트 register 대기 중)")
+        raise HTTPException(status_code=409, detail="Waygate 서버가 ACTIVE 상태가 아닙니다 (에이전트 register 대기 중)")
     if not server.get("server_public_key"):
-        raise HTTPException(status_code=409, detail="VPN 서버 공개키가 아직 등록되지 않았습니다")
+        raise HTTPException(status_code=409, detail="Waygate 서버 공개키가 아직 등록되지 않았습니다")
 
     private_key, public_key = waygate_keys.generate_keypair()
 
@@ -139,7 +139,7 @@ async def update_waygate_client(
     await _get_owned_server(project_id, server_id)
     updated = await waygate_db.update_client(server_id, project_id, client_id, name=body.name, enabled=body.enabled)
     if not updated:
-        raise HTTPException(status_code=404, detail="VPN 클라이언트를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 클라이언트를 찾을 수 없습니다")
     return await _merge_client_status(updated, server_id)
 
 
@@ -150,7 +150,7 @@ async def delete_waygate_client(server_id: str, client_id: str, token_info: dict
     await _get_owned_server(project_id, server_id)
     ok = await waygate_db.soft_delete_client(server_id, project_id, client_id, token_info.get("user_id", ""))
     if not ok:
-        raise HTTPException(status_code=404, detail="VPN 클라이언트를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 클라이언트를 찾을 수 없습니다")
 
 
 @router.get("/{server_id}/clients/{client_id}/config")
@@ -161,14 +161,14 @@ async def download_vpn_client_config(server_id: str, client_id: str, token_info:
     server = await _get_owned_server(project_id, server_id)
     client = await waygate_db.get_client(server_id, project_id, client_id)
     if not client:
-        raise HTTPException(status_code=404, detail="VPN 클라이언트를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 클라이언트를 찾을 수 없습니다")
     if not server.get("server_public_key") or not server.get("endpoint_ip"):
-        raise HTTPException(status_code=409, detail="VPN 서버가 아직 준비되지 않았습니다")
+        raise HTTPException(status_code=409, detail="Waygate 서버가 아직 준비되지 않았습니다")
 
     try:
         private_key = k3s_crypto.decrypt_wg_client_key(client["private_key_encrypted"])
     except Exception:
-        _logger.error("VPN 클라이언트 private key 복호화 실패 (client=%s)", client_id)
+        _logger.error("Waygate 클라이언트 private key 복호화 실패 (client=%s)", client_id)
         raise HTTPException(status_code=500, detail="클라이언트 키 복호화에 실패했습니다. 관리자에게 문의하세요.")
 
     tunnel_conf = waygate_config.render_client_conf(

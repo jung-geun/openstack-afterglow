@@ -113,7 +113,7 @@ async def provision_waygate_server(
     try:
         conn = await asyncio.to_thread(keystone.get_admin_connection_for_project, project_id)
     except Exception as e:
-        _logger.error("vpn_provisioner: OpenStack 연결 실패 (project=%s): %s", project_id, e)
+        _logger.error("waygate_provisioner: OpenStack 연결 실패 (project=%s): %s", project_id, e)
         await waygate_db.update_server_status(server_id, "ERROR", f"OpenStack 연결 실패: {e}")
         return
 

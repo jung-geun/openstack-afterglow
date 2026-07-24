@@ -26,13 +26,15 @@ def _extract_bearer(request: Request) -> str:
 
 
 async def _verify_and_bind(request: Request, server_id: str) -> dict:
-    """토큰 검증 + server_id 바인딩 확인. fail-closed(무효/불일치 시 401/403)."""
+    """토큰 검증. server-scoped — 경로의 server_id 에 귀속된 토큰만 통과. fail-closed(무효 시 401).
+
+    검증이 server_id 로 직접 이뤄지므로 다른 서버의 토큰은 이 서버에 대해 그냥 무효(401)다
+    (과거의 별도 403 바인딩 분기는 server-scoped 검증에 흡수됨).
+    """
     token = _extract_bearer(request)
-    token_data = await waygate_agent_auth.verify_report_token(token)
+    token_data = await waygate_agent_auth.verify_report_token(server_id, token)
     if not token_data:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
-    if token_data.get("server_id") != server_id:
-        raise HTTPException(status_code=403, detail="토큰이 해당 VPN 서버에 귀속되지 않음")
     return token_data
 
 
@@ -54,7 +56,7 @@ async def register_waygate_agent(
 
     server = await waygate_db.get_server_by_id(server_id)
     if not server:
-        raise HTTPException(status_code=404, detail="VPN 서버를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 서버를 찾을 수 없습니다")
 
     new_status = "ACTIVE" if server["status"] in ("CREATING", "PROVISIONING", "ACTIVE") else server["status"]
     await waygate_db.update_server_status(
@@ -63,7 +65,7 @@ async def register_waygate_agent(
         "" if new_status == "ACTIVE" else server.get("status_reason"),
         server_public_key=body.public_key,
     )
-    _logger.info("vpn agent register: server=%s status=%s->%s", server_id, server["status"], new_status)
+    _logger.info("waygate agent register: server=%s status=%s->%s", server_id, server["status"], new_status)
 
 
 @router.get("/{server_id}/agent/desired-state", response_model=WaygateAgentDesiredState)
@@ -74,7 +76,7 @@ async def get_desired_state(request: Request, server_id: str):
 
     server = await waygate_db.get_server_by_id(server_id)
     if not server:
-        raise HTTPException(status_code=404, detail="VPN 서버를 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail="Waygate 서버를 찾을 수 없습니다")
 
     clients = await waygate_db.list_all_active_clients(server_id)
     from app.services import k3s_crypto
@@ -86,7 +88,7 @@ async def get_desired_state(request: Request, server_id: str):
             try:
                 preshared_key = k3s_crypto.decrypt_wg_client_key(c["preshared_key_encrypted"])
             except Exception:
-                _logger.warning("vpn agent desired-state: preshared_key 복호화 실패 (client=%s)", c["id"])
+                _logger.warning("waygate agent desired-state: preshared_key 복호화 실패 (client=%s)", c["id"])
         client_payload.append(
             {
                 "public_key": c["public_key"],

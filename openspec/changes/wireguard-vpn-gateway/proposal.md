@@ -25,7 +25,7 @@
 
 ## Technical Namespace Cutover
 
-- [ ] `vpn` API/config/module/table/Redis/agent/frontend namespace를 `waygate`로 clean cutover 한다. 이전 VPN 인스턴스는 없으므로 데이터 이전·호환 경로·리다이렉트는 제공하지 않는다.
+- [x] `vpn` API/config/module/table/Redis/agent/frontend namespace를 `waygate`로 clean cutover 한다. 이전 VPN 인스턴스는 없으므로 데이터 이전·호환 경로·리다이렉트는 제공하지 않는다. (테스트 `test_vpn_*`→`test_waygate_*` 리네임, 빈 `app/api/vpn`·`routes/.../vpn` 디렉터리 제거, 로그 프리픽스·사용자 대면 문자열 `waygate` 통일 완료.)
 
 ## Impact
 

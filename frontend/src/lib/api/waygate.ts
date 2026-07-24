@@ -84,3 +84,18 @@ export async function downloadClientConfig(
 ): Promise<{ blob: Blob; filename: string }> {
 	return api.downloadBlob(`${BASE}/${serverId}/clients/${clientId}/config`, token, projectId);
 }
+
+/**
+ * 클라이언트 `.conf` 원문을 텍스트로 가져온다 (QR 코드 생성용).
+ * 백엔드는 QR 을 생성하지 않고 `.conf` 텍스트만 제공하므로(OpenSpec 결정), QR 은
+ * 이 텍스트로 프론트엔드에서 생성한다. downloadClientConfig 와 동일 엔드포인트를 재사용.
+ */
+export async function getClientConfigText(
+	serverId: string,
+	clientId: string,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<string> {
+	const { blob } = await downloadClientConfig(serverId, clientId, token, projectId);
+	return blob.text();
+}

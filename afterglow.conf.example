@@ -397,9 +397,17 @@ manifest_store_share_id = ""    # manifest-store Manila share ID
 
 
 [waygate]
-# Waygate (WireGuard 게이트웨이 — Phase 1 서버 프로비저닝 + 클라이언트 관리)
-# 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다.
-# services.waygate = true 여야 라우터가 등록되고 사이드바에 노출된다.
+# Waygate (WireGuard 게이트웨이 — 서버 프로비저닝 + 클라이언트 관리 + 상태 모니터링)
+# 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다. VM 내부 에이전트가
+# 백엔드와 pull/reconcile 로 연동되며 inbound 관리 포트가 없다(공격 표면 = WireGuard UDP 1개).
+#
+# 활성화 체크리스트:
+#   1. [services] waygate = true 로 설정 (라우터 등록 + 사이드바 노출).
+#   2. 아래 provider_network_id / image_id / callback_base_url 3개를 채운다(필수).
+#      셋 중 하나라도 비면 site config 게이트가 닫혀 UI 에 "미설정" 경고가 뜨고 생성이 503 이 된다.
+#   3. callback_base_url 은 **waygate VM 에서 실제로 도달 가능한** 백엔드 주소여야 한다.
+#      (에이전트 register/desired-state/status 가 이 URL 로 콜백 — 도달 불가 시 서버가 ACTIVE 로
+#       전이되지 않는다. "동작 안 함"의 가장 흔한 원인이므로 최우선 점검.)
 provider_network_id = ""       # Waygate VM이 부팅될 provider 네트워크 ID (필수)
 flavor_name = "cpu.1c_2g"      # flavor 이름으로 해석 (flavor_id 설정 시 이름 조회 생략)
 flavor_id = ""                 # 설정 시 이름 조회 없이 바로 사용

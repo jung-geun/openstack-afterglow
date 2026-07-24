@@ -87,35 +87,41 @@ class TestAgentAuthInvalidToken:
 
 
 class TestAgentAuthServerIdMismatch:
+    """server-scoped 검증: 다른 서버의 토큰은 이 서버에 대해 무효(401)다.
+
+    과거엔 token→server 역인덱스로 귀속을 확인해 불일치를 403 으로 구분했으나, 이제 경로의
+    server_id 로 그 서버의 저장 토큰과 직접 비교하므로 타 서버 토큰은 '유효하지 않은 토큰'(401)이다.
+    """
+
     @pytest.mark.asyncio
-    async def test_token_bound_to_different_server_returns_403(self, api_client):
-        """server-A 용 토큰으로 server-B 경로를 호출하면 403(귀속 불일치)."""
+    async def test_token_bound_to_different_server_returns_401(self, api_client):
+        """server-A 용 토큰으로 server-B 경로를 호출하면 401(server-B 에는 무효)."""
         token = await waygate_agent_auth.issue_report_token("server-A", "test-project-123")
         resp = await api_client.get(
             "/api/v1/waygate/servers/server-B/agent/desired-state",
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_register_with_mismatched_server_id_returns_403(self, api_client):
+    async def test_register_with_mismatched_server_id_returns_401(self, api_client):
         token = await waygate_agent_auth.issue_report_token("server-A", "test-project-123")
         resp = await api_client.post(
             "/api/v1/waygate/servers/server-B/agent/register",
             json={"public_key": "A" * 43 + "="},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_status_with_mismatched_server_id_returns_403(self, api_client):
+    async def test_status_with_mismatched_server_id_returns_401(self, api_client):
         token = await waygate_agent_auth.issue_report_token("server-A", "test-project-123")
         resp = await api_client.post(
             "/api/v1/waygate/servers/server-B/agent/status",
             json={"peers": []},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +269,60 @@ class TestAgentStatusHappyPath:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 토큰 durability — Redis 캐시 유실(재시작/eviction/TTL 만료) 후에도 DB 원천에서 복원.
+# 과거 결함: 토큰이 Redis 에만 7일 TTL 로 저장돼, 만료/eviction 시 제어채널이 영구 소실됐다.
+# ---------------------------------------------------------------------------
+
+
+class TestAgentTokenDurability:
+    @pytest.mark.asyncio
+    async def test_verify_falls_back_to_db_when_cache_evicted(self):
+        """캐시가 비어도 DB(원천)에 저장된 토큰으로 검증에 성공해야 한다."""
+        from app.services import k3s_crypto
+
+        token = await waygate_agent_auth.issue_report_token("srv-dur", "proj-dur")
+        enc = k3s_crypto.encrypt_wg_agent_token(token)
+
+        # Redis 캐시 강제 무효화(eviction/재시작/TTL 만료 시뮬레이션)
+        r = await waygate_agent_auth._redis()
+        await r.delete(f"{waygate_agent_auth._SRVTOKEN_CACHE_PREFIX}srv-dur")
+
+        # DB 원천이 토큰을 보유하도록 mock (실제 배포에선 set_agent_token 이 이미 저장)
+        with (
+            patch("app.services.waygate_db.get_agent_token_encrypted", AsyncMock(return_value=enc)),
+            patch("app.services.waygate_db.get_server_by_id", AsyncMock(return_value={"project_id": "proj-dur"})),
+        ):
+            result = await waygate_agent_auth.verify_report_token("srv-dur", token)
+        assert result is not None
+        assert result["server_id"] == "srv-dur"
+        assert result["project_id"] == "proj-dur"
+
+    @pytest.mark.asyncio
+    async def test_verify_rejects_wrong_token_even_with_db_source(self):
+        """DB 원천이 있어도 잘못된 토큰은 타이밍 안전 비교로 거부(None)."""
+        from app.services import k3s_crypto
+
+        real = await waygate_agent_auth.issue_report_token("srv-dur2", "proj-dur")
+        enc = k3s_crypto.encrypt_wg_agent_token(real)
+        r = await waygate_agent_auth._redis()
+        await r.delete(f"{waygate_agent_auth._SRVTOKEN_CACHE_PREFIX}srv-dur2")
+        with (
+            patch("app.services.waygate_db.get_agent_token_encrypted", AsyncMock(return_value=enc)),
+            patch("app.services.waygate_db.get_server_by_id", AsyncMock(return_value={"project_id": "proj-dur"})),
+        ):
+            assert await waygate_agent_auth.verify_report_token("srv-dur2", "not-the-real-token") is None
+
+    @pytest.mark.asyncio
+    async def test_revoke_invalidates_cache_and_db(self):
+        """revoke 후에는 캐시·DB 모두 비어 검증이 실패(None)해야 한다."""
+        token = await waygate_agent_auth.issue_report_token("srv-rev", "proj-dur")
+        await waygate_agent_auth.revoke_report_token_by_server("srv-rev")
+        # DB 도 비었다고 가정(set_agent_token(None) 호출됨) — get 이 None 반환
+        with patch("app.services.waygate_db.get_agent_token_encrypted", AsyncMock(return_value=None)):
+            assert await waygate_agent_auth.verify_report_token("srv-rev", token) is None
 
 
 # ---------------------------------------------------------------------------

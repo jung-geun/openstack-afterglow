@@ -28,6 +28,14 @@
 - [x] `npm run test:all` + `npm run lint:backend` 모두 통과 확인
 - [x] CI 설정 파일이 없는 환경에서도 Waygate 라우터 회귀 테스트가 활성화되도록 테스트 플래그 환경변수 정정
 
+### Phase 1 마감 (운영화 · QR · 제어채널 durability · 네임스페이스 컷오버)
+
+- [x] 🔴 에이전트 제어채널 토큰 durability 수정 — 토큰을 `waygate_servers.agent_token_encrypted`(AES-256-GCM, 도메인 `wg_agent_token`)에 영속 저장, Redis 는 캐시로만. server-scoped `hmac.compare_digest` 검증으로 변경. Redis eviction/7일 TTL 만료 후에도 채널 유지. 마이그레이션 `048_waygate_agent_token.sql`, 회귀 테스트 `TestAgentTokenDurability`
+- [x] QR 코드 — 프론트 `qrcode` 의존성 추가(bun.lock/package-lock.json 동기화), `getClientConfigText` 헬퍼, 클라이언트별 QR 버튼 + 모달(백엔드는 `.conf` 텍스트만 제공)
+- [x] `vpn`→`waygate` 클린 컷오버 — 테스트 6종 리네임, 빈 `app/api/vpn`·`routes/.../vpn` 제거, 로그 프리픽스·사용자 대면 문자열 통일
+- [x] `afterglow.conf.example [waygate]` 활성화 체크리스트 보강(callback_base_url 도달성 강조)
+- [ ] ⏳ 실환경 end-to-end 검증(런북) — 실제 OpenStack + WireGuard 클라이언트 필요, CI 로 증명 불가. **B/C 착수 전 게이트.**
+
 ### Phase 2 — 다중 테넌트 네트워크 연결
 
 - [ ] `app/api/vpn/servers.py`에 네트워크 attach/detach/list 엔드포인트 추가

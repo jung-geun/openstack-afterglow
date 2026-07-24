@@ -18,6 +18,8 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import Card from '$lib/components/ui/Card.svelte';
 	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
 	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 	import SelectionToolbar from '$lib/components/ui/SelectionToolbar.svelte';
@@ -265,6 +267,36 @@
 		}
 	}
 
+	// ---- QR 코드 (프론트 생성 — 백엔드는 .conf 텍스트만 제공) ----
+	let qrClient = $state<WaygateClient | null>(null);
+	let qrDataUrl = $state('');
+	let qrLoading = $state(false);
+	let qrError = $state('');
+
+	async function openQr(client: WaygateClient) {
+		if (!selectedServerId) return;
+		qrClient = client;
+		qrDataUrl = '';
+		qrError = '';
+		qrLoading = true;
+		try {
+			const text = await waygateApi.getClientConfigText(selectedServerId, client.id, token, projectId);
+			// qrcode 는 브라우저 전용 — SSR 회피를 위해 동적 import
+			const QRCode = (await import('qrcode')).default;
+			qrDataUrl = await QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin: 2, width: 320 });
+		} catch (e) {
+			qrError = e instanceof ApiError ? e.message : 'QR 생성 실패';
+		} finally {
+			qrLoading = false;
+		}
+	}
+
+	function closeQr() {
+		qrClient = null;
+		qrDataUrl = '';
+		qrError = '';
+	}
+
 	function clientStatusLabel(client: WaygateClient): string {
 		if (!client.enabled) return 'disabled';
 		return client.online ? 'ONLINE' : 'OFFLINE';
@@ -498,6 +530,10 @@
 												disabled={downloadingClientId === client.id}
 												class="text-xs text-[var(--color-accent)] hover:opacity-80 disabled:opacity-50"
 											>{downloadingClientId === client.id ? '다운로드 중...' : '.conf 다운로드'}</button>
+											<button
+												onclick={() => openQr(client)}
+												class="text-xs text-[var(--color-accent)] hover:opacity-80"
+											>QR</button>
 											<button onclick={() => toggleClient(client)} class="text-xs text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]">
 												{client.enabled ? '비활성화' : '활성화'}
 											</button>
@@ -512,7 +548,7 @@
 			{/if}
 
 			<p class="text-xs text-[var(--color-ink-3)] mt-4">
-				QR 코드를 통한 모바일 클라이언트 등록은 후속 작업으로 예정되어 있습니다. 현재는 <code>.conf</code> 파일 다운로드만 지원합니다.
+				<code>.conf</code> 파일을 다운로드하거나, <strong>QR</strong> 버튼으로 모바일 WireGuard 앱에서 바로 스캔해 등록할 수 있습니다.
 			</p>
 		</div>
 	</SlidePanel>
@@ -535,3 +571,26 @@
 		{/if}
 	</div>
 </FormModal>
+
+<Modal open={qrClient !== null} onClose={closeQr}>
+	<Card surface="modal" padding="lg" class="w-[min(100%-2rem,22rem)] mx-4">
+		<div class="flex items-center justify-between mb-4">
+			<h2 class="text-sm font-medium text-[var(--color-ink-0)]">
+				{qrClient?.name} — QR 코드
+			</h2>
+			<button onclick={closeQr} class="text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)] text-sm">✕</button>
+		</div>
+		{#if qrLoading}
+			<div class="py-16 text-center text-sm text-[var(--color-ink-3)]">QR 생성 중...</div>
+		{:else if qrError}
+			<Alert tone="danger">{qrError}</Alert>
+		{:else if qrDataUrl}
+			<div class="flex flex-col items-center gap-3">
+				<img src={qrDataUrl} alt="WireGuard 설정 QR 코드" width="288" height="288" class="rounded-lg bg-white p-2" />
+				<p class="text-xs text-[var(--color-ink-3)] text-center">
+					모바일 WireGuard 앱에서 "QR 코드로 추가"를 선택해 스캔하세요.
+				</p>
+			</div>
+		{/if}
+	</Card>
+</Modal>

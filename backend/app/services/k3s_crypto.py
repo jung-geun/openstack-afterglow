@@ -31,6 +31,7 @@ _DOMAIN_NODE_TOKEN = b"node_token"
 _DOMAIN_NOTION = b"notion_config"
 _DOMAIN_MANAGER_PW = b"manager_password"
 _DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
+_DOMAIN_WG_AGENT_TOKEN = b"wg_agent_token"
 _DOMAIN_LLM_PROVIDER_KEY = b"llm_provider_key"
 _DOMAIN_CHAT_CONTENT = b"chat_content"
 _DOMAIN_VM_CLOUD_INIT = b"vm_cloud_init"
@@ -175,6 +176,22 @@ def encrypt_wg_client_key(plaintext: str) -> str:
 def decrypt_wg_client_key(ciphertext_b64: str) -> str:
     """Decrypt WireGuard 클라이언트 private/preshared key — v3/v2/legacy 모두 처리."""
     return _aes_decrypt(_get_key(), _DOMAIN_WG_CLIENT_KEY, ciphertext_b64)
+
+
+def encrypt_wg_agent_token(plaintext: str) -> str:
+    """Encrypt Waygate 에이전트 reconcile 베어러 토큰 (v3).
+
+    이 토큰은 VM 에이전트가 무기한 사용하는 영구 제어채널 자격증명이므로 Redis(휘발성)가
+    아니라 waygate_servers 행에 암호화 저장해 durable 하게 보관한다. 마스터키는 기존
+    k3s_kubeconfig_encryption_key 를 재사용하고, 도메인 분리로 다른 ciphertext 와 교차
+    복호화되지 않는다.
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_WG_AGENT_TOKEN, plaintext)
+
+
+def decrypt_wg_agent_token(ciphertext_b64: str) -> str:
+    """Decrypt Waygate 에이전트 reconcile 베어러 토큰 — v3/v2/legacy 모두 처리."""
+    return _aes_decrypt(_get_key(), _DOMAIN_WG_AGENT_TOKEN, ciphertext_b64)
 
 
 def encrypt_llm_provider_key(plaintext: str) -> str:

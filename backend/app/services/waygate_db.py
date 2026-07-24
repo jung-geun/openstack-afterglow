@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.database import get_session_factory
+from app.database import get_session_factory, is_db_available
 from app.models.db import WaygateClient, WaygateServer
 
 _logger = logging.getLogger(__name__)
@@ -202,6 +202,47 @@ async def update_server_status(
                 setattr(server, key, value)
 
         await session.commit()
+
+
+async def set_agent_token(server_id: str, token_encrypted: str | None) -> None:
+    """에이전트 제어채널 토큰(암호화)을 waygate_servers 행에 durable 하게 저장.
+
+    DB 미가용 시 no-op — 이 경우 호출부(waygate_agent_auth)는 Redis 캐시만으로 degrade 동작한다.
+    project_id 필터 없음(백그라운드 프로비저닝/에이전트 인증 경로 전용, server_id 로 직접 접근).
+    """
+    if not is_db_available():
+        return
+    factory = get_session_factory()
+    if factory is None:
+        return
+    async with factory() as session:
+        stmt = select(WaygateServer).where(WaygateServer.id == server_id)
+        result = await session.execute(stmt)
+        server = result.scalar_one_or_none()
+        if server is None:
+            _logger.warning("set_agent_token: server %s not found", server_id)
+            return
+        server.agent_token_encrypted = token_encrypted
+        server.updated_at = datetime.now(UTC)
+        await session.commit()
+
+
+async def get_agent_token_encrypted(server_id: str) -> str | None:
+    """waygate_servers 행에서 암호화된 에이전트 토큰을 조회. 삭제된 서버는 제외(제어채널 무효화).
+
+    DB 미가용 시 None — 호출부는 Redis 캐시 fallback 으로 동작한다.
+    """
+    if not is_db_available():
+        return None
+    factory = get_session_factory()
+    if factory is None:
+        return None
+    async with factory() as session:
+        stmt = select(WaygateServer.agent_token_encrypted).where(
+            WaygateServer.id == server_id, WaygateServer.deleted_at.is_(None)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
 
 async def soft_delete_server(project_id: str, server_id: str, user_id: str, reason: str = "") -> bool:
