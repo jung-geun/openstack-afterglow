@@ -86,18 +86,38 @@
 
 ### Phase 3 — 허브
 
-- [ ] `services/palimpsest_hub_store.py` — `HubBlobStore` 인터페이스(`open_read`/`write_stream`/`exists`/`delete`) + `local_path` 드라이버. 배치는 OCI image-layout(`<root>/blobs/sha256/<hex>`)
-- [ ] `[palimpsest] hub_local_path` 설정 추가 — `config.py` + `generate_k8s.py` + `afterglow.conf.example` **3곳 동시**
-- [ ] 업로드 세션 `POST/PATCH/PUT /api/v1/palimpsest/hub/uploads[/{session}]` — 선언 digest 존재 시 단축 완료, 완료 시 **수신 바이트 digest 재계산 후 불일치 폐기(fail-closed)**
-- [ ] 검색 `GET /hub/layers` (q, digest, digest_prefix, md5, kind, name, chain_id, cursor)
-- [ ] 상세 `GET /hub/layers/{digest}` + `GET /hub/layers/{digest}/ancestors`
-- [ ] blob 스트리밍 `GET /hub/layers/{digest}/blob` (HTTP Range 지원)
-- [ ] 번들 export `POST /hub/bundles` — `{refs:[digest…]}` → OCI image-layout tar 스트리밍(`oci-layout` + `index.json` + `blobs/sha256/`). layers[]는 루트→리프 순 부모 체인 전체. mediaType: config `application/vnd.afterglow.palimpsest.layer.config.v1+json`, layer `application/vnd.afterglow.palimpsest.layer.squashfs.v1`
-- [ ] 번들 import `POST /hub/bundles/import` — 전 blob digest 재검증 후 등록
-- [ ] `POST /hub/layers/{digest}/pull` — 허브 → 이 사이트 레이어(부모 체인 포함)
-- [ ] `DELETE /hub/layers/{digest}` — 관리자. 자식 존재 시 거부(union.md §10 GC 규칙 계승)
-- [ ] 인가 — 조회/다운로드는 `is_published` 또는 `project_id` 일치, 업로드/삭제는 관리자 또는 소유 프로젝트. digest path param 접근 시 소유권 검증(IDOR)
-- [ ] `backend/tests/test_palimpsest_hub.py` — digest 불일치 업로드 거부, 중복 digest 단축, 번들에 조상 전부 포함, import 왕복 digest 보존, 자식 있는 레이어 삭제 거부, 타 프로젝트 404, Range 다운로드
+- [x] `backend/migrations/059_palimpsest_hub.sql` — `palimpsest_hub_layers` / `palimpsest_hub_uploads` (멱등, manifest 등록).
+      **059 를 쓴 이유**: 착수 직전 확인 시 `053~056` 에 더해 `058` 까지 병렬 chat 작업이 가져가 있었다.
+      번호는 파일 생성 **직전**에 다시 확인한다
+- [x] `services/palimpsest_hub_store.py` — `LocalPathBlobStore` + `get_blob_store()`(미설정 시 `HubStoreUnavailable` → 503).
+      배치는 OCI image-layout(`<root>/blobs/sha256/<hex>`). digest·세션 ID 경로 traversal 이중 방어
+- [x] `[palimpsest] hub_local_path` / `hub_max_blob_bytes` / `hub_upload_ttl_seconds` — `config.py` + `generate_k8s.py` + `afterglow.conf.example` **3곳 동시**
+- [x] 업로드 세션 `POST/PATCH/PUT/DELETE /api/v1/palimpsest/hub/uploads[/{id}]` — 선언 digest 존재 시 단축 완료,
+      완료 시 **수신 바이트 digest 재계산 + `hmac.compare_digest` 후 불일치 폐기(fail-closed)**, 크기 상한 초과 시 세션 폐기
+- [x] 검색 `GET /hub/layers` (digest, digest_prefix, md5, chain_id, name, kind, parent_digest)
+- [x] 상세 `GET /hub/layers/{digest}`(+`chain_complete`) + `GET /hub/layers/{digest}/ancestors`
+- [x] blob 스트리밍 `GET /hub/layers/{digest}/blob` — HTTP Range(접두/접미 모두), 416 처리
+- [x] 번들 export `POST /hub/bundles` — OCI image-layout tar 스트리밍. `layers[]` 는 루트→리프 순 부모 체인 전체,
+      공통 조상은 한 번만. `tarfile.addfile` 을 쓰지 않고 헤더만 `TarInfo.tobuf()` 로 만들어 큰 blob 을 청크로 흘린다
+      (addfile 은 blob 을 통째로 버퍼에 올려 메모리를 터뜨린다)
+- [x] 번들 import `POST /hub/bundles/import` — 전 blob digest 재검증, 개별 실패는 skip 요약
+- [x] `DELETE /hub/layers/{digest}` — 관리자. 자식 존재 시 409(union.md §10 GC 규칙 계승)
+- [x] 인가 — 조회/다운로드는 공개 OR 사이트공용 OR 내 프로젝트, 그 외는 존재도 흘리지 않고 404. 업로드 세션 IDOR 방어
+- [x] `backend/tests/test_palimpsest_hub.py` (42 케이스) — traversal 거부, digest 불일치 폐기, 중복 단축,
+      md5 보조키, Range, 상한 초과 abort, prune, 번들 유효성/체인 전체 포함/중복 1회/왕복/크기 불일치 거부/
+      unsafe 경로 거부/blob 누락 거부, API 422·404·403·503 계약
+- [x] `test_mutation_invalidate_coverage` 면제 등록 — 허브는 자체 테이블+blob store 라 무효화할 캐시 네임스페이스가 없다
+      (백필은 반대로 `afterglow:union_layer:*` 를 실제로 무효화한다)
+- [ ] ~~`POST /hub/layers/{digest}/pull` — 허브 → 이 사이트 레이어~~ → **별도 작업으로 분리**
+  > 로컬 레이어의 `.sqsh` 는 Manila share 에 있고 백엔드는 share 를 마운트하지 않는다. 허브 ↔ 로컬 artifact
+  > 전송은 digest 백필과 같은 **임시 Builder VM 경유 전송**이 필요해 허브 본체와 관심사가 다르다.
+  > 현재 허브는 "직접 만들어 업로드 / 검색 / 정보 조회 / 부모 추적 일괄 다운로드"를 모두 만족한다.
+
+### 별도 작업 (Phase 3 에서 분리)
+
+- [ ] 로컬 artifact ↔ 허브 전송 — 임시 Builder VM 으로 Manila share ↔ 허브 blob store 복사
+- [ ] Swift/S3 blob store 드라이버 (서비스 계정 자격증명 경로 필요 — `services/s3.py` 는 사용자 토큰 스코프)
+- [ ] 방치된 업로드 세션 주기적 정리 (`prune_uploads` 를 부를 스케줄러 배선)
 
 ### Phase 4 — Dockerfile 빌드 확장
 

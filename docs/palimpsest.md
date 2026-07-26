@@ -107,6 +107,64 @@ NFS의 마운트 옵션 교체가 아니라 **다른 스토리지 토폴로지**
 
 ---
 
+## 4.5. 허브 (레이어 레지스트리)
+
+레이어를 digest 로 저장·검색·배포한다. `[palimpsest] hub_local_path` 를 설정해야 활성화되며,
+미설정 배포에서는 허브 엔드포인트가 503 을 준다.
+
+### 저장 배치
+
+blob store 는 **OCI image-layout 그대로**다. 덕분에 번들이 곧 디렉터리이고, 로컬 KVM 호스트에
+펼치면 바로 레이어 경로가 된다.
+
+```
+<hub_local_path>/blobs/sha256/<hex>     # 레이어 blob · config · manifest (전부 콘텐츠 주소)
+<hub_local_path>/uploads/<session_id>   # 진행 중인 업로드 (완료 시 blobs/ 로 승격)
+```
+
+소비 VM 이 마운트하는 Manila share 와는 **다른 저장소**다. 허브는 백엔드가 바이트를 직접
+스트리밍 read/write 해야 성립하고, share 는 VM 이 마운트하는 용도이기 때문이다.
+
+### 엔드포인트
+
+| 메서드·경로 | 하는 일 |
+|---|---|
+| `GET /api/v1/palimpsest/hub/layers` | 검색 — `digest` · `digest_prefix` · `md5` · `chain_id` · `name` · `kind` · `parent_digest` |
+| `GET /hub/layers/{digest}` | 상세 + 조상 요약 + `chain_complete` |
+| `GET /hub/layers/{digest}/ancestors` | 루트→리프 순서 부모 체인 |
+| `GET /hub/layers/{digest}/blob` | blob 스트리밍 (HTTP Range 지원) |
+| `POST /hub/uploads` | 업로드 세션 시작. 선언 digest 가 이미 있으면 즉시 완료로 단축 |
+| `PATCH /hub/uploads/{id}` | 청크 이어붙이기 |
+| `PUT /hub/uploads/{id}` | 완료 — **수신 바이트로 digest 재계산 후 불일치면 폐기** |
+| `DELETE /hub/uploads/{id}` | 세션 취소 |
+| `POST /hub/bundles` | `{refs:[digest…]}` → 부모 체인 전체를 OCI image-layout tar 로 스트리밍 |
+| `POST /hub/bundles/import` | 번들 업로드 → 전 blob digest 재검증 후 등록 |
+| `DELETE /hub/layers/{digest}` | 관리자. **자식이 있으면 거부**(union.md §10 GC 규칙 계승) |
+
+업로드는 OCI Distribution 의 blob upload(POST/PATCH/PUT)를 `/v2/` 없이 차용한다 — 재개 가능하고
+구현자에게 익숙하다. **선언된 digest 를 신뢰하지 않는다**: 완료 시 재계산해 다르면 받지 않는다.
+
+### 번들 = 부모 추적 일괄 다운로드
+
+manifest 의 `layers[]` 가 **루트→리프 순서의 부모 체인 전체**이므로, "부모 레이어를 추적해 한 번에
+다운로드"가 manifest 하나를 받는 것과 같아진다. 공통 조상은 콘텐츠 주소라 자동으로 한 번만 실린다.
+
+mediaType 은 프로젝트 고유값을 쓴다 — 표준 도구가 squashfs 를 tar 레이어로 오해하지 않게:
+
+- config: `application/vnd.afterglow.palimpsest.layer.config.v1+json`
+- layer: `application/vnd.afterglow.palimpsest.layer.squashfs.v1`
+
+### 가시성
+
+조회·다운로드는 **공개(`is_published`) 이거나 사이트 공용(`project_id IS NULL`) 이거나 내 프로젝트**
+것만 보인다. 그 외는 존재 여부도 흘리지 않고 404. 업로드 세션도 타 프로젝트가 건드릴 수 없다.
+
+### 아직 없는 것
+
+- **로컬 artifact ↔ 허브 전송**. 로컬 레이어의 `.sqsh` 는 Manila share 에 있고 백엔드가 마운트하지
+  않으므로, 허브로 올리려면 digest 백필과 같은 임시 Builder VM 경유 전송이 필요하다. 별도 작업.
+- Swift/S3 드라이버, 레이어 서명(cosign 등), `/v2/` OCI Distribution 호환 레지스트리.
+
 ## 5. OverlayFS 제약 (변하지 않는 규칙)
 
 - **`upperdir`/`workdir`은 반드시 VM 로컬 디스크(ext4/xfs).** CephFS/NFS에 두면 조용히 깨진다 —

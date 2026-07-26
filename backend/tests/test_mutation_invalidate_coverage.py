@@ -86,6 +86,12 @@ EXEMPT_ROUTERS: set[str] = {
     # Agent endpoints update their dedicated Redis status/token store, not the
     # application resource cache covered by this invariant.
     "waygate/agent.py",
+    # Palimpsest hub owns its own tables (palimpsest_hub_layers / _uploads) and a
+    # content-addressed blob store. Nothing caches hub responses, so there is no
+    # namespace to invalidate. Note the contrast with palimpsest/admin.py, whose
+    # backfill DOES invalidate `afterglow:union_layer:*` because it mutates
+    # layer_artifacts rows that the layer listing cache serves.
+    "palimpsest/hub.py",
     # Admin resource policy and AI compatibility routes own application data
     # read directly from their stores; no OpenStack cache key is affected.
     "identity/admin_resource_policies.py",
@@ -102,6 +108,7 @@ EXEMPT_ROUTERS: set[str] = {
     "chat/conversations.py",  # 대화/메시지 (DB 직접)
     "chat/completions.py",  # 스트리밍 completions (사용량 원장 append-only)
     "chat/extensions.py",  # MCP 서버/커스텀툴 CRUD (DB 직접, app 캐시 미사용)
+    "chat/code_workspaces.py",  # workspace/credential metadata is read directly from its SQLAlchemy store
 }
 
 # ---------------------------------------------------------------------------

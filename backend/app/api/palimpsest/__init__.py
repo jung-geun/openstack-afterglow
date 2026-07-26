@@ -4,6 +4,7 @@
 """
 
 from app.api.palimpsest.admin import router as palimpsest_admin_router
+from app.api.palimpsest.hub import router as palimpsest_hub_router
 from app.api.palimpsest.layers import router as palimpsest_layers_router
 
-__all__ = ["palimpsest_admin_router", "palimpsest_layers_router"]
+__all__ = ["palimpsest_admin_router", "palimpsest_hub_router", "palimpsest_layers_router"]

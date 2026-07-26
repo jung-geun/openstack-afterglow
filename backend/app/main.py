@@ -611,10 +611,12 @@ if _svc_cfg.service_k3s_enabled:
 # `union_layers`/`union_templates`/`union_user_mounts` 테이블은 데이터 보존을 위해 남긴다.
 from app.api.palimpsest import (  # noqa: E402
     palimpsest_admin_router,
+    palimpsest_hub_router,
     palimpsest_layers_router,
 )
 
 app.include_router(palimpsest_layers_router, prefix="/api/v1/palimpsest", tags=["palimpsest"])
+app.include_router(palimpsest_hub_router, prefix="/api/v1/palimpsest/hub", tags=["palimpsest-hub"])
 app.include_router(palimpsest_admin_router, prefix="/api/v1/admin/palimpsest", tags=["palimpsest-admin"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router

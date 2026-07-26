@@ -415,6 +415,7 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     k3s = cfg.get("k3s", {})
     builder = cfg.get("builder", {})
     union = cfg.get("union", {})
+    palimpsest = cfg.get("palimpsest", {})
     waygate = cfg.get("waygate", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
@@ -640,6 +641,16 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         f"manifest_store_share_id = {_toml_str(union.get('manifest_store_share_id', ''))}"
     )
     lines.append("")
+
+    # [palimpsest] (선택) — 허브 blob store. 비밀 값 없음이므로 configmap 인라인.
+    if palimpsest:
+        lines.append("[palimpsest]")
+        if "hub_local_path" in palimpsest:
+            lines.append(f"hub_local_path = {_toml_str(palimpsest['hub_local_path'])}")
+        for key in ("hub_max_blob_bytes", "hub_upload_ttl_seconds"):
+            if key in palimpsest:
+                lines.append(f"{key} = {int(palimpsest[key])}")
+        lines.append("")
 
     # [waygate] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
     if waygate:
@@ -926,6 +937,7 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         or any(
             key in chat
             for key in (
+                "execution_protocol_version",
                 "run_event_retention_hours",
                 "semantic_memory_enabled",
                 "memory_embedding_model",
@@ -941,6 +953,7 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
                 "clamav_host",
                 "clamav_port",
                 "sandbox_url",
+                "sandbox_workspace_url",
                 "sandbox_image_digest",
                 "sandbox_policy_version",
                 "sandbox_egress_allowlist",
@@ -949,6 +962,7 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     ):
         lines.append("[chat]")
         lines.append(f"default_model = {_toml_str(chat.get('default_model', ''))}")
+        lines.append(f"execution_protocol_version = {chat.get('execution_protocol_version', 1)}")
         lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
         lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
         lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
@@ -972,6 +986,7 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         lines.append(f"clamav_host = {_toml_str(chat.get('clamav_host', ''))}")
         lines.append(f"clamav_port = {chat.get('clamav_port', 3310)}")
         lines.append(f"sandbox_url = {_toml_str(chat.get('sandbox_url', ''))}")
+        lines.append(f"sandbox_workspace_url = {_toml_str(chat.get('sandbox_workspace_url', ''))}")
         lines.append(f"sandbox_image_digest = {_toml_str(chat.get('sandbox_image_digest', ''))}")
         lines.append(f"sandbox_policy_version = {_toml_str(chat.get('sandbox_policy_version', ''))}")
         lines.append(f"sandbox_egress_allowlist = {_toml_list_str(chat.get('sandbox_egress_allowlist', []))}")

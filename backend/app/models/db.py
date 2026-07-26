@@ -498,6 +498,60 @@ class LayerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
+# Palimpsest 허브 — digest 로 주소화된 레이어 레지스트리 (마이그레이션 059)
+# ---------------------------------------------------------------------------
+
+
+class PalimpsestHubLayer(Base):
+    """허브에 보관된 레이어 한 건. blob 은 HubBlobStore 가 소유한다.
+
+    `layer_artifacts` 와 분리한 이유: 그쪽은 **이 사이트에서 빌드된** 레이어이고 산출물이
+    Manila share 에 있다. 허브 항목은 외부 업로드·번들 import 로도 들어오며 blob 을 허브가
+    직접 소유한다. 로컬 artifact → 허브는 publish 로 연결한다.
+
+    `parent_digest` 가 FK 가 아닌 이유: 부모가 자식보다 늦게 올라오거나 아예 없을 수 있고
+    번들 import 는 순서를 보장하지 않는다. digest 로 느슨히 참조하고 조회 시 해석한다.
+    """
+
+    __tablename__ = "palimpsest_hub_layers"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    # 허브에서는 digest 가 UNIQUE 다 — 중복 제거는 허브 계층의 책임(layer_artifacts 와 다른 점)
+    blob_digest: Mapped[str] = mapped_column(VARCHAR(71), nullable=False, unique=True)
+    blob_md5: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, index=True)
+    size_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    media_type: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    config_digest: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)
+    chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    parent_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)
+    # OCI config blob 원문 — 번들 export 시 그대로 직렬화한다
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # NULL = 사이트 공용. 값이 있으면 해당 프로젝트 소유(소유권 검증 대상)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0")
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class PalimpsestHubUpload(Base):
+    """업로드 세션. OCI Distribution 의 blob upload(POST/PATCH/PUT)를 `/v2/` 없이 차용."""
+
+    __tablename__ = "palimpsest_hub_uploads"
+
+    id: Mapped[str] = mapped_column(CHAR(32), primary_key=True)
+    declared_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    received_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False, default=0)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
 # (폐기) 2세대 union ORM — UnionLayer / UnionTemplate / UnionUserMount
 #
 # 인프라(중앙 Manila share, CephX keyring, Builder VM)가 배포된 적이 없어

@@ -300,6 +300,11 @@ def _load_toml() -> dict:
     flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
     flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
 
+    palimpsest = data.get("palimpsest", {})
+    flat["palimpsest_hub_local_path"] = palimpsest.get("hub_local_path", "")
+    flat["palimpsest_hub_max_blob_bytes"] = palimpsest.get("hub_max_blob_bytes", 34359738368)
+    flat["palimpsest_hub_upload_ttl_seconds"] = palimpsest.get("hub_upload_ttl_seconds", 86400)
+
     waygate = data.get("waygate", {})
     flat["waygate_provider_network_id"] = waygate.get("provider_network_id", "")
     flat["waygate_flavor_name"] = waygate.get("flavor_name", "cpu.1c_2g")
@@ -341,6 +346,7 @@ def _load_toml() -> dict:
     chat = data.get("chat", {})
     # 빌트인 AI 채팅 (litellm 라우팅 + 크레딧/쿼터)
     flat["chat_default_model"] = chat.get("default_model", "")
+    flat["chat_execution_protocol_version"] = chat.get("execution_protocol_version", 1)
     flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
     flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
     flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
@@ -371,6 +377,7 @@ def _load_toml() -> dict:
     flat["chat_clamav_host"] = chat.get("clamav_host", "")
     flat["chat_clamav_port"] = chat.get("clamav_port", 3310)
     flat["chat_sandbox_url"] = chat.get("sandbox_url", "")
+    flat["chat_sandbox_workspace_url"] = chat.get("sandbox_workspace_url", "")
     flat["chat_sandbox_api_key"] = chat.get("sandbox_api_key", "")
     flat["chat_sandbox_image_digest"] = chat.get("sandbox_image_digest", "")
     flat["chat_sandbox_policy_version"] = chat.get("sandbox_policy_version", "")
@@ -628,6 +635,15 @@ class Settings(BaseSettings):
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
     union_layer_store_ro_share_id: str = ""  # layer-store-ro (User VM RO)
     union_manifest_store_share_id: str = ""  # manifest-store
+
+    # --- Palimpsest 허브 (레이어 레지스트리) — docs/palimpsest.md ---
+    # 허브는 백엔드가 blob 을 직접 스트리밍 read/write 해야 성립하므로 Manila share 가 아니라
+    # 별도 blob store 를 쓴다. 비어 있으면 허브 기능이 비활성(503)이다.
+    # K8s 는 PVC, compose 는 볼륨을 이 경로에 마운트한다. 배치는 OCI image-layout 그대로:
+    #   <hub_local_path>/blobs/sha256/<hex>
+    palimpsest_hub_local_path: str = ""
+    palimpsest_hub_max_blob_bytes: int = 34359738368  # 32 GiB — torch 급 레이어를 수용
+    palimpsest_hub_upload_ttl_seconds: int = 86400  # 방치된 업로드 세션 정리 기준(초)
     union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
@@ -670,6 +686,7 @@ class Settings(BaseSettings):
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
 
+    chat_execution_protocol_version: int = 1
     # 빌트인 AI 채팅 (litellm 라우팅 + 모델별 가중 크레딧 + 월 쿼터)
     chat_default_model: str = ""  # 기본 모델명 (활성 llm_models 카탈로그의 model_name과 일치해야 함)
     chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
@@ -700,6 +717,7 @@ class Settings(BaseSettings):
     chat_asset_signed_url_ttl_seconds: int = 300
     chat_clamav_host: str = ""
     chat_clamav_port: int = 3310
+    chat_sandbox_workspace_url: str = ""
     chat_sandbox_url: str = ""
     chat_sandbox_api_key: str = ""
     chat_sandbox_image_digest: str = ""
@@ -717,6 +735,13 @@ class Settings(BaseSettings):
     jwt_access_ttl: int = 900  # access JWT 수명 (초), 기본 15분
     jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
     token_ip_binding_mode: str = "subnet"  # off | log | subnet | strict
+
+    @field_validator("chat_execution_protocol_version")
+    @classmethod
+    def validate_chat_execution_protocol_version(cls, value: int) -> int:
+        if value not in {1, 2}:
+            raise ValueError("chat_execution_protocol_version must be 1 or 2")
+        return value
 
     @field_validator("token_ip_binding_mode")
     @classmethod
