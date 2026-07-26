@@ -10,8 +10,9 @@ const fileStorageManageSource = readFileSync(
 );
 
 describe('/admin/libraries layer workflow UI contract', () => {
-	it('promotes the squashfs workflow copy and API prefix to Library Management', () => {
-		expect(source).toContain('PageHeader title="라이브러리 관리"');
+	it('promotes the squashfs workflow copy and API prefix to Palimpsest layer management', () => {
+		// 레이어드 VM 기능의 공식 명칭은 Palimpsest다 (docs/palimpsest.md). 이 페이지가 그 코어 UI다.
+		expect(source).toContain('PageHeader title="Palimpsest 레이어 관리"');
 		expect(source).not.toContain('squashfs 레이어 관리');
 		expect(source).toContain('/api/v1/admin/libraries/build');
 		expect(source).not.toContain('/api/v1/admin/layers');
@@ -19,6 +20,7 @@ describe('/admin/libraries layer workflow UI contract', () => {
 
 	it('keeps only one admin library navigation item and renames the file-storage manage page', () => {
 		expect(navSource).not.toContain('squashfs 레이어');
+		expect(navSource).toContain("label: 'Palimpsest'");
 		expect(fileStorageManageSource).toContain('사전 빌드 파일 스토리지');
 		expect(fileStorageManageSource).not.toContain('title="라이브러리 관리"');
 	});

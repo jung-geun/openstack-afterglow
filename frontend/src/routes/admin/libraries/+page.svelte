@@ -1110,7 +1110,7 @@
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
   <div data-tour="admin-library-header">
-  <PageHeader title="라이브러리 관리" breadcrumb="라이브러리">
+  <PageHeader title="Palimpsest 레이어 관리" breadcrumb="Palimpsest">
     {#snippet actions()}
       <TutorialStartButton tour="admin-library" compactOnMobile />
       <button

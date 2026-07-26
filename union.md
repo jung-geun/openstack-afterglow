@@ -1,5 +1,17 @@
 # Union Mount 기반 레이어 환경 플랫폼 설계
 
+> ⚠️ **이 문서는 Palimpsest로 통합되었다 (2026-07-27).**
+> 레이어드 VM 기능의 공식 명칭은 **Palimpsest**이며, 도메인 정의·용어·digest 규칙은
+> **[`docs/palimpsest.md`](docs/palimpsest.md)** 가 권위 있는 문서다.
+> 실제 배포·운영 중인 파이프라인은 [`docs/squashfs-layer-pipeline.md`](docs/squashfs-layer-pipeline.md)에 있다.
+>
+> 이 문서는 **설계 원칙의 출처**(content-addressable, single-parent 상속, 3-lock 불변성, GC 규칙)로서
+> 계속 유효하며 이력 보존을 위해 그대로 둔다. 단 아래 두 가지는 낡았으니 주의:
+> - **구현 현황 서술**(§0 상단, §12 로드맵)은 현재와 다르다.
+> - **`/api/union` 표면과 `UnionLayer` 모델·`scripts/layerbuild.py`·`scripts/envmgr-*.sh`는 폐기 대상**이다.
+>   digest는 여기 §3.3의 결정적 tar 해시가 아니라 **`.sqsh` blob 바이트의 sha256**을 쓴다(사유는
+>   `docs/palimpsest.md` §3).
+
 > OpenStack Afterglow — `dev` 브랜치
 > 작성일: 2026-04-24 | 최종 갱신: 2026-04-24
 > 대상: 관리자 / 개발자 참고용 설계 문서

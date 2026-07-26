@@ -99,7 +99,8 @@ frontend/             SvelteKit + TypeScript + Tailwind CSS 4
     stores/           Svelte stores (auth, projectNames 등)
     api/              API 클라이언트
 
-union.md              Union Mount 레이어 시스템 v2 설계 문서 (참조 필수)
+docs/palimpsest.md    Palimpsest(레이어드 VM) 도메인 정의 — 레이어 작업 시 참조 필수
+union.md              Union Mount v2 설계 원칙의 출처 (구현 현황 서술은 낡음 → palimpsest.md 우선)
 openspec/             작업 기록 (OpenSpec) — changes/<slug>/ 진행 중, changes/archive/ 완료
 milestone.md          → openspec/로 이관됨 (redirect stub만 유지)
 ```
@@ -204,10 +205,18 @@ git push origin dev
 4. **baked 레거시 계약 테스트.** `backend/tests/test_api_v1_legacy_compat.py`가 3종 baked 경로의
    `/api` 레거시 dual-mount 존재를 고정(404 아님)한다. 이 테스트를 삭제하거나 무력화하지 않는다.
 
-### Union Mount 설계
+### Palimpsest (레이어드 VM) 설계
 
-- Union Mount 레이어 시스템 구현 시 **`union.md` 를 반드시 먼저 읽는다.**
-- Content-addressable 레이어, single-parent 상속, 3-lock 불변성 등 설계 원칙을 따른다.
+> 레이어드 VM 기능의 공식 명칭은 **Palimpsest**다. 레이어 서브시스템이 역사적으로 3세대 공존하므로
+> 어느 코드를 고칠지 판단하려면 아래 순서로 읽는다.
+
+1. **`docs/palimpsest.md` 를 반드시 먼저 읽는다** — 도메인 정의(3세대 흡수/폐기/보존), 용어, digest 규칙.
+2. `docs/squashfs-layer-pipeline.md` — 실제 배포·운영 중인 파이프라인(= Palimpsest 코어)의 상세.
+3. `union.md` — 설계 원칙(content-addressable, single-parent 상속, 3-lock 불변성, GC)의 출처.
+   **구현 현황 서술과 `/api/union` 표면은 낡았다**(폐기 대상).
+
+- digest는 union.md §3.3의 결정적 tar 해시가 아니라 **`.sqsh` blob 바이트의 sha256**을 쓴다.
+- "재현 = 기존 레이어 재사용, 재빌드 = 새 digest로 새 레이어 추가" 정책을 지킨다(덮어쓰기 금지).
 
 ---
 
