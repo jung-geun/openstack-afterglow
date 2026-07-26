@@ -340,6 +340,8 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/admin/models", "llm_model"),
     ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
     ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
+    ("/api/v1/chat/code-workspaces", "chat_code_workspace"),
+    ("/api/v1/chat/git-credentials", "chat_git_credential"),
     ("/api/v1/chat/agents", "chat_agent"),
     ("/api/v1/chat/workspaces", "chat_workspace"),
     ("/api/v1/chat/memories", "chat_memory"),
@@ -364,6 +366,8 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/admin/resource-policies", "resource_policy"),
     ("/api/v1/admin/libraries", "union_layer"),
     ("/api/v1/libraries/squashfs", "union_layer"),
+    ("/api/v1/admin/palimpsest", "palimpsest_layer"),
+    ("/api/v1/palimpsest", "palimpsest_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
     ("/api/v1/waygate/servers", "waygate_server"),
@@ -605,6 +609,15 @@ if _svc_cfg.service_k3s_enabled:
 from app.api.union import router as union_router  # noqa: E402
 
 app.include_router(union_router, prefix="/api/v1/union", tags=["union"])
+
+# Palimpsest (레이어드 VM) — docs/palimpsest.md
+from app.api.palimpsest import (  # noqa: E402
+    palimpsest_admin_router,
+    palimpsest_layers_router,
+)
+
+app.include_router(palimpsest_layers_router, prefix="/api/v1/palimpsest", tags=["palimpsest"])
+app.include_router(palimpsest_admin_router, prefix="/api/v1/admin/palimpsest", tags=["palimpsest-admin"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 
@@ -644,6 +657,7 @@ if _svc_cfg.service_chat_enabled:
         chat_agents_router,
         chat_api_keys_router,
         chat_assets_router,
+        chat_code_workspaces_router,
         chat_completions_router,
         chat_conversations_router,
         chat_extensions_admin_router,
@@ -671,6 +685,7 @@ if _svc_cfg.service_chat_enabled:
     app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 프로젝트(workspace, 대화 그룹+공통 지침) + 장기 메모리 — /workspaces, /memories
     app.include_router(chat_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_code_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_memory_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
     # 외부 API 키 관리 (본인 스코프, 웹 인증) — /api-keys

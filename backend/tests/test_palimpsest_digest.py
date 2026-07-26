@@ -247,7 +247,6 @@ def _fields_kwargs(**overrides):
     return base
 
 
-@pytest.mark.asyncio
 async def test_resolve_digest_fields_without_report_stays_pending():
     fields = await resolve_digest_fields(_FakeSession(), report=None, parent_artifact_id=None, **_fields_kwargs())
 
@@ -258,7 +257,6 @@ async def test_resolve_digest_fields_without_report_stays_pending():
     assert fields["config_digest"].startswith("sha256:")
 
 
-@pytest.mark.asyncio
 async def test_resolve_digest_fields_for_root_sets_chain_id_to_digest():
     report = parse_digest_sentinels(_sentinel("uvbase", _HEX_A))["uvbase"]
 
@@ -270,7 +268,6 @@ async def test_resolve_digest_fields_for_root_sets_chain_id_to_digest():
     assert fields["blob_md5"] == "d" * 32
 
 
-@pytest.mark.asyncio
 async def test_resolve_digest_fields_for_child_chains_from_parent():
     parent = _artifact(blob_digest=f"sha256:{_HEX_A}", chain_id=f"sha256:{_HEX_A}", digest_state=DIGEST_READY)
     parent.id = 1
@@ -286,7 +283,6 @@ async def test_resolve_digest_fields_for_child_chains_from_parent():
     assert fields["chain_id"] == compute_chain_id(f"sha256:{_HEX_A}", _HEX_B)
 
 
-@pytest.mark.asyncio
 async def test_resolve_digest_fields_leaves_chain_id_null_when_parent_pending():
     # 부모가 아직 백필되지 않았으면 자식 chain_id 를 임의로 만들지 않는다 —
     # 루트 취급하면 서로 다른 스택이 같은 chain_id 를 갖게 된다.
@@ -306,7 +302,6 @@ async def test_resolve_digest_fields_leaves_chain_id_null_when_parent_pending():
     assert fields["chain_id"] is None
 
 
-@pytest.mark.asyncio
 async def test_recompute_descendant_chain_ids_fills_children_after_backfill():
     root = _artifact(blob_digest=f"sha256:{_HEX_A}", chain_id=f"sha256:{_HEX_A}", digest_state=DIGEST_READY)
     root.id = 1
@@ -324,7 +319,6 @@ async def test_recompute_descendant_chain_ids_fills_children_after_backfill():
     assert grandchild.chain_id == compute_chain_id(expected_child, _HEX_C)
 
 
-@pytest.mark.asyncio
 async def test_recompute_descendant_chain_ids_stops_at_digestless_node():
     root = _artifact(blob_digest=f"sha256:{_HEX_A}", chain_id=f"sha256:{_HEX_A}", digest_state=DIGEST_READY)
     root.id = 1
@@ -341,7 +335,6 @@ async def test_recompute_descendant_chain_ids_stops_at_digestless_node():
     assert grandchild.chain_id is None
 
 
-@pytest.mark.asyncio
 async def test_lineage_helpers_agree_on_opposite_orders():
     root = _artifact(name="uvbase")
     root.id = 1
@@ -358,7 +351,6 @@ async def test_lineage_helpers_agree_on_opposite_orders():
     assert [row.name for row in ancestors] == ["uvbase", "python311", "torch"]
 
 
-@pytest.mark.asyncio
 async def test_load_lineage_survives_parent_cycle():
     a = _artifact(name="a", parent_id=2)
     a.id = 1
@@ -411,7 +403,6 @@ def test_digest_computation_never_fails_the_build():
             assert line.endswith("|| true"), line
 
 
-@pytest.mark.asyncio
 async def test_layer_artifact_model_exposes_digest_columns():
     # 마이그레이션 057 과 ORM 이 어긋나면 artifacts 엔드포인트가 500 이 된다(waygate 전례).
     columns = {column.name for column in LayerArtifact.__table__.columns}

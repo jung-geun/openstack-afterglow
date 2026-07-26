@@ -41,9 +41,26 @@
 - [x] `services/layer_build.py` + `services/dockerfile_import.py` — 두 artifact 생성 경로 모두 sentinel 회수 → `digest_state='ready'`. 미확보 시 `pending` 으로 기록하고 빌드는 성공 처리
 - [x] `chain_id` 계산 — 루트는 자기 digest, 이후 `sha256(parent_chain + " " + digest)`. 부모가 `pending`이면 자식 `chain_id`를 **만들지 않는다**(루트 취급하면 서로 다른 스택이 같은 chain_id 를 갖게 됨)
 - [x] `backend/tests/test_palimpsest_digest.py` (36 케이스) — 정규화/검증, sentinel 이름 매핑·중복 last-wins·빈 sha256 스킵·size 누락 허용, chain_id 결정성 및 부모 민감성, config_digest 키 순서 무관, `resolve_digest_fields` 4 케이스, `recompute_descendant_chain_ids` 2 케이스, 계보 순서·사이클 방어, 5개 레시피 전부 sentinel 방출 + `|| true` 보장, ORM 컬럼/인덱스 존재
-- [ ] `POST /api/v1/admin/palimpsest/artifacts/backfill-digest` — 상주 SSH Builder VM(`services/builder_vm.py`)으로 share RO 마운트 → `sha256sum`/`md5sum` → 회수. 실패는 `digest_state='failed'` + 사유. 완료 후 `recompute_descendant_chain_ids` 호출
-- [ ] `GET /api/v1/palimpsest/layers?digest=&digest_prefix=&md5=&kind=&name=&chain_id=` + `GET /…/{id}/ancestors`
-- [ ] 백필·조회 API 테스트
+- [x] `POST /api/v1/admin/palimpsest/artifacts/backfill-digest` — `services/palimpsest_backfill.py`.
+      **임시 Builder VM 한 대**로 배치 전체 처리 → share RO 마운트 → 해시 → access rule/VM 회수.
+      실패는 `digest_state='failed'` + 사유, 배치는 계속. 완료 후 chain_id 재계산
+  > ⚠ **계획 정정**: 계획서의 "상주 SSH Builder VM 경유"는 성립하지 않는다. `builder_vm.py` 는
+  > *"Ephemeral(빌드별 임시) 경로만 지원"* 이고 상주 경로는 코드에서 제거됐다.
+  > `afterglow.conf.example [builder]` 의 `persistent_server_id` / `ssh_host` / `ssh_private_key` 는
+  > `config.py` 에 대응 필드가 **없는 낡은 문서**다(설정 동기화 의무 위반 — 기존 상태).
+  > → 별도 정리 항목으로 남긴다.
+- [x] `GET /api/v1/palimpsest/layers?digest=&digest_prefix=&md5=&chain_id=&name=&kind=` + `GET /…/{id}/ancestors`
+      (공개+봉인 레이어만 노출, 미공개는 존재 여부도 흘리지 않고 404)
+- [x] `GET /api/v1/admin/palimpsest/artifacts` + `GET /…/digest-status` (관리자 전용 전체 조회·분포)
+- [x] `main.py` 마운트 + `_AUDIT_PREFIX_MAP` 에 `/api/v1/palimpsest`, `/api/v1/admin/palimpsest` 등록
+- [x] `backend/tests/test_palimpsest_api.py` (33 케이스) — 감사 매핑·라우트 v1 단독, 검색 파라미터 9종 422,
+      미인증 거부, 가시성 조건 강제, 미공개 404, 관리자 3종 403, 해시 명령 인젝션 거부(export path 4종 /
+      sqsh 파일명 4종), RO 마운트 고정, 백필 성공/실패/예외 시 access rule·VM 회수
+
+### 별도 정리 (범위 밖, 발견 사항)
+
+- [ ] `afterglow.conf.example [builder]` 의 `persistent_server_id` / `ssh_host` / `ssh_private_key` 제거 또는
+      `config.py` 필드 복구 — 현재 문서와 코드가 어긋나 있다(설정 동기화 의무). 어느 쪽이 의도인지 확인 필요
 
 ### Phase 2 — `/api/v1/palimpsest` 표면 + union 폐기
 
