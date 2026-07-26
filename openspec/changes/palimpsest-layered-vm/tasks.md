@@ -142,13 +142,24 @@
 
 ### Phase 5 — 로컬 KVM 런타임 (CI 검증 불가)
 
-- [ ] `services/palimpsest_kvm.py` — `libvirt-python` 드라이버(도메인 XML 생성·정의·시작·삭제)
-- [ ] NoCloud seed ISO — `cloud-localds`로 `user-data`/`meta-data` 굽기. user-data는 기존 `services/cloudinit.py` + `templates/overlay_setup.sh.j2` 재사용
-- [ ] 호스트 레이어 경로 규약 `/var/lib/palimpsest/layers/sha256/<hex>/layer.sqsh` (+ `layer.json`) — 허브 OCI 번들을 그대로 펼친 배치
-- [ ] virtio-blk로 레이어 `.sqsh` RO 부착 → 게스트 `mount -t squashfs` → 기존 overlay 조립. 모든 보간 `shlex_quote`
-- [ ] `docs/palimpsest-local-kvm-runbook.md` — 수동 검증 런북
-- [ ] 단위 테스트 — libvirt XML 생성, seed ISO 인자 조립, 경로 쿼팅까지만 커버
-- [ ] ⏳ 실환경 검증(수동, CI 불가) — 로컬 KVM 호스트에서 3단 스택 VM 부팅 + merged에서 패키지 실행
+- [x] `services/palimpsest_kvm.py` — 도메인 XML 생성 · seed ISO · 레이어 디스크 배치 · 게스트 조립 스크립트 ·
+      libvirt 연결/정의/삭제. **libvirt 는 지연 import** — 미설치 배포에서 모듈 로드를 막지 않는다
+- [x] `libvirt-python` 을 `[project.optional-dependencies] kvm` 으로 분리 (`uv sync --extra kvm`).
+      시스템 libvirt-dev 를 요구하므로 기본 이미지에 넣지 않는다
+- [x] `[palimpsest] kvm_uri` / `kvm_layer_root` / `kvm_state_dir` — 3곳 동시 갱신. `kvm_uri` 비면 기능 비활성
+- [x] 호스트 레이어 경로 규약 = **허브 blob store 와 동일**(`<kvm_layer_root>/blobs/sha256/<hex>`).
+      번들이 OCI image-layout 이라 펼친 배치가 곧 레이어 경로다 — 변환 단계가 없다
+- [x] virtio-blk RO 부착 + 게스트 조립. **`/dev/vdX` 에 의존하지 않고 `/dev/disk/by-id/virtio-<serial>`** 사용
+      (부착 순서와 게스트 이름 순서는 보장되지 않는다). serial 은 QEMU 가 20자로 자르므로 호스트에서 미리 자른다.
+      udev 경합 대비 대기 루프 포함. lowerdir 는 루트→리프 입력을 뒤집어 넣는다
+- [x] XML 은 **생성만** 한다(파싱 경로 없음) — XXE 표면이 없어 defusedxml 불필요. 이를 테스트로 고정
+- [x] `docs/palimpsest-local-kvm-runbook.md` — 전제·번들 펼치기·도메인 정의·**검증 5단계**·흔한 실패 표·정리
+- [x] `backend/tests/test_palimpsest_kvm.py` (32 케이스) — 경로 traversal 거부, 디스크 배치·serial 절단·한도,
+      레이어 RO/루트 RW 고정, serial 전달, seed cdrom, spec 검증 5종, seed ISO 인자 리스트·비절대경로 거부·
+      셸 미사용, 조립 스크립트의 by-id 사용·역순 lowerdir·로컬 upper/work·RO 마운트·udev 대기·쿼팅,
+      libvirt 미설치/미설정 처리
+- [ ] ⏳ **실환경 검증(수동, CI 불가)** — 런북 §4 의 5단계. 로컬 KVM 호스트에서 3단 스택 VM 부팅 →
+      `lsblk`/by-id/squashfs/overlay 확인 → merged 에서 패키지 실행
 
 ### Phase 6 — OpenStack virtio (계획 확정, 코드 미착수)
 

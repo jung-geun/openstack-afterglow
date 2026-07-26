@@ -49,6 +49,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+# Palimpsest 로컬 KVM 런타임 (선택). 설치하지 않으면 해당 엔드포인트만 503 이고
+# 나머지 기능은 영향이 없다 — `services/palimpsest_kvm.py` 가 libvirt 를 지연 import 한다.
+# libvirt-python 은 시스템 라이브러리(libvirt-dev)를 요구하므로 기본 이미지에는 넣지 않는다.
+kvm = [
+    "libvirt-python>=10.0.0",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",

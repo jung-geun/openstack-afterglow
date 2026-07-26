@@ -171,6 +171,21 @@ hub_max_blob_bytes = 34359738368
 # hub_upload_ttl_seconds: 방치된 업로드 세션 정리 기준 (기본 24시간)
 hub_upload_ttl_seconds = 86400
 
+# --- 로컬 KVM 런타임 (선택) ---
+# OpenStack 없이 로컬/원격 KVM 호스트에 레이어드 VM 을 띄운다. 레이어는 virtio-blk
+# 읽기 전용 디스크로 붙고 게스트는 OpenStack 경로와 동일하게 OverlayFS 로 합성한다.
+#
+# ⚠️ libvirt-python 은 별도 extra 다 — `uv sync --extra kvm` (시스템 libvirt-dev 필요).
+#    설치하지 않으면 이 기능만 503 이고 나머지는 영향이 없다.
+#
+# kvm_uri: 비워 두면 기능 비활성. 예) "qemu:///system" 또는 "qemu+ssh://ops@kvm-host/system"
+kvm_uri = ""
+# kvm_layer_root: 레이어 blob 이 놓인 호스트 경로.
+#   허브 OCI 번들을 그대로 펼치면 이 배치가 된다 — <kvm_layer_root>/blobs/sha256/<hex>
+kvm_layer_root = "/var/lib/palimpsest/layers"
+# kvm_state_dir: 도메인별 루트 오버레이(qcow2)와 NoCloud seed ISO 를 두는 경로
+kvm_state_dir = "/var/lib/palimpsest/domains"
+
 
 [waygate] 섹션 설정 필수)
 chat = false        # 빌트인 AI 채팅 (활성화 시 [chat] 섹션 + 관리자 페이지에서 프로바이더/모델 등록)

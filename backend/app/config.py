@@ -304,6 +304,9 @@ def _load_toml() -> dict:
     flat["palimpsest_hub_local_path"] = palimpsest.get("hub_local_path", "")
     flat["palimpsest_hub_max_blob_bytes"] = palimpsest.get("hub_max_blob_bytes", 34359738368)
     flat["palimpsest_hub_upload_ttl_seconds"] = palimpsest.get("hub_upload_ttl_seconds", 86400)
+    flat["palimpsest_kvm_uri"] = palimpsest.get("kvm_uri", "")
+    flat["palimpsest_kvm_layer_root"] = palimpsest.get("kvm_layer_root", "/var/lib/palimpsest/layers")
+    flat["palimpsest_kvm_state_dir"] = palimpsest.get("kvm_state_dir", "/var/lib/palimpsest/domains")
 
     waygate = data.get("waygate", {})
     flat["waygate_provider_network_id"] = waygate.get("provider_network_id", "")
@@ -644,6 +647,16 @@ class Settings(BaseSettings):
     palimpsest_hub_local_path: str = ""
     palimpsest_hub_max_blob_bytes: int = 34359738368  # 32 GiB — torch 급 레이어를 수용
     palimpsest_hub_upload_ttl_seconds: int = 86400  # 방치된 업로드 세션 정리 기준(초)
+
+    # --- Palimpsest 로컬 KVM 런타임 (선택) ---
+    # 비어 있으면 기능 비활성(503). `qemu:///system` 또는 `qemu+ssh://user@host/system`.
+    # libvirt-python 은 별도 extra 다: `uv sync --extra kvm`
+    palimpsest_kvm_uri: str = ""
+    # 레이어 blob 이 놓인 호스트 경로. 허브 OCI 번들을 펼치면 이 배치가 된다:
+    #   <kvm_layer_root>/blobs/sha256/<hex>
+    palimpsest_kvm_layer_root: str = "/var/lib/palimpsest/layers"
+    # 도메인별 루트 오버레이(qcow2)와 seed ISO 를 두는 경로
+    palimpsest_kvm_state_dir: str = "/var/lib/palimpsest/domains"
     union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름

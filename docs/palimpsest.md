@@ -89,12 +89,22 @@ afterglow-layer-<name>-<token>/
 
 ### 로컬 KVM
 
-허브 번들을 호스트에 펼친 뒤 virtio-blk로 붙인다.
+허브 번들을 호스트에 그대로 펼친 뒤 **virtio-blk 읽기 전용 디스크**로 붙인다. 번들이 OCI
+image-layout 이므로 펼친 배치가 곧 레이어 경로다 — 변환 단계가 없다.
 
 ```
-/var/lib/palimpsest/layers/sha256/<hex>/layer.sqsh
-                                       layer.json
+<kvm_layer_root>/blobs/sha256/<hex>     # 허브 blob store 와 같은 배치
 ```
+
+게스트는 `/dev/vdX` 가 아니라 **`/dev/disk/by-id/virtio-<serial>`** 로 디스크를 찾는다. 부착 순서와
+게스트 디바이스 이름 순서는 보장되지 않기 때문이다. serial 은 digest 앞 20자다(QEMU 가 20자로 자른다).
+
+레이어 수 상한은 25개(`vdb`~`vdz`). 그 이상은 레이어를 병합하거나 EROFS 다중 blob 병합을 검토한다.
+
+설정은 `[palimpsest] kvm_uri` / `kvm_layer_root` / `kvm_state_dir`. `kvm_uri` 가 비면 기능 비활성.
+`libvirt-python` 은 별도 extra 다 — `uv sync --extra kvm`.
+
+수동 검증 절차는 **[로컬 KVM 런북](palimpsest-local-kvm-runbook.md)** 참조. 이 경로는 CI 로 검증할 수 없다.
 
 ### virtio-blk / virtio-scsi (OpenStack) — 미구현
 

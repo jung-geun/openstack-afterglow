@@ -650,6 +650,9 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         for key in ("hub_max_blob_bytes", "hub_upload_ttl_seconds"):
             if key in palimpsest:
                 lines.append(f"{key} = {int(palimpsest[key])}")
+        for key in ("kvm_uri", "kvm_layer_root", "kvm_state_dir"):
+            if key in palimpsest:
+                lines.append(f"{key} = {_toml_str(palimpsest[key])}")
         lines.append("")
 
     # [waygate] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
