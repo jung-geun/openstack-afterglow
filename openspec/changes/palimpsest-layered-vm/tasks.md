@@ -24,17 +24,26 @@
 
 ### Phase 1 — 콘텐츠 주소화
 
-- [ ] `backend/migrations/057_palimpsest_content_addressing.sql` — `layer_artifacts`에 `blob_digest` VARCHAR(71) / `blob_md5` CHAR(32) / `config_digest` VARCHAR(71) / `chain_id` VARCHAR(71) / `digest_state` VARCHAR(16) DEFAULT 'pending' + 인덱스 2개. 멱등(`information_schema` 체크), prepared stmt `palimpsest_digest_stmt`
-- [ ] `backend/migrations/manifest.txt`에 `057-palimpsest-content-addressing|…|<sha256>` 등록 (누락 시 부팅 fail-closed)
-- [ ] 🔴 배포 순서 준수: **마이그레이션 적용 → ORM 컬럼 추가**. 반대로 하면 artifacts 엔드포인트 즉시 500 (waygate `agent_token_encrypted` 전례)
-- [ ] `backend/app/models/db.py` `LayerArtifact`에 신규 컬럼 추가
-- [ ] `services/palimpsest_digest.py` 신규 — `compute_chain_id(parent_chain_id, blob_digest)`, `compute_config_digest(meta)`. `scripts/layerbuild.py:131-168`의 해시 개념 이식
-- [ ] `services/recipe_blocks.py` — `squashfs_uv_layer` / `squashfs_python_layer` / `squashfs_stacked_layer`의 `mksquashfs` 직후 `sha256sum`/`md5sum` → `::AFTERGLOW::DIGEST::` sentinel 출력. **digest 계산 실패가 빌드 실패가 되지 않게** 한다
-- [ ] `services/layer_build.py` — 콘솔 sentinel 파서에 digest 추가, `LayerArtifact` 기록 시 `digest_state='ready'`
-- [ ] `chain_id` 재귀 계산 (루트→리프). 부모가 `pending`이면 자식도 `pending` 유지
-- [ ] `POST /api/v1/admin/palimpsest/artifacts/backfill-digest` — 상주 SSH Builder VM(`services/builder_vm.py`)으로 share RO 마운트 → `sha256sum`/`md5sum` → 회수. 실패는 `digest_state='failed'` + 사유
-- [ ] `GET /api/v1/palimpsest/layers?digest=&digest_prefix=&md5=&kind=&name=&chain_id=` + `GET /…/{id}/ancestors` (조상 역추적 로직을 서비스 함수로 추출해 재사용)
-- [ ] `backend/tests/test_palimpsest_digest.py` — sentinel 파싱, chain_id 재귀, 백필 멱등성, digest 없는 artifact의 소비 경로 무영향, digest_prefix 검색
+- [x] `backend/migrations/057_palimpsest_content_addressing.sql` — `layer_artifacts`에 `blob_digest` VARCHAR(71) / `blob_md5` CHAR(32) / `config_digest` VARCHAR(71) / `chain_id` VARCHAR(71) / `digest_state` VARCHAR(16) DEFAULT 'pending' + 인덱스 2개. 멱등(`information_schema` 체크), prepared stmt `palimpsest_digest_stmt`
+- [x] `backend/migrations/manifest.txt`에 `057-palimpsest-content-addressing|…|<sha256>` 등록
+  > 커밋 시 인덱스에는 **HEAD + 057 한 줄만** 올렸다. 작업 트리 manifest 에는 커밋되지 않은 병렬 chat 작업의
+  > 053~056 항목이 들어 있는데, 그 `.sql` 파일들이 커밋에 없는 채로 manifest 만 커밋되면
+  > `load_manifest()` 가 "references an invalid migration path" 로 **fail-closed** 되어 부팅·테스트가 깨진다
+  > (`backend/scripts/baseline_migrations.py:59`).
+- [x] 🔴 배포 순서 — dev 환경에서 ORM 이 먼저 반영되어 `Unknown column 'layer_artifacts.blob_digest'` 500 이
+  실제로 재현됐고, 057 적용으로 복구했다. 적용 후 ORM SELECT 성공 / 기존 4행 `pending` / 재실행 멱등 확인
+- [x] `backend/app/models/db.py` `LayerArtifact`에 신규 컬럼 추가
+- [x] `services/palimpsest_digest.py` 신규 — 순수 함수(`normalize_digest`, `compute_chain_id`, `compute_config_digest`, `parse_digest_sentinels`). `scripts/layerbuild.py:131-168`의 해시 개념 이식
+- [x] `services/palimpsest_layers.py` 신규 — 세션이 필요한 헬퍼(`load_lineage`/`load_ancestor_chain`/`resolve_digest_fields`/`recompute_descendant_chain_ids`). `layer_ops._artifact_lineage_rows`가 이쪽에 위임하도록 통합(계보 해석 이중화 제거)
+- [x] `services/recipe_blocks.py` — 5개 squashfs 레시피 전부 `mksquashfs` 직후 `sha256sum`/`md5sum`/`stat` → `::AFTERGLOW::DIGEST::layer=<name> …` sentinel 출력. `|| true` 로 감싸 **digest 계산 실패가 빌드 실패가 되지 않게** 함(`set -euo pipefail` 환경)
+  > sentinel 에 **레이어 이름을 싣는다** — Dockerfile import 는 한 번의 VM 실행으로 여러 레이어를 만들고,
+  > 콘솔이 잘리면 위치 기반 매핑이 조용히 어긋나 잘못된 digest 가 붙는다
+- [x] `services/layer_build.py` + `services/dockerfile_import.py` — 두 artifact 생성 경로 모두 sentinel 회수 → `digest_state='ready'`. 미확보 시 `pending` 으로 기록하고 빌드는 성공 처리
+- [x] `chain_id` 계산 — 루트는 자기 digest, 이후 `sha256(parent_chain + " " + digest)`. 부모가 `pending`이면 자식 `chain_id`를 **만들지 않는다**(루트 취급하면 서로 다른 스택이 같은 chain_id 를 갖게 됨)
+- [x] `backend/tests/test_palimpsest_digest.py` (36 케이스) — 정규화/검증, sentinel 이름 매핑·중복 last-wins·빈 sha256 스킵·size 누락 허용, chain_id 결정성 및 부모 민감성, config_digest 키 순서 무관, `resolve_digest_fields` 4 케이스, `recompute_descendant_chain_ids` 2 케이스, 계보 순서·사이클 방어, 5개 레시피 전부 sentinel 방출 + `|| true` 보장, ORM 컬럼/인덱스 존재
+- [ ] `POST /api/v1/admin/palimpsest/artifacts/backfill-digest` — 상주 SSH Builder VM(`services/builder_vm.py`)으로 share RO 마운트 → `sha256sum`/`md5sum` → 회수. 실패는 `digest_state='failed'` + 사유. 완료 후 `recompute_descendant_chain_ids` 호출
+- [ ] `GET /api/v1/palimpsest/layers?digest=&digest_prefix=&md5=&kind=&name=&chain_id=` + `GET /…/{id}/ancestors`
+- [ ] 백필·조회 API 테스트
 
 ### Phase 2 — `/api/v1/palimpsest` 표면 + union 폐기
 

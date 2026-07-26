@@ -32,6 +32,8 @@ from app.services.layer_build import (
     _wait_for_shutoff,
 )
 from app.services.layer_ubuntu import normalize_ubuntu_base
+from app.services.palimpsest_digest import parse_digest_sentinels
+from app.services.palimpsest_layers import resolve_digest_fields
 
 _GITHUB_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?)/([A-Za-z0-9._-]{1,100})/?$"
@@ -824,7 +826,22 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                 return
             parent_artifact_id: int | None = None
             layer_names: list[str] = []
+            # 한 번의 VM 실행이 여러 레이어를 만든다 — sentinel 은 레이어 이름으로 매핑한다
+            # (콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다). docs/palimpsest.md §3.
+            digest_reports = parse_digest_sentinels(console)
             for index, step in enumerate(job.planned_layers or []):
+                digest_report = digest_reports.get(step["name"])
+                digest_fields = await resolve_digest_fields(
+                    session,
+                    report=digest_report,
+                    parent_artifact_id=parent_artifact_id,
+                    name=step["name"],
+                    kind="dockerfile",
+                    ubuntu_base=job.ubuntu_base,
+                    python_version=None,
+                    pip_packages=[],
+                    apt_packages=[],
+                )
                 artifact = LayerArtifact(
                     name=step["name"],
                     kind="dockerfile",
@@ -837,6 +854,8 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                     build_id=build_ids[index],
                     parent_id=parent_artifact_id,
                     is_sealed=True,
+                    size_bytes=digest_report.size_bytes if digest_report else None,
+                    **digest_fields,
                     base_image_id=job.base_image_id,
                     base_image_name=job.base_image_name,
                     base_image_checksum=job.base_image_checksum,

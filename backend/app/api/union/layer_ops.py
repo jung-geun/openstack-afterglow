@@ -453,25 +453,14 @@ async def _validate_profile_publication(session, profile) -> None:
 
 
 async def _artifact_lineage_rows(session, row) -> list[object]:
-    """직계 부모 row부터 parent_id 체인을 따라 artifact lineage를 반환한다."""
-    from app.models.db import LayerArtifact
+    """직계 부모 row부터 parent_id 체인을 따라 artifact lineage를 반환한다(child-first).
 
-    lineage: list[object] = []
-    seen_ids: set[int] = set()
-    current = row
-    while current is not None:
-        artifact_id = getattr(current, "id", None)
-        if not isinstance(artifact_id, int) or artifact_id in seen_ids:
-            break
-        lineage.append(current)
-        seen_ids.add(artifact_id)
-        parent_id = getattr(current, "parent_id", None)
-        if parent_id is None:
-            break
-        if not isinstance(parent_id, int):
-            break
-        current = await session.get(LayerArtifact, parent_id)
-    return lineage
+    구현은 `palimpsest_layers.load_lineage` 하나로 통일한다 — 허브 번들과 chain_id 계산이
+    같은 순회를 쓰므로 계보 해석이 두 벌 존재하면 안 된다.
+    """
+    from app.services.palimpsest_layers import load_lineage
+
+    return await load_lineage(session, row)
 
 
 def _validate_build_parent_contract(req: LayerBuildRequest, parent_row, lineage: list[object]) -> None:

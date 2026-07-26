@@ -414,6 +414,19 @@ class LayerArtifact(Base):
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     build_id: Mapped[int | None] = mapped_column(INT, ForeignKey("layer_builds.id", ondelete="SET NULL"))
     size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    # ── Palimpsest 콘텐츠 주소화 (마이그레이션 057) ──────────────────────────
+    # 레이어 정체성 = `.sqsh` blob 바이트의 sha256. 설계 근거는 docs/palimpsest.md §3.
+    # UNIQUE 를 걸지 않는다 — 같은 콘텐츠가 서로 다른 Manila share 에 존재할 수 있고,
+    # 중복 제거는 허브 계층의 책임이다.
+    blob_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    # 외부 도구 호환용 보조 검색 키. 무결성 권위 아님 — 보안 용도 금지.
+    blob_md5: Mapped[str | None] = mapped_column(CHAR(32), nullable=True)
+    # 빌드 의도(name/kind/base/packages/parent digest)를 정규화한 sha256
+    config_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    # 스택 전체의 정체성(OCI chainID 방식). 부모가 pending 이면 자식도 계산하지 않는다.
+    chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    # pending | ready | failed — digest 미확보 행도 소비는 계속 가능해야 한다
+    digest_state: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="pending", server_default="pending")
     # 단일 부모 체인: child → parent → grandparent → ... → base(parent_id=NULL)
     parent_id: Mapped[int | None] = mapped_column(
         INT, ForeignKey("layer_artifacts.id", ondelete="SET NULL"), nullable=True
@@ -895,15 +908,32 @@ from app.models.activity import ActivityLog  # noqa: E402,F401
 
 # Announcement/AnnouncementRead 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402,F401
+from app.models.chat_agent_platform import (  # noqa: E402,F401
+    ChatCodeWorkspace,
+    ChatCodeWorkspaceAsset,
+    ChatCommand,
+    ChatContextCheckpoint,
+    ChatExtensionPackage,
+    ChatExtensionPackageComponent,
+    ChatExtensionPackageInstall,
+    ChatGitCredential,
+    ChatRunInteraction,
+)
 from app.models.chat_assets import ChatAsset, ChatMessageAsset, ChatRunAsset  # noqa: E402,F401
 
 # 빌트인 AI 채팅 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.chat_db import (  # noqa: E402,F401
+    ChatAgent,
+    ChatApiKey,
     ChatConversation,
     ChatCustomTool,
+    ChatMcpCredential,
     ChatMcpServer,
+    ChatMemory,
     ChatMessage,
+    ChatSkill,
     ChatUsageLog,
+    ChatWorkspace,
     LlmModel,
     LlmProvider,
     UserWallet,

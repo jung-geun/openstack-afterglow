@@ -33,6 +33,8 @@ from app.services.layer_ubuntu import (
     layer_image_id_for_ubuntu_base,
     normalize_ubuntu_base,
 )
+from app.services.palimpsest_digest import parse_digest_sentinel
+from app.services.palimpsest_layers import resolve_digest_fields
 from app.services.recipe_blocks import (
     squashfs_nvidia_driver_layer,
     squashfs_stacked_layer,
@@ -1019,7 +1021,24 @@ async def run_layer_build(
             # LayerArtifact DB 기록
             try:
                 sqsh_filename = f"{layer_name}-latest.sqsh"
+                # Palimpsest 콘텐츠 주소화: 빌드 VM 이 mksquashfs 직후 방출한 digest sentinel 을
+                # 회수한다. 없으면 digest_state='pending' 으로 기록되고 백필이 채운다 —
+                # 빌드 성공 자체를 되돌리지 않는다.
+                digest_report = parse_digest_sentinel(console, layer_name)
+                if digest_report is None:
+                    _logger.warning("[layer_build] digest sentinel 부재 — pending 으로 기록: layer=%s", layer_name)
                 async with get_session_factory()() as _art_session:
+                    digest_fields = await resolve_digest_fields(
+                        _art_session,
+                        report=digest_report,
+                        parent_artifact_id=parent_artifact_id,
+                        name=layer_name,
+                        kind=kind,
+                        ubuntu_base=effective_ubuntu_base,
+                        python_version=python_version if kind == "python" else None,
+                        pip_packages=list(pip_packages or []),
+                        apt_packages=list(apt_packages or []),
+                    )
                     artifact = LayerArtifact(
                         name=layer_name,
                         kind=kind,
@@ -1032,11 +1051,18 @@ async def run_layer_build(
                         build_id=build_db_id,
                         parent_id=parent_artifact_id,
                         is_sealed=True,
+                        size_bytes=digest_report.size_bytes if digest_report else None,
+                        **digest_fields,
                         **_base_image_fields(base_image_snapshot),
                     )
                     _art_session.add(artifact)
                     await _art_session.commit()
-                _logger.info("[layer_build] LayerArtifact 기록: layer=%s kind=%s", layer_name, kind)
+                _logger.info(
+                    "[layer_build] LayerArtifact 기록: layer=%s kind=%s digest=%s",
+                    layer_name,
+                    kind,
+                    digest_fields.get("blob_digest") or "pending",
+                )
             except Exception:
                 _logger.warning("[layer_build] LayerArtifact 기록 실패 (빌드는 성공)", exc_info=True)
 
