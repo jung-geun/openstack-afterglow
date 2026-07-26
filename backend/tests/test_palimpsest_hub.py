@@ -286,6 +286,66 @@ def test_bundle_round_trips_through_parse(store, tmp_path):
     assert _sha256(staged.read_bytes()) == leaf.blob_digest
 
 
+def test_parse_bundle_reconstructs_parent_chain_from_manifest_order(store, tmp_path):
+    """🔴 부모 체인의 권위는 manifest layers[] 순서다.
+
+    config blob 에서 parent_digest 를 읽으면 안 된다 — manifest 는 leaf 의 config 만
+    참조하므로 조상들이 전부 루트로 import 되어 체인이 조용히 사라진다.
+    """
+    chain = _chain(store)
+    bundle_path = tmp_path / "bundle.tar"
+    bundle_path.write_bytes(b"".join(iter_bundle_tar(store, [chain])))
+
+    parsed = parse_bundle(bundle_path)
+
+    parents = [entry["parent_digest"] for entry in parsed.layers]
+    assert parents == [None, chain[0].blob_digest, chain[1].blob_digest]
+
+
+def test_parse_bundle_handles_layers_with_identical_config(store, tmp_path):
+    """config 가 완전히 같은 두 레이어가 한 번들에 있어도 manifest 가 깨지지 않아야 한다.
+
+    config blob 은 콘텐츠 주소라 한 번만 실리지만, layers[] 는 두 항목 모두 가져야 한다.
+    """
+    same_config = {"name": "twin", "kind": "squashfs"}
+    payloads = (b"first bytes", b"second bytes")
+    twins = [
+        BundleLayer(
+            blob_digest=_put_blob(store, payload),
+            size_bytes=len(payload),
+            name="twin",
+            config=same_config,
+        )
+        for payload in payloads
+    ]
+
+    bundle_path = tmp_path / "twins.tar"
+    bundle_path.write_bytes(b"".join(iter_bundle_tar(store, [twins])))
+    parsed = parse_bundle(bundle_path)
+
+    assert [entry["blob_digest"] for entry in parsed.layers] == [t.blob_digest for t in twins]
+    assert [entry["parent_digest"] for entry in parsed.layers] == [None, twins[0].blob_digest]
+
+
+def test_parse_bundle_rejects_contradictory_parent_for_shared_ancestor(store, tmp_path):
+    """두 manifest 가 같은 blob 에 서로 다른 부모를 주장하면 번들이 모순이다 — 거부한다."""
+    chain = _chain(store)
+    # 같은 leaf 를 부모 없이 루트로 주장하는 두 번째 체인
+    contradictory = [
+        BundleLayer(
+            blob_digest=chain[-1].blob_digest,
+            size_bytes=chain[-1].size_bytes,
+            name=chain[-1].name,
+            config={"name": chain[-1].name, "kind": "squashfs"},
+        )
+    ]
+    bundle_path = tmp_path / "contradictory.tar"
+    bundle_path.write_bytes(b"".join(iter_bundle_tar(store, [chain, contradictory])))
+
+    with pytest.raises(BundleError, match="모순"):
+        parse_bundle(bundle_path)
+
+
 def test_bundle_export_rejects_size_mismatch(store):
     chain = _chain(store)
     lying = [BundleLayer(**{**chain[0].__dict__, "size_bytes": 99999})]

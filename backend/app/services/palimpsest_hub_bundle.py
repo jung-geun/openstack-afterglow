@@ -271,6 +271,10 @@ def parse_bundle(tar_path: Path) -> ParsedBundle:
             if not isinstance(layer_descriptors, list) or not layer_descriptors:
                 raise BundleError("manifest 에 layers 가 없습니다")
 
+            # 🔴 부모 체인의 권위는 **manifest 의 layers[] 순서**다(루트→리프).
+            # config blob 에서 parent_digest 를 읽으면 안 된다 — manifest 는 leaf 의 config 만
+            # 참조하므로 조상들은 config 를 못 받아 전부 루트로 import 되고 체인이 조용히 사라진다.
+            previous_digest: str | None = None
             for layer_desc in layer_descriptors:
                 blob_digest = normalize_digest((layer_desc or {}).get("digest", ""))
                 if blob_digest is None:
@@ -280,15 +284,27 @@ def parse_bundle(tar_path: Path) -> ParsedBundle:
                     raise BundleError(f"번들에 blob 이 없습니다: {blob_digest}")
                 blob_members[blob_digest] = member_name
                 if blob_digest in layers_by_digest:
+                    # 여러 manifest 가 공통 조상을 공유하면 여기로 온다. 이미 기록된 부모가
+                    # 이번 체인과 다르면 번들이 모순이다 — 조용히 덮어쓰지 않는다.
+                    known_parent = layers_by_digest[blob_digest].get("parent_digest")
+                    if known_parent != previous_digest:
+                        raise BundleError(
+                            f"번들의 부모 체인이 모순됩니다: {blob_digest} 의 부모가 "
+                            f"{known_parent} 와 {previous_digest} 로 다릅니다"
+                        )
+                    previous_digest = blob_digest
                     continue
                 ordered.append(blob_digest)
                 layers_by_digest[blob_digest] = {
                     "blob_digest": blob_digest,
                     "size_bytes": int((layer_desc or {}).get("size") or 0),
                     "name": ((layer_desc or {}).get("annotations") or {}).get(ANNOTATION_NAME, ""),
+                    "parent_digest": previous_digest,
                 }
+                previous_digest = blob_digest
 
-            # config 는 leaf 것만 참조되지만, 있으면 메타를 보강한다.
+            # config 는 leaf 것만 manifest 가 참조한다. 메타 보강용으로만 쓰고,
+            # parent_digest 는 위에서 정한 값을 신뢰한다.
             config_desc = manifest.get("config") if isinstance(manifest, dict) else None
             config_digest = normalize_digest((config_desc or {}).get("digest", ""))
             if config_digest is not None:

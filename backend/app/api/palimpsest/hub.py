@@ -643,6 +643,9 @@ async def import_bundle(file: UploadFile, token_info: dict = Depends(get_token_i
                     continue
 
                 config = dict(entry.get("config") or {})
+                # 부모는 **manifest layers[] 순서**에서 온 값을 쓴다(parse_bundle 이 채운다).
+                # config 는 leaf 것만 실려 오므로 여기서 읽으면 조상이 전부 루트가 된다.
+                parent_digest = normalize_digest(entry.get("parent_digest") or "")
                 name = config.get("name") or entry.get("name") or ""
                 if not _NAME_RE.match(name or ""):
                     skipped.append({"digest": declared, "error": "레이어 이름 형식이 유효하지 않습니다"})
@@ -660,7 +663,7 @@ async def import_bundle(file: UploadFile, token_info: dict = Depends(get_token_i
                         media_type=MEDIA_TYPE_LAYER_SQUASHFS,
                         config_digest=compute_config_digest(config or {"blob_digest": declared}),
                         chain_id=normalize_digest(config.get("chain_id") or ""),
-                        parent_digest=normalize_digest(config.get("parent_digest") or ""),
+                        parent_digest=parent_digest,
                         name=name,
                         kind=kind,
                         ubuntu_base=config.get("ubuntu_base"),
