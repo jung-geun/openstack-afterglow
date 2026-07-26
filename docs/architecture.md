@@ -62,7 +62,7 @@ FastAPI 백엔드는 모든 OpenStack 서비스와 통신하는 단일 게이트
 > **키 관리**(Barbican), **VPNaaS**를 내장합니다. 각 API 도메인 상세는 [API 레퍼런스](api-reference.md)를
 > 참고하세요.
 
-CI/CD 파이프라인은 GitHub Actions → GHCR(컨테이너 레지스트리) → ArgoCD → Kubernetes 순서로 연결됩니다. `dev` 브랜치 푸시 시 이미지가 자동 빌드·푸시되고, ArgoCD가 kustomization.yaml의 digest 변경을 감지하여 클러스터에 자동 배포합니다.
+CI/CD 파이프라인은 GitHub Actions → GHCR(컨테이너 레지스트리) → ArgoCD → Kubernetes 순서로 연결됩니다. `dev` 브랜치 푸시 시 이미지가 자동 빌드·푸시되고, Image Updater가 Helm Application의 이미지 값을 갱신하면 ArgoCD가 `helm/afterglow` 차트를 동기화합니다.
 
 ---
 
@@ -73,12 +73,10 @@ CI/CD 파이프라인은 GitHub Actions → GHCR(컨테이너 레지스트리) �
 ```
 push to dev
   → [Docker Build & Push]
-      → backend/frontend 이미지 빌드 (linux/amd64 + linux/arm64)
+      → backend/frontend/worker 이미지 빌드 (linux/amd64 + linux/arm64)
       → GHCR에 :dev 태그로 push
-      → 멀티아치 manifest 생성
-      → deploy/k8s-template/overlays/dev/kustomization.yaml의
-        images[].digest 자동 갱신 ("chore(deploy): update dev image digests [skip ci]")
-  → ArgoCD가 kustomization.yaml diff 감지
+  → Image Updater가 afterglow-dev Helm Application의 이미지 digest 갱신
+  → ArgoCD가 helm/afterglow 차트 diff 감지
   → afterglow-dev Application 자동 sync
   → 새 digest로 rolling update
 ```

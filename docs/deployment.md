@@ -380,29 +380,32 @@ kubectl apply -n argocd \
 ```bash
 kubectl apply -f argocd/00-namespace.yaml
 kubectl apply -f argocd/01-appproject.yaml
-kubectl apply -f argocd/02-application.dev.yaml    # 개발
-kubectl apply -f argocd/02-application.prod.yaml   # 프로덕션
 kubectl apply -f argocd/03-ingress.yaml
 kubectl apply -f argocd/04-server-config.yaml
+
+# Helm Application 생성 — 생성물에는 Secret 값이 들어가므로 커밋하지 않음
+backend/.venv/bin/python argocd/generate_helm_application.py dev
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-dev.yaml
+
+backend/.venv/bin/python argocd/generate_helm_application.py prod
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-prod.yaml
 ```
 
-`02-application.*.yaml`은 `deploy/k8s-template/overlays/*`만 동기화합니다. root의 `configmap.yaml`/`secret.yaml`은 ArgoCD Application 범위 밖이고 `namespace: afterglow`가 고정되어 있으므로, sync 전에 대상 네임스페이스(`afterglow-dev` 또는 `afterglow`)에 `afterglow-config`와 `afterglow-secrets`를 별도로 생성하거나 ExternalSecret으로 공급해야 합니다.
+`generate_helm_application.py`가 dev/prod Application의 유일한 생성 경로입니다.
+Application은 모두 `helm/afterglow`를 source로 사용하며, Helm valuesObject,
+`selfHeal`, Image Updater 설정, `afterglow-config`/`afterglow-secrets`의
+`ignoreDifferences`가 함께 생성됩니다. 삭제된 `argocd/02-application.*.yaml`
+Kustomize Application은 다시 적용하지 않습니다.
 
-`argocd/02-application.dev.yaml` 주요 설정:
+### 3. 동기화 확인
 
-```yaml
-spec:
-  source:
-    repoURL: https://github.com/openstack-afterglow/openstack-afterglow
-    targetRevision: dev          # 감시할 브랜치
-    path: deploy/k8s-template/overlays/dev
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: afterglow-dev
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+```bash
+argocd app list
+argocd app sync afterglow-dev
+argocd app sync afterglow-prod
+argocd app get afterglow-dev
 ```
 
 ### 3. 동기화 확인

@@ -3,15 +3,19 @@
 
 현재 afterglow.conf/config.toml (및 오버라이드)을 읽어
 deploy/k8s/{secret.yaml, configmap.yaml, grafana-deployment.yaml}을 자동 생성합니다.
+`--namespace`는 해당 환경 프로필(deploy/afterglow-prod.conf 또는
+deploy/afterglow-dev.conf)을 항상 먼저 적용합니다. `--override`는 추가 오버라이드입니다.
 
 grafana-deployment.yaml 은 anonymous 인증으로 동작하는 Grafana Deployment 매니페스트로,
 iframe 임베드를 위해 GF_SECURITY_ALLOW_EMBEDDING 이 활성화되어 있습니다.
 Afterglow 앱 인증이 실질적인 접근 게이트 역할을 합니다.
 
 사용법:
-    python3 generate_k8s.py
     python3 generate_k8s.py --config /path/to/afterglow.conf
     python3 generate_k8s.py --output-dir /path/to/deploy/k8s
+    python3 generate_k8s.py --config afterglow.conf \
+        --override deploy/afterglow-dev.conf \
+        --namespace afterglow-dev
 
 Python 3.12+ 표준 라이브러리만 사용합니다.
 """
@@ -95,12 +99,22 @@ def _config_override_paths(config_path: Path) -> list[Path]:
     return [overrides[key] for key in sorted(overrides)]
 
 
-def load_config(config_path: Path) -> dict:
+def load_config(
+    config_path: Path, extra_override_paths: list[Path] | None = None
+) -> dict:
     """afterglow.conf/config.toml + 오버라이드 파일을 로드하고 딥 머지."""
     with open(config_path, "rb") as f:
         cfg = tomllib.load(f)
-    # 알파벳순으로 오버라이드 파일 적용 (뒤 파일이 앞을 이김)
-    for override_path in _config_override_paths(config_path):
+    # 자동 오버라이드 뒤에 명시적 오버라이드를 적용해 환경별 값을 우선한다.
+    override_paths = _config_override_paths(config_path)
+    for override_path in extra_override_paths or []:
+        resolved_path = override_path.resolve()
+        if not resolved_path.is_file():
+            raise FileNotFoundError(f"오버라이드 파일을 찾을 수 없습니다: {resolved_path}")
+        if resolved_path not in override_paths:
+            override_paths.append(resolved_path)
+    # 알파벳순으로 자동 오버라이드를 적용한 뒤 명시적 오버라이드를 적용한다.
+    for override_path in override_paths:
         with open(override_path, "rb") as f:
             _deep_merge(cfg, tomllib.load(f))
         print(f"  {dim(f'오버라이드 로드: {override_path.name}')}")
@@ -257,7 +271,7 @@ def _validate_k8s_secret_key(secret_key: str) -> None:
         raise ValueError("K8s secret.yaml의 SECRET_KEY는 32자 이상이어야 합니다.")
 
 
-def render_secret(cfg: dict) -> str:
+def render_secret(cfg: dict, namespace: str = "afterglow") -> str:
     """secret.yaml 생성: 비밀 값만 추출."""
     os_cfg = cfg.get("openstack", {})
     app = cfg.get("app", {})
@@ -277,7 +291,7 @@ def render_secret(cfg: dict) -> str:
         "kind: Secret",
         "metadata:",
         "  name: afterglow-secrets",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "type: Opaque",
         "stringData:",
         "  # OpenStack 관리자 계정 비밀번호",
@@ -389,7 +403,7 @@ def render_secret(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _render_toml_for_k8s(cfg: dict) -> str:
+def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     """config.toml 전체를 렌더링하되 비밀 값은 주석으로 대체."""
     os_cfg = cfg.get("openstack", {})
     app = cfg.get("app", {})
@@ -764,7 +778,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
     lines.append("[worker_runtime.kubernetes]")
-    lines.append(f"namespace = {_toml_str(wr_k8s.get('namespace', 'afterglow'))}")
+    lines.append(f"namespace = {_toml_str(namespace or wr_k8s.get('namespace', 'afterglow'))}")
     lines.append(
         f"service_account_token_path = {_toml_str(wr_k8s.get('service_account_token_path', '/var/run/secrets/kubernetes.io/serviceaccount/token'))}"
     )
@@ -1023,7 +1037,7 @@ def _render_gpu_toml(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def render_configmap(cfg: dict) -> str:
+def render_configmap(cfg: dict, namespace: str = "afterglow") -> str:
     """configmap.yaml 생성: Redis URL, Origin, S3 base, afterglow.conf/config.toml + config.gpu.toml 인라인."""
     cors = cfg.get("cors", {})
     ost = cfg.get("openstack", {})
@@ -1039,7 +1053,7 @@ def render_configmap(cfg: dict) -> str:
     app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
 
     # afterglow.conf 인라인 (4칸 들여쓰기). config.toml 키도 하위호환용으로 함께 출력.
-    toml_content = _render_toml_for_k8s(cfg)
+    toml_content = _render_toml_for_k8s(cfg, namespace)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
 
     lines = [
@@ -1047,7 +1061,7 @@ def render_configmap(cfg: dict) -> str:
         "kind: ConfigMap",
         "metadata:",
         "  name: afterglow-config",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  APP_ORIGIN: "{app_origin}"',
@@ -1080,7 +1094,9 @@ def render_configmap(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def render_grafana_deployment(cfg: dict) -> str:
+def render_grafana_deployment(
+    cfg: dict, namespace: str = "afterglow"
+) -> str:
     """grafana-deployment.yaml 생성.
 
     iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 익명 접근(auth.anonymous)을 설정한다.
@@ -1093,7 +1109,7 @@ def render_grafana_deployment(cfg: dict) -> str:
         "kind: Deployment",
         "metadata:",
         "  name: grafana",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "  labels:",
         "    app: grafana",
         "spec:",
@@ -1188,10 +1204,25 @@ def main() -> None:
         help="afterglow.conf 또는 config.toml 경로 (기본값: ./afterglow.conf, 없으면 ./config.toml)",
     )
     parser.add_argument(
+        "--override",
+        dest="override_paths",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="PATH",
+        help="환경별 TOML 오버라이드 파일 (반복 지정 가능)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=SCRIPT_DIR / "deploy" / "k8s",
         help="출력 디렉토리 (기본값: ./deploy/k8s)",
+    )
+    parser.add_argument(
+        "--namespace",
+        choices=("afterglow", "afterglow-dev"),
+        default="afterglow",
+        help="대상 네임스페이스 (기본값: afterglow)",
     )
     parser.add_argument(
         "--dry-run",
@@ -1202,6 +1233,15 @@ def main() -> None:
 
     config_path = args.config.resolve()
     output_dir = args.output_dir.resolve()
+    profile_name = "dev" if args.namespace == "afterglow-dev" else "prod"
+    profile_path = SCRIPT_DIR / "deploy" / f"afterglow-{profile_name}.conf"
+    if not profile_path.is_file():
+        print(
+            f"{red('오류')}: namespace 환경 프로필을 찾을 수 없습니다: {profile_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    override_paths = [profile_path, *args.override_paths]
 
     if not config_path.exists():
         print(
@@ -1211,15 +1251,15 @@ def main() -> None:
         sys.exit(1)
 
     print(f"  설정 로드: {dim(str(config_path))}")
-    cfg = load_config(config_path)
+    cfg = load_config(config_path, override_paths)
     print(f"  {green('✓')} 설정 로드 완료")
     print()
 
     # 렌더링
     try:
-        secret_content = render_secret(cfg)
-        configmap_content = render_configmap(cfg)
-        grafana_deployment_content = render_grafana_deployment(cfg)
+        secret_content = render_secret(cfg, args.namespace)
+        configmap_content = render_configmap(cfg, args.namespace)
+        grafana_deployment_content = render_grafana_deployment(cfg, args.namespace)
     except ValueError as exc:
         print(f"{red('오류')}: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -1262,8 +1302,11 @@ def main() -> None:
     print("  적용 방법:")
     print(f"    kubectl apply -f {secret_path}")
     print(f"    kubectl apply -f {configmap_path}")
-    print(f"    kubectl apply -f {grafana_deployment_path}")
-    print("    kubectl rollout restart deployment -n afterglow")
+    print(
+        f"    # grafana-deployment.yaml is Helm/ArgoCD-managed; do not apply it directly: "
+        f"{grafana_deployment_path}"
+    )
+    print(f"    kubectl rollout restart deployment -n {args.namespace}")
 
 
 if __name__ == "__main__":
