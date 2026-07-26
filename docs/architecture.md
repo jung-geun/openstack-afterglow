@@ -238,6 +238,12 @@ VM 내부 파일시스템 뷰
 
 ### Union 레이어 라이프사이클 (seal / fork / build)
 
+> ⚠️ **이 절의 `/api/v1/union/...` 엔드포인트는 2026-07-27 제거되었다.** 아래 다이어그램은 배포된 적 없는
+> 2세대 union 설계의 기록이다. 현행 레이어 도메인은 [Palimpsest](palimpsest.md)이며, 실제 빌드/소비
+> 파이프라인은 [squashfs 레이어 파이프라인](squashfs-layer-pipeline.md)이 담당한다.
+> content-addressable·single-parent·불변성 **원칙 자체는 Palimpsest가 계승**한다(정체성은
+> `.sqsh` blob 의 sha256).
+
 Union 레이어 시스템은 **content-addressable**·**single-parent 상속**·**seal 불변성(3-lock)** 원칙을
 따릅니다. 레이어는 RW(쓰기 가능) 상태로 시작해 **seal(봉인)** 되면 불변이 되고, sealed 레이어에서만
 **fork(파생)** 하여 새 RW 레이어를 만들 수 있습니다. 상세 API는 [Union 레이어 API](api/union.md)를 참고하세요.

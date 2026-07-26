@@ -64,13 +64,25 @@
 
 ### Phase 2 — `/api/v1/palimpsest` 표면 + union 폐기
 
-- [ ] `backend/app/api/palimpsest/{layers,builds,hub,admin}.py` 신규 — 기존 서비스 함수 호출(로직 이중화 금지)
-- [ ] `main.py` — `/api/v1/palimpsest/…` 마운트 + `_AUDIT_PREFIX_MAP`에 `("/api/v1/palimpsest", "palimpsest_layer")` 등록
-- [ ] 기존 `/api/v1/admin/libraries`·`/api/v1/libraries/squashfs`를 같은 서비스 seam 호출 dual-mount로 유지
-- [ ] 2세대 폐기 — `/api/v1/union` 마운트 제거, `app/api/union/layers.py` · `services/union_layers.py` · `scripts/layerbuild.py` · `scripts/envmgr-*.sh` 삭제. **`union_*` 테이블은 보존**(DROP 필요 시 행 수 0 확인 단계를 별도 항목으로)
-- [ ] 프론트 API 호출 경로를 `/api/v1/palimpsest/…`로 전환
-- [ ] 레거시 dual-mount 제거는 **프론트 전환 커밋 이후 별도 커밋**
-- [ ] 테스트 — 신규 경로 계약 + (전환 전) 레거시 경로가 404가 아님을 고정
+- [x] `backend/app/api/palimpsest/{layers,admin}.py` + `main.py` 마운트 + `_AUDIT_PREFIX_MAP` 등록 (Phase 1에서 완료)
+- [x] 2세대 폐기 — `/api/v1/union` 마운트·감사 매핑 제거, 파일 28개 삭제:
+      `api/union/layers.py`, `services/union_layers.py`, `models/union.py`,
+      테스트 5종(`test_union_layers`, `test_union_layers_db`, `test_union_snapshot`, `test_layerbuild`, `test_libraries_license_db`),
+      `scripts/{layerbuild.py,envmgr-init.sh,envmgr-use.sh,envmgr-rotate-key.sh}`,
+      프론트 `routes/dashboard/library/**` · `lib/components/{library,dashboard/library}/` · `lib/types/layer.ts` · `wizard/SelectTemplate.svelte`
+- [x] ORM `UnionLayer`/`UnionTemplate`/`UnionUserMount` 제거 + `database.py`의 union DDL 제거.
+      **테이블은 보존** — DROP 마이그레이션 없음. 신규 배포는 만들지 않고, 기존 배포는 그대로 둔다
+- [x] `main.py` 대시보드 집계가 비어 있던 `union_user_mounts` JOIN 대신 `layer_consumes`(status='active') 를 세도록 교체
+- [x] `app/api/union/__init__.py` — 라우터 제거, 디렉터리는 유지(감사 매핑 `union_layer`·테이블명 정합)
+- [x] `legacyVisualDebt.ts` 항목 15개 정리, `docs/api/union.md`·`api-reference.md`·`index.md`·`architecture.md`(ko/en) 안내 추가
+- [x] 회귀 테스트 `test_second_generation_union_surface_stays_removed` — 라우트·감사 매핑·모듈·ORM 부재 + 3세대 표면 존속 고정
+- [ ] ~~프론트 API 호출 경로를 `/api/v1/palimpsest/…`로 전환~~ → **보류(권고: 하지 않음)**
+  > 계획서는 `/api/v1/admin/libraries`·`/api/v1/libraries/squashfs` 를 `/api/v1/palimpsest/…` 로 옮기고
+  > dual-mount 후 제거하려 했다. 실제로 보니 **얻는 게 이름뿐이고 비용·위험이 크다** — 관리자 20개
+  > 엔드포인트 + 공개 3개 + 프론트 전면 재배선이며, 대상은 현재 **유일하게 동작하는 레이어 시스템**이다.
+  > 사용자 대면 명칭은 Phase 0에서 이미 Palimpsest로 통일됐고, `_AUDIT_PREFIX_MAP` 도 이미 매핑돼 있다.
+  > 신규 능력(digest 검색·조상·백필·허브)만 `/api/v1/palimpsest` 에 두고 기존 경로는 그대로 둔다.
+  > 경로까지 통일하길 원하면 별도 change 로 진행할 것.
 
 ### Phase 3 — 허브
 

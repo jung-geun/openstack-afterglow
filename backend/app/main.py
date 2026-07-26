@@ -386,7 +386,6 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/routers", "router"),
     ("/api/v1/secrets", "secret"),
     ("/api/v1/images", "image"),
-    ("/api/v1/union", "union_layer"),
     ("/api/v1/clusters", "container_cluster"),
 ]
 
@@ -605,12 +604,11 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_nodegroups_router, prefix="/api/v1/k3s/clusters", tags=["k3s-nodegroups"])
     app.include_router(k3s_certificates_router, prefix="/api/v1/k3s/clusters", tags=["k3s-certificates"])
 
-# Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
-from app.api.union import router as union_router  # noqa: E402
-
-app.include_router(union_router, prefix="/api/v1/union", tags=["union"])
-
 # Palimpsest (레이어드 VM) — docs/palimpsest.md
+#
+# 2세대 union 표면(`/api/v1/union`)은 폐기됐다 — 인프라(중앙 Manila share, CephX keyring,
+# Builder VM)가 배포된 적이 없고 프론트 호출자도 nav 에서 도달 불가능한 고립 페이지뿐이었다.
+# `union_layers`/`union_templates`/`union_user_mounts` 테이블은 데이터 보존을 위해 남긴다.
 from app.api.palimpsest import (  # noqa: E402
     palimpsest_admin_router,
     palimpsest_layers_router,
@@ -852,11 +850,14 @@ async def _collect_snapshot() -> None:
                 factory = get_session_factory()
                 if factory:
                     async with factory() as db:
+                        # Palimpsest 활성 레이어 소비 집계.
+                        # 이전에는 2세대 `union_user_mounts` 를 세었으나 그 테이블은 채워진 적이
+                        # 없다(인프라 미배포) — 실제 사용 중인 스택은 `layer_consumes` 다.
                         result = await db.execute(
                             text(
-                                "SELECT ul.name, COUNT(*) as cnt FROM union_user_mounts uum "
-                                "JOIN union_layers ul ON ul.id = uum.leaf_layer_id "
-                                "WHERE uum.unmounted_at IS NULL GROUP BY ul.name"
+                                "SELECT profile_name, COUNT(*) AS cnt FROM layer_consumes "
+                                "WHERE status = 'active' AND server_id IS NOT NULL "
+                                "GROUP BY profile_name"
                             )
                         )
                         for row in result:

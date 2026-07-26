@@ -498,93 +498,13 @@ class LayerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
-# Union Mount 레이어 시스템
+# (폐기) 2세대 union ORM — UnionLayer / UnionTemplate / UnionUserMount
+#
+# 인프라(중앙 Manila share, CephX keyring, Builder VM)가 배포된 적이 없어
+# Palimpsest 통합 과정에서 제거했다. `union_layers` / `union_templates` /
+# `union_user_mounts` **테이블 자체는 데이터 보존을 위해 남긴다** — DROP 마이그레이션
+# 없음. 레이어 정체성은 이제 `LayerArtifact.blob_digest` 다(docs/palimpsest.md §3).
 # ---------------------------------------------------------------------------
-
-
-class UnionLayer(Base):
-    """Content-addressable 불변 레이어. id = 'sha256:<64hex>'."""
-
-    __tablename__ = "union_layers"
-
-    id: Mapped[str] = mapped_column(VARCHAR(71), primary_key=True)  # sha256:<64hex>
-    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
-    version: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-
-    # 단일 상속: 부모 0개(최상위) 또는 1개
-    parent_id: Mapped[str | None] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), index=True
-    )
-    # 다중 상속(실험, opt-in): parent_ids 가 NOT NULL 이면 multi 모드, parent_id 는 NULL.
-    # 단일/다중은 mutually exclusive (둘 중 하나만 사용).
-    parent_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    # 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
-    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 재현/재빌드용 메타데이터
-    build_recipe: Mapped[dict] = mapped_column(JSON, nullable=False)
-    installed_packages: Mapped[dict] = mapped_column(JSON, nullable=False)
-
-    # 검증용
-    content_hash: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)  # sha256:<64hex>
-    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
-    file_count: Mapped[int | None] = mapped_column(INT)
-
-    # 프로젝트 격리 (NULL = 공유/시스템 레이어, 값 있음 = 해당 프로젝트 전용)
-    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
-    # 봉인 시각 (sealed=True 로 변경된 시점)
-    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    # 라이선스 메타데이터 (None = 제한 없음)
-    license_type: Mapped[str | None] = mapped_column(VARCHAR(64))
-    max_concurrent_mounts: Mapped[int | None] = mapped_column(INT)
-
-    # 관계
-    parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
-    templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")
-
-    __table_args__ = (
-        Index("idx_union_layers_name_version", "name", "version"),
-        Index("idx_union_layers_parent", "parent_id"),
-    )
-
-
-class UnionTemplate(Base):
-    """이름 붙은 레이어 조합 (leaf layer + ubuntu base 지정)."""
-
-    __tablename__ = "union_templates"
-
-    name: Mapped[str] = mapped_column(VARCHAR(128), primary_key=True)
-    version: Mapped[int] = mapped_column(INT, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    parent_version: Mapped[int | None] = mapped_column(INT)
-    ubuntu_base: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
-    leaf_layer_id: Mapped[str] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    note: Mapped[str | None] = mapped_column(TEXT)
-
-    # 관계
-    leaf_layer: Mapped["UnionLayer"] = relationship("UnionLayer", back_populates="templates")
-
-
-class UnionUserMount(Base):
-    """사용자 VM 마운트 추적 (GC 판단 및 운영 가시성)."""
-
-    __tablename__ = "union_user_mounts"
-
-    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
-    vm_hostname: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
-    leaf_layer_id: Mapped[str] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class K3sNodegroup(Base):

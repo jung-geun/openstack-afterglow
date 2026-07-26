@@ -52,6 +52,36 @@ async def test_palimpsest_routes_are_mounted_under_v1_only():
     assert not any(p.startswith("/api/palimpsest") for p in paths)
 
 
+async def test_second_generation_union_surface_stays_removed():
+    """2세대 `/api/v1/union` 은 폐기됐다 — 되살아나면 레이어 시스템이 다시 갈라진다.
+
+    인프라(중앙 Manila share, CephX keyring, Builder VM)가 배포된 적 없는 설계였고,
+    프론트 호출자도 nav 에서 도달 불가능한 고립 페이지뿐이었다. docs/palimpsest.md §1.
+    `union_layers`/`union_templates`/`union_user_mounts` 테이블은 데이터 보존을 위해 남아 있으나
+    ORM·API·서비스는 없다.
+    """
+    import importlib
+
+    from app.main import _AUDIT_PREFIX_MAP, app
+
+    assert not any(route.path.startswith("/api/v1/union") for route in app.routes)
+    assert not any(prefix.startswith("/api/v1/union") for prefix, _ in _AUDIT_PREFIX_MAP)
+
+    for gone in ("app.services.union_layers", "app.models.union", "app.api.union.layers"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(gone)
+
+    import app.models.db as db_models
+
+    for gone_orm in ("UnionLayer", "UnionTemplate", "UnionUserMount"):
+        assert not hasattr(db_models, gone_orm), f"{gone_orm} ORM 이 되살아났다"
+
+    # 3세대(= Palimpsest 코어) 표면은 그대로여야 한다
+    paths = {route.path for route in app.routes}
+    assert any(p.startswith("/api/v1/admin/libraries") for p in paths)
+    assert any(p.startswith("/api/v1/libraries/squashfs") for p in paths)
+
+
 # ---------------------------------------------------------------------------
 # 검색 파라미터 검증
 # ---------------------------------------------------------------------------

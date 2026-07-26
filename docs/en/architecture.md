@@ -243,6 +243,12 @@ VM internal filesystem view
 
 ### Union Layer Lifecycle (seal / fork / build)
 
+> ⚠️ **The `/api/v1/union/...` endpoints in this section were removed on 2026-07-27.** The diagram below
+> records the second-generation union design, whose infrastructure was never deployed. The current layer
+> domain is [Palimpsest](palimpsest.md), and the actual build/consume pipeline is the
+> [squashfs layer pipeline](squashfs-layer-pipeline.md). The content-addressable, single-parent, and
+> immutability **principles carry over to Palimpsest** (identity is the sha256 of the `.sqsh` blob).
+
 The Union layer system follows the principles of **content-addressable**, **single-parent inheritance**, and **seal immutability (3-lock)**.
 A layer starts in the RW (writable) state, becomes immutable once **sealed**, and only a sealed layer can be
 **forked** to create a new RW layer. For the detailed API, see the [Union Layer API](api/union.md).

@@ -685,38 +685,6 @@ export const LEGACY_VISUAL_DEBT: VisualDebtBaseline = {
 		count: 24,
 		tokens: ["bg-blue-500","bg-blue-600","bg-gray-700","bg-gray-800","bg-gray-900","border-blue-500","border-gray-600","border-gray-700","text-gray-400","text-gray-500","text-red-400"],
 	},
-	"frontend/src/lib/components/dashboard/library/id/LayerAncestorChain.svelte": {
-		count: 12,
-		tokens: ["bg-blue-400","bg-gray-600","bg-gray-700","bg-gray-800","border-gray-700","text-blue-400","text-blue-400/60","text-gray-300","text-gray-500"],
-	},
-	"frontend/src/lib/components/dashboard/library/id/LayerDependents.svelte": {
-		count: 8,
-		tokens: ["bg-gray-700","bg-gray-700/40","bg-gray-800","border-gray-700","text-gray-200","text-gray-300","text-gray-500"],
-	},
-	"frontend/src/lib/components/dashboard/library/id/LayerInfoCard.svelte": {
-		count: 28,
-		tokens: ["bg-amber-600","bg-amber-700","bg-gray-600","bg-gray-700","bg-gray-800","bg-red-600","bg-red-700","bg-red-800/60","bg-red-900/40","border-gray-700","border-red-800","text-gray-300","text-gray-400","text-gray-500","text-red-300","text-red-400"],
-	},
-	"frontend/src/lib/components/dashboard/library/id/LayerPackagesAccordion.svelte": {
-		count: 5,
-		tokens: ["bg-gray-800","border-gray-700","text-gray-300","text-gray-400"],
-	},
-	"frontend/src/lib/components/dashboard/library/id/LayerRecipeAccordion.svelte": {
-		count: 5,
-		tokens: ["bg-gray-800","border-gray-700","text-gray-300","text-gray-400"],
-	},
-	"frontend/src/lib/components/dashboard/library/templates/TemplateCreateForm.svelte": {
-		count: 26,
-		tokens: ["bg-blue-500","bg-blue-600","bg-gray-600","bg-gray-700","bg-gray-800","border-blue-500","border-gray-600","border-gray-700","text-gray-400"],
-	},
-	"frontend/src/lib/components/dashboard/library/templates/TemplateDetailPanel.svelte": {
-		count: 16,
-		tokens: ["bg-gray-600","bg-gray-700/40","text-blue-300","text-blue-400","text-gray-200","text-gray-300","text-gray-400","text-gray-500"],
-	},
-	"frontend/src/lib/components/dashboard/library/templates/TemplateTable.svelte": {
-		count: 8,
-		tokens: ["bg-gray-800","bg-gray-800/50","border-gray-700","text-gray-400","text-gray-500"],
-	},
 	"frontend/src/lib/components/dashboard/loadbalancers/id/LbListenerSection.svelte": {
 		count: 33,
 		tokens: ["bg-blue-500","bg-blue-600","bg-blue-900/30","bg-gray-700","bg-gray-800","bg-gray-800/50","bg-gray-800/60","bg-gray-900","border-blue-700","border-blue-900","border-gray-700","border-gray-800","border-red-700","border-red-900","text-blue-300","text-blue-400","text-gray-200","text-gray-400","text-gray-600","text-green-400","text-red-300","text-red-400","text-yellow-400"],
@@ -1229,14 +1197,6 @@ export const LEGACY_VISUAL_DEBT: VisualDebtBaseline = {
 		count: 20,
 		tokens: ["bg-[#0B1220]","bg-gray-700","bg-gray-800","bg-gray-800/30","bg-red-950/40","bg-violet-900/25","border-gray-700","border-gray-800","border-red-900","border-violet-800","text-gray-200","text-gray-400","text-gray-500","text-gray-600","text-red-400","text-violet-400"],
 	},
-	"frontend/src/lib/components/library/LayerCatalogTable.svelte": {
-		count: 11,
-		tokens: ["bg-gray-800","border-gray-700","text-blue-400","text-gray-100","text-gray-400","text-gray-500","text-gray-600"],
-	},
-	"frontend/src/lib/components/library/LayerSearchBar.svelte": {
-		count: 7,
-		tokens: ["bg-gray-600","bg-gray-700","bg-gray-800","border-blue-500","border-gray-700","text-gray-200","text-gray-400"],
-	},
 	"frontend/src/lib/components/LibraryUsageChart.svelte": {
 		count: 21,
 		tokens: ["#34d399","#38bdf8","#4ade80","#60a5fa","#a78bfa","#c084fc","#f472b6","#f87171","#fb923c","#fbbf24","bg-blue-600","bg-gray-800","bg-gray-900","border-gray-800","text-gray-300","text-gray-400","text-gray-500","text-gray-600"],
@@ -1645,10 +1605,6 @@ export const LEGACY_VISUAL_DEBT: VisualDebtBaseline = {
 		count: 60,
 		tokens: ["bg-blue-500","bg-blue-900/15","bg-blue-900/30","bg-blue-900/40","bg-gray-800","bg-gray-900","bg-yellow-900/20","border-blue-500","border-blue-600","border-blue-800","border-gray-500","border-gray-600","border-gray-700","border-gray-800","border-yellow-800","text-blue-300","text-blue-400","text-gray-400","text-gray-500","text-yellow-400"],
 	},
-	"frontend/src/lib/components/wizard/SelectTemplate.svelte": {
-		count: 23,
-		tokens: ["bg-blue-400","bg-blue-900/20","bg-gray-700/50","bg-gray-800","bg-red-900/40","border-blue-400","border-blue-500","border-gray-500","border-gray-600","border-gray-700","border-red-700","text-gray-100","text-gray-300","text-gray-400","text-gray-500","text-red-300"],
-	},
 	"frontend/src/lib/components/wizard/VmDeployProgress.svelte": {
 		count: 5,
 		tokens: ["bg-gray-900","border-gray-700","text-gray-400","text-gray-500","text-gray-600"],
@@ -2000,22 +1956,6 @@ export const LEGACY_VISUAL_DEBT: VisualDebtBaseline = {
 	"frontend/src/routes/dashboard/file-storage/snapshots/+page.svelte": {
 		count: 5,
 		tokens: ["bg-gray-600","bg-gray-700","bg-red-900/40","border-red-700","text-red-300"],
-	},
-	"frontend/src/routes/dashboard/library/[id]/+page.svelte": {
-		count: 8,
-		tokens: ["bg-gray-900","bg-red-900/40","border-red-700","text-gray-100","text-gray-200","text-gray-400","text-red-300"],
-	},
-	"frontend/src/routes/dashboard/library/+page.svelte": {
-		count: 13,
-		tokens: ["bg-blue-500","bg-blue-600","bg-gray-600","bg-gray-700","bg-gray-900","bg-red-900/40","border-gray-600","border-gray-700","border-red-700","text-gray-100","text-gray-400","text-gray-500","text-red-300"],
-	},
-	"frontend/src/routes/dashboard/library/create/+page.svelte": {
-		count: 36,
-		tokens: ["bg-blue-500","bg-blue-600","bg-gray-700","bg-gray-800","bg-gray-900","bg-red-900/40","border-blue-500","border-gray-600","border-gray-700","border-red-700","text-gray-100","text-gray-200","text-gray-400","text-gray-500","text-red-300","text-red-400"],
-	},
-	"frontend/src/routes/dashboard/library/templates/+page.svelte": {
-		count: 11,
-		tokens: ["bg-blue-500","bg-blue-600","bg-gray-900","bg-red-900/40","border-gray-600","border-gray-700","border-red-700","text-gray-100","text-gray-400","text-gray-500","text-red-300"],
 	},
 	"frontend/src/routes/dashboard/loadbalancers/[id]/+page.svelte": {
 		count: 5,

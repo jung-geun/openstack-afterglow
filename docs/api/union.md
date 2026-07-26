@@ -6,8 +6,19 @@ nav_order: 30
 
 # 유니온 레이어 (Union) API
 
-> 태그: `union`, `admin-libraries`, `squashfs-libraries`
-> 기본 경로: `/api/v1/union`, `/api/v1/admin/libraries`, `/api/v1/libraries/squashfs`
+> ⚠️ **`/api/v1/union` 표면은 제거되었다 (2026-07-27, Palimpsest 통합).**
+> 인프라(중앙 Manila share, CephX keyring, Builder VM)가 배포된 적이 없는 2세대 설계였다.
+> 이 문서에서 `/api/v1/union/...` 로 시작하는 절은 **더 이상 존재하지 않는 엔드포인트**다.
+>
+> - 레이어 정체성·검색·부모 체인 → **`/api/v1/palimpsest/layers`**, `/layers/{id}/ancestors`
+> - 관리자 백필·전체 조회 → **`/api/v1/admin/palimpsest/...`**
+> - 도메인 정의와 digest 규칙 → **[`docs/palimpsest.md`](../palimpsest.md)**
+>
+> `/api/v1/admin/libraries` 와 `/api/v1/libraries/squashfs` 절은 **현행 유효**하다
+> (Palimpsest 코어인 squashfs 파이프라인).
+
+> 태그: `admin-libraries`, `squashfs-libraries`
+> 기본 경로: `/api/v1/admin/libraries`, `/api/v1/libraries/squashfs`
 > 인증: `Authorization: Bearer <access_token>` · `X-Project-Id`(선택, rescope용)
 
 Afterglow의 플래그십 기능인 **레이어 기반 환경 플랫폼** API입니다. 도커 이미지처럼 패키지·툴체인 단위 레이어를 중앙(CephFS)에 저장하고, VM 부팅 시 base 디스크 위에 OverlayFS로 합성하여 사용합니다. 컨테이너가 아니라 VM 내부에서 직접 마운트하는 방식이며, 저장소 공유는 Manila(CephFS/NFS) share로 이뤄집니다.
