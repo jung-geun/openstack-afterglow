@@ -67,7 +67,7 @@ The FastAPI backend acts as a single gateway that communicates with every OpenSt
 > library), a **k3s provisioner** (lightweight Kubernetes), **monitoring integration** (Prometheus/Grafana),
 > **key management** (Barbican), and **VPNaaS**. For details on each API domain, see the [API Reference](api-reference.md).
 
-The CI/CD pipeline is wired as GitHub Actions → GHCR (container registry) → ArgoCD → Kubernetes. On a push to the `dev` branch, images are automatically built and pushed, and ArgoCD detects the digest change in kustomization.yaml and automatically deploys to the cluster.
+The CI/CD pipeline is wired as GitHub Actions → GHCR (container registry) → ArgoCD → Kubernetes. On a push to the `dev` branch, images are built and pushed automatically; Image Updater updates the Helm Application image values, and ArgoCD syncs the `helm/afterglow` chart.
 
 ---
 
@@ -78,14 +78,12 @@ On a push to the `dev` branch, the GitHub Actions workflow runs in the following
 ```
 push to dev
   → [Docker Build & Push]
-      → build backend/frontend images (linux/amd64 + linux/arm64)
+      → build backend/frontend/worker images (linux/amd64 + linux/arm64)
       → push to GHCR with :dev tag
-      → create multi-arch manifest
-      → auto-update images[].digest in
-        deploy/k8s-template/overlays/dev/kustomization.yaml ("chore(deploy): update dev image digests [skip ci]")
-  → ArgoCD detects kustomization.yaml diff
+  → Image Updater updates the afterglow-dev Helm Application image digest
+  → ArgoCD detects the helm/afterglow chart diff
   → afterglow-dev Application auto-sync
-  → rolling update with new digest
+  → rolling update with the new digest
 ```
 
 On a push of a `v*` tag, images are built with the `:vX.Y.Z` + `:latest` tags.

@@ -282,29 +282,34 @@ kubectl apply -n argocd \
 ```bash
 kubectl apply -f argocd/00-namespace.yaml
 kubectl apply -f argocd/01-appproject.yaml
-kubectl apply -f argocd/02-application.dev.yaml    # development
-kubectl apply -f argocd/02-application.prod.yaml   # production
 kubectl apply -f argocd/03-ingress.yaml
 kubectl apply -f argocd/04-server-config.yaml
+
+# Generate Helm Applications. The generated files contain Secret values;
+# never commit them.
+backend/.venv/bin/python argocd/generate_helm_application.py dev
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-dev.yaml
+
+backend/.venv/bin/python argocd/generate_helm_application.py prod
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-prod.yaml
 ```
 
-`02-application.*.yaml` syncs only `deploy/k8s-template/overlays/*`. The root `configmap.yaml` and `secret.yaml` are outside the ArgoCD Application path and hard-code `namespace: afterglow`; before syncing, create `afterglow-config` and `afterglow-secrets` in the destination namespace (`afterglow-dev` or `afterglow`) or provide them through ExternalSecret.
+`generate_helm_application.py` is the only supported Application generation path.
+Both Applications use `helm/afterglow` as their source and include the Helm
+valuesObject, `selfHeal`, Image Updater settings, and
+`ignoreDifferences` for `afterglow-config`/`afterglow-secrets`.
+Do not recreate or apply the removed `argocd/02-application.*.yaml`
+Kustomize Applications.
 
-Key fields in `argocd/02-application.dev.yaml`:
+### 3. Verify Sync
 
-```yaml
-spec:
-  source:
-    repoURL: https://github.com/openstack-afterglow/openstack-afterglow
-    targetRevision: dev          # branch to watch
-    path: deploy/k8s-template/overlays/dev
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: afterglow-dev
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+```bash
+argocd app list
+argocd app sync afterglow-dev
+argocd app sync afterglow-prod
+argocd app get afterglow-dev
 ```
 
 ### 3. Verify Sync

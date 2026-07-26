@@ -176,6 +176,7 @@ secret_key = "0123456789abcdef0123456789abcdef"
 
     output = capsys.readouterr().out
     assert "afterglow.conf" in output
+    assert "afterglow-prod.conf" in output
     assert 'site_name = "Explicit K8s Afterglow Conf"' in output
 
 

@@ -1,8 +1,8 @@
 """argocd/generate_helm_application.py 단위 테스트.
 
-worker_runtime kubernetes 모드에서 매니저가 drover/notion-worker Deployment 의 replicas 를
-런타임에 조정(pause=0, resume=1)한다. ArgoCD selfHeal 이 이를 git 선언값으로 되돌리지 않도록
-생성되는 Application 이 해당 Deployment 의 /spec/replicas 를 ignoreDifferences 로 두는지 고정한다.
+ArgoCD selfHeal 이 관리자가 직접 적용한 Afterglow 설정과 충돌하지 않도록
+ConfigMap/Secret 데이터 필드를 ignoreDifferences 로 생성하는지 고정한다.
+worker_runtime kubernetes 모드에서는 런타임 replica 조정도 함께 보존한다.
 """
 
 import sys
@@ -37,18 +37,42 @@ def test_worker_ignore_differences_covers_both_worker_deployments():
         assert entry["jsonPointers"] == ["/spec/replicas"]
 
 
-def test_ignore_differences_gated_off_in_static_mode():
-    # 기본(static)에서는 매니저가 replicas 를 건드리지 않으므로 ArgoCD 가 계속 drift 를
-    # 감지·복구하도록 무시 목록을 비워 둔다(누군가 워커를 0으로 줄이면 self-heal 로 복원).
-    assert _ignore_differences_for({}, "afterglow-dev") == []
-    assert _ignore_differences_for({"workerRuntime": {"mode": "static"}}, "afterglow-dev") == []
-    assert _ignore_differences_for({"workerRuntime": {"mode": "docker"}}, "afterglow-dev") == []
+def test_admin_managed_config_and_secret_data_are_always_ignored():
+    entries = _ignore_differences_for({}, "afterglow-dev")
+
+    assert {(e["kind"], e["name"]) for e in entries} == {
+        ("ConfigMap", "afterglow-config"),
+        ("Secret", "afterglow-secrets"),
+    }
+    for entry in entries:
+        assert entry["group"] == ""
+        assert entry["namespace"] == "afterglow-dev"
+        if entry["kind"] == "ConfigMap":
+            assert entry["jsonPointers"] == ["/data"]
+        else:
+            assert entry["jsonPointers"] == ["/data", "/stringData"]
 
 
-def test_ignore_differences_enabled_only_in_kubernetes_mode():
+def test_static_mode_does_not_ignore_worker_replicas():
+    entries = _ignore_differences_for({"workerRuntime": {"mode": "static"}}, "afterglow-dev")
+
+    assert all(entry["kind"] != "Deployment" for entry in entries)
+
+
+def test_docker_mode_does_not_ignore_worker_replicas():
+    entries = _ignore_differences_for({"workerRuntime": {"mode": "docker"}}, "afterglow-dev")
+
+    assert all(entry["kind"] != "Deployment" for entry in entries)
+
+
+def test_ignore_differences_enabled_for_worker_replicas_in_kubernetes_mode():
     entries = _ignore_differences_for({"workerRuntime": {"mode": "kubernetes"}}, "afterglow")
-    assert {e["name"] for e in entries} == {"drover", "notion-worker"}
-    assert all(e["namespace"] == "afterglow" for e in entries)
+
+    assert {e["name"] for e in entries if e["kind"] == "Deployment"} == {
+        "drover",
+        "notion-worker",
+    }
+    assert all(e["namespace"] == "afterglow" for e in entries if e["kind"] == "Deployment")
 
 
 def test_ignore_difference_names_match_kubernetes_adapter_deployment_names():

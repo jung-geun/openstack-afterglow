@@ -9,7 +9,13 @@ import yaml
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from generate_k8s import _render_toml_for_k8s, render_configmap, render_grafana_deployment, render_secret  # noqa: E402
+from generate_k8s import (  # noqa: E402
+    _render_toml_for_k8s,
+    load_config,
+    render_configmap,
+    render_grafana_deployment,
+    render_secret,
+)
 
 
 def test_render_toml_includes_nova_server_image_id():
@@ -141,6 +147,78 @@ def test_render_toml_and_configmap_exclude_secret_values():
     for sentinel in sentinels.values():
         assert sentinel not in toml_output
         assert sentinel not in configmap_output
+
+
+def test_dev_override_renders_dev_urls(tmp_path):
+    base_config = tmp_path / "afterglow.conf"
+    base_config.write_text(
+        """
+[app]
+frontend_base_url = "https://cloud.dmslab.re.kr"
+public_api_base = "https://cloud.dmslab.re.kr"
+
+[k3s]
+callback_base_url = "https://cloud.dmslab.re.kr"
+
+[waygate]
+callback_base_url = "https://cloud.dmslab.re.kr"
+
+[cors]
+origins = "https://cloud.dmslab.re.kr"
+
+[gitlab_oidc]
+redirect_uri = "https://cloud.dmslab.re.kr/auth/gitlab/callback"
+""".strip(),
+        encoding="utf-8",
+    )
+    cfg = load_config(
+        base_config,
+        [ROOT / "deploy" / "afterglow-dev.conf"],
+    )
+    configmap = yaml.safe_load(render_configmap(cfg, namespace="afterglow-dev"))
+    toml = configmap["data"]["afterglow.conf"]
+
+    assert configmap["data"]["APP_ORIGIN"] == "https://test.cloud.dmslab.re.kr"
+    assert configmap["data"]["PUBLIC_API_BASE"] == "https://test.cloud.dmslab.re.kr"
+    assert 'frontend_base_url = "https://test.cloud.dmslab.re.kr"' in toml
+    assert 'public_api_base = "https://test.cloud.dmslab.re.kr"' in toml
+    assert 'origins = "https://test.cloud.dmslab.re.kr"' in toml
+    assert 'redirect_uri = "https://test.cloud.dmslab.re.kr/auth/gitlab/callback"' in toml
+    assert 'namespace = "afterglow-dev"' in toml
+
+
+def test_prod_override_renders_prod_urls(tmp_path):
+    base_config = tmp_path / "afterglow.conf"
+    base_config.write_text('[app]\nsite_name = "base"\n', encoding="utf-8")
+    cfg = load_config(
+        base_config,
+        [ROOT / "deploy" / "afterglow-prod.conf"],
+    )
+    configmap = yaml.safe_load(render_configmap(cfg, namespace="afterglow"))
+    toml = configmap["data"]["afterglow.conf"]
+
+    assert configmap["data"]["APP_ORIGIN"] == "https://cloud.dmslab.re.kr"
+    assert configmap["data"]["PUBLIC_API_BASE"] == "https://cloud.dmslab.re.kr"
+    assert 'callback_base_url = "https://cloud.dmslab.re.kr"' in toml
+    assert 'redirect_uri = "https://cloud.dmslab.re.kr/auth/gitlab/callback"' in toml
+    assert 'namespace = "afterglow"' in toml
+
+
+def test_render_manifests_support_dev_namespace():
+    secret = yaml.safe_load(
+        render_secret(
+            {"app": {"secret_key": "0123456789abcdef0123456789abcdef"}},
+            namespace="afterglow-dev",
+        )
+    )
+    configmap = yaml.safe_load(render_configmap({}, namespace="afterglow-dev"))
+    grafana = yaml.safe_load(render_grafana_deployment({}, namespace="afterglow-dev"))
+
+    assert secret["metadata"]["namespace"] == "afterglow-dev"
+    assert configmap["metadata"]["namespace"] == "afterglow-dev"
+    assert grafana["metadata"]["namespace"] == "afterglow-dev"
+    assert '\nnamespace = "afterglow-dev"\n' in configmap["data"]["afterglow.conf"]
+    assert '\nnamespace = "afterglow"\n' not in configmap["data"]["afterglow.conf"]
 
 
 def test_render_configmap_falls_back_to_backend_port_without_public_origin():

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# ArgoCD values 업데이트 스크립트
+# ArgoCD Application values 업데이트 스크립트
 #
-# values-<env>.yaml + secrets-<env>.yaml 변경 후 이 스크립트를 실행하면
-# ArgoCD Application CR의 valuesObject가 갱신되고 ArgoCD가 재배포합니다.
+# helm/afterglow/values-<env>.yaml 변경 후 실행하면 Application CR의 valuesObject가
+# 갱신됩니다. afterglow-config/afterglow-secrets의 data는 관리자 직접 적용 영역이므로
+# generate_k8s.py 출력물을 kubectl apply 한 뒤 rollout restart 해야 합니다.
 #
 # 사용법:
 #   ./deploy/argocd-sync.sh dev [--dry-run] [--wait]

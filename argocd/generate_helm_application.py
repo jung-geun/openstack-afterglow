@@ -13,11 +13,16 @@
     helm/afterglow/values-<env>.yaml   — 환경별 config (템플릿: deploy/values-dev-example.yaml)
     helm/afterglow/secrets-<env>.yaml  — 시크릿 (템플릿: deploy/secrets-example.yaml)
     → 두 파일을 deep merge해 Application CR의 valuesObject로 주입
+    → afterglow-config/afterglow-secrets 데이터는 관리자가 직접 적용할 수 있도록
+      Application의 ignoreDifferences로 보호
 
 사용법:
   # 첫 배포 또는 env config·시크릿 변경 시
   backend/.venv/bin/python argocd/generate_helm_application.py dev
   kubectl apply -f deploy/k8s/argocd-application-dev.yaml   # 시크릿 포함 — git 커밋 금지
+
+  # afterglow.conf/Secret을 직접 바꿀 때는 generate_k8s.py 출력물을 적용한 뒤
+  # 관련 Deployment를 rollout restart 한다. ArgoCD는 이 두 리소스의 data를 되돌리지 않는다.
 
   # 이후 values.yaml / 템플릿 변경은 git push → ArgoCD 자동 sync (재실행 불필요)
 
@@ -76,6 +81,27 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # replicaCount 와 달라지므로, selfHeal 이 켜진 ArgoCD가 즉시 되돌리지 않도록 무시한다.
 # 이름은 backend/app/services/worker_runtime.py 의 _deployment_name 과 일치해야 한다.
 _WORKER_DEPLOYMENT_NAMES = ("drover", "notion-worker")
+# These resources are intentionally operator-managed.  Helm still renders them
+# so they exist on a fresh install, but ArgoCD must not overwrite values that
+# an administrator applies directly to the target namespace.
+_ADMIN_MANAGED_RESOURCE_FIELDS = (
+    ("ConfigMap", "afterglow-config", ["/data"]),
+    # Helm renders stringData while the API stores Secret values in data.
+    ("Secret", "afterglow-secrets", ["/data", "/stringData"]),
+)
+
+
+def _admin_resource_ignore_differences(namespace: str) -> list[dict]:
+    return [
+        {
+            "group": "",
+            "kind": kind,
+            "name": name,
+            "namespace": namespace,
+            "jsonPointers": json_pointers,
+        }
+        for kind, name, json_pointers in _ADMIN_MANAGED_RESOURCE_FIELDS
+    ]
 
 
 def _worker_replica_ignore_differences(namespace: str) -> list[dict]:
@@ -92,16 +118,12 @@ def _worker_replica_ignore_differences(namespace: str) -> list[dict]:
 
 
 def _ignore_differences_for(values_object: dict, namespace: str) -> list[dict]:
-    """kubernetes 모드일 때만 worker replicas 를 무시한다.
-
-    static 모드(기본)에서는 매니저가 replicas 를 건드리지 않으므로, ArgoCD 가 계속 drift 를
-    감지·복구(누군가 워커를 0으로 줄여도 자동 복원)하도록 무시 목록을 비워 둔다. kubernetes
-    모드에서만 pause(=0)/resume(=1) 를 selfHeal 과 충돌 없이 유지하기 위해 무시한다.
-    """
+    """Return resource fields that ArgoCD must leave operator-managed."""
+    differences = _admin_resource_ignore_differences(namespace)
     mode = (values_object.get("workerRuntime") or {}).get("mode", "static")
-    if mode != "kubernetes":
-        return []
-    return _worker_replica_ignore_differences(namespace)
+    if mode == "kubernetes":
+        differences.extend(_worker_replica_ignore_differences(namespace))
+    return differences
 
 
 def build_application(env: str) -> dict:
