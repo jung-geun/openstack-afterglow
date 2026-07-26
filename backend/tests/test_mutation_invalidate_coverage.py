@@ -148,6 +148,13 @@ EXEMPT_HANDLERS: set[str] = {
     "create_announcement_endpoint",
     "update_announcement_endpoint",
     "delete_announcement_endpoint",
+    # Palimpsest inline Dockerfile build: the handler only creates a LayerImportJob
+    # row. Artifacts and profiles appear later, inside run_dockerfile_import_job,
+    # which is where `afterglow:union_layer:*` is invalidated. Invalidating at
+    # request time would clear the cache before anything changed.
+    "build_from_inline_dockerfile",
+    # Plan preview is read-only despite being POST (the body carries the Dockerfile).
+    "preview_inline_dockerfile_plan",
     "mark_announcement_read",
     # 사용자별 튜토리얼(투어) 진행 이력 upsert — DB에서 매 요청 직접 읽는 per-user 상태로,
     # cached_call/app 캐시 레이어를 거치지 않으며 per-project OpenStack 리소스 캐시와도

@@ -426,6 +426,9 @@ class LayerArtifact(Base):
     # 스택 전체의 정체성(OCI chainID 방식). 부모가 pending 이면 자식도 계산하지 않는다.
     chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
     # pending | ready | failed — digest 미확보 행도 소비는 계속 가능해야 한다
+    # 빌드 캐시 키 = sha256(부모 참조 + "\n" + 정규화된 Dockerfile instruction).
+    # 같은 부모 위에 같은 명령이면 기존 sealed artifact 를 재사용해 빌드를 건너뛴다.
+    step_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
     digest_state: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="pending", server_default="pending")
     # 단일 부모 체인: child → parent → grandparent → ... → base(parent_id=NULL)
     parent_id: Mapped[int | None] = mapped_column(
@@ -453,13 +456,17 @@ class LayerImportJob(Base):
     progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
     error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
-    github_url: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
-    repo_owner: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    repo_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    commit_sha: Mapped[str] = mapped_column(CHAR(40), nullable=False)
-    dockerfile_path: Mapped[str] = mapped_column(
-        VARCHAR(255), nullable=False, default="Dockerfile", server_default="Dockerfile"
-    )
+    # source_type='github_dockerfile' 일 때만 채워진다. inline 업로드는 전부 NULL. (마이그레이션 060)
+    github_url: Mapped[str | None] = mapped_column(VARCHAR(512), nullable=True)
+    repo_owner: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    repo_name: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(CHAR(40), nullable=True)
+    # inline 업로드 원문과 그 sha256 — 감사·재현용. source_type='inline_dockerfile' 일 때 채워진다.
+    dockerfile_text: Mapped[str | None] = mapped_column(MEDIUMTEXT, nullable=True)
+    dockerfile_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    # FROM 이 기존 Palimpsest 레이어를 가리킬 때의 부모 blob digest
+    parent_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    dockerfile_path: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True)
 
     layer_prefix: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)

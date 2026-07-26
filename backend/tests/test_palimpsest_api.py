@@ -39,11 +39,11 @@ async def test_audit_prefix_map_covers_palimpsest_surfaces():
 async def test_palimpsest_routes_are_mounted_under_v1_only():
     from app.main import app
 
-    # 허브 경로는 test_palimpsest_hub.py 가 따로 고정한다 — 여기서는 레이어/관리자 표면만.
+    # 허브·빌드 경로는 각자의 테스트 파일이 고정한다 — 여기서는 레이어/관리자 표면만.
     paths = {
         route.path
         for route in app.routes
-        if "palimpsest" in route.path and "/palimpsest/hub" not in route.path
+        if "palimpsest" in route.path and "/palimpsest/hub" not in route.path and "/palimpsest/builds" not in route.path
     }
 
     assert paths == {

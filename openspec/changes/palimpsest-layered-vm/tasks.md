@@ -121,12 +121,24 @@
 
 ### Phase 4 — Dockerfile 빌드 확장
 
-- [ ] `services/dockerfile_import.py`에 `DockerfileSource` 추상화 — `github`(기존 경로 유지) / `inline`(본문 업로드, `_MAX_DOCKERFILE_BYTES` 재사용)
-- [ ] `POST /api/v1/palimpsest/builds/dockerfile` — **inline 모드는 빌드 컨텍스트가 없으므로 `COPY`/`ADD` 거부**(에러에 GitHub 소스 안내)
-- [ ] `FROM` 해석 — `ubuntu:24.04` → ubuntu base key(`layer_base_images.py`) / `palimpsest/<name>@sha256:<digest>` → 부모 레이어 / `scratch` 거부
-- [ ] 빌드 캐시 — `step_digest = sha256(parent_chain_id + "\n" + 정규화된 instruction)`으로 기존 artifact 재사용
-- [ ] 🔴 inline 경로는 임의 쉘 실행이므로 `require_admin` 유지. 일반 사용자 개방은 별도 결정(격리·쿼터·네트워크 정책 선행)
-- [ ] `backend/tests/test_palimpsest_dockerfile.py` — inline COPY 거부, FROM digest 해석, 캐시 히트 시 빌드 미실행, `_UNSUPPORTED` 명령 거부 회귀, 개행/쉘 메타문자 인젝션 거부
+- [x] `backend/migrations/060_palimpsest_dockerfile_inline.sql` — `layer_import_jobs` 의 GitHub 전용 컬럼을
+      nullable 로 완화 + `dockerfile_text`/`dockerfile_digest`/`parent_digest`, `layer_artifacts.step_digest`(+인덱스).
+      manifest 등록. **dev DB 적용·멱등성 검증 완료**(적용 전 두 종류 `Unknown column` 500 재현 → 적용 후 정상)
+- [x] `parse_dockerfile_source(..., allow_build_context)` 신규 + `parse_dockerfile_plan` 은 GitHub 경로 호환 래퍼로 유지
+      (기존 테스트 3곳이 2-튜플을 언패킹하므로 시그니처를 깨지 않는다)
+- [x] `POST /api/v1/palimpsest/builds/dockerfile` + `/dockerfile/plan`(미리보기) — **inline 은 `COPY`/`ADD` 거부**
+- [x] `FROM` 해석 — ubuntu 4종 / `palimpsest/<name>@sha256:<64hex>`(부모에게서 base 상속) / `scratch` 거부
+- [x] 빌드 캐시 — `step_digest = sha256(부모 참조 + "\n" + 정규화된 instruction)`.
+      `apply_build_cache` 가 단계를 표시하고 `split_cached_prefix` 가 **선두 연속 구간만** 재사용한다
+      (중간부터 건너뛰면 다른 스택이 된다). 전부 캐시면 409. 재사용분은 `planned_layers` 에서 빠지고
+      `job.artifact_ids` 에 미리 채워져 빌드 루프가 이어 쌓는다 — 빌더 VM 오케스트레이션의 인덱스 정렬을 건드리지 않는 방식
+- [x] 🔴 inline 경로 `require_admin` 유지 — 임의 셸 실행 표면. 일반 사용자 개방은 별도 결정
+- [x] 캐시 무효화는 **요청 핸들러가 아니라** `run_dockerfile_import_job` 에 넣었다(artifact 가 실제로 생기는 지점).
+      핸들러는 잡만 만들므로 요청 시점 무효화는 아무것도 바뀌기 전에 캐시를 비우는 셈이다
+- [x] `backend/tests/test_palimpsest_dockerfile.py` (44 케이스) — inline COPY/ADD 거부 + GitHub 은 계속 허용,
+      FROM 6종 거부 / palimpsest 참조 해석 / scratch 거부 / multi-stage 거부, 래퍼 하위호환,
+      `_UNSUPPORTED` 7종·RUN 플래그 3종·heredoc 거부, step_digest 안정성·부모 민감성·대소문자 정규화,
+      선두 구간만 재사용, base 불일치 거부, 부모 base 상속, 전부 캐시 시 409, 관리자 전용 403
 
 ### Phase 5 — 로컬 KVM 런타임 (CI 검증 불가)
 

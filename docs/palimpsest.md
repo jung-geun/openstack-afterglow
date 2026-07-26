@@ -107,6 +107,44 @@ NFS의 마운트 옵션 교체가 아니라 **다른 스토리지 토폴로지**
 
 ---
 
+## 4.4. Dockerfile 로 레이어 빌드
+
+Dockerfile 한 편이 곧 레이어 체인이 된다. 명령 하나가 레이어 하나다(Docker 와 같은 모델).
+
+| 소스 | 엔드포인트 | 빌드 컨텍스트 |
+|---|---|---|
+| GitHub (commit 고정) | `POST /api/v1/admin/libraries/imports/dockerfile` | 커밋 archive — `COPY`/`ADD` 사용 가능 |
+| 업로드(inline) | `POST /api/v1/palimpsest/builds/dockerfile` | **없음 — `COPY`/`ADD` 거부** |
+
+계획만 미리 보려면 `POST /api/v1/palimpsest/builds/dockerfile/plan`.
+
+### 지원하는 문법
+
+- `FROM ubuntu:18.04|20.04|22.04|24.04` — 새 체인을 시작한다. Glance base image 와 일치해야 한다.
+- `FROM palimpsest/<name>@sha256:<64hex>` — **기존 레이어 위에 쌓는다**. Ubuntu base 는 부모에게서
+  상속한다(다른 base 위에 쌓으면 ABI 가 어긋난다 — union.md §4.2 와 같은 이유).
+- `RUN` · `ENV` · `WORKDIR` — 각각 레이어가 된다. `ENV`/`WORKDIR` 는 뒤따르는 `RUN` 에 반영된다.
+- `COPY` · `ADD` — GitHub 소스에서만.
+
+거부: `FROM scratch`, multi-stage `FROM … AS`, `FROM --platform=…`, heredoc,
+`RUN --mount/--network/--security`, 그리고 `ARG`/`USER`/`EXPOSE`/`CMD`/`ENTRYPOINT`/`LABEL`/`SHELL` 등.
+
+### 빌드 캐시
+
+`step_digest = sha256(부모 참조 + "\n" + 정규화된 instruction)`. 같은 부모 위에 같은 명령이 이미
+sealed artifact 로 있으면 그 단계를 다시 빌드하지 않는다. 부모 참조는 루트에서는 Ubuntu base 키,
+이후에는 부모의 `chain_id` 다 — Palimpsest 의 chain_id 가 "여기까지의 스택"을 한 값으로 대표하기 때문에
+성립한다.
+
+**선두 연속 구간만 재사용한다.** 중간부터 건너뛰면 다른 스택이 되기 때문이다. 모든 단계가 캐시에
+맞으면 만들 게 없다는 뜻이므로 409 를 준다(기존 프로파일을 그대로 쓰면 된다).
+
+### 🔴 보안
+
+**inline Dockerfile 의 `RUN` 은 임의 셸 명령이다.** 실행은 격리된 임시 Builder VM 안에서만 일어나고
+모든 보간이 `shlex.quote` 되지만, 그럼에도 이 경로는 **관리자 전용**이다. 일반 사용자 개방은
+격리 강도·쿼터·네트워크 정책이 선행되어야 하는 별도 결정이다.
+
 ## 4.5. 허브 (레이어 레지스트리)
 
 레이어를 digest 로 저장·검색·배포한다. `[palimpsest] hub_local_path` 를 설정해야 활성화되며,

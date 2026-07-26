@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
+import logging
 import re
 import shlex
 import tarfile
@@ -14,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -34,6 +36,8 @@ from app.services.layer_build import (
 from app.services.layer_ubuntu import normalize_ubuntu_base
 from app.services.palimpsest_digest import parse_digest_sentinels
 from app.services.palimpsest_layers import resolve_digest_fields
+
+_logger = logging.getLogger(__name__)
 
 _GITHUB_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?)/([A-Za-z0-9._-]{1,100})/?$"
@@ -69,17 +73,46 @@ class GitHubRepo:
     canonical_url: str
 
 
+SOURCE_GITHUB = "github_dockerfile"
+SOURCE_INLINE = "inline_dockerfile"
+
+# FROM 이 기존 Palimpsest 레이어를 가리키는 형태: `FROM palimpsest/<name>@sha256:<64hex>`
+_PALIMPSEST_FROM_RE = re.compile(r"^palimpsest/([a-z0-9][a-z0-9.+\-]{0,63})@(sha256:[0-9a-f]{64})$")
+_UBUNTU_FROM_VALUES = {"ubuntu:18.04", "ubuntu:20.04", "ubuntu:22.04", "ubuntu:24.04"}
+
+
+@dataclass(frozen=True)
+class ParsedDockerfile:
+    """Dockerfile 한 편을 해석한 결과.
+
+    `ubuntu_base` 와 `parent_digest` 는 **배타적**이다 — FROM 이 ubuntu 이미지면 앞엣것,
+    기존 Palimpsest 레이어면 뒤엣것이 채워지고 base 는 부모에게서 상속한다.
+    """
+
+    ubuntu_base: str | None
+    parent_digest: str | None
+    planned_layers: list[dict]
+
+
 @dataclass(frozen=True)
 class DockerfilePlan:
-    github_url: str
-    repo_owner: str
-    repo_name: str
-    commit_sha: str
-    dockerfile_path: str
+    # github_* / commit_sha / dockerfile_path 는 source_type == SOURCE_GITHUB 일 때만 채워진다.
+    github_url: str | None
+    repo_owner: str | None
+    repo_name: str | None
+    commit_sha: str | None
+    dockerfile_path: str | None
     layer_prefix: str
     profile_name: str
     base_image_snapshot: dict
     planned_layers: list[dict]
+    source_type: str = SOURCE_GITHUB
+    dockerfile_text: str | None = None
+    dockerfile_digest: str | None = None
+    parent_digest: str | None = None
+    # 빌드 캐시로 재사용하는 접두부 artifact id (루트→리프 순).
+    # 이 단계들은 `planned_layers` 에서 빠져 있어 빌더 VM 이 다시 만들지 않는다.
+    cached_artifact_ids: list[int] = field(default_factory=list)
 
 
 class DockerfileImportError(ValueError):
@@ -298,12 +331,25 @@ def _parse_env(args: str, line: int) -> dict:
     return {key: value}
 
 
-def parse_dockerfile_plan(
-    text: str, *, layer_prefix: str, profile_name: str, commit_sha: str, dockerfile_path: str
-) -> tuple[str, list[dict]]:
+def parse_dockerfile_source(
+    text: str,
+    *,
+    layer_prefix: str,
+    profile_name: str,
+    commit_sha: str | None,
+    dockerfile_path: str | None,
+    allow_build_context: bool = True,
+) -> ParsedDockerfile:
+    """Dockerfile 을 레이어 계획으로 해석한다.
+
+    `allow_build_context=False`(inline 업로드)면 **COPY/ADD 를 거부**한다 — 빌드 컨텍스트로
+    쓸 파일이 없기 때문이다. GitHub 소스는 커밋에 고정된 archive 가 컨텍스트가 되므로 허용한다.
+    """
     prefix = validate_layer_name(layer_prefix, field="layer_prefix")
     validate_layer_name(profile_name or layer_prefix, field="profile_name")
     from_base: str | None = None
+    parent_digest: str | None = None
+    seen_from = False
     planned: list[dict] = []
     env: dict[str, str] = {}
     workdir = "/"
@@ -314,15 +360,29 @@ def parse_dockerfile_plan(
         instruction = match.group(1).upper()
         args = match.group(2).strip()
         if instruction == "FROM":
-            if from_base is not None:
+            if seen_from:
                 raise _line_error(line, "multi-stage FROM은 지원하지 않습니다")
             if " AS " in f" {args.upper()} " or "--" in args:
                 raise _line_error(line, "FROM AS/flags는 지원하지 않습니다")
-            if args not in {"ubuntu:18.04", "ubuntu:20.04", "ubuntu:22.04", "ubuntu:24.04"}:
-                raise _line_error(line, "FROM은 ubuntu:18.04|20.04|22.04|24.04만 지원합니다")
-            from_base = normalize_ubuntu_base(args.replace(":", "-"))
+            if args == "scratch":
+                raise _line_error(
+                    line, "FROM scratch는 지원하지 않습니다 — 레이어는 Ubuntu base 또는 기존 레이어 위에 쌓입니다"
+                )
+            palimpsest_match = _PALIMPSEST_FROM_RE.match(args)
+            if palimpsest_match:
+                # 기존 Palimpsest 레이어 위에 쌓는다. ubuntu_base 는 부모에게서 상속하므로
+                # 여기서 정하지 않는다(호출자가 부모 artifact 를 조회해 채운다).
+                parent_digest = palimpsest_match.group(2)
+            elif args in _UBUNTU_FROM_VALUES:
+                from_base = normalize_ubuntu_base(args.replace(":", "-"))
+            else:
+                raise _line_error(
+                    line,
+                    "FROM은 ubuntu:18.04|20.04|22.04|24.04 또는 palimpsest/<name>@sha256:<64hex>만 지원합니다",
+                )
+            seen_from = True
             continue
-        if from_base is None:
+        if not seen_from:
             raise _line_error(line, "첫 instruction은 FROM이어야 합니다")
         payload: dict[str, Any]
         if instruction == "RUN":
@@ -330,6 +390,12 @@ def parse_dockerfile_plan(
                 raise _line_error(line, "지원하지 않는 RUN 옵션입니다")
             payload = {"command": args, "env": dict(env), "workdir": workdir}
         elif instruction in {"COPY", "ADD"}:
+            if not allow_build_context:
+                raise _line_error(
+                    line,
+                    f"{instruction}은 업로드한 Dockerfile에서 지원하지 않습니다 "
+                    "— 빌드 컨텍스트가 없습니다. GitHub 소스를 사용하세요",
+                )
             payload = _parse_copy_add(instruction, args, line)
         elif instruction == "ENV":
             updates = _parse_env(args, line)
@@ -362,11 +428,50 @@ def parse_dockerfile_plan(
                 },
             }
         )
-    if from_base is None:
-        raise DockerfileImportError("Dockerfile에는 FROM ubuntu:<version>이 필요합니다")
+    if not seen_from:
+        raise DockerfileImportError(
+            "Dockerfile에는 FROM ubuntu:<version> 또는 FROM palimpsest/<name>@sha256:<64hex>가 필요합니다"
+        )
     if not planned:
         raise DockerfileImportError("Dockerfile에는 layer로 변환할 RUN/COPY/ADD/ENV/WORKDIR instruction이 필요합니다")
-    return from_base, planned
+    return ParsedDockerfile(ubuntu_base=from_base, parent_digest=parent_digest, planned_layers=planned)
+
+
+def parse_dockerfile_plan(
+    text: str, *, layer_prefix: str, profile_name: str, commit_sha: str, dockerfile_path: str
+) -> tuple[str, list[dict]]:
+    """`parse_dockerfile_source` 의 GitHub 경로 호환 래퍼 — `(ubuntu_base, planned)` 를 돌려준다.
+
+    FROM 이 Palimpsest 레이어를 가리키면 ubuntu_base 가 없으므로 이 래퍼로는 표현할 수 없다.
+    그 경우 `parse_dockerfile_source` 를 직접 쓸 것.
+    """
+    parsed = parse_dockerfile_source(
+        text,
+        layer_prefix=layer_prefix,
+        profile_name=profile_name,
+        commit_sha=commit_sha,
+        dockerfile_path=dockerfile_path,
+        allow_build_context=True,
+    )
+    if parsed.ubuntu_base is None:
+        raise DockerfileImportError(
+            "FROM palimpsest/<name>@sha256:… 은 이 경로에서 지원하지 않습니다 (inline 빌드 API를 사용하세요)"
+        )
+    return parsed.ubuntu_base, parsed.planned_layers
+
+
+def compute_step_digest(parent_ref: str, instruction: str, args: str) -> str:
+    """빌드 캐시 키 — 같은 부모 위의 같은 명령이면 같은 값.
+
+    `parent_ref` 는 부모 레이어의 `chain_id`(있으면) 또는 루트일 때 ubuntu base 키다.
+    Docker 의 레이어 캐시와 같은 개념이고, Palimpsest 의 chain_id 가 "여기까지의 스택"을
+    한 값으로 대표해 주기 때문에 성립한다.
+
+    instruction/args 는 공백만 정규화한다 — 셸 명령의 의미를 바꾸지 않기 위해 그 이상은 손대지 않는다.
+    """
+    normalized = f"{instruction.upper()} {' '.join(args.split())}"
+    payload = f"{parent_ref}\n{normalized}".encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def prepare_dockerfile_import(
@@ -409,6 +514,196 @@ def prepare_dockerfile_import(
         base_image_snapshot=base_snapshot,
         planned_layers=layers,
     )
+
+
+async def prepare_inline_dockerfile_import(
+    conn,
+    *,
+    dockerfile_text: str,
+    layer_prefix: str,
+    profile_name: str | None,
+    base_image_id: str | None,
+) -> DockerfilePlan:
+    """사용자가 올린 Dockerfile 본문을 레이어 계획으로 만든다.
+
+    GitHub 경로와 달리 **빌드 컨텍스트가 없으므로 COPY/ADD 를 거부**한다.
+    `FROM palimpsest/<name>@sha256:…` 이면 base 이미지는 부모에게서 상속하고,
+    `FROM ubuntu:<ver>` 이면 호출자가 준 Glance 이미지와 일치해야 한다.
+    """
+    if not dockerfile_text or not dockerfile_text.strip():
+        raise DockerfileImportError("Dockerfile 본문이 비어 있습니다")
+    raw = dockerfile_text.encode("utf-8")
+    if len(raw) > _MAX_DOCKERFILE_BYTES:
+        raise DockerfileImportError("Dockerfile 크기는 1MiB 이하여야 합니다")
+
+    prefix = validate_layer_name(layer_prefix, field="layer_prefix")
+    profile = validate_layer_name(profile_name or prefix, field="profile_name")
+    parsed = parse_dockerfile_source(
+        dockerfile_text,
+        layer_prefix=prefix,
+        profile_name=profile,
+        commit_sha=None,
+        dockerfile_path=None,
+        allow_build_context=False,
+    )
+
+    if parsed.parent_digest:
+        parent = await resolve_parent_layer(parsed.parent_digest)
+        base_snapshot = _snapshot_from_artifact(parent)
+        root_ref = parent.chain_id or parsed.parent_digest
+    else:
+        if not base_image_id:
+            raise DockerfileImportError("FROM ubuntu:<version> 을 쓰려면 base_image_id 가 필요합니다")
+        base_snapshot = resolve_base_image_snapshot(conn, base_image_id)
+        if parsed.ubuntu_base != base_snapshot["ubuntu_base"]:
+            raise DockerfileImportError(
+                f"Dockerfile FROM({parsed.ubuntu_base})과 선택한 Glance image"
+                f"({base_snapshot['ubuntu_base']})가 일치하지 않습니다"
+            )
+        root_ref = base_snapshot["ubuntu_base"]
+
+    annotated = await apply_build_cache(parsed.planned_layers, root_ref=root_ref)
+    cached_ids, planned = split_cached_prefix(annotated)
+
+    # `FROM palimpsest/…` 의 부모도 재사용 접두부의 일부다 — 빌드 루프가 여기서 이어 쌓는다.
+    if parsed.parent_digest:
+        parent_artifact = await resolve_parent_layer(parsed.parent_digest)
+        cached_ids = [parent_artifact.id, *cached_ids]
+
+    if not planned:
+        raise DockerfileImportError(
+            "모든 단계가 이미 빌드되어 있습니다 — 새로 만들 레이어가 없습니다. 기존 프로파일을 그대로 사용하세요"
+        )
+
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    for step in planned:
+        step["source_metadata"] = {
+            **(step.get("source_metadata") or {}),
+            "dockerfile_digest": digest,
+            "source_type": SOURCE_INLINE,
+        }
+
+    return DockerfilePlan(
+        github_url=None,
+        repo_owner=None,
+        repo_name=None,
+        commit_sha=None,
+        dockerfile_path=None,
+        layer_prefix=prefix,
+        profile_name=profile,
+        base_image_snapshot=base_snapshot,
+        planned_layers=planned,
+        source_type=SOURCE_INLINE,
+        dockerfile_text=dockerfile_text,
+        dockerfile_digest=digest,
+        parent_digest=parsed.parent_digest,
+        cached_artifact_ids=cached_ids,
+    )
+
+
+def split_cached_prefix(annotated: list[dict]) -> tuple[list[int], list[dict]]:
+    """캐시에 맞은 **선두 연속 구간**과 새로 빌드할 나머지로 나눈다.
+
+    중간부터 재사용하는 건 불가능하다 — 레이어는 부모 위에 쌓이므로 앞을 건너뛰면 다른 스택이 된다.
+    `apply_build_cache` 도 첫 미스 이후로는 캐시를 끄므로 여기서는 선두만 보면 된다.
+    """
+    cached_ids: list[int] = []
+    for index, step in enumerate(annotated):
+        if step.get("cached") and step.get("reuse_artifact_id"):
+            cached_ids.append(int(step["reuse_artifact_id"]))
+            continue
+        return cached_ids, [dict(item) for item in annotated[index:]]
+    return cached_ids, []
+
+
+def _snapshot_from_artifact(artifact) -> dict:
+    """부모 artifact 가 들고 있는 base image 지문을 그대로 물려받는다.
+
+    `FROM palimpsest/...` 는 부모와 같은 Ubuntu base 위에서만 성립한다 — 다른 base 로
+    쌓으면 ABI 가 어긋난다(union.md §4.2 의 다중 상속 위험과 같은 이유).
+    """
+    return {
+        "ubuntu_base": artifact.ubuntu_base,
+        "base_image_id": artifact.base_image_id,
+        "base_image_name": artifact.base_image_name,
+        "base_image_checksum": artifact.base_image_checksum,
+        "base_image_os_hash_algo": artifact.base_image_os_hash_algo,
+        "base_image_os_hash_value": artifact.base_image_os_hash_value,
+        "base_image_min_disk": artifact.base_image_min_disk,
+    }
+
+
+async def resolve_parent_layer(parent_digest: str) -> Any:
+    """`FROM palimpsest/<name>@sha256:…` 이 가리키는 sealed artifact 를 찾는다."""
+    from sqlalchemy import select
+
+    from app.models.db import LayerArtifact
+
+    factory = get_session_factory()
+    if factory is None:
+        raise DockerfileImportError("DB가 초기화되지 않았습니다")
+    async with factory() as session:
+        row = (
+            await session.execute(
+                select(LayerArtifact)
+                .where(LayerArtifact.blob_digest == parent_digest)
+                .where(LayerArtifact.is_sealed.is_(True))
+                .order_by(LayerArtifact.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if row is None:
+        raise DockerfileImportError(
+            f"FROM 이 가리키는 레이어를 찾을 수 없습니다: {parent_digest} "
+            "(digest 백필이 끝나지 않았거나 봉인되지 않은 레이어일 수 있습니다)"
+        )
+    return row
+
+
+async def apply_build_cache(planned: list[dict], *, root_ref: str) -> list[dict]:
+    """각 단계에 `step_digest` 를 붙이고, 이미 있는 sealed artifact 는 재사용으로 표시한다.
+
+    `root_ref` 는 체인의 시작점 — ubuntu base 키(루트 빌드) 또는 부모 레이어의 chain_id 다.
+    한 단계가 캐시에 맞으면 그 artifact 의 chain_id 가 다음 단계의 부모 참조가 된다.
+    **캐시가 끊기면 그 뒤는 전부 새로 빌드한다** — 중간을 건너뛰면 스택이 달라지기 때문이다.
+    """
+    from sqlalchemy import select
+
+    from app.models.db import LayerArtifact
+
+    factory = get_session_factory()
+    if factory is None:
+        raise DockerfileImportError("DB가 초기화되지 않았습니다")
+
+    annotated: list[dict] = []
+    parent_ref = root_ref
+    cache_live = True
+    async with factory() as session:
+        for step in planned:
+            step_digest = compute_step_digest(parent_ref, step["instruction"], step["args"])
+            entry = dict(step, step_digest=step_digest, cached=False, reuse_artifact_id=None)
+            if cache_live:
+                hit = (
+                    await session.execute(
+                        select(LayerArtifact)
+                        .where(LayerArtifact.step_digest == step_digest)
+                        .where(LayerArtifact.is_sealed.is_(True))
+                        .order_by(LayerArtifact.id.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if hit is not None and hit.chain_id:
+                    entry["cached"] = True
+                    entry["reuse_artifact_id"] = hit.id
+                    parent_ref = hit.chain_id
+                    annotated.append(entry)
+                    continue
+                cache_live = False
+            # 캐시 미스 이후로는 부모 참조를 알 수 없다(아직 빌드 전) — step_digest 만 기록해 두고
+            # 실제 값은 빌드 후 artifact 에 저장된다.
+            parent_ref = step_digest
+            annotated.append(entry)
+    return annotated
 
 
 def _base_fields(snapshot: dict) -> dict:
@@ -461,7 +756,7 @@ async def create_import_job(plan: DockerfilePlan) -> dict:
     fields = _base_fields(plan.base_image_snapshot)
     async with factory() as session:
         job = LayerImportJob(
-            source_type="github_dockerfile",
+            source_type=plan.source_type,
             status="queued",
             progress_step="검증 완료",
             progress_pct=0,
@@ -470,10 +765,14 @@ async def create_import_job(plan: DockerfilePlan) -> dict:
             repo_name=plan.repo_name,
             commit_sha=plan.commit_sha,
             dockerfile_path=plan.dockerfile_path,
+            dockerfile_text=plan.dockerfile_text,
+            dockerfile_digest=plan.dockerfile_digest,
+            parent_digest=plan.parent_digest,
             layer_prefix=plan.layer_prefix,
             profile_name=plan.profile_name,
             planned_layers=plan.planned_layers,
-            artifact_ids=[],
+            # 캐시 재사용분을 미리 채워 둔다 — 빌드 루프가 여기서 이어 쌓는다.
+            artifact_ids=list(plan.cached_artifact_ids),
             build_ids=[],
             **fields,
         )
@@ -824,8 +1123,16 @@ async def run_dockerfile_import_job(import_id: int) -> None:
             job = await session.get(LayerImportJob, import_id)
             if job is None:
                 return
-            parent_artifact_id: int | None = None
+            # 캐시로 재사용한 접두부(또는 `FROM palimpsest/…` 의 부모)에서 이어 쌓는다.
+            # 재사용분은 plan 단계에서 planned_layers 에서 제거됐고 job.artifact_ids 에 들어 있다.
+            reused_ids = list(job.artifact_ids or [])
+            parent_artifact_id: int | None = reused_ids[-1] if reused_ids else None
             layer_names: list[str] = []
+            for reused_id in reused_ids:
+                reused = await session.get(LayerArtifact, reused_id)
+                if reused is not None:
+                    layer_names.append(reused.name)
+            artifact_ids = list(reused_ids)
             # 한 번의 VM 실행이 여러 레이어를 만든다 — sentinel 은 레이어 이름으로 매핑한다
             # (콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다). docs/palimpsest.md §3.
             digest_reports = parse_digest_sentinels(console)
@@ -855,6 +1162,8 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                     parent_id=parent_artifact_id,
                     is_sealed=True,
                     size_bytes=digest_report.size_bytes if digest_report else None,
+                    # 빌드 캐시 키 — 다음 요청이 같은 부모 위에 같은 명령을 주면 재사용된다
+                    step_digest=step.get("step_digest"),
                     **digest_fields,
                     base_image_id=job.base_image_id,
                     base_image_name=job.base_image_name,
@@ -892,6 +1201,14 @@ async def run_dockerfile_import_job(import_id: int) -> None:
             job.artifact_ids = artifact_ids
             job.completed_at = _now()
             await session.commit()
+        # artifact/profile 이 실제로 생긴 지점에서 레이어 캐시를 무효화한다.
+        # 요청 핸들러가 아니라 여기가 맞다 — 핸들러는 잡만 만들고 산출물은 여기서 나온다.
+        try:
+            from app.services.cache import invalidate
+
+            await invalidate("afterglow:union_layer:*")
+        except Exception:
+            _logger.warning("[dockerfile_import] 레이어 캐시 무효화 실패 (빌드는 성공)", exc_info=True)
     except Exception as exc:
         await _update_job(import_id, status="error", progress_step="실패", error_message=str(exc)[:1000])
         for build_id in build_ids:
