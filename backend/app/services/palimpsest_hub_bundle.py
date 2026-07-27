@@ -54,12 +54,17 @@ class BundleError(ValueError):
 
 @dataclass(frozen=True)
 class BundleLayer:
-    """번들에 담을 레이어 한 건(루트→리프 순서로 전달된다)."""
+    """번들에 담을 항목 하나(루트→리프 순서로 전달된다).
+
+    베이스 cloud image 도 여기에 담긴다 — `media_type` 만 다르다. 그래야 "이 스택에 필요한
+    전부"(베이스 이미지 + 레이어 체인)를 번들 하나로 받을 수 있다.
+    """
 
     blob_digest: str
     size_bytes: int
     name: str
     config: dict[str, Any]
+    media_type: str = MEDIA_TYPE_LAYER_SQUASHFS
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +118,7 @@ def build_manifest(chain: list[BundleLayer], config_blobs: dict[str, bytes]) -> 
         },
         "layers": [
             {
-                "mediaType": MEDIA_TYPE_LAYER_SQUASHFS,
+                "mediaType": layer.media_type,
                 "digest": layer.blob_digest,
                 "size": layer.size_bytes,
                 "annotations": {ANNOTATION_NAME: layer.name},

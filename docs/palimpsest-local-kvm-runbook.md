@@ -1,147 +1,181 @@
 ---
-title: Palimpsest 로컬 KVM 런북
+title: Palimpsest 로컬 빌드 런북
 parent: Palimpsest
 nav_order: 10
 ---
 
-# Palimpsest 로컬 KVM 런북
+# Palimpsest 로컬 빌드 런북
 
-OpenStack 없이 로컬(또는 원격) KVM 호스트에 레이어드 VM 을 띄우는 수동 절차.
+**로컬 KVM 에서 레이어를 만들어 허브에 올리는** 절차. 사용자 머신에서 진행하며 afterglow
+백엔드는 사용자 머신에 접근하지 않는다 — 오가는 것은 HTTP 뿐이다.
 
-> ⚠️ **이 경로는 CI 로 검증할 수 없다.** `backend/tests/test_palimpsest_kvm.py` 는 도메인 XML 생성 ·
-> seed ISO 인자 조립 · 경로 쿼팅까지만 덮는다. 실제 부팅·마운트·라우팅은 아래 절차로 사람이 확인한다.
+```
+허브에서 베이스 cloud image 받기  →  로컬 KVM 으로 부팅  →  원하는 걸 설치
+   →  변경분을 squashfs 로 패킹  →  허브에 업로드
+```
+
+> ⚠️ **이 경로는 CI 로 검증할 수 없다.** 도메인 XML 생성·인자 조립·경로 쿼팅은 단위 테스트
+> (`test_palimpsest_kvm.py`, `test_palimpsest_cli.py`)가 덮지만, 실제 부팅·마운트는 사람이 확인한다.
 > 도메인 정의와 용어는 [`palimpsest.md`](palimpsest.md) 참조.
 
-## 0. 전제
-
-호스트에 필요한 것:
+## 0. 준비
 
 ```bash
 sudo apt-get install -y \
   qemu-kvm libvirt-daemon-system libvirt-clients \
-  cloud-image-utils   # cloud-localds
+  cloud-image-utils squashfs-tools
+
+export PALIMPSEST_URL=https://cloud.example.com
+export PALIMPSEST_TOKEN=<access token>
 ```
 
-백엔드 쪽:
+CLI 는 `scripts/palimpsest.py` 하나이고 **표준 라이브러리만 쓴다** — 별도 설치가 필요 없다.
 
 ```bash
-cd backend && uv sync --extra kvm    # libvirt-python (시스템 libvirt-dev 필요)
+curl -sSLO https://<afterglow>/static/palimpsest.py && chmod +x palimpsest.py
+# 또는 저장소에서: scripts/palimpsest.py
 ```
 
-`afterglow.conf`:
+## 1. 베이스 이미지 받기
+
+```bash
+./palimpsest.py images
+# sha256:9f2c…  ubuntu-2404   ubuntu-24.04   x86_64   qcow2   612.4 MiB
+
+./palimpsest.py pull sha256:9f2c… -o base.qcow2
+# base.qcow2 (612.4 MiB) — digest 검증 완료
+```
+
+`pull` 은 받은 뒤 sha256 을 **재계산해 검증**하고, 불일치면 파일을 지운다.
+
+## 2. 빌드용 VM 띄우기
+
+원본은 건드리지 않고 오버레이 위에서 작업한다.
+
+```bash
+qemu-img create -F qcow2 -b "$PWD/base.qcow2" -f qcow2 build.qcow2 20G
+
+cat > meta-data <<'EOF'
+instance-id: palimpsest-build
+local-hostname: palimpsest-build
+EOF
+cat > user-data <<'EOF'
+#cloud-config
+ssh_authorized_keys:
+  - ssh-ed25519 AAAA... you@host
+EOF
+cloud-localds seed.iso user-data meta-data
+
+virt-install --name palimpsest-build --memory 4096 --vcpus 2 \
+  --disk build.qcow2,bus=virtio --disk seed.iso,device=cdrom \
+  --os-variant ubuntu24.04 --import --graphics none --noautoconsole
+```
+
+## 3. 레이어로 만들 변경분 뽑기
+
+게스트 안에서 **overlay 로 작업하면 변경분이 그대로 분리**된다. 백엔드 빌드 경로
+(`recipe_blocks.squashfs_stacked_layer`)와 같은 방식이다.
+
+```bash
+# 게스트 안에서
+sudo mkdir -p /mnt/cap/{upper,work,merged}
+sudo mount -t overlay overlay \
+  -o lowerdir=/,upperdir=/mnt/cap/upper,workdir=/mnt/cap/work /mnt/cap/merged
+
+sudo chroot /mnt/cap/merged /bin/bash -c 'apt-get update && apt-get install -y <원하는 것>'
+sudo umount /mnt/cap/merged
+
+# 휘발성 경로는 레이어에 넣지 않는다 (재현성·크기)
+sudo rm -rf /mnt/cap/upper/{tmp,run,var/cache,var/lib/apt/lists,var/log,root} \
+            /mnt/cap/upper/etc/machine-id
+```
+
+`/mnt/cap/upper` 를 호스트로 가져온다(`virt-copy-out`, `scp`, 공유 디렉터리 등).
+
+## 4. 패킹과 업로드
+
+```bash
+./palimpsest.py pack ./upper -o mylayer.sqsh
+# mylayer.sqsh (184.2 MiB)
+# sha256:7ab1…
+
+./palimpsest.py push mylayer.sqsh \
+  --name mylayer \
+  --base-image sha256:9f2c…            # 어떤 베이스 위에서 만들었는지
+  --parent sha256:<부모 레이어>          # 기존 레이어 위에 쌓았다면
+# 등록 완료: sha256:7ab1…
+```
+
+- digest 를 먼저 선언하므로 **이미 허브에 있는 콘텐츠는 업로드 자체가 생략**된다.
+- 서버는 받은 바이트로 digest 를 재계산해 검증한다. 거짓 digest 는 통과하지 못한다.
+- `--publish` 를 주면 사이트 전체에 공개된다(기본은 본인 프로젝트만).
+
+베이스 이미지를 직접 올릴 수도 있다:
+
+```bash
+./palimpsest.py push ubuntu-24.04.qcow2 --name ubuntu-2404 --kind cloud-image \
+  --disk-format qcow2 --arch x86_64 --os-variant ubuntu24.04 --ubuntu-base ubuntu-24.04
+```
+
+## 5. 확인
+
+```bash
+./palimpsest.py layers --name mylayer
+# sha256:7ab1…  mylayer   squashfs   parent=sha256:…
+
+# 스택 전체 + 베이스 이미지를 한 번에 받기
+./palimpsest.py bundle sha256:7ab1… -o stack.tar --include-base-image
+```
+
+번들은 **OCI image-layout** 이라 그대로 펼치면 곧 레이어 경로가 된다:
+
+```bash
+mkdir -p /var/lib/palimpsest/layers && tar -xf stack.tar -C /var/lib/palimpsest/layers
+ls /var/lib/palimpsest/layers/blobs/sha256/
+```
+
+---
+
+## 부록 A. 플랫폼이 관리하는 KVM 호스트
+
+운영자가 KVM 호스트를 플랫폼에 등록해 두면 백엔드가 직접 도메인을 정의할 수도 있다
+(`services/palimpsest_kvm.py`). 이때 레이어는 **virtio-blk 읽기 전용 디스크**로 붙고
+게스트는 OpenStack 경로와 동일하게 OverlayFS 로 합성한다.
 
 ```toml
 [palimpsest]
-kvm_uri        = "qemu:///system"                  # 원격이면 "qemu+ssh://ops@kvm-host/system"
+kvm_uri        = "qemu+ssh://ops@kvm-host/system"
 kvm_layer_root = "/var/lib/palimpsest/layers"
 kvm_state_dir  = "/var/lib/palimpsest/domains"
 ```
 
-`kvm_uri` 가 비어 있으면 기능은 비활성이고 관련 호출은 503 이다.
+`libvirt-python` 은 별도 extra 다 — `uv sync --extra kvm`. 설치하지 않으면 이 기능만 503 이다.
 
-## 1. 레이어를 호스트에 펼치기
-
-허브 번들은 **OCI image-layout** 이라 그대로 풀면 곧바로 레이어 경로가 된다.
+게스트 검증:
 
 ```bash
-# 리프 레이어 digest 하나만 주면 부모 체인 전체가 담겨 온다
-curl -sS -X POST https://<afterglow>/api/v1/palimpsest/hub/bundles \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"refs":["sha256:<leaf-digest>"]}' \
-  -o bundle.tar
-
-sudo mkdir -p /var/lib/palimpsest/layers
-sudo tar -xf bundle.tar -C /var/lib/palimpsest/layers
-```
-
-확인 — 체인의 모든 레이어가 있어야 한다:
-
-```bash
-ls /var/lib/palimpsest/layers/blobs/sha256/ | wc -l
-jq -r '.manifests[0].digest' /var/lib/palimpsest/layers/index.json
-```
-
-## 2. 루트 오버레이와 seed ISO 준비
-
-```bash
-sudo mkdir -p /var/lib/palimpsest/domains
-cd /var/lib/palimpsest/domains
-
-# Ubuntu 클라우드 이미지 위에 qcow2 오버레이 — 원본은 건드리지 않는다
-sudo qemu-img create -F qcow2 -b /var/lib/libvirt/images/ubuntu-24.04.qcow2 \
-  -f qcow2 demo.qcow2 20G
-
-cat > meta-data <<'EOF'
-instance-id: palimpsest-demo
-local-hostname: palimpsest-demo
-EOF
-
-# user-data 는 백엔드가 렌더한 것을 쓴다(레이어 조립 스크립트 포함).
-# 수동 확인용 최소본:
-cat > user-data <<'EOF'
-#cloud-config
-packages: [squashfs-tools]
-runcmd:
-  - [ bash, /var/lib/cloud/instance/scripts/layer-activate.sh ]
-EOF
-
-sudo cloud-localds demo-seed.iso user-data meta-data
-```
-
-## 3. 도메인 정의·부팅
-
-백엔드의 `palimpsest_kvm.build_domain_xml` 이 만든 XML 을 쓴다. 손으로 확인할 때는:
-
-```bash
-virsh define /tmp/palimpsest-demo.xml
-virsh start palimpsest-demo
-virsh console palimpsest-demo
-```
-
-## 4. 검증 (여기가 핵심)
-
-게스트 안에서:
-
-```bash
-# ① 레이어 디스크가 전부 보이는가 — 루트(vda) + 레이어 N개
-lsblk
-
-# ② by-id 심볼릭 링크가 있는가.
-#    ⚠️ /dev/vdb 같은 이름에 의존하면 안 된다 — 부착 순서와 게스트 이름 순서는 보장되지 않는다.
-ls -l /dev/disk/by-id/virtio-*
-
-# ③ 각 레이어가 squashfs 로 마운트됐는가
+lsblk                              # 루트(vda) + 레이어 N개
+ls -l /dev/disk/by-id/virtio-*     # ⚠️ /dev/vdb 같은 이름에 의존하면 안 된다
 mount | grep squashfs
-
-# ④ overlay 가 합성됐고 upper/work 가 로컬 디스크인가
 mount | grep overlay
-findmnt -no SOURCE /opt/layers/upper    # 네트워크 FS 가 아니어야 한다
-
-# ⑤ 실제로 쓸 수 있는가 — 레이어가 제공하는 것을 실행
+findmnt -no SOURCE /opt/layers/upper   # 네트워크 FS 가 아니어야 한다
 /opt/layers/merged/usr/local/bin/python3 --version
 ```
 
-**흔한 실패**
+## 부록 B. 흔한 실패
 
 | 증상 | 원인 |
 |---|---|
+| `pull` 후 "digest 불일치" | 전송 중 손상이거나 허브 blob 이 오염됐다. 파일은 자동 삭제된다 |
+| `push` 가 413 | `[palimpsest] hub_max_blob_bytes`(기본 32 GiB) 초과 |
+| `push` 가 503 | 허브 미설정(`hub_local_path`). 관리자에게 문의 |
+| `pack` 이 "mksquashfs 없음" | `squashfs-tools` 미설치 |
 | `/dev/disk/by-id/virtio-*` 없음 | serial 이 20자를 넘었다. QEMU 가 자르므로 호스트에서 미리 20자로 만들어야 한다 |
-| `mount: unknown filesystem type 'squashfs'` | 게스트에 `squashfs-tools`/커널 모듈 없음 |
-| overlay 마운트 실패 | `upperdir`/`workdir` 가 같은 파일시스템이 아니거나 네트워크 FS 위에 있다 |
+| overlay 마운트 실패 | `upperdir`/`workdir` 가 같은 FS 가 아니거나 네트워크 FS 위에 있다 |
 | 레이어 순서가 뒤바뀜 | `lowerdir` 는 **왼쪽이 최상위**다. 루트→리프 입력을 뒤집어야 한다 |
-| 26개 넘는 레이어 | virtio-blk 디스크 문자 한도(`vdb`~`vdz`). 레이어를 병합하거나 EROFS 단일 디바이스 검토 |
+| 26개 넘는 레이어 | virtio-blk 디스크 문자 한도(`vdb`~`vdz`). 병합하거나 EROFS 단일 디바이스 검토 |
 
-## 5. 정리
-
-```bash
-virsh destroy palimpsest-demo
-virsh undefine palimpsest-demo
-sudo rm -f /var/lib/palimpsest/domains/demo.qcow2 /var/lib/palimpsest/domains/demo-seed.iso
-```
-
-레이어 blob 은 콘텐츠 주소라 여러 도메인이 공유한다 — 도메인을 지운다고 지우지 않는다.
-
-## 부록. 왜 virtio-blk 인가
+## 부록 C. 왜 virtio-blk 인가
 
 `virtiofs` 대신 virtio-blk 을 고른 이유:
 
@@ -151,4 +185,3 @@ sudo rm -f /var/lib/palimpsest/domains/demo.qcow2 /var/lib/palimpsest/domains/de
 
 대가는 레이어 수만큼 디스크가 늘어난다는 것이다. 레이어가 많아지면 EROFS 의 다중 blob 병합
 (여러 레이어를 하나의 파일시스템으로 합쳐 virtio-blk 디바이스 **1개**로 넘김)을 검토할 가치가 있다.
-현재 파이프라인은 `mksquashfs` 가 `recipe_blocks.py` 에 박혀 있어 squashfs 를 유지한다.

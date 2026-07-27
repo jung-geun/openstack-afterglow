@@ -113,6 +113,32 @@
   > 전송은 digest 백필과 같은 **임시 Builder VM 경유 전송**이 필요해 허브 본체와 관심사가 다르다.
   > 현재 허브는 "직접 만들어 업로드 / 검색 / 정보 조회 / 부모 추적 일괄 다운로드"를 모두 만족한다.
 
+### Phase 5b — 베이스 cloud image 배포 + 로컬 빌드 CLI
+
+> **목적 정정**: 로컬 KVM 은 "레이어드 VM 을 로컬에서 실행"하는 런타임이 아니라
+> **사용자가 로컬에서 빌드해 허브에 올리는 환경**이다. 그러려면 빌드의 출발점인
+> 베이스 cloud image 도 허브에서 받을 수 있어야 한다.
+
+- [x] `backend/migrations/061_palimpsest_hub_cloud_images.sql` — `palimpsest_hub_layers` 에
+      `disk_format`/`arch`/`os_variant` + kind 인덱스. manifest 등록, dev DB 적용·멱등 검증 완료
+- [x] `kind='cloud-image'` 를 **같은 테이블**에 둔다 — 업로드 세션·digest 재검증·Range 스트리밍·
+      삭제 로직이 레이어와 동일해, 테이블을 나누면 그 machinery 를 통째로 복제하게 된다.
+      레이어 전용 컬럼(parent_digest/chain_id/python_version)은 NULL
+- [x] mediaType 분리 — `…image.qcow2.v1` / `…image.raw.v1`. 받는 쪽이 qcow2 를 squashfs 로
+      착각하면 마운트가 실패하므로 번들 manifest 에도 항목별 mediaType 을 싣는다
+      (`BundleLayer.media_type`)
+- [x] `GET /api/v1/palimpsest/hub/images` — 이미지 전용 필터(ubuntu_base/arch/os_variant/disk_format)
+- [x] 레이어가 `base_image_digest` 로 "어떤 베이스 위에서 만들어졌는지" 선언 →
+      `POST /hub/bundles` 의 `include_base_image` 로 **베이스 + 체인 전체**를 번들 하나로 수령
+- [x] 검증 규칙 — cloud-image 는 `disk_format` 필수, 부모/자기 베이스 불가. 레이어는 `disk_format` 불가
+- [x] `scripts/palimpsest.py` — 로컬 빌드·업로드 CLI(`images`/`layers`/`pull`/`pack`/`push`/`bundle`).
+      **표준 라이브러리만** 사용(사용자가 별도 설치 불요), 셸 미사용, `pull` 은 digest 재검증 후
+      불일치 시 파일 삭제, `pack` 은 백엔드 `recipe_blocks` 와 같은 mksquashfs 옵션
+- [x] `docs/palimpsest-local-kvm-runbook.md` 재작성 — "받기 → 부팅 → overlay 로 변경분 분리 →
+      패킹 → 업로드" 흐름. 플랫폼 관리 KVM 호스트는 부록으로 이동
+- [x] 테스트 — `test_palimpsest_hub.py` +14(이미지 메타 검증·mediaType·필터·번들 항목별 타입),
+      `test_palimpsest_cli.py` 17(표준 라이브러리만·셸 미사용·digest 스트리밍·mksquashfs 옵션 일치·CLI 표면)
+
 ### 별도 작업 (Phase 3 에서 분리)
 
 - [ ] 로컬 artifact ↔ 허브 전송 — 임시 Builder VM 으로 Manila share ↔ 허브 blob store 복사

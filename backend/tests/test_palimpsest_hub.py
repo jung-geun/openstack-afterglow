@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from app.services.palimpsest_hub_bundle import (
     ANNOTATION_NAME,
@@ -28,6 +29,9 @@ from app.services.palimpsest_hub_bundle import (
     parse_bundle,
 )
 from app.services.palimpsest_hub_store import (
+    KIND_CLOUD_IMAGE,
+    MEDIA_TYPE_IMAGE_QCOW2,
+    MEDIA_TYPE_IMAGE_RAW,
     MEDIA_TYPE_LAYER_SQUASHFS,
     HubDigestMismatch,
     HubStoreError,
@@ -450,6 +454,7 @@ async def test_hub_routes_are_mounted_under_v1_only():
         "/api/v1/palimpsest/hub/layers/{digest}",
         "/api/v1/palimpsest/hub/layers/{digest}/ancestors",
         "/api/v1/palimpsest/hub/layers/{digest}/blob",
+        "/api/v1/palimpsest/hub/images",
         "/api/v1/palimpsest/hub/uploads",
         "/api/v1/palimpsest/hub/uploads/{session_id}",
         "/api/v1/palimpsest/hub/bundles",
@@ -539,3 +544,123 @@ async def test_hub_bundle_export_rejects_malformed_ref(client):
     resp = await client.post("/api/v1/palimpsest/hub/bundles", json={"refs": ["nope"]})
 
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 베이스 cloud image
+# ---------------------------------------------------------------------------
+
+
+def _image_meta(**overrides) -> dict:
+    base = {
+        "name": "ubuntu-2404",
+        "kind": KIND_CLOUD_IMAGE,
+        "disk_format": "qcow2",
+        "arch": "x86_64",
+        "os_variant": "ubuntu24.04",
+        "ubuntu_base": "ubuntu-24.04",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_cloud_image_meta_resolves_media_type_by_disk_format():
+    from app.api.palimpsest.hub import HubLayerMeta
+
+    assert HubLayerMeta(**_image_meta()).resolved_media_type() == MEDIA_TYPE_IMAGE_QCOW2
+    assert HubLayerMeta(**_image_meta(disk_format="raw")).resolved_media_type() == MEDIA_TYPE_IMAGE_RAW
+    # 레이어는 그대로 squashfs
+    assert HubLayerMeta(name="torch", kind="squashfs").resolved_media_type() == MEDIA_TYPE_LAYER_SQUASHFS
+
+
+def test_cloud_image_requires_disk_format():
+    from app.api.palimpsest.hub import HubLayerMeta
+
+    with pytest.raises(ValidationError, match="disk_format"):
+        HubLayerMeta(**_image_meta(disk_format=None))
+
+
+def test_cloud_image_cannot_have_parent_or_base():
+    from app.api.palimpsest.hub import HubLayerMeta
+
+    # cloud image 는 스택의 출발점이다 — 부모도, 자기 베이스도 없다
+    with pytest.raises(ValidationError, match="부모"):
+        HubLayerMeta(**_image_meta(parent_digest="sha256:" + "a" * 64))
+    with pytest.raises(ValidationError, match="베이스"):
+        HubLayerMeta(**_image_meta(base_image_digest="sha256:" + "a" * 64))
+
+
+def test_layer_cannot_declare_disk_format():
+    from app.api.palimpsest.hub import HubLayerMeta
+
+    with pytest.raises(ValidationError, match="disk_format"):
+        HubLayerMeta(name="torch", kind="squashfs", disk_format="qcow2")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("disk_format", "vmdk"), ("arch", "riscv"), ("os_variant", "Bad Variant")],
+)
+def test_cloud_image_rejects_unsupported_values(field, value):
+    from app.api.palimpsest.hub import HubLayerMeta
+
+    with pytest.raises(ValidationError):
+        HubLayerMeta(**_image_meta(**{field: value}))
+
+
+@pytest.mark.parametrize(("param", "value"), [("arch", "riscv"), ("disk_format", "vmdk"), ("ubuntu_base", "Bad Base")])
+async def test_hub_images_rejects_malformed_filters(client, param, value):
+    resp = await client.get("/api/v1/palimpsest/hub/images", params={param: value})
+
+    assert resp.status_code == 422
+
+
+async def test_hub_images_filters_to_cloud_image_kind(client):
+    captured = {}
+
+    class _Session(_EmptySession):
+        async def execute(self, stmt):
+            captured["sql"] = str(stmt)
+            return _EmptyResult()
+
+    with patch("app.api.palimpsest.hub.get_session_factory", return_value=lambda: _Session()):
+        resp = await client.get("/api/v1/palimpsest/hub/images", params={"arch": "x86_64"})
+
+    assert resp.status_code == 200
+    # 레이어가 섞여 나오면 안 된다
+    assert "kind" in captured["sql"]
+    assert "is_published" in captured["sql"]
+
+
+def test_bundle_layer_carries_media_type_so_image_is_not_mistaken_for_layer(store):
+    payload = b"fake qcow2 bytes"
+    digest = _put_blob(store, payload)
+    image = BundleLayer(
+        blob_digest=digest,
+        size_bytes=len(payload),
+        name="ubuntu-2404",
+        config={"name": "ubuntu-2404", "kind": KIND_CLOUD_IMAGE},
+        media_type=MEDIA_TYPE_IMAGE_QCOW2,
+    )
+    layer_payload = b"layer bytes"
+    layer = BundleLayer(
+        blob_digest=_put_blob(store, layer_payload),
+        size_bytes=len(layer_payload),
+        name="uvbase",
+        config={"name": "uvbase", "kind": "uv"},
+    )
+
+    members = _read_tar(iter_bundle_tar(store, [[image, layer]]))
+    index = json.loads(members["index.json"])
+    manifest_digest = index["manifests"][0]["digest"]
+    manifest = json.loads(members[f"blobs/sha256/{manifest_digest[len('sha256:') :]}"])
+
+    # 받는 쪽이 qcow2 를 squashfs 로 착각하면 마운트가 실패한다
+    assert manifest["layers"][0]["mediaType"] == MEDIA_TYPE_IMAGE_QCOW2
+    assert manifest["layers"][1]["mediaType"] == MEDIA_TYPE_LAYER_SQUASHFS
+
+
+def test_bundle_layer_defaults_to_squashfs_media_type():
+    layer = BundleLayer(blob_digest="sha256:" + "a" * 64, size_bytes=1, name="x", config={})
+
+    assert layer.media_type == MEDIA_TYPE_LAYER_SQUASHFS

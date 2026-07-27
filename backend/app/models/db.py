@@ -528,11 +528,16 @@ class PalimpsestHubLayer(Base):
     blob_md5: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, index=True)
     size_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False)
     media_type: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    # --- kind='cloud-image' 전용 (마이그레이션 061). 레이어에서는 NULL ---
+    disk_format: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)  # qcow2 | raw
+    arch: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)  # x86_64 | aarch64
+    os_variant: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)  # ubuntu24.04 등
     config_digest: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)
     chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
     parent_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
     name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    # 'cloud-image' | squashfs 레이어 종류(uv/python/pip/dockerfile/…)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, index=True)
     ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
     python_version: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)
     # OCI config blob 원문 — 번들 export 시 그대로 직렬화한다

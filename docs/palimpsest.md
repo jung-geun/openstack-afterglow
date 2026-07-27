@@ -178,6 +178,7 @@ blob store 는 **OCI image-layout 그대로**다. 덕분에 번들이 곧 디렉
 | 메서드·경로 | 하는 일 |
 |---|---|
 | `GET /api/v1/palimpsest/hub/layers` | 검색 — `digest` · `digest_prefix` · `md5` · `chain_id` · `name` · `kind` · `parent_digest` |
+| `GET /hub/images` | **베이스 cloud image 목록** — `ubuntu_base` · `arch` · `os_variant` · `disk_format` |
 | `GET /hub/layers/{digest}` | 상세 + 조상 요약 + `chain_complete` |
 | `GET /hub/layers/{digest}/ancestors` | 루트→리프 순서 부모 체인 |
 | `GET /hub/layers/{digest}/blob` | blob 스트리밍 (HTTP Range 지원) |
@@ -207,10 +208,25 @@ mediaType 은 프로젝트 고유값을 쓴다 — 표준 도구가 squashfs 를
 조회·다운로드는 **공개(`is_published`) 이거나 사이트 공용(`project_id IS NULL`) 이거나 내 프로젝트**
 것만 보인다. 그 외는 존재 여부도 흘리지 않고 404. 업로드 세션도 타 프로젝트가 건드릴 수 없다.
 
+### 베이스 cloud image
+
+허브는 레이어뿐 아니라 **빌드의 출발점인 cloud image(qcow2/raw)도 보관·배포**한다. 로컬 빌드
+환경이 여기서 이미지를 받아 VM 을 띄우고 그 위에 레이어를 만들기 때문이다.
+
+`kind='cloud-image'` 로 구분하며 저장·업로드·다운로드 machinery 는 레이어와 완전히 같다
+(별도 테이블을 두면 그걸 통째로 복제하게 된다). 레이어 전용 필드는 NULL 이고, 대신
+`disk_format`(qcow2|raw) · `arch` · `os_variant` 를 갖는다. mediaType 도 다르다 —
+받는 쪽이 qcow2 를 squashfs 로 착각하면 마운트가 실패한다.
+
+레이어는 `base_image_digest` 로 "어떤 베이스 위에서 만들어졌는지"를 선언한다. 그러면
+`POST /hub/bundles` 에 `include_base_image: true` 를 주어 **베이스 이미지 + 레이어 체인 전체**를
+번들 하나로 받을 수 있다.
+
 ### 아직 없는 것
 
-- **로컬 artifact ↔ 허브 전송**. 로컬 레이어의 `.sqsh` 는 Manila share 에 있고 백엔드가 마운트하지
-  않으므로, 허브로 올리려면 digest 백필과 같은 임시 Builder VM 경유 전송이 필요하다. 별도 작업.
+- **OpenStack 에서 빌드한 artifact 를 허브로 올리기**. 그 레이어의 `.sqsh` 는 Manila share 에 있고
+  백엔드가 마운트하지 않으므로, digest 백필과 같은 임시 Builder VM 경유 전송이 필요하다. 별도 작업.
+  (로컬에서 빌드해 올리는 경로는 `scripts/palimpsest.py` 로 이미 가능하다.)
 - Swift/S3 드라이버, 레이어 서명(cosign 등), `/v2/` OCI Distribution 호환 레지스트리.
 
 ## 5. OverlayFS 제약 (변하지 않는 규칙)

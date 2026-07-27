@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from app.api.deps import get_token_info, require_admin
@@ -40,6 +40,8 @@ from app.services.palimpsest_hub_bundle import (
     parse_bundle,
 )
 from app.services.palimpsest_hub_store import (
+    DISK_FORMAT_MEDIA_TYPES,
+    KIND_CLOUD_IMAGE,
     MEDIA_TYPE_LAYER_SQUASHFS,
     HubDigestMismatch,
     HubStoreError,
@@ -55,6 +57,7 @@ router = APIRouter()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.+\-]{0,63}$")
 _KIND_RE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
 _UBUNTU_BASE_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,63}$")
+_OS_VARIANT_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]{0,63}$")
 _PY_VERSION_RE = re.compile(r"^\d+\.\d+$")
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _MAX_REFS = 32
@@ -83,7 +86,11 @@ class HubUploadStartRequest(BaseModel):
 
 
 class HubLayerMeta(BaseModel):
-    """업로드 완료 시 함께 등록할 레이어 메타."""
+    """업로드 완료 시 함께 등록할 메타.
+
+    `kind='cloud-image'` 면 베이스 cloud image 로 등록된다 — 레이어가 아니라 스택의 출발점이다.
+    그 경우 `disk_format` 이 필수이고 `parent_digest`/`chain_id`/`python_version` 은 의미가 없다.
+    """
 
     name: str
     kind: str = "squashfs"
@@ -92,6 +99,52 @@ class HubLayerMeta(BaseModel):
     parent_digest: str | None = None
     chain_id: str | None = None
     is_published: bool = False
+    # 이 레이어가 어떤 베이스 cloud image 위에서 만들어졌는지. 번들이 베이스까지 함께
+    # 담을 수 있게 해 준다("이 스택을 돌리는 데 필요한 전부"를 한 번에 받는다).
+    base_image_digest: str | None = None
+    # --- kind='cloud-image' 전용 ---
+    disk_format: str | None = None  # qcow2 | raw
+    arch: str = "x86_64"
+    os_variant: str | None = None
+
+    @field_validator("disk_format")
+    @classmethod
+    def _check_disk_format(cls, value: str | None) -> str | None:
+        if value is not None and value not in DISK_FORMAT_MEDIA_TYPES:
+            raise ValueError(f"disk_format 은 {sorted(DISK_FORMAT_MEDIA_TYPES)} 중 하나여야 합니다")
+        return value
+
+    @field_validator("arch")
+    @classmethod
+    def _check_arch(cls, value: str) -> str:
+        if value not in {"x86_64", "aarch64"}:
+            raise ValueError("arch 는 x86_64 또는 aarch64 여야 합니다")
+        return value
+
+    @field_validator("os_variant")
+    @classmethod
+    def _check_os_variant(cls, value: str | None) -> str | None:
+        if value is not None and not _OS_VARIANT_RE.match(value):
+            raise ValueError("os_variant 형식이 유효하지 않습니다")
+        return value
+
+    @model_validator(mode="after")
+    def _check_kind_consistency(self):
+        if self.kind == KIND_CLOUD_IMAGE:
+            if not self.disk_format:
+                raise ValueError("cloud-image 는 disk_format(qcow2|raw)이 필요합니다")
+            if self.parent_digest or self.chain_id:
+                raise ValueError("cloud-image 는 부모 레이어를 가질 수 없습니다 — 스택의 출발점입니다")
+            if self.base_image_digest:
+                raise ValueError("cloud-image 자신이 베이스입니다 — base_image_digest 를 가질 수 없습니다")
+        elif self.disk_format:
+            raise ValueError("disk_format 은 kind='cloud-image' 에서만 사용합니다")
+        return self
+
+    def resolved_media_type(self) -> str:
+        if self.kind == KIND_CLOUD_IMAGE and self.disk_format:
+            return DISK_FORMAT_MEDIA_TYPES[self.disk_format]
+        return MEDIA_TYPE_LAYER_SQUASHFS
 
     @field_validator("name")
     @classmethod
@@ -121,7 +174,7 @@ class HubLayerMeta(BaseModel):
             raise ValueError("python_version 은 major.minor 형식이어야 합니다")
         return value
 
-    @field_validator("parent_digest", "chain_id")
+    @field_validator("parent_digest", "chain_id", "base_image_digest")
     @classmethod
     def _check_digests(cls, value: str | None) -> str | None:
         if value is None:
@@ -134,6 +187,9 @@ class HubLayerMeta(BaseModel):
 
 class BundleExportRequest(BaseModel):
     refs: list[str] = Field(..., min_length=1, max_length=_MAX_REFS)
+    # 각 leaf 가 선언한 베이스 cloud image 까지 함께 담는다 — 로컬 빌드/실행에 필요한 전부를
+    # 한 번에 받기 위한 옵션. 이미지가 수 GB 라 기본값은 False 다.
+    include_base_image: bool = False
 
     @field_validator("refs")
     @classmethod
@@ -186,6 +242,9 @@ def _layer_dict(row: PalimpsestHubLayer) -> dict[str, Any]:
         "blob_md5": row.blob_md5,
         "size_bytes": row.size_bytes,
         "media_type": row.media_type,
+        "disk_format": row.disk_format,
+        "arch": row.arch,
+        "os_variant": row.os_variant,
         "config_digest": row.config_digest,
         "chain_id": row.chain_id,
         "parent_digest": row.parent_digest,
@@ -286,6 +345,45 @@ async def search_hub_layers(
         if not _KIND_RE.match(kind):
             raise HTTPException(status_code=422, detail="kind 형식이 유효하지 않습니다")
         stmt = stmt.where(PalimpsestHubLayer.kind == kind)
+
+    factory = _factory_or_503()
+    async with factory() as session:
+        rows = (await session.execute(stmt.order_by(PalimpsestHubLayer.id.desc()).limit(limit))).scalars().all()
+        return [_layer_dict(row) for row in rows]
+
+
+@router.get("/images")
+async def list_hub_images(
+    ubuntu_base: str | None = Query(None, description="예: ubuntu-24.04"),
+    arch: str | None = Query(None),
+    os_variant: str | None = Query(None),
+    disk_format: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    token_info: dict = Depends(get_token_info),
+) -> list[dict[str, Any]]:
+    """베이스 cloud image 목록.
+
+    로컬 빌드 환경이 여기서 이미지를 골라 받아 VM 을 띄우고 그 위에 레이어를 만든다.
+    `/layers?kind=cloud-image` 와 같은 데이터지만 이미지 전용 필터를 준다.
+    """
+    if arch is not None and arch not in {"x86_64", "aarch64"}:
+        raise HTTPException(status_code=422, detail="arch 는 x86_64 또는 aarch64 여야 합니다")
+    if disk_format is not None and disk_format not in DISK_FORMAT_MEDIA_TYPES:
+        raise HTTPException(status_code=422, detail="disk_format 은 qcow2 또는 raw 여야 합니다")
+    if ubuntu_base is not None and not _UBUNTU_BASE_RE.match(ubuntu_base):
+        raise HTTPException(status_code=422, detail="ubuntu_base 형식이 유효하지 않습니다")
+    if os_variant is not None and not _OS_VARIANT_RE.match(os_variant):
+        raise HTTPException(status_code=422, detail="os_variant 형식이 유효하지 않습니다")
+
+    stmt = _visible_filter(select(PalimpsestHubLayer), token_info).where(PalimpsestHubLayer.kind == KIND_CLOUD_IMAGE)
+    for value, column in (
+        (ubuntu_base, PalimpsestHubLayer.ubuntu_base),
+        (arch, PalimpsestHubLayer.arch),
+        (os_variant, PalimpsestHubLayer.os_variant),
+        (disk_format, PalimpsestHubLayer.disk_format),
+    ):
+        if value is not None:
+            stmt = stmt.where(column == value)
 
     factory = _factory_or_503()
     async with factory() as session:
@@ -491,6 +589,10 @@ async def finalize_upload(
         "parent_digest": meta.parent_digest,
         "chain_id": meta.chain_id,
         "blob_digest": finalized.blob_digest,
+        "disk_format": meta.disk_format,
+        "arch": meta.arch,
+        "os_variant": meta.os_variant,
+        "base_image_digest": meta.base_image_digest,
     }
 
     async with factory() as session:
@@ -505,7 +607,10 @@ async def finalize_upload(
                     blob_digest=finalized.blob_digest,
                     blob_md5=finalized.blob_md5,
                     size_bytes=finalized.size_bytes,
-                    media_type=MEDIA_TYPE_LAYER_SQUASHFS,
+                    media_type=meta.resolved_media_type(),
+                    disk_format=meta.disk_format,
+                    arch=meta.arch if meta.kind == KIND_CLOUD_IMAGE else None,
+                    os_variant=meta.os_variant,
                     config_digest=compute_config_digest(config),
                     chain_id=meta.chain_id,
                     parent_digest=meta.parent_digest,
@@ -559,6 +664,21 @@ async def export_bundle(req: BundleExportRequest, token_info: dict = Depends(get
         for ref in req.refs:
             row = await _load_visible(session, ref, token_info)
             chain_rows = await _ancestor_chain(session, row, token_info)
+
+            if req.include_base_image:
+                # 베이스 cloud image 를 체인 맨 앞에 얹는다. 부모 체인의 루트가 선언한
+                # base_image_digest 를 쓴다 — 스택 전체가 같은 베이스 위에 있기 때문이다.
+                base_digest = normalize_digest((chain_rows[0].config_json or {}).get("base_image_digest") or "")
+                if base_digest is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"{chain_rows[0].blob_digest} 가 베이스 이미지를 선언하지 않았습니다",
+                    )
+                base_row = await _load_visible(session, base_digest, token_info)
+                if base_row.kind != KIND_CLOUD_IMAGE:
+                    raise HTTPException(status_code=409, detail=f"{base_digest} 는 cloud-image 가 아닙니다")
+                chain_rows = [base_row, *chain_rows]
+
             if chain_rows[0].parent_digest is not None:
                 raise HTTPException(
                     status_code=409,
@@ -574,6 +694,9 @@ async def export_bundle(req: BundleExportRequest, token_info: dict = Depends(get
                         size_bytes=item.size_bytes,
                         name=item.name,
                         config=dict(item.config_json or {}),
+                        # 베이스 cloud image 는 레이어와 mediaType 이 다르다 — 받는 쪽이
+                        # qcow2 를 squashfs 로 착각하지 않도록 그대로 싣는다.
+                        media_type=item.media_type or MEDIA_TYPE_LAYER_SQUASHFS,
                     )
                     for item in chain_rows
                 ]
