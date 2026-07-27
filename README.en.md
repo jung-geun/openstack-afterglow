@@ -8,13 +8,27 @@
 [![Docker Build](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml)
 [![License](https://img.shields.io/github/license/openstack-afterglow/openstack-afterglow)](LICENSE)
 
-Afterglow is an open-source web dashboard for OpenStack clouds. It keeps Horizon's feature completeness and stability while delivering a modern SvelteKit UI/UX, and bundles **k3s-based Kubernetes provisioning** (a Magnum replacement) and an **OverlayFS library layer** optimized for AI/ML workloads.
+Afterglow is an open-source web dashboard for OpenStack clouds. It keeps Horizon's feature completeness and stability while delivering a modern SvelteKit UI/UX, and bundles **k3s-based Kubernetes provisioning** (a Magnum replacement) and a **squashfs/NFS-based Palimpsest library layer** for AI/ML workloads.
+
+## Live service
+
+Afterglow currently runs as the [DMS Cloud research-cloud delivery console](https://cloud.dmslab.re.kr). Its operational flow lets researchers and teaching teams request resources within a project, lets operators allocate them under quota and permission policies, exposes usage, state, and topology, and reuses environments through library layers and snapshots.
+
+The repository implements these operational surfaces:
+
+- **Compute** — allocate Nova VMs with GPU, vCPU, memory, and storage within project quotas, combining images, networks, and keypairs.
+- **Kubernetes** — configure k3s control-plane and worker nodes on OpenStack VMs through cloud-init, then track cluster state and workloads.
+- **Shared data and libraries** — use Manila CephFS/NFS shares and snapshots; compose squashfs content-addressable immutable AI/ML layers with OverlayFS inside VMs for reuse.
+- **Operations and observability** — manage projects, users, roles, quotas, Grafana and Prometheus integrations, and audit logs from one console.
+
+The implementation path is SvelteKit frontend → FastAPI `/api/v1` gateway → OpenStack services through `openstacksdk`, with Redis providing cache and session storage. See the [architecture documentation](docs/architecture.md) and [Palimpsest layer documentation](docs/palimpsest.md) for the detailed flows.
+
 
 ## Features
 
 - **Full OpenStack service management** — Nova · Glance · Cinder · Neutron · Manila · Octavia in a single dashboard
 - **k3s cluster provisioning** — deploy k3s directly onto VMs without Magnum (OCCM · Cinder/Manila CSI · Keystone Auth · Barbican KMS plugins)
-- **OverlayFS library layer (Union Mount v2)** — content-addressable immutable layers, Fork API, Manila snapshot backup/restore
+- **squashfs/NFS library layer (Palimpsest)** — store content-addressable immutable layer chains on Manila shares and compose them with OverlayFS in consumer VMs
 - **Monitoring integration** — Grafana JWT embed, Prometheus HTTP SD, automated monitoring security groups
 - **Defense-in-depth security** — IDOR guards, HKDF key-separated encryption, kubeconfig audit log, production boot guard
 
