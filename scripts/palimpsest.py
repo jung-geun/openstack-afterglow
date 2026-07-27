@@ -207,20 +207,25 @@ def cmd_push(args) -> int:
 
     started = _json_request("POST", "/uploads", {"digest": digest})
     if started.get("completed"):
-        print("이미 허브에 있는 콘텐츠입니다 — 업로드를 생략합니다.")
-        session_id = None
-    else:
-        session_id = started["session_id"]
-        sent = 0
-        with path.open("rb") as handle:
-            while chunk := handle.read(_UPLOAD_CHUNK):
-                with _request(
-                    "PATCH", f"/uploads/{session_id}", body=chunk, content_type="application/octet-stream"
-                ):
-                    pass
-                sent += len(chunk)
-                print(f"\r  업로드 {format_size(sent)} / {format_size(size)}", end="", file=sys.stderr)
-        print("", file=sys.stderr)
+        # blob 은 있는데 레이어로 등록되지 않은 상태라면 여기서 끝내면 안 된다 —
+        # 업로드 세션이 없어 메타를 붙일 방법이 없으므로 조용히 성공한 척하지 않는다.
+        if not started.get("registered"):
+            raise PalimpsestCliError(
+                f"blob({digest})은 저장소에 있으나 허브에 등록되어 있지 않습니다. "
+                "관리자에게 문의하거나 해당 blob 을 삭제한 뒤 다시 push 하세요"
+            )
+        print("이미 허브에 등록된 콘텐츠입니다 — 업로드를 생략합니다.")
+        return 0
+
+    session_id = started["session_id"]
+    sent = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(_UPLOAD_CHUNK):
+            with _request("PATCH", f"/uploads/{session_id}", body=chunk, content_type="application/octet-stream"):
+                pass
+            sent += len(chunk)
+            print(f"\r  업로드 {format_size(sent)} / {format_size(size)}", end="", file=sys.stderr)
+    print("", file=sys.stderr)
 
     meta: dict = {"name": args.name, "kind": args.kind, "is_published": bool(args.publish)}
     if args.parent:
@@ -234,10 +239,6 @@ def cmd_push(args) -> int:
         meta["arch"] = args.arch
         if args.os_variant:
             meta["os_variant"] = args.os_variant
-
-    if session_id is None:
-        print(f"등록 완료: {digest}")
-        return 0
 
     result = _json_request("PUT", f"/uploads/{session_id}", meta)
     print(f"등록 완료: {result['blob_digest']}")

@@ -200,6 +200,42 @@ def test_push_accepts_layer_parentage_and_base_image():
     assert args.base_image == digest
 
 
+def test_push_refuses_to_claim_success_for_unregistered_blob(tmp_path, monkeypatch):
+    """blob 은 있는데 허브에 등록되지 않은 상태를 '등록 완료' 로 보고하면 안 된다.
+
+    단축 경로에는 업로드 세션이 없어 메타를 붙일 방법이 없다 — 조용히 성공한 척하는 대신
+    무슨 일이 있었는지 알려야 한다.
+    """
+    payload = tmp_path / "layer.sqsh"
+    payload.write_bytes(b"already in the store")
+    monkeypatch.setattr(
+        cli, "_json_request", lambda *a, **k: {"completed": True, "registered": False, "already_present": True}
+    )
+
+    args = cli.build_parser().parse_args(["push", str(payload), "--name", "mylayer"])
+
+    with pytest.raises(cli.PalimpsestCliError, match="등록되어 있지 않습니다"):
+        cli.cmd_push(args)
+
+
+def test_push_skips_upload_when_content_is_already_registered(tmp_path, monkeypatch, capsys):
+    payload = tmp_path / "layer.sqsh"
+    payload.write_bytes(b"already registered")
+    calls: list[tuple] = []
+
+    def _fake(method, path, body=None):
+        calls.append((method, path))
+        return {"completed": True, "registered": True, "already_present": True}
+
+    monkeypatch.setattr(cli, "_json_request", _fake)
+    args = cli.build_parser().parse_args(["push", str(payload), "--name", "mylayer"])
+
+    assert cli.cmd_push(args) == 0
+    # 업로드 세션을 시작하는 POST 한 번뿐 — PATCH/PUT 이 없어야 한다
+    assert calls == [("POST", "/uploads")]
+    assert "업로드를 생략" in capsys.readouterr().out
+
+
 def test_bundle_can_request_base_image():
     args = cli.build_parser().parse_args(["bundle", "sha256:" + "a" * 64, "-o", "out.tar", "--include-base-image"])
 
