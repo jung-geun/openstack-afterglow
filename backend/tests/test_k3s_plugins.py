@@ -22,12 +22,10 @@ def _base_settings(**kwargs) -> MagicMock:
         # OCCM
         "k3s_occm_enabled": False,
         "k3s_occm_image": "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0",
-        "k3s_occm_floating_network_id": "",
-        "k3s_occm_public_network_name": "",
         # Cinder CSI
         "k3s_cinder_csi_enabled": False,
         "k3s_cinder_csi_image": "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0",
-        "k3s_cinder_csi_default_az": "nova",
+        # Immutable resource-policy values supplied through the plugin context.
         # Manila CSI
         "k3s_manila_csi_enabled": False,
         "k3s_manila_csi_image": "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0",
@@ -37,11 +35,10 @@ def _base_settings(**kwargs) -> MagicMock:
         "k3s_keystone_auth_enabled": False,
         "k3s_keystone_auth_image": "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0",
         "k3s_keystone_auth_policy": "",
+        # Immutable Octavia resource-policy values are supplied below.
         # Octavia Ingress
         "k3s_octavia_ingress_enabled": False,
         "k3s_octavia_ingress_image": "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0",
-        "k3s_octavia_ingress_subnet_id": "",
-        "k3s_octavia_ingress_floating_network_id": "",
         # Barbican KMS
         "k3s_barbican_kms_enabled": False,
         "k3s_barbican_kms_image": "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0",
@@ -51,6 +48,15 @@ def _base_settings(**kwargs) -> MagicMock:
     mock = MagicMock()
     for k, v in defaults.items():
         setattr(mock, k, v)
+    resource_ids = {
+        "k3s.occm_floating_network": "ext-net-id",
+        "k3s.lb_subnet": "lb-subnet-id",
+        "cinder.default_volume_availability_zone": "nova",
+        "k3s.octavia_ingress_floating_network": "ingress-ext-net-id",
+    }
+    resource_names = {"k3s.occm_public_network": "external"}
+    mock.resource_id.side_effect = lambda key: resource_ids.get(key, "")
+    mock.resource_name.side_effect = lambda key: resource_names.get(key, "")
     return mock
 
 
@@ -662,6 +668,7 @@ def test_cloudinit_server_no_plugins():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         callback_url="http://callback.example.com",
@@ -679,6 +686,7 @@ def test_cloudinit_server_with_occm_plugin():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         callback_url="http://callback.example.com",
@@ -700,6 +708,7 @@ def test_cloudinit_server_multi_plugins():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         callback_url="http://callback.example.com",
@@ -717,10 +726,11 @@ def test_cloudinit_server_multi_plugins():
 
 
 def test_cloudinit_agent_no_extra_args():
-    """에이전트: extra_agent_args 없어도 --node-ip가 INSTALL_K3S_EXEC에 포함되어야 한다."""
+    """에이전트: INSTALL_K3S_EXEC에 agent만 포함하고 node-ip CLI는 없어야 한다."""
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         server_ip="10.0.0.1",
@@ -729,8 +739,9 @@ def test_cloudinit_agent_no_extra_args():
     assert result.config_drive is False
     decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
-    assert "INSTALL_K3S_EXEC" in decoded
-    assert "--node-ip" in decoded
+    assert 'INSTALL_K3S_EXEC="${_EXEC_ARGS}"' in decoded
+    assert '_EXEC_ARGS="agent"' in decoded
+    assert "--node-ip" not in decoded
 
 
 def test_cloudinit_agent_with_cloud_provider():
@@ -738,6 +749,7 @@ def test_cloudinit_agent_with_cloud_provider():
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         server_ip="10.0.0.1",
@@ -755,6 +767,7 @@ def test_cloudinit_agent_backward_compat_occm_enabled():
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         server_ip="10.0.0.1",

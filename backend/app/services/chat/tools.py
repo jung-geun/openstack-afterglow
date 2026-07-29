@@ -33,6 +33,11 @@ class ToolContext:
     tools_enabled: bool = True
     selected_tool_ids: tuple[int, ...] | None = None
     selected_mcp_ids: tuple[int, ...] | None = None
+    expected_mcp_credential_versions: tuple[tuple[int, int], ...] | None = None
+    run_id: str | None = None
+    tool_call_id: str | None = None
+    lumen_snapshot: dict[str, object] | None = None
+    lumen_snapshot_frozen: bool = False
 
     execution_hooks: object | None = None
     managed_search: dict[str, Any] | None = None

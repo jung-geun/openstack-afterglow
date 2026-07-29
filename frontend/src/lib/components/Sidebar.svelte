@@ -222,7 +222,7 @@
 		</Button>
 	</div>
 
-	<nav class="flex-1 px-3 pb-4 space-y-0.5">
+	<nav class="flex-1 min-h-0 overflow-y-auto px-3 pb-4 space-y-0.5">
 		<!-- 대시보드 섹션 -->
 		<div>
 			<button

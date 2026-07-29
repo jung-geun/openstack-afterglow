@@ -914,39 +914,20 @@ async def test_delete_k3s_cluster_async_already_deleted(client):
 
 
 # ---------------------------------------------------------------------------
-# FCOS 이미지 선택 분기 — 503 가드 (clusters.py:238-243)
+# Runtime policy storage failure
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_create_fcos_cluster_503_when_fcos_image_not_configured(client):
-    """fcos_image_id 미설정 시 FCOS 클러스터 생성이 503 + FCOS 언급 메시지를 반환해야 한다."""
-    mock_s = MagicMock()
-    mock_s.k3s_fcos_image_id = ""  # 미설정
-    with patch("app.api.k3s.clusters.get_settings", return_value=mock_s):
-        resp = await client.post(
-            "/api/v1/k3s/clusters/async",
-            json={"name": "test-fcos", "os_type": "fcos"},
-        )
-    # 전역 에러 핸들러가 5xx detail을 sanitize하므로 status code만 검증
-    assert resp.status_code == 503
+@pytest.mark.parametrize("os_type", ["ubuntu", "fcos"])
+async def test_create_cluster_returns_503_when_policy_storage_is_unavailable(client, os_type):
+    resp = await client.post(
+        "/api/v1/k3s/clusters/async",
+        json={"name": f"test-{os_type}", "os_type": os_type},
+    )
 
-
-@pytest.mark.asyncio
-async def test_fcos_503_guard_does_not_fire_for_ubuntu(client):
-    """ubuntu 클러스터는 fcos_image_id 미설정이어도 FCOS 503 가드에 걸리지 않아야 한다."""
-    mock_s = MagicMock()
-    mock_s.k3s_fcos_image_id = ""  # fcos 이미지 없음 — ubuntu 요청엔 무관
-    mock_s.k3s_server_image_id = ""  # ubuntu 이미지도 없어 후속 503이 발생하지만
-    mock_s.k3s_server_flavor_id = ""
-    with patch("app.api.k3s.clusters.get_settings", return_value=mock_s):
-        resp = await client.post(
-            "/api/v1/k3s/clusters/async",
-            json={"name": "test-ubuntu", "os_type": "ubuntu"},
-        )
-    # ubuntu는 다른 503(이미지/플레이버 미설정)이 발생할 수 있지만
-    # "FCOS 이미지가 설정되지 않았습니다" 메시지는 절대 나오면 안 됨
-    assert "FCOS 이미지가 설정되지 않았습니다" not in resp.text
+    # The production HTTP handler sanitizes all 5xx response bodies.
+    assert resp.json() == {"detail": "내부 서버 오류"}
 
 
 @pytest.mark.asyncio

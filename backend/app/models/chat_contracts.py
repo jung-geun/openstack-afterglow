@@ -416,15 +416,17 @@ class ResponseFormat(_StrictModel):
 class ToolPolicy(_StrictModel):
     mode: Literal["agent_default", "none"] = "agent_default"
     approval_mode: Literal["required_for_mutations", "always"] = "required_for_mutations"
-    enabled_tool_ids: list[str] | None = Field(default=None, max_length=100)
+    enabled_tool_ids: list[int] | None = Field(default=None, max_length=100)
+    enabled_mcp_ids: list[int] | None = Field(default=None, max_length=100)
+    workspace_write_mode: Literal["ask", "auto_edit"] = "ask"
 
-    @field_validator("enabled_tool_ids")
+    @field_validator("enabled_tool_ids", "enabled_mcp_ids")
     @classmethod
-    def validate_enabled_tool_ids(cls, value: list[str] | None) -> list[str] | None:
+    def validate_enabled_ids(cls, value: list[int] | None) -> list[int] | None:
         if value is None:
             return None
-        if len(set(value)) != len(value) or any(not item.isdecimal() or int(item) < 1 for item in value):
-            raise ValueError("enabled_tool_ids must be unique positive decimal ids")
+        if len(set(value)) != len(value) or any(item < 1 for item in value):
+            raise ValueError("enabled extension IDs must be unique positive ids")
         return value
 
 
@@ -486,6 +488,8 @@ class CompletionRequest(_ReasoningEffortRequest):
     model_id: str = Field(min_length=1, max_length=190)
     features: ChatFeatureOptions = Field(default_factory=ChatFeatureOptions)
     agent_id: str | None = Field(default=None, max_length=36)
+    execution_mode: Literal["chat", "plan", "code"] = "chat"
+    code_workspace_id: str | None = Field(default=None, max_length=36)
     skill_ids: list[int] = Field(default_factory=list, max_length=100)
 
     @field_validator("skill_ids")
@@ -494,6 +498,16 @@ class CompletionRequest(_ReasoningEffortRequest):
         if len(set(value)) != len(value) or any(item < 1 for item in value):
             raise ValueError("skill_ids must be unique positive ids")
         return value
+
+    @model_validator(mode="after")
+    def validate_execution_mode(self) -> CompletionRequest:
+        if self.execution_mode == "chat" and (
+            self.code_workspace_id is not None or self.features.tool_policy.workspace_write_mode != "ask"
+        ):
+            raise ValueError("chat mode cannot select a code workspace or auto-edit")
+        if self.execution_mode != "code" and self.features.tool_policy.workspace_write_mode == "auto_edit":
+            raise ValueError("auto_edit is only available in code mode")
+        return self
 
     @field_validator("parts")
     @classmethod
@@ -510,14 +524,34 @@ class ChatRunDescriptor(_StrictModel):
     run_id: str = Field(min_length=1, max_length=36)
     conversation_id: str | None = Field(default=None, max_length=36)
     temp_thread_id: str | None = Field(default=None, max_length=36)
-    status: Literal["queued", "running", "awaiting_approval", "finalizing", "completed", "failed", "canceled"]
+    status: Literal[
+        "queued",
+        "running",
+        "awaiting_approval",
+        "awaiting_input",
+        "waiting_children",
+        "finalizing",
+        "completed",
+        "failed",
+        "canceled",
+    ]
     events_url: str = Field(min_length=1, max_length=512)
     cancel_url: str = Field(min_length=1, max_length=512)
 
 
 class ChatRunResponse(_StrictModel):
     run_id: str = Field(min_length=1, max_length=36)
-    status: Literal["queued", "running", "awaiting_approval", "finalizing", "completed", "failed", "canceled"]
+    status: Literal[
+        "queued",
+        "running",
+        "awaiting_approval",
+        "awaiting_input",
+        "waiting_children",
+        "finalizing",
+        "completed",
+        "failed",
+        "canceled",
+    ]
     conversation_id: str | None = Field(default=None, max_length=36)
     temp_thread_id: str | None = Field(default=None, max_length=36)
     effective_features: dict[str, Any] = Field(default_factory=dict)
@@ -611,7 +645,15 @@ class RunStartedPayload(_StrictModel):
 
 
 class RunStageChangedPayload(_StrictModel):
-    stage: Literal["queued", "model_request", "model_response", "tool_execution", "response_writing", "finalizing"]
+    stage: Literal[
+        "queued",
+        "model_request",
+        "model_response",
+        "tool_execution",
+        "response_writing",
+        "awaiting_input",
+        "finalizing",
+    ]
     tool_name: str | None = Field(default=None, min_length=1, max_length=190)
 
     @model_validator(mode="after")
@@ -658,15 +700,51 @@ class ToolCallCompletedPayload(_StrictModel):
     name: str = Field(min_length=1, max_length=190)
     content: ChatParts = Field(min_length=1, max_length=MAX_PARTS_PER_MESSAGE)
     status: Literal["completed", "failed"]
+    error_code: str | None = Field(default=None, max_length=100)
 
 
-class ToolApprovalRequiredPayload(ToolCallStartedPayload):
+class ToolApprovalRequiredPayload(_StrictModel):
+    call_id: str = Field(min_length=1, max_length=190)
+    name: str = Field(min_length=1, max_length=190)
+    source: Literal["builtin", "managed", "custom_http", "mcp", "workspace", "agent"]
+    effect: Literal["read", "workspace_write", "process", "external_mutation"]
+    destination: str | None = Field(default=None, max_length=255)
+    redacted_arguments: dict[str, Any] = Field(max_length=256)
+    preview: ChatParts = Field(max_length=MAX_PARTS_PER_MESSAGE)
+    expected_state_revision: int | None = Field(default=None, ge=0)
+    writer_fence: int | None = Field(default=None, ge=0)
     expires_at: datetime
 
 
 class ToolApprovalResolvedPayload(_StrictModel):
     call_id: str = Field(min_length=1, max_length=190)
     decision: Literal["approve", "deny"]
+    decided_by_user_id: str | None = Field(max_length=64)
+    decided_at: datetime
+
+
+class RunInteractionResponsePayload(_StrictModel):
+    option_ids: list[str] = Field(max_length=5)
+    text: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("option_ids")
+    @classmethod
+    def validate_option_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value) or any(not option_id for option_id in value):
+            raise ValueError("interaction option ids must be unique non-empty strings")
+        return value
+
+
+class RunInteractionResolvedPayload(_StrictModel):
+    interaction_id: str = Field(min_length=1, max_length=36)
+    status: Literal["answered", "timeout", "canceled"]
+    response: RunInteractionResponsePayload | None = None
+
+    @model_validator(mode="after")
+    def validate_response_for_status(self) -> RunInteractionResolvedPayload:
+        if (self.status == "answered") != (self.response is not None):
+            raise ValueError("answered interactions require a response and terminal non-answers omit it")
+        return self
 
 
 class UsageUpdatedPayload(_StrictModel):
@@ -764,6 +842,11 @@ class ToolApprovalResolvedEvent(_RunEvent):
     payload: ToolApprovalResolvedPayload
 
 
+class RunInteractionResolvedEvent(_RunEvent):
+    type: Literal["interaction.resolved"]
+    payload: RunInteractionResolvedPayload
+
+
 class UsageUpdatedEvent(_RunEvent):
     type: Literal["usage.updated"]
     payload: UsageUpdatedPayload
@@ -795,6 +878,7 @@ ChatRunEvent = Annotated[
     | ToolCallCompletedEvent
     | ToolApprovalRequiredEvent
     | ToolApprovalResolvedEvent
+    | RunInteractionResolvedEvent
     | UsageUpdatedEvent
     | RunCompletedEvent
     | RunFailedEvent

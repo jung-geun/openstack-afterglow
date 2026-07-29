@@ -28,6 +28,10 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   COMPLETED:           { tone: 'success' },
   NEW:                 { tone: 'info', pulse: true, label: '대기 중' },
 
+  // MCP access levels are stable authority scopes, not resource lifecycle states.
+  read:                { tone: 'info', label: '읽기' },
+  manage:              { tone: 'warning', label: '관리' },
+
   // warning + pulse — active transitions (building, deleting, detaching)
   BUILD:               { tone: 'warning', pulse: true },
   PENDING:             { tone: 'warning', pulse: true },
@@ -38,6 +42,12 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   PENDING_DELETE:      { tone: 'warning', pulse: true },
   DELETING:            { tone: 'warning', pulse: true },
   chat_running:        { tone: 'info', pulse: true, label: '실행 중' },
+  queued:             { tone: 'neutral', label: '대기 중' },
+  awaiting_input:     { tone: 'warning', pulse: true, label: '입력 대기' },
+  waiting_children:   { tone: 'info', pulse: true, label: '하위 작업 대기' },
+  finalizing:         { tone: 'info', pulse: true, label: '마무리 중' },
+  completed:          { tone: 'success', label: '완료' },
+  canceled:           { tone: 'neutral', label: '취소됨' },
   deleting:            { tone: 'warning', pulse: true },
   detaching:           { tone: 'warning', pulse: true },
   DETACHING:           { tone: 'warning', pulse: true },
@@ -82,12 +92,14 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   ONLINE_STANDBY:      { tone: 'info' },
   SHARED:              { tone: 'info' },
 
-  // neutral — shelved / deleted / reserved
+  // neutral — shelved / deleted / revoked or expired authority
   deleted:            { tone: 'neutral' },
   SHELVED:             { tone: 'neutral' },
   SHELVED_OFFLOADED:   { tone: 'neutral' },
   reserved:            { tone: 'neutral' },
   RESERVED:            { tone: 'neutral' },
+  revoked:             { tone: 'neutral', label: '폐기됨' },
+  expired:             { tone: 'neutral', label: '만료됨' },
 
   // 라이브러리 빌드 의미 상태
   ready:               { tone: 'success', label: '빌드 완료' },

@@ -3,6 +3,8 @@
 	import ModelSelector from './ModelSelector.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ThinkingBlock from './ThinkingBlock.svelte';
+	import ExecutionTimeline from './ExecutionTimeline.svelte';
+	import ChatBubble from '$lib/components/ui/ChatBubble.svelte';
 	import type { AvailableModel, ChatMessage } from '$lib/api/chatTree';
 	import { formatMetrics, type StreamMetrics } from '$lib/api/chatMetrics';
 	import {
@@ -11,6 +13,7 @@
 		type ToolActivityItem
 	} from '$lib/api/chatToolActivity';
 	import { citationDomain, citationLabel, normalizeCitations } from '$lib/api/chatCitations';
+	import type { RunActivityItem } from '$lib/api/chatRunReducer';
 
 	interface Props {
 		message: ChatMessage & { streaming?: boolean };
@@ -21,6 +24,8 @@
 		toolItems?: ToolActivityItem[];
 		/** 추론(thinking) 텍스트 — 있으면 접이식 블록 노출(라이브, 미저장). */
 		reasoning?: string;
+		/** Durable run journal에서 복원한 순차 실행 과정(draft 전용). */
+		activityItems?: RunActivityItem[];
 		/** 형제 버전 정보 (index/total). total>1 이면 ‹ n/m › 노출 */
 		siblingIndex?: number;
 		siblingTotal?: number;
@@ -31,6 +36,7 @@
 		modelDisplayName?: string | null;
 		onCopy: (text: string) => void;
 		onRegenerate: (modelName: string) => void;
+		onRetry: () => void;
 		onFork: () => void;
 		onPrevVersion: () => void;
 		onNextVersion: () => void;
@@ -41,6 +47,7 @@
 		metrics = null,
 		toolItems = [],
 		reasoning = '',
+		activityItems = [],
 		siblingIndex = 1,
 		siblingTotal = 1,
 		busy = false,
@@ -48,6 +55,7 @@
 		modelDisplayName = null,
 		onCopy,
 		onRegenerate,
+		onRetry,
 		onFork,
 		onPrevVersion,
 		onNextVersion
@@ -57,6 +65,7 @@
 	const isTool = $derived(message.role === 'tool');
 	const streaming = $derived(Boolean(message.streaming));
 	// 추론은 본문 토큰이 시작되면 끝난다 — 스트리밍 중이라도 content 가 있으면 "추론 중"이 아니다.
+	const retryable = $derived(isUser && message.execution?.retryable === true);
 	const reasoningActive = $derived(streaming && message.content.length === 0);
 	const metricsText = $derived(formatMetrics(metrics));
 	// 저장된 assistant 호출 스텝(재로딩) → 호출 카드(인자). role=tool → 결과 카드.
@@ -75,6 +84,18 @@
 				}
 			: null
 	);
+	function formatMessageTime(value: string | null): string | null {
+		if (!value) return null;
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return null;
+		return new Intl.DateTimeFormat('ko-KR', {
+			hour: '2-digit',
+			minute: '2-digit',
+			hour12: false
+		}).format(date);
+	}
+
+	const displayTime = $derived(formatMessageTime(message.created_at));
 	let copied = $state(false);
 
 	function copy() {
@@ -94,10 +115,20 @@
 		</div>
 	</div>
 {:else}
-	<div class="row" class:user={isUser} class:assistant={!isUser}>
-		<div class="bubble" class:user={isUser} class:assistant={!isUser}>
-			{#if isUser}
-				<div class="user-text">{message.content}</div>
+	<ChatBubble
+		align={isUser ? 'end' : 'start'}
+		label={isUser ? '나' : 'Afterglow'}
+		ariaLabel={isUser ? '내 메시지' : 'Afterglow 응답'}
+		metadata={isUser ? null : modelDisplayName}
+		timestamp={message.created_at}
+		timestampLabel={displayTime}
+		footerVisible={!streaming}
+	>
+		{#if isUser}
+			<div class="user-text">{message.content}</div>
+		{:else}
+			{#if activityItems.length}
+				<ExecutionTimeline items={activityItems} active={streaming} />
 			{:else}
 				{#if reasoning}
 					<ThinkingBlock text={reasoning} active={reasoningActive} />
@@ -112,47 +143,47 @@
 						{/each}
 					</div>
 				{/if}
-				<MarkdownMessage content={message.content} {streaming} />
-				{#if streaming && message.content.length === 0}
-					<div class="thinking">
-						<span></span><span></span><span></span>
-					</div>
-				{/if}
-				{#if streaming && metricsText}
-					<div class="live-metric" aria-live="off">{metricsText}</div>
-				{/if}
-				{#if citations.length}
-					<div class="sources">
-						<div class="sources-label">
-							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							출처 {citations.length}
-						</div>
-						<ol class="sources-list">
-							{#each citations as c, i (`${c.source_kind}:${c.url ?? c.document_index}:${i}`)}
-								<li>
-									{#if c.url}
-										<a href={c.url} target="_blank" rel="noopener noreferrer nofollow" title={c.url}>
-											<span class="src-num">{i + 1}</span>
-											<span class="src-label">{citationLabel(c)}</span>
-											<span class="src-domain">{citationDomain(c.url)}</span>
-										</a>
-									{:else}
-										<div class="source-document" title={c.snippet ?? undefined}>
-											<span class="src-num">{i + 1}</span>
-											<span class="src-label">{citationLabel(c)}</span>
-											<span class="src-domain">입력 문서</span>
-										</div>
-									{/if}
-								</li>
-							{/each}
-						</ol>
-					</div>
-				{/if}
 			{/if}
-		</div>
+			<MarkdownMessage content={message.content} {streaming} />
+			{#if streaming && message.content.length === 0}
+				<div class="thinking">
+					<span></span><span></span><span></span>
+				</div>
+			{/if}
+			{#if streaming && metricsText}
+				<div class="live-metric" aria-live="off">{metricsText}</div>
+			{/if}
+			{#if citations.length}
+				<div class="sources">
+					<div class="sources-label">
+						<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						출처 {citations.length}
+					</div>
+					<ol class="sources-list">
+						{#each citations as c, i (`${c.source_kind}:${c.url ?? c.document_index}:${i}`)}
+							<li>
+								{#if c.url}
+									<a href={c.url} target="_blank" rel="noopener noreferrer nofollow" title={c.url}>
+										<span class="src-num">{i + 1}</span>
+										<span class="src-label">{citationLabel(c)}</span>
+										<span class="src-domain">{citationDomain(c.url)}</span>
+									</a>
+								{:else}
+									<div class="source-document" title={c.snippet ?? undefined}>
+										<span class="src-num">{i + 1}</span>
+										<span class="src-label">{citationLabel(c)}</span>
+										<span class="src-domain">입력 문서</span>
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ol>
+				</div>
+			{/if}
+		{/if}
 
-		{#if !streaming}
-			<div class="actions" class:user={isUser}>
+		{#snippet footer()}
+			<div class="actions" class:user={isUser} class:retryable>
 				{#if siblingTotal > 1}
 					<div class="versions">
 						<button type="button" class="ver-arrow" disabled={siblingIndex <= 1 || busy} onclick={onPrevVersion} aria-label="이전 버전" title="이전 버전">
@@ -173,9 +204,15 @@
 					{/if}
 				</button>
 
+				{#if retryable}
+					<span class="retry-note" role="status">응답 생성에 실패했습니다</span>
+					<button type="button" class="act retry" disabled={busy} onclick={onRetry} title="다시 전송" aria-label="다시 전송">
+						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v6h6M20 20v-6h-6" stroke-linecap="round" stroke-linejoin="round" /><path d="M20 10a8 8 0 0 0-14.9-3M4 14a8 8 0 0 0 14.9 3" stroke-linecap="round" /></svg>
+					</button>
+				{/if}
+
 				{#if !isUser}
 					{#if modelLocked}
-						<!-- 에이전트 바인딩 중: 모델 선택 없이 단순 재생성 -->
 						<button type="button" class="act" disabled={busy} onclick={() => onRegenerate('')} title="재생성" aria-label="재생성">
 							<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v6h6M20 20v-6h-6" stroke-linecap="round" stroke-linejoin="round" /><path d="M20 10a8 8 0 0 0-14.9-3M4 14a8 8 0 0 0 14.9 3" stroke-linecap="round" stroke-linejoin="round" /></svg>
 						</button>
@@ -185,16 +222,13 @@
 					<button type="button" class="act" disabled={busy} onclick={onFork} title="이 지점에서 분기" aria-label="분기">
 						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="9" r="2.5" /><path d="M6 8.5v3a3 3 0 0 0 3 3h6M18 11.5v.5" stroke-linecap="round" /></svg>
 					</button>
-					{#if modelDisplayName}
-						<span class="model-tag">{modelDisplayName}</span>
-					{/if}
 					{#if metricsText}
 						<span class="metric-tag" title="생성 속도">{metricsText}</span>
 					{/if}
 				{/if}
 			</div>
-		{/if}
-	</div>
+		{/snippet}
+	</ChatBubble>
 {/if}
 
 <style>
@@ -204,81 +238,30 @@
 		gap: 0.3rem;
 		max-width: 100%;
 	}
-	.row.user {
-		align-items: flex-end;
-	}
 	.row.assistant {
 		align-items: flex-start;
-	}
-	.bubble {
-		position: relative;
-		z-index: 0;
-		max-width: min(85%, 46rem);
-		border-radius: 1.1rem;
-		padding: 0.7rem 1rem;
-	}
-	.bubble.user {
-		background: var(--color-accent);
-		color: var(--color-action-on-accent);
-		border-top-right-radius: 0.35rem;
-	}
-	.bubble.user::after {
-		content: '';
-		position: absolute;
-		top: 0;
-		right: -0.7rem;
-		z-index: -1;
-		width: 1.35rem;
-		height: 1.35rem;
-		background: var(--color-accent);
-		clip-path: polygon(0 0, 100% 0, 0 100%);
-	}
-	.bubble.assistant {
-		max-width: min(92%, 52rem);
-		background: var(--color-surface-raised);
-		border: 1px solid var(--color-line);
-		border-top-left-radius: 0.35rem;
-	}
-	.bubble.assistant::before,
-	.bubble.assistant::after {
-		content: '';
-		position: absolute;
-		clip-path: polygon(0 0, 100% 0, 100% 100%);
-	}
-	.bubble.assistant::before {
-		top: -1px;
-		left: -0.72rem;
-		z-index: -1;
-		width: 1.38rem;
-		height: 1.38rem;
-		background: var(--color-line);
-	}
-	.bubble.assistant::after {
-		top: 0;
-		left: -0.64rem;
-		z-index: -1;
-		width: 1.22rem;
-		height: 1.22rem;
-		background: var(--color-surface-raised);
-	}
-	.user-text {
-		font-size: 0.9rem;
-		line-height: 1.55;
-		white-space: pre-wrap;
-		word-break: break-word;
-		overflow-wrap: anywhere;
 	}
 	.actions {
 		display: flex;
 		align-items: center;
 		gap: 0.15rem;
-		padding: 0 0.2rem;
 		opacity: 0;
 		transition: opacity 0.15s;
 	}
-	.row:hover .actions,
+	:global(.chat:hover) .actions,
 	.actions:focus-within {
 		opacity: 1;
+	}
+	.actions.retryable {
+		opacity: 1;
+	}
+	.retry-note {
+		font-size: 0.7rem;
+		color: var(--color-state-danger);
+		white-space: nowrap;
+	}
+	.act.retry {
+		color: var(--color-state-danger);
 	}
 	.versions {
 		display: inline-flex;
@@ -315,11 +298,6 @@
 		min-width: 1.9rem;
 		text-align: center;
 		font-variant-numeric: tabular-nums;
-	}
-	.model-tag {
-		font-size: 0.68rem;
-		color: var(--color-ink-3);
-		padding-left: 0.3rem;
 	}
 	.metric-tag {
 		font-size: 0.68rem;

@@ -13,7 +13,7 @@ nav_order: 55
 
 Manages the Manila shared file system (CephFS/NFS).
 
-> **Activation condition:** `config.toml` (or `afterglow.conf`) `[services] manila = true`.
+> **Activation condition:** `afterglow.conf [services] manila = true`.
 > Since Manila is an optional service, when disabled this router itself is not mounted, so
 > all `/api/v1/file-storage*` paths return `404`.
 

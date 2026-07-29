@@ -208,10 +208,9 @@ async def test_ephemeral_build_uses_format_error_message_for_http_error(monkeypa
         response=response,
     )
 
-    # get_service_project_connection mock
     mock_conn = MagicMock()
     monkeypatch.setattr(
-        "app.services.ephemeral_build.get_service_project_connection",
+        "app.services.keystone.get_admin_connection_for_project",
         MagicMock(return_value=mock_conn),
     )
     # create_builder_share가 enriched HTTPStatusError를 raise
@@ -241,7 +240,21 @@ async def test_ephemeral_build_uses_format_error_message_for_http_error(monkeypa
         MagicMock(return_value=MagicMock(version="1.0")),
     )
 
-    await ephemeral_build.run_ephemeral_build("jupyter", 1)
+    await ephemeral_build.run_ephemeral_build(
+        "jupyter",
+        1,
+        resource_snapshot={
+            "openstack.service_project": {"id": "service-project", "name": "service"},
+            "base_image": {"id": "img-123", "name": "Ubuntu"},
+            "builder.flavor": {"id": "flavor-1", "name": "builder"},
+            "builder.network": {"id": "network-1", "name": "network"},
+            "manila": {
+                "share_proto": "NFS",
+                "share_type": "nfs-policy",
+                "share_size_gb": 10,
+            },
+        },
+    )
 
     error_msg = captured.get("error_message", "")
     assert "Share type not found" in error_msg, f"expected Manila message, got: {error_msg!r}"

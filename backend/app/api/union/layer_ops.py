@@ -818,13 +818,12 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
         req.flavor_id,
     )
 
-    from app.config import get_settings
     from app.database import get_session_factory
     from app.models.db import LayerConsume
-    from app.services.layer_build import run_layer_consume
-
-    settings = get_settings()
-    ro_share_id = settings.union_layer_store_ro_share_id or ""
+    from app.services.layer_build import (
+        resolve_layer_consume_resource_snapshot,
+        run_layer_consume,
+    )
 
     try:
         ssh_public_key: str | None = req.ssh_public_key or None
@@ -840,6 +839,11 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
             ssh_public_key = getattr(kp, "public_key", None) or ""
             if not ssh_public_key:
                 raise RuntimeError(f"선택한 키페어의 공개키를 조회할 수 없습니다: {req.key_name!r}")
+        resource_snapshot = await resolve_layer_consume_resource_snapshot(
+            conn,
+            flavor_ref=req.flavor_id,
+            network_id=req.network_id,
+        )
 
         # DB 레코드 생성
         consume_db_id: int | None = None
@@ -849,7 +853,8 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
                 row = LayerConsume(
                     profile_name=req.profile_name,
                     server_name=req.server_name,
-                    share_id=ro_share_id,
+                    artifact_ids=None,
+                    resource_snapshot=resource_snapshot,
                     status="creating",
                 )
                 session.add(row)
@@ -866,6 +871,7 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
             network_id=req.network_id,
             ssh_public_key=ssh_public_key,
             ssh_username=req.ssh_username,
+            resource_snapshot=resource_snapshot,
         )
         return {"consume_id": consume_db_id, "server_id": server_id, "status": "active"}
     except RuntimeError as e:

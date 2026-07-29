@@ -9,6 +9,7 @@
 	import { toast } from '$lib/stores/toast';
 	import CreateProjectModal from '$lib/components/projects/CreateProjectModal.svelte';
 
+	import { postAuthDestination } from '$lib/utils/mcpConsent';
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
 	let switching = $state(false);
@@ -82,7 +83,7 @@
 				roles: resp.roles ?? [],
 				isSystemAdmin: !!resp.is_system_admin,
 			});
-			goto('/dashboard');
+			goto(postAuthDestination('/dashboard'));
 		} catch (e) {
 			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
 		} finally {

@@ -1,6 +1,7 @@
-"""빌트인 AI 채팅 에이전트 API (사용자 소유 리소스 + 공개 허브).
+"""빌트인 AI 채팅 에이전트 API (사용자·프로젝트 소유 리소스 + 공개 허브).
 
-전 엔드포인트 get_token_info 인증. 조회는 소유자 본인 또는 public, 수정/삭제는 소유자만(IDOR 방어).
+전 엔드포인트 get_token_info 인증. CRUD는 호출자 user/project에 한정하고,
+공개 허브는 복제 가능한 템플릿만 검색한다(IDOR 방어).
 """
 
 from __future__ import annotations
@@ -57,7 +58,11 @@ def _map_error(exc: Exception) -> HTTPException:
 @router.post("/agents", status_code=201)
 async def create_agent(payload: AgentCreate, token_info: dict = Depends(get_token_info)):
     try:
-        return await ags.create_agent(owner_user_id=token_info["user_id"], **payload.model_dump())
+        return await ags.create_agent(
+            owner_user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+            **payload.model_dump(),
+        )
     except (ags.AgentValidationError, ags.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
@@ -66,7 +71,7 @@ async def create_agent(payload: AgentCreate, token_info: dict = Depends(get_toke
 async def list_agents(token_info: dict = Depends(get_token_info)):
     # 선택적 기능 목록: 저장소 미가용/데이터 없음은 빈 목록으로 graceful 처리(503 아님).
     try:
-        return await ags.list_agents(user_id=token_info["user_id"])
+        return await ags.list_agents(user_id=token_info["user_id"], project_id=token_info["project_id"])
     except ags.ChatStorageUnavailable:
         return []
 
@@ -80,7 +85,13 @@ async def agent_hub(
 ):
     """공개 에이전트 검색(허브). 이름·설명 부분일치, 인기(clone_count) 순."""
     try:
-        return await ags.list_public(query=query, limit=limit, offset=offset, user_id=token_info["user_id"])
+        return await ags.list_public(
+            query=query,
+            limit=limit,
+            offset=offset,
+            user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+        )
     except ags.ChatStorageUnavailable:
         return []
 
@@ -88,7 +99,11 @@ async def agent_hub(
 @router.get("/agents/{agent_id}")
 async def get_agent(agent_id: int, token_info: dict = Depends(get_token_info)):
     try:
-        return await ags.get_agent(agent_id, user_id=token_info["user_id"])
+        return await ags.get_agent(
+            agent_id,
+            user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+        )
     except (ags.AgentNotFound, ags.AgentForbidden, ags.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
@@ -97,7 +112,10 @@ async def get_agent(agent_id: int, token_info: dict = Depends(get_token_info)):
 async def update_agent(agent_id: int, payload: AgentUpdate, token_info: dict = Depends(get_token_info)):
     try:
         return await ags.update_agent(
-            agent_id, user_id=token_info["user_id"], patch=payload.model_dump(exclude_unset=True)
+            agent_id,
+            user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+            patch=payload.model_dump(exclude_unset=True),
         )
     except (ags.AgentNotFound, ags.AgentForbidden, ags.AgentValidationError, ags.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
@@ -106,7 +124,11 @@ async def update_agent(agent_id: int, payload: AgentUpdate, token_info: dict = D
 @router.delete("/agents/{agent_id}", status_code=204)
 async def delete_agent(agent_id: int, token_info: dict = Depends(get_token_info)):
     try:
-        await ags.delete_agent(agent_id, user_id=token_info["user_id"])
+        await ags.delete_agent(
+            agent_id,
+            user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+        )
     except (ags.AgentNotFound, ags.AgentForbidden, ags.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc
 
@@ -115,6 +137,10 @@ async def delete_agent(agent_id: int, token_info: dict = Depends(get_token_info)
 async def clone_agent(agent_id: int, token_info: dict = Depends(get_token_info)):
     """허브의 공개(또는 본인) 에이전트를 내 계정으로 복제(private 사본)."""
     try:
-        return await ags.clone_agent(agent_id, user_id=token_info["user_id"])
+        return await ags.clone_agent(
+            agent_id,
+            user_id=token_info["user_id"],
+            project_id=token_info["project_id"],
+        )
     except (ags.AgentNotFound, ags.AgentForbidden, ags.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc

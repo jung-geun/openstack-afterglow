@@ -1,8 +1,8 @@
 """빌트인 AI 채팅 에이전트 저장소 — 프롬프트+모델+파라미터+MCP/툴 묶음 (MySQL chat_agents).
 
-⚠️ 소유권(IDOR): 조회는 소유자 본인 또는 visibility='public'만 허용, 수정/삭제는 소유자만.
+⚠️ 소유권(IDOR): CRUD와 실행은 호출자 user/project에 한정한다.
 instructions 는 AES-256-GCM(chat_content 도메인) 암호문으로 저장하고 조회 시 복호화한다.
-허브 복제(clone)는 공개(또는 본인) 에이전트를 본인 소유의 private 사본으로 복사한다.
+허브 복제는 active public 템플릿 또는 같은 프로젝트(레거시 NULL 포함) 소유 에이전트만 private 사본으로 복사한다.
 """
 
 from __future__ import annotations
@@ -90,6 +90,7 @@ def _validate(name: str | None, visibility: str | None) -> None:
 async def create_agent(
     *,
     owner_user_id: str,
+    project_id: str,
     name: str,
     description: str | None = None,
     avatar: str | None = None,
@@ -104,6 +105,7 @@ async def create_agent(
     _validate(name, visibility)
     row = ChatAgent(
         owner_user_id=owner_user_id,
+        project_id=project_id,
         name=name.strip(),
         description=(description or None),
         avatar=(avatar or None),
@@ -124,8 +126,8 @@ async def create_agent(
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_agents(*, user_id: str) -> list[dict]:
-    """본인 소유 에이전트 목록(updated_at desc)."""
+async def list_agents(*, user_id: str, project_id: str) -> list[dict]:
+    """List only the caller's project-owned agents."""
     factory = _require_db()
     try:
         async with factory() as session:
@@ -133,7 +135,7 @@ async def list_agents(*, user_id: str) -> list[dict]:
                 (
                     await session.execute(
                         select(ChatAgent)
-                        .where(ChatAgent.owner_user_id == user_id)
+                        .where(ChatAgent.owner_user_id == user_id, ChatAgent.project_id == project_id)
                         .order_by(ChatAgent.updated_at.desc())
                     )
                 )
@@ -146,12 +148,14 @@ async def list_agents(*, user_id: str) -> list[dict]:
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def list_public(*, query: str = "", limit: int = 30, offset: int = 0, user_id: str = "") -> list[dict]:
-    """허브 — 공개 에이전트 검색(이름·설명), clone_count desc. is_owner 로 본인 것 표시."""
+async def list_public(
+    *, query: str = "", limit: int = 30, offset: int = 0, user_id: str = "", project_id: str = ""
+) -> list[dict]:
+    """Search public templates and mark ownership only within the caller's project."""
     factory = _require_db()
     try:
         async with factory() as session:
-            stmt = select(ChatAgent).where(ChatAgent.visibility == "public")
+            stmt = select(ChatAgent).where(ChatAgent.visibility == "public", ChatAgent.is_active.is_(True))
             q = (query or "").strip()
             if q:
                 like = f"%{q}%"
@@ -159,7 +163,7 @@ async def list_public(*, query: str = "", limit: int = 30, offset: int = 0, user
             stmt = stmt.order_by(ChatAgent.clone_count.desc(), ChatAgent.id.desc())
             stmt = stmt.limit(min(max(limit, 1), 100)).offset(max(offset, 0))
             rows = (await session.execute(stmt)).scalars().all()
-            return [_public(r, owner_view=(r.owner_user_id == user_id)) for r in rows]
+            return [_public(r, owner_view=(r.owner_user_id == user_id and r.project_id == project_id)) for r in rows]
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -172,29 +176,40 @@ async def _load(session, agent_id: int) -> ChatAgent:
     return row
 
 
-async def get_agent(agent_id: int, *, user_id: str) -> dict:
-    """소유자 본인 또는 공개 에이전트만 조회 가능. 비공개 타인 접근은 Forbidden."""
+async def _load_owned_project(session, agent_id: int, user_id: str, project_id: str) -> ChatAgent:
+    row = (
+        await session.execute(
+            select(ChatAgent).where(
+                ChatAgent.id == agent_id,
+                ChatAgent.owner_user_id == user_id,
+                ChatAgent.project_id == project_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise AgentNotFound(f"에이전트 {agent_id} 를 찾을 수 없습니다")
+    return row
+
+
+async def get_agent(agent_id: int, *, user_id: str, project_id: str) -> dict:
+    """Read only the caller's project-owned agent."""
     factory = _require_db()
     try:
         async with factory() as session:
-            row = await _load(session, agent_id)
-            if row.owner_user_id != user_id and row.visibility != "public":
-                raise AgentForbidden("에이전트에 접근할 권한이 없습니다")
-            return _public(row, owner_view=(row.owner_user_id == user_id))
+            row = await _load_owned_project(session, agent_id, user_id, project_id)
+            return _public(row, owner_view=True)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def update_agent(agent_id: int, *, user_id: str, patch: dict) -> dict:
-    """소유자만 수정. instructions 는 재암호화 저장."""
+async def update_agent(agent_id: int, *, user_id: str, project_id: str, patch: dict) -> dict:
+    """Update only a caller-owned project agent."""
     factory = _require_db()
     _validate(patch.get("name"), patch.get("visibility"))
     try:
         async with factory() as session, session.begin():
-            row = await _load(session, agent_id)
-            if row.owner_user_id != user_id:
-                raise AgentForbidden("에이전트를 수정할 권한이 없습니다")
+            row = await _load_owned_project(session, agent_id, user_id, project_id)
             if patch.get("name"):
                 row.name = str(patch["name"]).strip()
             if "description" in patch:
@@ -220,46 +235,53 @@ async def update_agent(agent_id: int, *, user_id: str, patch: dict) -> dict:
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def delete_agent(agent_id: int, *, user_id: str) -> None:
+async def delete_agent(agent_id: int, *, user_id: str, project_id: str) -> None:
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            row = await _load(session, agent_id)
-            if row.owner_user_id != user_id:
-                raise AgentForbidden("에이전트를 삭제할 권한이 없습니다")
+            row = await _load_owned_project(session, agent_id, user_id, project_id)
             await session.delete(row)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def clone_agent(agent_id: int, *, user_id: str) -> dict:
-    """공개(또는 본인) 에이전트를 본인 소유 private 사본으로 복제. 출처 clone_count 증가.
-
-    ⚠️ mcp_ids/tool_ids 는 그대로 복사하되, 복제자가 접근 불가한 비공개 확장이면 실행 시 무시된다
-    (tool_runtime 이 소유권을 재검증). 여기서는 참조만 복사한다.
-    """
+async def clone_agent(agent_id: int, *, user_id: str, project_id: str) -> dict:
+    """Clone an active public template, same-project private agent, or owned legacy template."""
     factory = _require_db()
     try:
         async with factory() as session, session.begin():
-            src = await _load(session, agent_id)
-            if src.owner_user_id != user_id and src.visibility != "public":
-                raise AgentForbidden("복제할 권한이 없습니다")
+            src = (
+                await session.execute(
+                    select(ChatAgent).where(
+                        ChatAgent.id == agent_id,
+                        ChatAgent.is_active.is_(True),
+                        or_(
+                            ChatAgent.visibility == "public",
+                            (ChatAgent.owner_user_id == user_id)
+                            & or_(ChatAgent.project_id == project_id, ChatAgent.project_id.is_(None)),
+                        ),
+                    )
+                )
+            ).scalar_one_or_none()
+            if src is None:
+                raise AgentNotFound(f"에이전트 {agent_id} 를 찾을 수 없습니다")
             clone = ChatAgent(
                 owner_user_id=user_id,
+                project_id=project_id,
                 name=src.name,
                 description=src.description,
                 avatar=src.avatar,
-                instructions=src.instructions,  # 암호문 그대로 복사(재암호화 불필요)
+                instructions=src.instructions,
                 model_name=src.model_name,
                 params=src.params,
-                mcp_ids=src.mcp_ids,
-                tool_ids=src.tool_ids,
+                mcp_ids=None,
+                tool_ids=None,
+                delegable_agent_ids=None,
                 visibility="private",
                 cloned_from_id=src.id,
             )
             session.add(clone)
-            # 출처 인기 지표 증가(본인 복제는 제외)
             if src.owner_user_id != user_id:
                 await session.execute(
                     update(ChatAgent).where(ChatAgent.id == src.id).values(clone_count=ChatAgent.clone_count + 1)
@@ -271,18 +293,22 @@ async def clone_agent(agent_id: int, *, user_id: str) -> dict:
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def get_agent_for_run(agent_id: int, *, user_id: str) -> dict | None:
-    """완료 경로용 — 소유자 본인 또는 공개 에이전트의 실행 설정. 미접근/미존재 시 None.
-
-    ⚠️ 반환 instructions 는 복호화 평문 — 시스템 프롬프트 주입 전용, 응답 노출 금지.
-    """
+async def get_agent_for_run(agent_id: int, *, user_id: str, project_id: str) -> dict | None:
+    """Load only an active, caller-owned project agent for executable run snapshots."""
     factory = _require_db()
     try:
         async with factory() as session:
-            row = await session.get(ChatAgent, agent_id)
+            row = (
+                await session.execute(
+                    select(ChatAgent).where(
+                        ChatAgent.id == agent_id,
+                        ChatAgent.owner_user_id == user_id,
+                        ChatAgent.project_id == project_id,
+                        ChatAgent.is_active.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
             if row is None:
-                return None
-            if row.owner_user_id != user_id and row.visibility != "public":
                 return None
             return {
                 "id": row.id,
@@ -290,7 +316,10 @@ async def get_agent_for_run(agent_id: int, *, user_id: str) -> dict | None:
                 "model_name": row.model_name,
                 "params": row.params or {},
                 "mcp_ids": row.mcp_ids or [],
+                "role": row.role,
                 "tool_ids": row.tool_ids or [],
+                "execution_policy": row.execution_policy or {},
+                "delegable_agent_ids": row.delegable_agent_ids or [],
             }
     except OperationalError as exc:
         mark_db_unhealthy()

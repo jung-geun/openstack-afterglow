@@ -7,7 +7,6 @@ import base64
 import logging
 import shlex
 
-from app.config import get_settings
 from app.services import manila
 from app.services.builder_vm import EphemeralBuilderVM
 from app.services.ssh_executor import run_command
@@ -19,29 +18,22 @@ MOUNT_POINT = "/mnt/lib-output"
 
 async def create_builder_share(
     svc_conn,
+    *,
     name: str,
     size_gb: int,
-    share_proto: str,  # "NFS" | "CEPHFS"
+    share_proto: str,
+    share_type: str,
+    share_network_id: str = "",
     metadata: dict | None = None,
 ) -> str:
-    """Manila share를 생성하고 share ID를 반환한다.
+    """Create a builder share from an already validated resource snapshot.
 
-    NFS: os_manila_nfs_share_type + os_manila_share_network_id 사용.
-    CephFS: os_manila_share_type 사용, share_network_id 생략(DHSS=False 백엔드 대응).
-
-    Args:
-        metadata: 기본 메타데이터(union_type, union_status)에 병합할 추가 키-값.
-                  예: {"union_library": library_id, "union_version": "3.11"}
+    CephFS callers pass an empty ``share_network_id`` for the non-DHSS service
+    backend. NFS callers pass the service share network selected by policy.
     """
-    settings = get_settings()
     proto_upper = share_proto.upper()
-
-    if proto_upper == "NFS":
-        share_type = settings.os_manila_nfs_share_type
-        share_network_id = settings.os_manila_share_network_id
-    else:
-        share_type = settings.os_manila_share_type
-        share_network_id = ""
+    if proto_upper not in {"NFS", "CEPHFS"}:
+        raise ValueError(f"unsupported builder share protocol: {share_proto!r}")
 
     base_metadata: dict = {"union_type": "ephemeral-build", "union_status": "building"}
     if metadata:

@@ -1,14 +1,20 @@
 """Global discovered-resource policy registry and OpenStack validation.
 
-Policies store stable resource IDs.  Display names are snapshots only; every
-write revalidates the ID against the configured administrative OpenStack
-connection so deleted, wrong-kind, or non-external selections cannot persist.
+Policies persist stable resource IDs (or canonical availability-zone names where
+OpenStack exposes no ID). Display names are snapshots only. Every write and
+provisioning resolution validates the saved value in the operation's actual
+OpenStack scope; no policy falls back to deployment configuration.
 """
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
+
+from openstack.exceptions import ResourceNotFound
 
 from app.services import glance, manila, neutron, nova
 
@@ -18,43 +24,175 @@ class PolicySpec:
     key: str
     resource_kind: str
     title: str
+    group: str
+    help_text: str
+    execution_scope: str = "tenant"  # admin | tenant | service
+    dependency: str | None = None
+    required_when: str | None = None
     external_only: bool = False
     shared_only: bool = False
-    execution_scope: str = "tenant"
 
 
 _POLICY_SPECS = (
-    PolicySpec("k3s.server_image", "image", "K3s server image"),
-    PolicySpec("k3s.fcos_image", "image", "K3s Fedora CoreOS image"),
-    PolicySpec("k3s.server_flavor", "flavor", "K3s server flavor"),
-    PolicySpec("k3s.default_agent_flavor", "flavor", "K3s default agent flavor"),
-    PolicySpec("k3s.occm_floating_network", "network", "K3s OCCM floating network", external_only=True),
-    PolicySpec("k3s.api_lb_vip_network", "network", "K3s API load-balancer network", shared_only=True),
-    PolicySpec("k3s.api_lb_floating_network", "network", "K3s API load-balancer floating network", external_only=True),
-    PolicySpec("k3s.octavia_ingress_subnet", "subnet", "K3s Octavia ingress subnet"),
     PolicySpec(
-        "k3s.octavia_ingress_floating_network", "network", "K3s Octavia ingress floating network", external_only=True
+        "openstack.service_project",
+        "project",
+        "Service project",
+        "OpenStack",
+        "Project used for Builder and service-owned Manila resources.",
+        execution_scope="admin",
     ),
-    PolicySpec("builder.image", "image", "Layer builder image", execution_scope="service"),
-    PolicySpec("builder.flavor", "flavor", "Layer builder flavor", execution_scope="service"),
-    PolicySpec("builder.network", "network", "Layer builder network", execution_scope="service"),
+    PolicySpec(
+        "nova.default_network",
+        "network",
+        "Default tenant network",
+        "Nova / Cinder",
+        "Shared fallback network used only when project auto-networking is disabled.",
+        shared_only=True,
+    ),
+    PolicySpec(
+        "nova.default_external_network",
+        "network",
+        "Default external network",
+        "Nova / Cinder",
+        "External network required when project default networking is enabled.",
+        external_only=True,
+        required_when="default_network_enabled",
+    ),
+    PolicySpec(
+        "nova.default_compute_availability_zone",
+        "compute_availability_zone",
+        "Default compute availability zone",
+        "Nova / Cinder",
+        "Nova scheduling zone when a request does not provide one.",
+        execution_scope="admin",
+    ),
+    PolicySpec(
+        "cinder.default_volume_availability_zone",
+        "volume_availability_zone",
+        "Default volume availability zone",
+        "Nova / Cinder",
+        "Cinder placement zone when a request does not provide one.",
+        execution_scope="admin",
+    ),
+    PolicySpec(
+        "manila.share_network",
+        "share_network",
+        "Service share network",
+        "Manila",
+        "Share network used only by Builder and service-owned NFS/DHSS shares.",
+        execution_scope="service",
+        dependency="openstack.service_project",
+    ),
+    PolicySpec(
+        "manila.cephfs_share_type",
+        "share_type",
+        "Public CephFS share type",
+        "Manila",
+        "Public share type available in service and tenant projects for CephFS.",
+        execution_scope="tenant",
+    ),
+    PolicySpec(
+        "manila.nfs_share_type",
+        "share_type",
+        "Public NFS share type",
+        "Manila",
+        "Public share type available in service and tenant projects for NFS.",
+        execution_scope="tenant",
+    ),
+    PolicySpec("k3s.server_image", "image", "K3s server image", "K3s", "Public Ubuntu server image."),
+    PolicySpec("k3s.fcos_image", "image", "K3s Fedora CoreOS image", "K3s", "Public Fedora CoreOS image."),
+    PolicySpec("k3s.server_flavor", "flavor", "K3s server flavor", "K3s", "Default server-node flavor."),
+    PolicySpec("k3s.default_agent_flavor", "flavor", "K3s default agent flavor", "K3s", "Default agent-node flavor."),
+    PolicySpec(
+        "k3s.occm_floating_network",
+        "network",
+        "K3s OCCM floating network",
+        "K3s",
+        "External network for OCCM floating IP allocation.",
+        external_only=True,
+    ),
+    PolicySpec(
+        "k3s.occm_public_network",
+        "network",
+        "K3s OCCM public network",
+        "K3s",
+        "Shared/external network rendered into OCCM as its saved name.",
+        shared_only=True,
+    ),
+    PolicySpec(
+        "k3s.lb_subnet", "subnet", "K3s load-balancer subnet", "K3s", "Subnet used for active load-balancer modes."
+    ),
+    PolicySpec(
+        "k3s.api_lb_vip_network",
+        "network",
+        "K3s API load-balancer network",
+        "K3s",
+        "Shared network for the API load balancer VIP.",
+        shared_only=True,
+    ),
+    PolicySpec(
+        "k3s.api_lb_floating_network",
+        "network",
+        "K3s API load-balancer floating network",
+        "K3s",
+        "External network for the API load balancer.",
+        external_only=True,
+    ),
+    PolicySpec(
+        "k3s.octavia_ingress_floating_network",
+        "network",
+        "K3s Octavia ingress floating network",
+        "K3s",
+        "External network for Octavia ingress.",
+        external_only=True,
+    ),
+    PolicySpec(
+        "builder.flavor",
+        "flavor",
+        "Builder flavor",
+        "Builder",
+        "Default Builder flavor; individual jobs may override it.",
+        execution_scope="service",
+        dependency="openstack.service_project",
+    ),
+    PolicySpec(
+        "builder.network",
+        "network",
+        "Builder network",
+        "Builder",
+        "Default Builder network; individual jobs may override it.",
+        execution_scope="service",
+        dependency="openstack.service_project",
+    ),
     PolicySpec(
         "builder.floating_network",
         "network",
-        "Layer builder floating network",
-        external_only=True,
+        "Builder floating network",
+        "Builder",
+        "Optional external network for Builder utility VMs.",
         execution_scope="service",
+        dependency="openstack.service_project",
+        external_only=True,
     ),
-    PolicySpec("nova.default_network", "network", "Default tenant network", shared_only=True),
-    PolicySpec("builder.ubuntu_18_04_image", "image", "Ubuntu 18.04 layer builder image", execution_scope="service"),
-    PolicySpec("builder.ubuntu_20_04_image", "image", "Ubuntu 20.04 layer builder image", execution_scope="service"),
-    PolicySpec("builder.ubuntu_22_04_image", "image", "Ubuntu 22.04 layer builder image", execution_scope="service"),
-    PolicySpec("builder.ubuntu_24_04_image", "image", "Ubuntu 24.04 layer builder image", execution_scope="service"),
-    PolicySpec("nova.default_external_network", "network", "Default external network", external_only=True),
-    PolicySpec("manila.share_network", "share_network", "Manila share network", execution_scope="service"),
-    PolicySpec("waygate.provider_network", "network", "Waygate provider network", shared_only=True),
-    PolicySpec("waygate.image", "image", "Waygate image"),
-    PolicySpec("waygate.flavor", "flavor", "Waygate flavor"),
+    PolicySpec(
+        "waygate.provider_network",
+        "network",
+        "Waygate provider network",
+        "Waygate",
+        "Target-tenant-visible shared provider network.",
+        shared_only=True,
+    ),
+    PolicySpec("waygate.image", "image", "Waygate image", "Waygate", "Target-tenant-visible public image."),
+    PolicySpec("waygate.flavor", "flavor", "Waygate flavor", "Waygate", "Target-tenant-visible public flavor."),
+    PolicySpec(
+        "waygate.floating_network",
+        "network",
+        "Waygate floating network",
+        "Waygate",
+        "Optional external network for Waygate endpoints.",
+        external_only=True,
+    ),
 )
 POLICY_SPECS = {spec.key: spec for spec in _POLICY_SPECS}
 
@@ -78,7 +216,45 @@ def _option(resource_id: object, name: object, **extra: Any) -> dict[str, Any]:
     return {"id": str(resource_id), "name": str(name or resource_id), **extra}
 
 
+def _is_tenant_network(network: object) -> bool:
+    return bool(getattr(network, "is_shared", False) or getattr(network, "is_router_external", False))
+
+
+def _zone_option(zone: object) -> dict[str, Any] | None:
+    if isinstance(zone, dict):
+        name = zone.get("name") or zone.get("zoneName")
+        state = zone.get("state") or zone.get("zoneState") or {}
+    else:
+        name = getattr(zone, "name", None) or getattr(zone, "zoneName", None)
+        state = getattr(zone, "state", {}) or getattr(zone, "zoneState", {}) or {}
+    if not name or str(name).lower() == "internal":
+        return None
+    available = state.get("available", True) if isinstance(state, dict) else True
+    if not available:
+        return None
+    return _option(name, name)
+
+
+def _share_type_options(conn: object, spec: PolicySpec) -> list[dict[str, Any]]:
+    protocol = "CEPHFS" if spec.key == "manila.cephfs_share_type" else "NFS"
+    options: list[dict[str, Any]] = []
+    for share_type in manila.list_share_types(conn):
+        if not bool(share_type.get("is_public", share_type.get("is_default", True))):
+            continue
+        if protocol not in {item.upper() for item in share_type.get("supported_protocols", [])}:
+            continue
+        resource_id = share_type.get("id") or share_type.get("name")
+        if resource_id:
+            options.append(_option(resource_id, share_type.get("name"), protocol=protocol))
+    return options
+
+
 def _discover_sync(conn, spec: PolicySpec) -> list[dict[str, Any]]:
+    if spec.resource_kind == "project":
+        return [
+            _option(project.id, project.name, domain_id=getattr(project, "domain_id", None))
+            for project in conn.identity.projects()
+        ]
     if spec.resource_kind == "image":
         images = glance.list_images(conn)
         if spec.execution_scope == "tenant":
@@ -98,6 +274,7 @@ def _discover_sync(conn, spec: PolicySpec) -> list[dict[str, Any]]:
                 is_shared=bool(getattr(network, "is_shared", False)),
             )
             for network in neutron.list_networks(conn)
+            if spec.execution_scope != "tenant" or _is_tenant_network(network)
         ]
         return [
             option
@@ -108,9 +285,7 @@ def _discover_sync(conn, spec: PolicySpec) -> list[dict[str, Any]]:
         options = []
         for subnet in conn.network.subnets():
             parent = conn.network.get_network(subnet.network_id)
-            if spec.execution_scope == "tenant" and not (
-                bool(getattr(parent, "is_shared", False)) or bool(getattr(parent, "is_router_external", False))
-            ):
+            if parent is None or (spec.execution_scope == "tenant" and not _is_tenant_network(parent)):
                 continue
             options.append(_option(subnet.id, subnet.name, network_id=subnet.network_id, cidr=subnet.cidr))
         return options
@@ -118,15 +293,22 @@ def _discover_sync(conn, spec: PolicySpec) -> list[dict[str, Any]]:
         return [
             _option(item.get("id"), item.get("name")) for item in manila.list_share_networks(conn) if item.get("id")
         ]
+    if spec.resource_kind == "share_type":
+        return _share_type_options(conn, spec)
+    if spec.resource_kind == "compute_availability_zone":
+        return [option for zone in conn.compute.availability_zones() if (option := _zone_option(zone)) is not None]
+    if spec.resource_kind == "volume_availability_zone":
+        zones = getattr(conn.block_storage, "availability_zones", lambda: [])()
+        return [option for zone in zones if (option := _zone_option(zone)) is not None]
     raise AssertionError(f"unsupported resource kind: {spec.resource_kind}")
 
 
 async def discovery_connection(admin_conn, spec: PolicySpec):
     """Use the same OpenStack scope as the eventual provisioning operation."""
     if spec.execution_scope == "service":
-        from app.services.keystone import get_service_project_connection
+        from app.services.resource_policy_store import get_service_project_connection
 
-        return await asyncio.to_thread(get_service_project_connection)
+        return await get_service_project_connection()
     return admin_conn
 
 
@@ -142,8 +324,20 @@ async def discover_options(conn, key: str) -> list[dict[str, Any]]:
                 await asyncio.to_thread(execution_conn.close)
 
 
+def _validate_catalog_value(conn: object, spec: PolicySpec, resource_id: str) -> dict[str, Any]:
+    for option in _discover_sync(conn, spec):
+        if option["id"] == resource_id:
+            return option
+    raise ResourcePolicyValidationError("selected resource is unavailable or violates policy constraints")
+
+
 def _validate_existing_sync(conn, spec: PolicySpec, resource_id: str) -> dict[str, Any]:
-    """Validate one persisted ID without re-enumerating a resource catalog."""
+    """Validate one persisted value without re-enumerating resources where possible."""
+    if spec.resource_kind == "project":
+        project = conn.identity.get_project(resource_id)
+        if project is None:
+            raise ResourcePolicyValidationError("selected project is unavailable")
+        return _option(project.id, project.name, domain_id=getattr(project, "domain_id", None))
     if spec.resource_kind == "image":
         image = conn.image.get_image(resource_id)
         if image is None or (
@@ -160,6 +354,7 @@ def _validate_existing_sync(conn, spec: PolicySpec, resource_id: str) -> dict[st
         network = conn.network.get_network(resource_id)
         if (
             network is None
+            or (spec.execution_scope == "tenant" and not _is_tenant_network(network))
             or (spec.external_only and not bool(getattr(network, "is_router_external", False)))
             or (spec.shared_only and not bool(getattr(network, "is_shared", False)))
         ):
@@ -168,16 +363,7 @@ def _validate_existing_sync(conn, spec: PolicySpec, resource_id: str) -> dict[st
     if spec.resource_kind == "subnet":
         subnet = conn.network.get_subnet(resource_id)
         parent = conn.network.get_network(subnet.network_id) if subnet is not None else None
-        if (
-            subnet is None
-            or parent is None
-            or (
-                spec.execution_scope == "tenant"
-                and not (
-                    bool(getattr(parent, "is_shared", False)) or bool(getattr(parent, "is_router_external", False))
-                )
-            )
-        ):
+        if subnet is None or parent is None or (spec.execution_scope == "tenant" and not _is_tenant_network(parent)):
             raise ResourcePolicyValidationError("selected subnet is unavailable in the execution scope")
         return _option(subnet.id, subnet.name)
     if spec.resource_kind == "share_network":
@@ -185,7 +371,9 @@ def _validate_existing_sync(conn, spec: PolicySpec, resource_id: str) -> dict[st
         if not share_network or not share_network.get("id"):
             raise ResourcePolicyValidationError("selected share network is unavailable in the execution scope")
         return _option(share_network["id"], share_network.get("name"))
-    raise ResourcePolicyValidationError("resource kind requires catalog validation")
+    if spec.resource_kind in {"share_type", "compute_availability_zone", "volume_availability_zone"}:
+        return _validate_catalog_value(conn, spec, resource_id)
+    raise AssertionError(f"unsupported resource kind: {spec.resource_kind}")
 
 
 async def validate_existing_selection(conn, key: str, resource_id: str) -> dict[str, Any]:
@@ -193,13 +381,40 @@ async def validate_existing_selection(conn, key: str, resource_id: str) -> dict[
 
 
 async def validate_selection(conn, key: str, resource_id: str | None) -> dict[str, Any] | None:
-    if resource_id is None:
+    if resource_id is None or not resource_id.strip():
         return None
-    normalized = resource_id.strip()
-    if not normalized:
+    return await validate_existing_selection(conn, key, resource_id.strip())
+
+
+async def validate_legacy_selection(
+    conn, key: str, value: str, *, allow_exact_name: bool = False
+) -> dict[str, Any] | None:
+    """Resolve importer-only legacy selectors to a stable policy ID.
+
+    Deployment configuration historically stored names for a small set of
+    selectors. Runtime writes remain ID-only; this compatibility path accepts
+    a name only when exactly one discovered resource has that name.
+    """
+    if value is None or not value.strip():
         return None
-    options = await discover_options(conn, key)
-    for option in options:
-        if option["id"] == normalized:
-            return option
+    normalized = value.strip()
+    spec = get_spec(key)
+    try:
+        return await asyncio.to_thread(_validate_existing_sync, conn, spec, normalized)
+    except (ResourcePolicyValidationError, ResourceNotFound):
+        if not allow_exact_name:
+            raise
+
+    matches = await asyncio.to_thread(
+        lambda: [option for option in _discover_sync(conn, spec) if option["name"] == normalized]
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ResourcePolicyValidationError("legacy selector name is ambiguous")
     raise ResourcePolicyValidationError("selected resource is unavailable or violates policy constraints")
+
+
+def dependencies_for(key: str) -> Iterable[str]:
+    dependency = get_spec(key).dependency
+    return (dependency,) if dependency else ()

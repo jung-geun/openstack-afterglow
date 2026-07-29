@@ -107,6 +107,16 @@ async def _run_sync_cycle() -> None:
         collect_hypervisor_data,
         collect_instance_data,
     )
+    from app.services.resource_policy_store import ResourcePolicyStorageUnavailable, get_runtime_setting
+
+    try:
+        enabled = await get_runtime_setting("notion.sync_enabled")
+    except ResourcePolicyStorageUnavailable:
+        _logger.warning("Notion synchronization skipped: runtime setting storage is unavailable")
+        return
+    if enabled is not True:
+        _logger.info("Notion synchronization is disabled by the global runtime setting")
+        return
 
     if is_db_available():
         try:

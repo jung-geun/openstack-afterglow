@@ -12,11 +12,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
+from uuid import NAMESPACE_URL, uuid5
 
+from app.models.chat_contracts import TextPart
 from app.services.chat import advisor, mcp_client, ssrf, tools, web_fetch, web_search
+from app.services.chat.agent_protocol import ToolBinding, ToolDefinition
+from app.services.chat.agent_protocol import ToolExecutionResult as V2ToolExecutionResult
 from app.services.chat.tools import ToolContext
+from app.services.mcp_control_plane import ledger as mcp_ledger
+from app.services.mcp_control_plane import lumen as mcp_lumen
+from app.services.mcp_control_plane import registry as mcp_registry
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +57,423 @@ class ToolExecutionResult:
 
 
 _MANAGED_ADVISOR_TOOL = "managed_advisor"
+
+
+def v2_builtin_tool_bindings() -> dict[str, ToolBinding]:
+    """Return immutable v2 bindings for the read-only built-in tool registry.
+
+    The v2 graph dispatches these bindings through ``agent_runtime_v2`` so JSON
+    schema validation runs before a handler receives model-supplied arguments.
+    """
+
+    bindings: dict[str, ToolBinding] = {}
+    for tool in tools.TOOLS:
+
+        async def execute(arguments: dict[str, object], context: object, *, builtin=tool) -> V2ToolExecutionResult:
+            if not isinstance(context, ToolContext):
+                return V2ToolExecutionResult(
+                    status="failed",
+                    model_content="Tool execution context is invalid.",
+                    error_code="invalid_tool_context",
+                )
+            result = await builtin.handler(arguments, context)
+            model_content = str(result)[:8_192]
+            return V2ToolExecutionResult(
+                status="completed",
+                model_content=model_content,
+                display=[TextPart(type="text", text=model_content)] if model_content else [],
+            )
+
+        definition = ToolDefinition(
+            name=tool.name,
+            description=tool.description,
+            input_schema={**tool.parameters, "additionalProperties": False},
+            effect="read",
+            parallel_safe=True,
+            source="builtin",
+        )
+        bindings[definition.name] = ToolBinding(definition=definition, execute=execute)
+    return bindings
+
+
+def _v2_provider_name(prefix: str, identifier: int, name: object) -> str:
+    raw_name = str(name)
+    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", raw_name).strip("_") or "tool"
+    digest = hashlib.sha256(raw_name.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}__{identifier}__{normalized[:96]}_{digest}"[:128]
+
+
+def _v2_effect(value: object) -> str:
+    return value if value in {"read", "workspace_write", "process", "external_mutation"} else "external_mutation"
+
+
+def _v2_config_fingerprint(value: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _v2_destination_origin(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        hostname, _port, scheme = ssrf._parse_and_validate_url(value)
+    except ssrf.SsrfBlocked:
+        return None
+    return f"{scheme}://{hostname}"
+
+
+def _v2_result(value: str | ToolExecutionResult) -> V2ToolExecutionResult:
+    legacy = _visible_result(value)
+    model_content = legacy.content[:8_192]
+    return V2ToolExecutionResult(
+        status="completed",
+        model_content=model_content,
+        display=[TextPart(type="text", text=model_content)] if legacy.visible and model_content else [],
+        usage_components={"components": list(legacy.usage)},
+        error_code=legacy.warning_code,
+    )
+
+
+def _lumen_idempotency_key(*, run_id: str, tool_call_id: str) -> str:
+    """Use the durable run and call identity so retries replay only that call."""
+    return f"lumen-{uuid5(NAMESPACE_URL, f'afterglow:lumen:{run_id}:{tool_call_id}')}"
+
+
+async def _lumen_registry_bindings(ctx: ToolContext) -> tuple[ToolBinding, ...]:
+    """Expose only the selected grant's explicit consumer-cloud registry entries."""
+    try:
+        if ctx.lumen_snapshot_frozen:
+            snapshot = mcp_lumen.frozen_snapshot(ctx.lumen_snapshot)
+        else:
+            snapshot = await mcp_lumen.selected_lumen_snapshot(user_id=ctx.user_id, project_id=ctx.project_id)
+        if snapshot is None:
+            return ()
+        if snapshot.user_id != ctx.user_id or snapshot.project_id != ctx.project_id:
+            return ()
+        principal = await mcp_lumen.resolve_lumen_principal(snapshot)
+    except mcp_lumen.McpLumenAuthorityError:
+        return ()
+
+    bindings: list[ToolBinding] = []
+    for entry in mcp_registry.enabled_entries(principal):
+        definition = ToolDefinition(
+            name=entry.name,
+            description=entry.description,
+            input_schema={**entry.input_schema(), "additionalProperties": False},
+            effect=entry.effect,
+            parallel_safe=entry.effect == "read",
+            source="managed",
+        )
+        config_fingerprint = _v2_config_fingerprint(
+            {
+                "grant_id": snapshot.grant_id,
+                "credential_epoch": snapshot.credential_epoch,
+                "selection_generation": snapshot.selection_generation,
+                "registry_version": mcp_registry.REGISTRY_VERSION,
+                "service_fingerprint": mcp_registry.enabled_service_fingerprint(),
+                "tool_name": entry.name,
+            }
+        )
+
+        async def execute(
+            arguments: dict[str, object],
+            context: object,
+            *,
+            registry_entry=entry,
+            frozen_snapshot=snapshot,
+        ) -> V2ToolExecutionResult:
+            if (
+                not isinstance(context, ToolContext)
+                or context.user_id != frozen_snapshot.user_id
+                or context.project_id != frozen_snapshot.project_id
+            ):
+                return V2ToolExecutionResult(
+                    status="failed",
+                    model_content="Cloud tool execution context is invalid.",
+                    error_code="invalid_tool_context",
+                )
+            try:
+                current_principal = await mcp_lumen.resolve_lumen_principal(frozen_snapshot)
+                parsed = mcp_registry.parse_entry_arguments(registry_entry, arguments)
+                normalized = parsed.model_dump(mode="json")
+                cloud_context = mcp_registry.ConsumerCloudContext(principal=current_principal)
+                if registry_entry.effect == "read":
+                    try:
+                        result = await mcp_registry.dispatch(cloud_context, entry=registry_entry, arguments=parsed)
+                        payload = mcp_registry.output_payload(registry_entry, result)
+                    except Exception as exc:
+                        await mcp_ledger.record_read_invocation(
+                            current_principal,
+                            entry=registry_entry,
+                            arguments=normalized,
+                            status="failed",
+                            error=str(exc),
+                            source="lumen",
+                        )
+                        raise
+                    await mcp_ledger.record_read_invocation(
+                        current_principal,
+                        entry=registry_entry,
+                        arguments=normalized,
+                        status="succeeded",
+                        source="lumen",
+                    )
+                else:
+                    if not context.run_id or not context.tool_call_id:
+                        raise mcp_ledger.McpInvocationError("Lumen mutation requires a durable tool call")
+                    claim = await mcp_ledger.claim_mutation(
+                        current_principal,
+                        entry=registry_entry,
+                        arguments=normalized,
+                        idempotency_key=_lumen_idempotency_key(
+                            run_id=context.run_id,
+                            tool_call_id=context.tool_call_id,
+                        ),
+                        source="lumen",
+                    )
+                    if claim.state == "replay":
+                        assert claim.result is not None
+                        payload = claim.result
+                    elif claim.state in {"in_progress", "unknown", "failed"}:
+                        raise mcp_ledger.McpInvocationError(claim.error or "Cloud mutation is unavailable")
+                    else:
+                        try:
+                            await mcp_registry.build_mutation_preview(
+                                cloud_context, entry=registry_entry, arguments=parsed
+                            )
+                        except Exception:
+                            await mcp_ledger.fail_pre_dispatch(
+                                current_principal,
+                                invocation_id=claim.invocation_id,
+                                error="Lumen pre-dispatch validation failed",
+                                source="lumen",
+                            )
+                            raise
+                        try:
+                            current_principal = await mcp_lumen.resolve_lumen_principal(frozen_snapshot)
+                        except Exception:
+                            await mcp_ledger.fail_pre_dispatch(
+                                current_principal,
+                                invocation_id=claim.invocation_id,
+                                error="Lumen delegated MCP selection changed before dispatch",
+                                source="lumen",
+                            )
+                            raise
+                        cloud_context = mcp_registry.ConsumerCloudContext(principal=current_principal)
+                        await mcp_ledger.authorize_mutation_dispatch(
+                            current_principal, invocation_id=claim.invocation_id, source="lumen"
+                        )
+                        try:
+                            result = await mcp_registry.dispatch(cloud_context, entry=registry_entry, arguments=parsed)
+                            payload = mcp_registry.output_payload(registry_entry, result)
+                            await mcp_ledger.complete_mutation(
+                                current_principal,
+                                invocation_id=claim.invocation_id,
+                                result=payload,
+                                source="lumen",
+                            )
+                        except Exception:
+                            try:
+                                await mcp_ledger.complete_mutation(
+                                    current_principal,
+                                    invocation_id=claim.invocation_id,
+                                    error="Lumen mutation outcome is unknown after dispatch authorization",
+                                    source="lumen",
+                                )
+                            except mcp_ledger.McpInvocationError:
+                                pass
+                            raise
+                content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                return V2ToolExecutionResult(
+                    status="completed",
+                    model_content=content,
+                    display=[TextPart(type="text", text=content)],
+                )
+            except Exception:
+                logger.warning("Lumen cloud registry call failed tool=%s", registry_entry.name, exc_info=True)
+                return V2ToolExecutionResult(
+                    status="failed",
+                    model_content="Cloud control-plane call was denied or is unavailable.",
+                    error_code="cloud_control_unavailable",
+                )
+
+        async def preview(
+            arguments: dict[str, object],
+            context: object,
+            *,
+            registry_entry=entry,
+            frozen_snapshot=snapshot,
+        ) -> dict[str, object]:
+            if registry_entry.effect != "external_mutation":
+                return {}
+            if (
+                not isinstance(context, ToolContext)
+                or context.user_id != frozen_snapshot.user_id
+                or context.project_id != frozen_snapshot.project_id
+            ):
+                raise ValueError("Cloud tool execution context is invalid")
+            current_principal = await mcp_lumen.resolve_lumen_principal(frozen_snapshot)
+            parsed = mcp_registry.parse_entry_arguments(registry_entry, arguments)
+            plan = await mcp_registry.build_mutation_preview(
+                mcp_registry.ConsumerCloudContext(principal=current_principal),
+                entry=registry_entry,
+                arguments=parsed,
+            )
+            detail = f"{plan.intended_transition}: {plan.resource_identity}" + (
+                f" (current state: {plan.current_state})" if plan.current_state else ""
+            )
+            return {
+                "preview": [TextPart(type="text", text=detail).model_dump(mode="json")],
+                "expected_state_revision": None,
+                "writer_fence": None,
+            }
+
+        bindings.append(
+            ToolBinding(
+                definition=definition,
+                execute=execute,
+                preview=preview if entry.effect == "external_mutation" else None,
+                config_fingerprint=config_fingerprint,
+            )
+        )
+    return tuple(bindings)
+
+
+async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
+    """Resolve frozen-schema bindings without allowing dynamic names to collide.
+
+    Custom tools and MCP methods receive provider-safe, numeric namespaces. Their
+    original names and transport records stay captured only in the server-side
+    binding closure.
+    """
+
+    bindings = v2_builtin_tool_bindings()
+
+    def add(binding: ToolBinding) -> None:
+        if binding.definition.name in bindings:
+            raise ValueError(f"duplicate v2 tool name: {binding.definition.name}")
+        bindings[binding.definition.name] = binding
+
+    for binding in await _lumen_registry_bindings(ctx):
+        add(binding)
+
+    for custom in await _load_custom(ctx):
+        identifier = custom.get("id")
+        if not isinstance(identifier, int):
+            continue
+        destination_origin = _v2_destination_origin(custom.get("url"))
+        if destination_origin is None:
+            logger.warning("custom tool without a canonical destination excluded from v2 bindings id=%s", identifier)
+            continue
+        try:
+            definition = ToolDefinition(
+                name=_v2_provider_name("custom", identifier, custom.get("name")),
+                description=str(custom.get("description") or custom.get("name") or "Custom HTTP tool"),
+                input_schema={
+                    **(custom.get("params_schema") or {"type": "object", "properties": {}}),
+                    "additionalProperties": False,
+                },
+                effect=_v2_effect(custom.get("effect")),
+                source="custom_http",
+            )
+        except (TypeError, ValueError):
+            logger.warning("invalid custom tool excluded from v2 bindings id=%s", identifier)
+            continue
+
+        async def execute(arguments: dict[str, object], context: object, *, tool_def=custom) -> V2ToolExecutionResult:
+            if not isinstance(context, ToolContext):
+                return V2ToolExecutionResult(
+                    status="failed",
+                    model_content="Tool execution context is invalid.",
+                    error_code="invalid_tool_context",
+                )
+            return _v2_result(await _execute_custom_http_tool(tool_def, arguments, context))
+
+        add(
+            ToolBinding(
+                definition=definition,
+                execute=execute,
+                config_fingerprint=_v2_config_fingerprint(
+                    {
+                        "id": identifier,
+                        "name": custom.get("name"),
+                        "url": custom.get("url"),
+                        "method": custom.get("method"),
+                        "params_schema": custom.get("params_schema"),
+                        "effect": custom.get("effect"),
+                        "config_version": custom.get("config_version"),
+                    }
+                ),
+                destination_origin=destination_origin,
+            )
+        )
+
+    for server in await _load_mcp(ctx):
+        identifier = server.get("id")
+        if not isinstance(identifier, int):
+            continue
+        destination_origin = _v2_destination_origin(server.get("url"))
+        if destination_origin is None:
+            logger.warning("MCP server without a canonical destination excluded from v2 bindings server=%s", identifier)
+            continue
+        try:
+            discovered = await mcp_client.list_tools(server)
+        except Exception:
+            logger.warning("MCP discovery failed for v2 bindings server=%s", identifier, exc_info=True)
+            continue
+        for method in discovered:
+            if not isinstance(method, dict) or not isinstance(method.get("name"), str):
+                continue
+            try:
+                definition = ToolDefinition(
+                    name=_v2_provider_name("mcp", identifier, method["name"]),
+                    description=str(method.get("description") or method["name"]),
+                    input_schema={
+                        **(method.get("input_schema") or {"type": "object", "properties": {}}),
+                        "additionalProperties": False,
+                    },
+                    effect=_v2_effect((server.get("effect_overrides") or {}).get(method["name"])),
+                    source="mcp",
+                )
+            except (TypeError, ValueError):
+                logger.warning(
+                    "invalid MCP tool excluded from v2 bindings server=%s name=%r", identifier, method.get("name")
+                )
+                continue
+
+            async def execute(
+                arguments: dict[str, object],
+                context: object,
+                *,
+                mcp_server=server,
+                method_name=method["name"],
+            ) -> V2ToolExecutionResult:
+                if not isinstance(context, ToolContext):
+                    return V2ToolExecutionResult(
+                        status="failed",
+                        model_content="Tool execution context is invalid.",
+                        error_code="invalid_tool_context",
+                    )
+                return _v2_result(await mcp_client.call_tool(mcp_server, method_name, arguments))
+
+            add(
+                ToolBinding(
+                    definition=definition,
+                    execute=execute,
+                    config_fingerprint=_v2_config_fingerprint(
+                        {
+                            "id": identifier,
+                            "url": server.get("url"),
+                            "effect_overrides": server.get("effect_overrides"),
+                            "config_version": server.get("config_version"),
+                        }
+                    ),
+                    destination_origin=destination_origin,
+                )
+            )
+
+    return bindings
 
 
 async def _read_bounded_response(response) -> str:
@@ -85,30 +511,58 @@ async def _load_custom(ctx: ToolContext) -> list[dict]:
 async def _load_mcp(ctx: ToolContext) -> list[dict]:
     """호출자에게 노출되는 활성 MCP 서버 — 선택 필터 적용. 저장소 장애 시 []."""
     from app.services.chat import extensions_store as es
+    from app.services.chat import mcp_oauth
 
     try:
         # reveal_secrets=True: 실행에는 복호화된 실제 인증 헤더가 필요(API 응답용 마스킹 dict 아님).
         items = await es.list_for_user(
             "mcp", user_id=ctx.user_id, project_id=ctx.project_id, active_only=True, reveal_secrets=True
         )
+        # 사용자별 인증 값(Notion/Gmail 등)을 서버 기본 헤더 위에 병합. 요구사항 미충족 서버는 노출 스킵
+        # (인증 없이 호출하면 어차피 실패 → LLM 이 깨진 툴을 시도하지 않도록 미리 제외).
+        creds_by_server = await es.mcp_all_credentials(user_id=ctx.user_id, project_id=ctx.project_id)
+        oauth_headers_by_server = await mcp_oauth.headers_for_user(user_id=ctx.user_id, project_id=ctx.project_id)
+        expected_credential_versions = dict(ctx.expected_mcp_credential_versions or ())
+        credential_versions = (
+            await es.mcp_credential_versions(
+                list(expected_credential_versions), user_id=ctx.user_id, project_id=ctx.project_id
+            )
+            if expected_credential_versions
+            else {}
+        )
+    except es.ExtensionSecretUnavailable:
+        logger.warning("MCP 비밀값을 복호화할 수 없어 MCP 도구를 비활성화합니다", exc_info=True)
+        return []
     except Exception:
         logger.warning("MCP 서버 로드 실패", exc_info=True)
         return []
-    # 사용자별 인증 값(Notion/Gmail 등)을 서버 기본 헤더 위에 병합. 요구사항 미충족 서버는 노출 스킵
-    # (인증 없이 호출하면 어차피 실패 → LLM 이 깨진 툴을 시도하지 않도록 미리 제외).
-    creds_by_server = await es.mcp_all_credentials(user_id=ctx.user_id, project_id=ctx.project_id)
     usable: list[dict] = []
     for server in items:
         if server.get("transport") != "http" or not str(server.get("url") or "").lower().startswith("https://"):
             logger.warning("MCP 서버 %s: 지원되지 않는 transport 또는 URL — 노출 스킵", server.get("id"))
             continue
-        user_creds = creds_by_server.get(server.get("id")) or {}
-        if user_creds:
-            server["headers"] = {**(server.get("headers") or {}), **user_creds}
-        reqs = server.get("auth_requirements") or []
-        headers = server.get("headers") or {}
-        if reqs and not all(r.get("key") in headers for r in reqs):
-            logger.info("MCP 서버 %s: 사용자 인증 요구사항 미충족 — 노출 스킵", server.get("id"))
+        server_id = server.get("id")
+        if server.get("auth_mode") == "oauth":
+            oauth_headers = oauth_headers_by_server.get(server_id)
+            if not oauth_headers:
+                logger.info("MCP 서버 %s: 사용자 OAuth 연결 미완료 — 노출 스킵", server_id)
+                continue
+            server["headers"] = {**(server.get("headers") or {}), **oauth_headers}
+        else:
+            user_creds = creds_by_server.get(server_id) or {}
+            if user_creds:
+                server["headers"] = {**(server.get("headers") or {}), **user_creds}
+            reqs = server.get("auth_requirements") or []
+            headers = server.get("headers") or {}
+            if reqs and not all(r.get("key") in headers for r in reqs):
+                logger.info("MCP 서버 %s: 사용자 인증 요구사항 미충족 — 노출 스킵", server_id)
+                continue
+        server_id = server.get("id")
+        if expected_credential_versions and (
+            not isinstance(server_id, int)
+            or expected_credential_versions.get(server_id) != credential_versions.get(server_id, 0)
+        ):
+            logger.info("MCP 서버 %s: 실행 중 인증 값이 변경되었거나 폐기됨 — 노출 스킵", server_id)
             continue
         usable.append(server)
     return _selected(usable, ctx.selected_mcp_ids)

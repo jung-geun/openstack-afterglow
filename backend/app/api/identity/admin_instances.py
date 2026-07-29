@@ -124,17 +124,22 @@ async def admin_create_instance_async(
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
-    # admin 모드: target project에서 default network 자동 생성은 하지 않음
-    # (비의도적 리소스 생성 방지). 설정값 폴백만 허용.
-    if not req.network_id and settings.default_network_id:
-        req = req.model_copy(update={"network_id": settings.default_network_id})
-
     conn = await asyncio.to_thread(_make_admin_conn, req.project_id, token_info.get("user_id", ""))
     try:
         req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
     except ValueError as exc:
         await asyncio.to_thread(conn.close)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        if not req.network_id:
+            req = req.model_copy(update={"network_id": await instance_orch.resolve_default_network(conn, settings)})
+        compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+            conn, req.availability_zone
+        )
+    except Exception:
+        await asyncio.to_thread(conn.close)
+        raise
 
     async def progress_generator():
         import time
@@ -212,7 +217,7 @@ async def admin_create_instance_async(
                     name=f"{req.name}-boot",
                     image_id=req.image_id,
                     size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                    availability_zone=volume_availability_zone,
                 )
                 boot_volume_id = boot_vol.id
                 await asyncio.to_thread(
@@ -238,7 +243,7 @@ async def admin_create_instance_async(
                         conn,
                         name=f"union-upper-{req.name}",
                         size_gb=settings.upper_volume_size_gb,
-                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                        availability_zone=volume_availability_zone,
                     )
                     upper_volume_id = upper_vol.id
                     created_upper = True
@@ -307,7 +312,7 @@ async def admin_create_instance_async(
                 userdata=userdata,
                 key_name=req.key_name or None,
                 admin_pass=req.admin_pass,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
+                availability_zone=compute_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=(
                     False if boot_volume_was_provided else req.delete_boot_volume_on_termination

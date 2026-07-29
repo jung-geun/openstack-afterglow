@@ -61,14 +61,27 @@ async def test_get_file_storage(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_create_file_storage(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage("share-new")):
+    """A validated tenant share type and network create the requested share."""
+    with (
+        patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage("share-new")),
+        patch(
+            "app.api.storage.file_storage.manila.list_share_types",
+            return_value=[{"id": "type-nfs", "name": "nfs-tenant"}],
+        ),
+        patch(
+            "app.services.resource_policies.validate_existing_selection",
+            new=AsyncMock(return_value={"id": "type-nfs", "name": "nfs-tenant"}),
+        ),
+        patch("app.api.storage.file_storage.manila.get_share_network", return_value={"id": "network-1"}),
+    ):
         resp = await client.post(
             "/api/v1/file-storage",
             json={
                 "name": "test-share",
                 "size_gb": 100,
-                "share_type": "default",
+                "share_type": "type-nfs",
                 "share_proto": "NFS",
+                "share_network_id": "network-1",
             },
         )
     assert resp.status_code == 201
@@ -553,16 +566,28 @@ def _make_manila_status_error(status: int, message: str) -> "Exception":
 
 @pytest.mark.asyncio
 async def test_create_file_storage_propagates_manila_400(client, mock_conn):
-    """Manila 400 → HTTPException 400 + Manila message 그대로 detail 에 포함."""
+    """Manila 400 is returned after the request's type and network validate."""
     err = _make_manila_status_error(400, "Invalid share protocol provided: NFS. Available protocols: ['CEPHFS'].")
-    with patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err):
+    with (
+        patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err),
+        patch(
+            "app.api.storage.file_storage.manila.list_share_types",
+            return_value=[{"id": "type-nfs", "name": "nfs-tenant"}],
+        ),
+        patch(
+            "app.services.resource_policies.validate_existing_selection",
+            new=AsyncMock(return_value={"id": "type-nfs", "name": "nfs-tenant"}),
+        ),
+        patch("app.api.storage.file_storage.manila.get_share_network", return_value={"id": "network-1"}),
+    ):
         resp = await client.post(
             "/api/v1/file-storage",
             json={
                 "name": "test-bad",
                 "size_gb": 10,
-                "share_type": "cephfstype",
+                "share_type": "type-nfs",
                 "share_proto": "NFS",
+                "share_network_id": "network-1",
             },
         )
     assert resp.status_code == 400
@@ -571,18 +596,30 @@ async def test_create_file_storage_propagates_manila_400(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_create_file_storage_runtime_error_returns_409(client, mock_conn):
-    """Manila 폴링 RuntimeError (capabilities filter 등) → 409 + 사유 detail 노출."""
-    with patch(
-        "app.api.storage.file_storage.manila.create_file_storage",
-        side_effect=RuntimeError("파일 스토리지 생성 실패 (error 상태): Capabilities filter didn't succeed."),
+    """A Manila polling error remains a conflict after request validation."""
+    with (
+        patch(
+            "app.api.storage.file_storage.manila.create_file_storage",
+            side_effect=RuntimeError("파일 스토리지 생성 실패 (error 상태): Capabilities filter didn't succeed."),
+        ),
+        patch(
+            "app.api.storage.file_storage.manila.list_share_types",
+            return_value=[{"id": "type-nfs", "name": "nfs-tenant"}],
+        ),
+        patch(
+            "app.services.resource_policies.validate_existing_selection",
+            new=AsyncMock(return_value={"id": "type-nfs", "name": "nfs-tenant"}),
+        ),
+        patch("app.api.storage.file_storage.manila.get_share_network", return_value={"id": "network-1"}),
     ):
         resp = await client.post(
             "/api/v1/file-storage",
             json={
                 "name": "test-cap-fail",
                 "size_gb": 10,
-                "share_type": "nfstype",
+                "share_type": "type-nfs",
                 "share_proto": "NFS",
+                "share_network_id": "network-1",
             },
         )
     assert resp.status_code == 409
@@ -592,16 +629,26 @@ async def test_create_file_storage_runtime_error_returns_409(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_file_storage_500_fallback(client, mock_conn):
     """RuntimeError 가 아닌 일반 Exception 은 여전히 500 으로 (글로벌 핸들러가 마스킹)."""
-    with patch(
-        "app.api.storage.file_storage.manila.create_file_storage",
-        side_effect=ValueError("unexpected"),
+    with (
+        patch(
+            "app.api.storage.file_storage.manila.create_file_storage",
+            side_effect=ValueError("unexpected"),
+        ),
+        patch(
+            "app.api.storage.file_storage.manila.list_share_types",
+            return_value=[{"id": "type-ceph", "name": "ceph-tenant"}],
+        ),
+        patch(
+            "app.services.resource_policies.validate_existing_selection",
+            new=AsyncMock(return_value={"id": "type-ceph", "name": "ceph-tenant"}),
+        ),
     ):
         resp = await client.post(
             "/api/v1/file-storage",
             json={
                 "name": "test-valueerr",
                 "size_gb": 10,
-                "share_type": "default",
+                "share_type": "type-ceph",
                 "share_proto": "CEPHFS",
             },
         )
@@ -609,40 +656,51 @@ async def test_create_file_storage_500_fallback(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_create_file_storage_nfs_uses_nfs_share_type_fallback(client, mock_conn):
-    """share_type 미지정 + NFS → settings.os_manila_nfs_share_type 으로 fallback (CephFS 타입과 다름)."""
-    from app.config import get_settings
-
-    settings = get_settings()
-    with patch(
-        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
-    ) as mock_create:
+async def test_create_file_storage_nfs_uses_selected_policy(client, mock_conn):
+    """An omitted NFS type resolves the persisted NFS policy, not config."""
+    with (
+        patch(
+            "app.api.storage.file_storage.manila.create_file_storage",
+            return_value=make_file_storage(),
+        ) as mock_create,
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(return_value={"manila.nfs_share_type": {"id": "type-nfs", "name": "nfs-policy"}}),
+        ),
+        patch("app.api.storage.file_storage.manila.get_share_network", return_value={"id": "network-1"}),
+    ):
         resp = await client.post(
             "/api/v1/file-storage",
-            json={"name": "nfs-no-type", "size_gb": 10, "share_proto": "NFS"},
+            json={
+                "name": "nfs-no-type",
+                "size_gb": 10,
+                "share_proto": "NFS",
+                "share_network_id": "network-1",
+            },
         )
     assert resp.status_code == 201
-    _, kwargs = mock_create.call_args
-    assert kwargs["share_type"] == settings.os_manila_nfs_share_type
-    assert kwargs["share_type"] != settings.os_manila_share_type  # NFS ≠ CephFS 타입
+    assert mock_create.call_args.kwargs["share_type"] == "nfs-policy"
 
 
 @pytest.mark.asyncio
-async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client, mock_conn):
-    """share_type 미지정 + CEPHFS → settings.os_manila_share_type 으로 fallback."""
-    from app.config import get_settings
-
-    settings = get_settings()
-    with patch(
-        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
-    ) as mock_create:
+async def test_create_file_storage_cephfs_uses_selected_policy(client, mock_conn):
+    """An omitted CephFS type resolves the persisted CephFS policy, not config."""
+    with (
+        patch(
+            "app.api.storage.file_storage.manila.create_file_storage",
+            return_value=make_file_storage(),
+        ) as mock_create,
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(return_value={"manila.cephfs_share_type": {"id": "type-ceph", "name": "ceph-policy"}}),
+        ),
+    ):
         resp = await client.post(
             "/api/v1/file-storage",
             json={"name": "ceph-no-type", "size_gb": 10, "share_proto": "CEPHFS"},
         )
     assert resp.status_code == 201
-    _, kwargs = mock_create.call_args
-    assert kwargs["share_type"] == settings.os_manila_share_type
+    assert mock_create.call_args.kwargs["share_type"] == "ceph-policy"
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -28,6 +28,22 @@ function expandChatBackendSelectors() {
 		.sort();
 }
 
+function expandDbBackendSelectors() {
+	const testsDir = path.join(backendDir, "tests");
+	return fs
+		.readdirSync(testsDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && /^test_.*\.py$/.test(entry.name))
+		.filter((entry) => {
+			const source = fs.readFileSync(path.join(testsDir, entry.name), "utf8");
+			return source
+				.split(/\r?\n/)
+				.some((line) => /^\s*(?:pytestmark\s*=.*pytest\.mark\.db|@pytest\.mark\.db\b)/.test(line));
+		})
+		.map((entry) => `tests/${entry.name}`)
+		.sort();
+}
+
+
 function expandChatFrontendSelectors() {
 	const apiTestsDir = path.join(frontendDir, "src", "lib", "api", "__tests__");
 	const selectors = fs
@@ -130,11 +146,11 @@ const targets = {
 		}
 	},
 	db: {
-		description: "Real MariaDB union layer and license SQL behavior",
+		description: "MariaDB-backed persistence and SQL behavior",
 		liveServices: "MariaDB test database",
 		requiredEnv: ["AFTERGLOW_TEST_DATABASE_URL"],
 		backend: {
-			selectors: ["tests/test_union_layers_db.py", "tests/test_libraries_license_db.py"],
+			selectors: expandDbBackendSelectors,
 			extraArgs: ["-m", "db"]
 		}
 	},
@@ -219,12 +235,9 @@ const targets = {
 				"tests/test_layer_ops.py",
 				"tests/test_layer_build.py",
 				"tests/test_layer_consume.py",
-				"tests/test_layerbuild.py",
 				"tests/test_libraries.py",
 				"tests/test_library_builder.py",
 				"tests/test_library_usage.py",
-				"tests/test_union_layers.py",
-				"tests/test_union_snapshot.py",
 				"tests/test_dockerfile_import.py",
 				"tests/test_recipe_blocks.py",
 				"tests/test_reconcile_builds.py",
@@ -254,6 +267,7 @@ const targets = {
 		frontend: {
 			selectors: [
 				"src/lib/components/k3s/__tests__/K3sStampedeTab.test.ts",
+				"src/lib/components/k3s/__tests__/K3sClusterNetworksCard.test.ts",
 				"src/lib/components/dashboard/drover/__tests__/K3sNodegroupCard.test.ts"
 			]
 		}
@@ -338,7 +352,7 @@ const targets = {
 };
 
 function printUsage(stream) {
-	stream.write("Usage: node scripts/test-target.js [--list] [--help] [--dry-run|-n] [--parallel|-p] <target|backend:selector|frontend:selector>...\n");
+	stream.write("Usage: node scripts/test-target.js [--list] [--validate] [--help] [--dry-run|-n] [--parallel|-p] <target|backend:selector|frontend:selector>...\n");
 	stream.write("\n");
 	stream.write("Examples:\n");
 	stream.write("  npm run test:list\n");
@@ -616,7 +630,6 @@ async function runStepsParallel(steps, dryRun, runner = runStepAsync) {
 	return laneExitCodes.find((code) => code !== 0) || 0;
 }
 
-
 function fail(message, code = 1) {
 	console.error(message);
 	process.exit(code);
@@ -627,6 +640,7 @@ async function main(argv) {
 	let parallel = false;
 	let showList = false;
 	let showHelp = false;
+	let validateCatalog = false;
 	const namedTargets = [];
 	const customBackendSelectors = [];
 	const customFrontendSelectors = [];
@@ -642,6 +656,10 @@ async function main(argv) {
 		}
 		if (arg === "--list") {
 			showList = true;
+			continue;
+		}
+		if (arg === "--validate") {
+			validateCatalog = true;
 			continue;
 		}
 		if (arg === "--help") {
@@ -664,14 +682,20 @@ async function main(argv) {
 		return 0;
 	}
 	if (showList) {
+		validateAllTargetDefinitions();
 		printTargetList();
 		return 0;
+	}
+	if (validateCatalog) {
+		validateAllTargetDefinitions();
+		if (namedTargets.length === 0 && customBackendSelectors.length === 0 && customFrontendSelectors.length === 0) {
+			return 0;
+		}
 	}
 	if (namedTargets.length === 0 && customBackendSelectors.length === 0 && customFrontendSelectors.length === 0) {
 		printUsage(process.stderr);
 		return 1;
 	}
-	validateAllTargetDefinitions();
 
 	const steps = [];
 	for (const targetName of namedTargets) {

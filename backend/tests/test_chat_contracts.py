@@ -31,6 +31,8 @@ def test_default_feature_options_preserve_manual_memory_without_tools():
             "mode": "agent_default",
             "approval_mode": "required_for_mutations",
             "enabled_tool_ids": None,
+            "enabled_mcp_ids": None,
+            "workspace_write_mode": "ask",
         },
         "output_modalities": ["text"],
         "image_output": None,
@@ -75,7 +77,7 @@ def test_json_schema_format_allows_bounded_subset_only():
 
 
 def test_tool_policy_rejects_non_numeric_or_duplicate_extension_ids():
-    assert ChatFeatureOptions(tool_policy={"enabled_tool_ids": ["1", "20"]}).tool_policy.enabled_tool_ids == ["1", "20"]
+    assert ChatFeatureOptions(tool_policy={"enabled_tool_ids": ["1", "20"]}).tool_policy.enabled_tool_ids == [1, 20]
     with pytest.raises(ValidationError, match="enabled_tool_ids"):
         ChatFeatureOptions(tool_policy={"enabled_tool_ids": ["1", "1"]})
     with pytest.raises(ValidationError, match="enabled_tool_ids"):
@@ -207,6 +209,121 @@ def test_run_stage_event_requires_named_tool_only_during_execution():
         validate_chat_run_event({**base, "payload": {"stage": "tool_execution", "tool_name": None}})
     with pytest.raises(ValidationError, match="only tool_execution"):
         validate_chat_run_event({**base, "payload": {"stage": "queued", "tool_name": "web_search"}})
+
+
+def test_tool_approval_resolved_event_has_decision_provenance():
+    event = validate_chat_run_event(
+        {
+            "event_id": "run-1:3",
+            "run_id": "run-1",
+            "seq": 3,
+            "type": "tool.approval_resolved",
+            "created_at": datetime.now(UTC).isoformat(),
+            "payload": {
+                "call_id": "call-1",
+                "decision": "deny",
+                "decided_by_user_id": None,
+                "decided_at": datetime.now(UTC).isoformat(),
+            },
+        }
+    )
+    assert event.payload.decided_by_user_id is None
+    with pytest.raises(ValidationError):
+        validate_chat_run_event(
+            {
+                "event_id": "run-1:3",
+                "run_id": "run-1",
+                "seq": 3,
+                "type": "tool.approval_resolved",
+                "created_at": datetime.now(UTC).isoformat(),
+                "payload": {"call_id": "call-1", "decision": "deny"},
+            }
+        )
+
+
+def test_tool_approval_required_event_exposes_only_redacted_frozen_dispatch_details():
+    base = {
+        "event_id": "run-1:4",
+        "run_id": "run-1",
+        "seq": 4,
+        "type": "tool.approval_required",
+        "created_at": datetime.now(UTC).isoformat(),
+        "payload": {
+            "call_id": "call-1",
+            "name": "workspace.write_file",
+            "source": "workspace",
+            "effect": "workspace_write",
+            "destination": "workspace:ws-1",
+            "redacted_arguments": {"path": "src/app.py", "content": "[REDACTED]"},
+            "preview": [{"type": "text", "text": "Modify src/app.py"}],
+            "expected_state_revision": 7,
+            "writer_fence": 3,
+            "expires_at": datetime.now(UTC).isoformat(),
+        },
+    }
+    event = validate_chat_run_event(base)
+    assert event.payload.redacted_arguments["content"] == "[REDACTED]"
+    with pytest.raises(ValidationError):
+        validate_chat_run_event({**base, "payload": {**base["payload"], "arguments": {"content": "secret"}}})
+
+
+def test_interaction_resolved_event_has_bounded_typed_payload():
+    event = validate_chat_run_event(
+        {
+            "event_id": "run-1:3",
+            "run_id": "run-1",
+            "seq": 3,
+            "type": "interaction.resolved",
+            "created_at": datetime.now(UTC).isoformat(),
+            "payload": {
+                "interaction_id": "75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+                "status": "answered",
+                "response": {"option_ids": ["yes"], "text": None},
+            },
+        }
+    )
+    assert event.payload.status == "answered"
+    with pytest.raises(ValidationError):
+        validate_chat_run_event(
+            {
+                "event_id": "run-1:3",
+                "run_id": "run-1",
+                "seq": 3,
+                "type": "interaction.resolved",
+                "created_at": datetime.now(UTC).isoformat(),
+                "payload": {
+                    "interaction_id": "75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+                    "status": "answered",
+                    "response": {"option_ids": ["yes"], "text": "x" * 4_001, "extra": "rejected"},
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        validate_chat_run_event(
+            {
+                "event_id": "run-1:3",
+                "run_id": "run-1",
+                "seq": 3,
+                "type": "interaction.resolved",
+                "created_at": datetime.now(UTC).isoformat(),
+                "payload": {
+                    "interaction_id": "75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+                    "status": "timeout",
+                    "response": {"option_ids": ["yes"], "text": None},
+                },
+            }
+        )
+    with pytest.raises(ValidationError):
+        validate_chat_run_event(
+            {
+                "event_id": "run-1:3",
+                "run_id": "run-1",
+                "seq": 3,
+                "type": "interaction.resolved",
+                "created_at": datetime.now(UTC).isoformat(),
+                "payload": {"interaction_id": "i", "status": "invalid"},
+            }
+        )
 
 
 @pytest.mark.parametrize(

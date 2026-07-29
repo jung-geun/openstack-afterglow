@@ -29,7 +29,6 @@ from app.database import get_session_factory
 from app.models.db import LayerArtifact
 from app.services import manila, ssh_executor
 from app.services.builder_vm import EphemeralBuilderVM, create_ephemeral_vm, delete_ephemeral_vm
-from app.services.keystone import get_service_project_connection
 from app.services.palimpsest_digest import (
     DIGEST_FAILED,
     DIGEST_PENDING,
@@ -175,18 +174,45 @@ async def backfill_digests(*, limit: int = 20, retry_failed: bool = False) -> di
             .scalars()
             .all()
         )
-
     if not target_ids:
         return {"scanned": 0, "updated": 0, "failed": 0, "chain_updated": 0, "details": []}
 
-    conn = await asyncio.to_thread(get_service_project_connection)
+    async with factory() as session:
+        base_image_ids = set(
+            (await session.execute(select(LayerArtifact.base_image_id).where(LayerArtifact.id.in_(target_ids))))
+            .scalars()
+            .all()
+        )
+    if None in base_image_ids or len(base_image_ids) != 1:
+        raise BackfillError("digest backfill requires one resolved base image across the batch")
+
+    from app.services.resource_policies import validate_existing_selection
+    from app.services.resource_policy_store import (
+        get_policy_snapshot,
+        get_service_project_connection,
+        resolve_policy_snapshot,
+    )
+
+    conn = await get_service_project_connection()
     vm: EphemeralBuilderVM | None = None
     details: list[dict] = []
     updated = 0
     failed = 0
     try:
-        # 배치 전체를 VM 한 대로 처리한다 — artifact 마다 VM 을 띄우면 비용이 선형으로 는다.
-        vm = await create_ephemeral_vm(conn)
+        builder_snapshot = await resolve_policy_snapshot(conn=conn, keys=("builder.flavor", "builder.network"))
+        floating_selection = (await get_policy_snapshot(("builder.floating_network",)))["builder.floating_network"]
+        floating_network_id = None
+        if floating_selection is not None:
+            floating_network_id = (
+                await validate_existing_selection(conn, "builder.floating_network", floating_selection["id"])
+            )["id"]
+        vm = await create_ephemeral_vm(
+            conn,
+            image_id=next(iter(base_image_ids)),
+            flavor_id=builder_snapshot["builder.flavor"]["id"],
+            network_id=builder_snapshot["builder.network"]["id"],
+            floating_network_id=floating_network_id,
+        )
         _logger.info("[palimpsest_backfill] 임시 빌더 VM 준비: %s (%d건 대상)", vm.server_id, len(target_ids))
 
         for artifact_id in target_ids:
@@ -211,7 +237,14 @@ async def backfill_digests(*, limit: int = 20, retry_failed: bool = False) -> di
                 await session.commit()
     finally:
         if vm is not None:
-            await delete_ephemeral_vm(conn, vm.server_id, vm.fip_id)
+            await delete_ephemeral_vm(
+                conn,
+                server_id=vm.server_id,
+                fip_id=vm.fip_id,
+                keypair_name=vm.keypair_name,
+                key_path=vm.key_path,
+            )
+        await asyncio.to_thread(conn.close)
 
     chain_updated = await _refresh_chain_ids(factory)
 

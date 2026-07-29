@@ -8,6 +8,7 @@
 	import LoginForm from '$lib/components/auth/LoginForm.svelte';
 	import type { LoginResponse } from '$lib/types/auth';
 	import { resolvePostLoginProject } from '$lib/utils/authFlow';
+	import { postAuthDestination } from '$lib/utils/mcpConsent';
 
 	onMount(async () => {
 		try {
@@ -27,7 +28,10 @@
 	let gitlabLoading = $state(false);
 
 	$effect(() => {
-		if ($isLoggedIn) goto($page.data.mockup?.active ? $page.data.mockup.homePath : ($auth.projectId ? '/dashboard' : '/select-project'));
+		if ($isLoggedIn) {
+			const fallback = $page.data.mockup?.active ? $page.data.mockup.homePath : ($auth.projectId ? '/dashboard' : '/select-project');
+			goto(postAuthDestination(fallback));
+		}
 	});
 
 	async function loginWithGitlab() {
@@ -72,7 +76,7 @@
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
-			await goto(resolution.target);
+			await goto(postAuthDestination(resolution.target));
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status})` : '서버 오류가 발생했습니다';
 		} finally {

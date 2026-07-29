@@ -11,7 +11,7 @@ nav_order: 64
 
 기존에 운영 중인 LibreChat 인스턴스의 LLM 토큰 사용량을 **읽기 전용으로 미러링**합니다. Afterglow는 LibreChat 데이터에 쓰기를 수행하지 않으며, 현재 로그인 사용자 본인의 사용량만 노출합니다.
 
-> **활성화 조건:** `config.toml [services] chat = true` 및 LibreChat MongoDB 연동 설정.
+> **활성화 조건:** `afterglow.conf [services] chat = true` 및 LibreChat MongoDB 연동 설정.
 > 비활성화 상태에서는 라우터가 등록되지 않습니다.
 
 ---

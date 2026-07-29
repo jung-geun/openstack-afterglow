@@ -10,7 +10,7 @@ k3s 프로비저너는 **Magnum 없이** OpenStack Nova VM + cloud-init 만으�
 
 클러스터 내부 Kubernetes 리소스(Pod/Deployment/ConfigMap/Secret/Cloud Shell 등)를 조회·조작하는 프록시성 API는 별도 문서 [k3s 리소스 관리](k3s-resources.md)를 참고하세요.
 
-> **활성화 조건:** `config.toml [services] k3s = true`
+> **활성화 조건:** `afterglow.conf [services] k3s = true`
 > 비활성화 상태에서는 라우터가 마운트되지 않아 `404` 가 반환됩니다.
 
 ---
@@ -99,7 +99,7 @@ data: {"step": "failed", "progress": 0, "message": "클러스터 생성 실패: 
 
 ## Cloud Provider OpenStack 플러그인
 
-k3s 클러스터는 플러그인 레지스트리(`backend/app/services/k3s_plugins/`)를 통해 OpenStack 서비스와 통합됩니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화됩니다.
+k3s 클러스터는 플러그인 레지스트리(`backend/app/services/k3s_plugins/`)를 통해 OpenStack 서비스와 통합됩니다. 각 플러그인은 `afterglow.conf [k3s]` 섹션에서 독립적으로 활성화됩니다.
 
 | 플러그인 | 설정 키 | 배포 리소스 | 용도 |
 |---------|--------|-----------|------|
@@ -200,7 +200,7 @@ SSE 스트림으로 클러스터를 비동기 생성합니다. **Rate limit: 5�
 |------|------|------|------|
 | `name` | string | — | 클러스터 이름. 영문/숫자로 시작, 영문·숫자·하이픈·언더스코어 (최대 63자). 미지정 시 `k3s-<hex8>` 자동 생성 |
 | `agent_count` | int | — | 워커 노드 수. 기본 `1`, 범위 `0~10` |
-| `agent_flavor_id` | string | — | 워커 플레이버. 미설정 시 `config.toml [k3s] default_agent_flavor_id` |
+| `agent_flavor_id` | string | — | 워커 플레이버. 미설정 시 관리자 `k3s.default_agent_flavor` 정책 |
 | `network_id` | string | — | 네트워크 ID. 미설정 시 default 네트워크 자동 결정/폴백 |
 | `key_name` | string | — | SSH 키페어 이름 |
 | `os_type` | string | — | `ubuntu`(기본) 또는 `fcos`. `fcos` 는 `k3s_fcos_image_id` 설정 필요 |
@@ -257,7 +257,7 @@ SSE 스트림으로 클러스터를 비동기 생성합니다. **Rate limit: 5�
 
 ## Stampede 오토스케일
 
-클러스터 단위 오토스케일 모드를 제어합니다. 서버 전역 설정 `config.toml [k3s] stampede_enabled` 가 꺼져 있으면 enable 시 `400`.
+클러스터 단위 오토스케일 모드를 제어합니다. 서버 전역 설정 `afterglow.conf [k3s] stampede_enabled` 가 꺼져 있으면 enable 시 `400`.
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|

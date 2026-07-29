@@ -21,7 +21,12 @@ npm run test:target -- --parallel instances
 npm run test:target -- backend:tests/test_instances.py::test_delete_instance
 npm run test:target -- frontend:src/lib/config/site.test.ts
 npm run test:auth -- --dry-run
+npm run test:db
 ```
+
+`test:db`는 Docker Compose의 `test` 프로필로 로컬 MariaDB를 자동 기동한다.
+이미 실행 중인 DB를 재사용하려면 `npm run test:db -- --no-start`를 사용한다.
+다른 DB를 사용하려면 `AFTERGLOW_TEST_DATABASE_URL`을 지정한다.
 
 ## 타깃 선택표
 
@@ -78,7 +83,7 @@ cd frontend && npm test -- src/routes/__tests__/logout-flow.test.ts
 
 ## DB와 통합 테스트 사전조건
 
-- `db`: 실행 중인 MariaDB 테스트 DB와 `AFTERGLOW_TEST_DATABASE_URL` 이 필요하다. 예시 URL 형식은 `backend/tests/test_union_layers_db.py` 기준 `mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test` 이다.
+- `db`: `npm run test:db`가 Docker Compose의 `mariadb` test profile을 기동하고 `pytest.mark.db` 전체를 실행한다. 기본 URL은 `mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test` 이며, 직접 target을 실행할 때는 `AFTERGLOW_TEST_DATABASE_URL`이 필요하다.
 - `integration:*`: 실제 Redis 와 OpenStack 자격 증명이 필요하다. 입력원은 환경변수, `backend/tests/integration/credentials.toml`, 또는 기존 config fallback 이다. 선택적 user/project-b/SSH 변수 부족으로 일부 테스트가 skip 될 수 있다.
 
 ## 에이전트 규칙

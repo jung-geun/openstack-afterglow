@@ -87,6 +87,16 @@ describe('createChatRevealBuffer', () => {
 		expect(buffer.drain()).toBe('partial response');
 	});
 
+	it('clears a prior assistant turn before revealing the next one', () => {
+		const buffer = createChatRevealBuffer({ reducedMotion: true });
+		buffer.append('previous turn', 0);
+		expect(buffer.frame(0).text).toBe('previous turn');
+
+		buffer.clear();
+		buffer.append('next turn', 1);
+		expect(buffer.frame(1).text).toBe('next turn');
+	});
+
 	it('drains immediately when reduced motion is requested', () => {
 		const buffer = createChatRevealBuffer({ reducedMotion: true });
 		buffer.append('accessible', 0);

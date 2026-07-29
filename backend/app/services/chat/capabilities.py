@@ -4,9 +4,126 @@ Provider-specific SDK probes are normalized here.  Callers must gate a requested
 feature on the returned availability rather than silently dropping parameters.
 """
 
-from __future__ import annotations
-
 from typing import Any
+from urllib.parse import urlsplit
+
+from app.services.chat.execution_protocol import v2_runtime_ready
+
+_RUNTIME_TOOL_FEATURES = ("mcp", "approval_tools", "code_interpreter", "computer_use", "code_workspace", "child_agents")
+
+
+def _runtime_gate(*, available: bool, mode: str, reason_code: str | None) -> dict[str, Any]:
+    return {
+        "available": available,
+        "mode": mode if available else "none",
+        "reason_code": None if available else reason_code,
+        "pricing_available": False,
+    }
+
+
+def runtime_capabilities(settings=None) -> dict[str, Any]:
+    """Report deployment readiness independently from provider model probes.
+
+    A configured model can support function calling while its deployment lacks a
+    durable checkpointer or remote workspace runtime.  These gates intentionally
+    describe only server runtime prerequisites; callers intersect them with the
+    selected model before admitting a feature.
+    """
+    if settings is None:
+        from app.config import get_settings
+
+        settings = get_settings()
+    from app.services.chat.checkpointer import chat_checkpointer
+    from app.services.chat.sandbox_runtime import configured_policy
+
+    checkpointer_ready = chat_checkpointer.available
+    sandbox_policy = configured_policy(settings)
+    protocol_v2_ready = v2_runtime_ready(getattr(settings, "chat_execution_protocol_version", 1))
+    workspace_url = str(getattr(settings, "chat_sandbox_workspace_url", "") or "").strip()
+    parsed_workspace_url = urlsplit(workspace_url)
+    workspace_ready = (
+        sandbox_policy is not None
+        and parsed_workspace_url.scheme == "https"
+        and parsed_workspace_url.hostname is not None
+        and parsed_workspace_url.username is None
+        and parsed_workspace_url.password is None
+        and not parsed_workspace_url.query
+        and not parsed_workspace_url.fragment
+    )
+    v2_reason = "execution_protocol_v2_unavailable"
+    return {
+        "checkpointer_ready": checkpointer_ready,
+        "workspace_ready": workspace_ready,
+        "protocol_v2_ready": protocol_v2_ready,
+        "feature_gates": {
+            "mcp": _runtime_gate(available=True, mode="native", reason_code=None),
+            "approval_tools": _runtime_gate(
+                available=protocol_v2_ready and checkpointer_ready,
+                mode="native",
+                reason_code=None
+                if protocol_v2_ready and checkpointer_ready
+                else ("checkpointer_unavailable" if protocol_v2_ready else v2_reason),
+            ),
+            "code_interpreter": _runtime_gate(
+                available=protocol_v2_ready and sandbox_policy is not None,
+                mode="remote",
+                reason_code=None
+                if protocol_v2_ready and sandbox_policy is not None
+                else ("sandbox_unavailable" if protocol_v2_ready else v2_reason),
+            ),
+            "computer_use": _runtime_gate(
+                available=protocol_v2_ready and sandbox_policy is not None,
+                mode="remote",
+                reason_code=None
+                if protocol_v2_ready and sandbox_policy is not None
+                else ("sandbox_unavailable" if protocol_v2_ready else v2_reason),
+            ),
+            "code_workspace": _runtime_gate(
+                available=protocol_v2_ready and workspace_ready and checkpointer_ready,
+                mode="remote",
+                reason_code=None
+                if protocol_v2_ready and workspace_ready and checkpointer_ready
+                else ("workspace_or_checkpointer_unavailable" if protocol_v2_ready else v2_reason),
+            ),
+            "child_agents": _runtime_gate(
+                available=protocol_v2_ready and checkpointer_ready,
+                mode="native",
+                reason_code=None
+                if protocol_v2_ready and checkpointer_ready
+                else ("checkpointer_unavailable" if protocol_v2_ready else v2_reason),
+            ),
+        },
+    }
+
+
+def effective_runtime_capabilities(
+    model_capabilities: dict[str, Any] | None, runtime: dict[str, Any]
+) -> dict[str, Any]:
+    """Intersect model function calling with runtime-backed tool features."""
+    model_capabilities = model_capabilities or {}
+    function_calling = bool(model_capabilities.get("function_calling") or model_capabilities.get("tool_call"))
+    gates = {name: dict(gate) for name, gate in (runtime.get("feature_gates") or {}).items()}
+    for name in _RUNTIME_TOOL_FEATURES:
+        gate = gates.get(name)
+        if gate is None:
+            continue
+        if not function_calling:
+            gate.update(
+                {
+                    "available": False,
+                    "mode": "none",
+                    "reason_code": "model_function_calling_unsupported",
+                    "pricing_available": False,
+                }
+            )
+        gates[name] = gate
+    return {
+        "function_calling": function_calling,
+        "checkpointer_ready": bool(runtime.get("checkpointer_ready")),
+        "workspace_ready": bool(runtime.get("workspace_ready")),
+        "protocol_v2_ready": bool(runtime.get("protocol_v2_ready")),
+        "feature_gates": gates,
+    }
 
 
 def _probe(name: str, *, model_name: str, provider_type: str | None) -> bool:

@@ -39,6 +39,17 @@ class ChatRun(Base):
     client_request_id: Mapped[str] = mapped_column(CHAR(36), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
     fingerprint_version: Mapped[int] = mapped_column(INT, nullable=False)
+    execution_protocol_version: Mapped[int] = mapped_column(INT, nullable=False, default=1)
+    execution_mode: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="chat")
+    code_workspace_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("chat_code_workspaces.id", ondelete="SET NULL")
+    )
+    parent_run_id: Mapped[str | None] = mapped_column(CHAR(36), ForeignKey("chat_runs.id", ondelete="RESTRICT"))
+    root_run_id: Mapped[str | None] = mapped_column(CHAR(36), ForeignKey("chat_runs.id", ondelete="RESTRICT"))
+    delegation_call_id: Mapped[str | None] = mapped_column(VARCHAR(190))
+    depth: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    policy_snapshot: Mapped[dict | None] = mapped_column(JSON)
+    reservation_snapshot: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(VARCHAR(30), nullable=False, default="queued")
     last_seq: Mapped[int] = mapped_column(BIGINT, nullable=False, default=0)
     current_ordinal: Mapped[int] = mapped_column(INT, nullable=False, default=0)
@@ -51,6 +62,10 @@ class ChatRun(Base):
     reserved_credits: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
     reservation_released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     usage_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    descendant_credit_ceiling: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    descendant_credits_reserved: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
+    sandbox_seconds_ceiling: Mapped[int | None] = mapped_column(INT)
+    sandbox_seconds_reserved: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
@@ -59,6 +74,9 @@ class ChatRun(Base):
         Index("idx_chat_runs_conversation_status", "conversation_id", "status"),
         Index("idx_chat_runs_temp_status", "temp_thread_id", "status"),
         Index("uq_chat_runs_idempotency", "project_id", "user_id", "client_request_id", unique=True),
+        Index("idx_chat_runs_root_status", "root_run_id", "status"),
+        Index("idx_chat_runs_parent_status", "parent_run_id", "status"),
+        Index("uq_chat_runs_parent_delegation", "parent_run_id", "delegation_call_id", unique=True),
     )
 
 
@@ -90,10 +108,25 @@ class ChatToolApproval(Base):
     call_id: Mapped[str] = mapped_column(VARCHAR(190), primary_key=True)
     tool_name: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
     arguments: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
+    arguments_ciphertext: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    dispatch_hmac: Mapped[str | None] = mapped_column(CHAR(64))
+    preview_fingerprint: Mapped[str | None] = mapped_column(CHAR(64))
+    decision_hmac: Mapped[str | None] = mapped_column(CHAR(64))
+
+    source: Mapped[str | None] = mapped_column(VARCHAR(30))
+    effect: Mapped[str | None] = mapped_column(VARCHAR(30))
+    tool_definition_hash: Mapped[str | None] = mapped_column(CHAR(64))
+    config_fingerprint: Mapped[str | None] = mapped_column(CHAR(64))
+    destination_origin: Mapped[str | None] = mapped_column(VARCHAR(255))
+    expected_state_revision: Mapped[int | None] = mapped_column(BIGINT)
+    writer_fence: Mapped[int | None] = mapped_column(BIGINT)
     status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="pending")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("idx_chat_tool_approvals_pending_expiry", "status", "expires_at"),)
 
 
 class ChatRunEventRow(Base):
@@ -132,6 +165,8 @@ class ChatRunSegment(Base):
     segment_id: Mapped[str] = mapped_column(VARCHAR(190), primary_key=True)
     ordinal: Mapped[int] = mapped_column(INT, nullable=False)
     endpoint: Mapped[str] = mapped_column(VARCHAR(40), nullable=False)
+    kind: Mapped[str] = mapped_column(VARCHAR(40), nullable=False, default="provider")
+    boundary_key: Mapped[str | None] = mapped_column(VARCHAR(255))
     turn_ordinal: Mapped[int | None] = mapped_column(INT)
     call_id: Mapped[str | None] = mapped_column(VARCHAR(190))
     status: Mapped[str] = mapped_column(VARCHAR(30), nullable=False, default="prepared")
@@ -143,7 +178,10 @@ class ChatRunSegment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (Index("uq_chat_run_segments_ordinal", "run_id", "ordinal", unique=True),)
+    __table_args__ = (
+        Index("uq_chat_run_segments_ordinal", "run_id", "ordinal", unique=True),
+        Index("uq_chat_run_segments_boundary", "run_id", "boundary_key", unique=True),
+    )
 
 
 class ChatTempThread(Base):

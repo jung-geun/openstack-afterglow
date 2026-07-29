@@ -21,6 +21,7 @@ const baseConfig: PublicSiteConfig = {
 		barbican: false,
 		waygate: false,
 		chat: false,
+		mcp: false,
 	},
 	runtime: {
 		api_base: 'https://api.example.com',

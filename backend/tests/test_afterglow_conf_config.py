@@ -108,23 +108,30 @@ ttl_fast = 3
     assert flat["cache_ttl_fast"] == 3
 
 
-def test_app_config_applies_legacy_config_toml_overrides_to_afterglow_conf(isolated_config_dir):
+def test_app_config_ignores_legacy_config_toml_files(isolated_config_dir):
     (isolated_config_dir / "afterglow.conf").write_text(
         """
 [app]
-site_name = "Base Legacy Site"
-logo_path = "/legacy-base-logo.png"
+site_name = "Primary Site"
+logo_path = "/primary-logo.png"
 
 [cache]
-redis_url = "redis://legacy-base-cache:6379/0"
+redis_url = "redis://primary-cache:6379/0"
 ttl_fast = 13
+""".strip(),
+        encoding="utf-8",
+    )
+    (isolated_config_dir / "config.toml").write_text(
+        """
+[app]
+site_name = "Ignored Legacy Base"
 """.strip(),
         encoding="utf-8",
     )
     (isolated_config_dir / "config.local.toml").write_text(
         """
 [app]
-site_name = "Legacy Override Site"
+site_name = "Ignored Legacy Override"
 
 [cache]
 ttl_fast = 4
@@ -136,16 +143,16 @@ ttl_fast = 4
     flat = app_config._load_toml()
 
     assert raw["app"] == {
-        "site_name": "Legacy Override Site",
-        "logo_path": "/legacy-base-logo.png",
+        "site_name": "Primary Site",
+        "logo_path": "/primary-logo.png",
     }
     assert raw["cache"] == {
-        "redis_url": "redis://legacy-base-cache:6379/0",
-        "ttl_fast": 4,
+        "redis_url": "redis://primary-cache:6379/0",
+        "ttl_fast": 13,
     }
-    assert flat["site_name"] == "Legacy Override Site"
-    assert flat["logo_path"] == "/legacy-base-logo.png"
-    assert flat["cache_ttl_fast"] == 4
+    assert flat["site_name"] == "Primary Site"
+    assert flat["logo_path"] == "/primary-logo.png"
+    assert flat["cache_ttl_fast"] == 13
 
 
 def test_generate_k8s_main_accepts_explicit_afterglow_conf_path(tmp_path, monkeypatch, capsys):
@@ -246,6 +253,7 @@ def test_app_config_loads_capability_platform_chat_settings(isolated_config_dir)
     (isolated_config_dir / "afterglow.conf").write_text(
         """
 [chat]
+execution_protocol_version = 2
 run_event_retention_hours = 48
 checkpoint_retention_days = 14
 semantic_memory_enabled = true
@@ -261,6 +269,7 @@ asset_signed_url_ttl_seconds = 120
 clamav_host = "clamav"
 clamav_port = 3311
 sandbox_url = "https://sandbox.example"
+sandbox_workspace_url = "https://workspace.example"
 sandbox_image_digest = "sha256:abc"
 sandbox_policy_version = "v1"
 sandbox_egress_allowlist = ["api.example"]
@@ -275,3 +284,10 @@ sandbox_egress_allowlist = ["api.example"]
     assert settings.chat_memory_embedding_dimensions == 1536
     assert settings.chat_asset_s3_bucket == "chat-assets"
     assert settings.chat_sandbox_egress_allowlist == ["api.example"]
+    assert settings.chat_execution_protocol_version == 2
+    assert settings.chat_sandbox_workspace_url == "https://workspace.example"
+
+
+def test_chat_execution_protocol_version_rejects_unrecognized_version():
+    with pytest.raises(ValueError):
+        app_config.Settings(chat_execution_protocol_version=3)

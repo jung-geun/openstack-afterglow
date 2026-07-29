@@ -167,3 +167,12 @@ class TestErrors:
         monkeypatch.setattr(es, "list_global", fake_list)
         resp = await admin_client.get(_ADMIN_TOOL)
         assert resp.status_code == 503
+
+    async def test_unavailable_extension_secret_maps_to_503(self, client, monkeypatch):
+        async def fail_closed(*_args, **_kwargs):
+            raise es.ExtensionSecretUnavailable("cannot decrypt")
+
+        monkeypatch.setattr(es, "set_mcp_credentials", fail_closed)
+        response = await client.put(f"{_USER_MCP}/7/credentials", json={"values": {"Authorization": "x"}})
+
+        assert response.status_code == 503

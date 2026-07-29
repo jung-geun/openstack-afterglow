@@ -1,14 +1,12 @@
-"""채팅 완료 후 사용자 메모리 자동 추출 — 관리자 지정 초소형 모델(is_memory_model)로
+"""Post-response long-term-memory extraction through the designated small model.
 
-기존 메모리와 최근 대화를 비교해 **추가/갱신할 델타만** 구조화 op 로 뽑아 반영한다.
+The model receives visible encrypted-memory plaintext plus a bounded finished
+conversation slice and returns only validated add/update/delete deltas.  It
+never receives authority to alter another user's memory; application code
+serializes one user/project and rechecks each referenced ID before mutation.
 
-⚠️ 델타 계약(중복 무한 증식 방지): 모델에 기존 메모리를 **id 와 함께** 주고
-`{"op":"add","content":...}` / `{"op":"update","id":N,"content":...}` 만 출력하게 한다.
-- add: 새 사실. update: 기존 사실 갱신. 없으면 빈 배열.
-- 방어적 JSON 파싱 — 형식 위반/오류는 조용히 무시(부가 기능이라 대화를 막지 않음).
-
-⚠️ 비용은 시스템 부담(title_summary 와 동일: source="system", charge_wallet=False).
-⚠️ 프라이버시: 복호화된 기존 메모리 + 최근 대화가 (외부 프로바이더일 수 있는) 초소형 모델로 전송된다.
+Extraction is supplemental: malformed output and provider failure do not
+affect the completed chat response.  Usage is system-funded.
 """
 
 from __future__ import annotations
@@ -30,14 +28,25 @@ _MAX_TOKENS = 400
 _MAX_EXISTING = 30  # 프롬프트에 넣는 기존 메모리 상한(비용)
 _MAX_OPS = 6  # 한 번에 반영할 op 상한(runaway 방지)
 _MAX_CONTENT_CHARS = 2000
+_CATEGORIES = frozenset({"interest", "development", "habit", "preference", "general"})
+
+
+class MemoryExtractionRetryable(RuntimeError):
+    """A provider or source-of-truth failure that must requeue the durable job."""
+
+
 _SYSTEM = (
-    "당신은 사용자에 대해 장기 기억할 사실을 관리한다. 아래 [기존 메모리]와 [최근 대화]를 보고 "
-    "추가하거나 갱신할 항목만 JSON 배열로 출력하라. 각 항목은 다음 둘 중 하나다:\n"
-    '- {"op":"add","content":"새로 기억할 한 문장"}\n'
-    '- {"op":"update","id":<기존 메모리 id>,"content":"갱신된 한 문장"}\n'
-    "규칙: 이미 있는 사실은 중복 추가하지 말고 필요 시 update 하라. 일시적·사소한 내용은 제외하고 "
-    "안정적인 선호·사실만 기록하라. content 는 한 문장이며 사용자의 언어를 따른다. "
-    "새로 기억하거나 갱신할 것이 없으면 빈 배열 []를 출력하라. JSON 배열만 출력하고 설명은 하지 마라."
+    "당신은 사용자의 장기 메모리를 관리하는 소형 분류 모델이다. [기존 메모리]와 완료된 [최근 세션]을 "
+    "비교해 안정적인 사용자 사실의 델타만 JSON 배열로 출력하라. 허용 category 는 "
+    "interest(관심사), development(현재 개발 특성), habit(습관), preference(선호), general 이다. "
+    "각 항목은 다음 중 하나여야 한다:\n"
+    '- {"op":"add","category":"preference","content":"새로 기억할 한 문장"}\n'
+    '- {"op":"update","id":<기존 메모리 id>,"category":"habit","content":"갱신된 한 문장"}\n'
+    '- {"op":"delete","id":<기존 메모리 id>}\n'
+    "사용자가 명시한 안정적인 관심사·개발 방식·습관·선호만 기록하고, 모델/도구/보조자의 발언을 사실로 "
+    "삼지 마라. update 로 모순되거나 더 이상 유효하지 않은 항목을 대체하고, delete 는 사용자가 "
+    "분명히 철회했거나 모순되어 대체할 수 없는 기존 항목에만 사용하라. 기존 사실을 중복 add 하지 말고, "
+    "일시적 요청·민감 정보·추측은 제외하라. 새 델타가 없으면 []만 출력하라. 설명이나 마크다운은 금지한다."
 )
 
 
@@ -73,63 +82,123 @@ def _parse_ops(text: str) -> list[dict]:
     return parsed if isinstance(parsed, list) else []
 
 
-async def _apply_ops(ops: list[dict], user_id: str, project_id: str, existing_ids: set[int]) -> None:
+def _normalize_ops(ops: list[dict], existing: dict[int, dict]) -> list[dict]:
+    normalized: list[dict] = []
+    referenced_ids: set[int] = set()
+    added_contents: set[str] = set()
     for op in ops[:_MAX_OPS]:
         if not isinstance(op, dict):
             continue
         kind = op.get("op")
-        content = op.get("content")
-        if not isinstance(content, str) or not content.strip():
+        if kind == "add":
+            content = op.get("content")
+            category = op.get("category")
+            if isinstance(content, str) and content.strip() and isinstance(category, str) and category in _CATEGORIES:
+                normalized_content = content.strip()[:_MAX_CONTENT_CHARS]
+                content_key = normalized_content.casefold()
+                if content_key not in added_contents:
+                    added_contents.add(content_key)
+                    normalized.append({"op": "add", "category": category, "content": normalized_content})
             continue
-        content = content.strip()[:_MAX_CONTENT_CHARS]
-        try:
-            if kind == "add":
-                await ms.create_memory(
-                    user_id=user_id,
-                    project_id=project_id,
-                    scope="project",
-                    content=content,
-                )
-            elif kind == "update":
-                mid = op.get("id")
-                if isinstance(mid, int) and mid in existing_ids:
-                    await ms.update_memory(mid, user_id=user_id, project_id=project_id, patch={"content": content})
-        except Exception:
-            logger.warning("메모리 op 반영 실패 user=%s op=%s", user_id, kind, exc_info=True)
+        memory_id = op.get("id")
+        snapshot = existing.get(memory_id) if isinstance(memory_id, int) else None
+        if (
+            kind not in {"update", "delete"}
+            or snapshot is None
+            or memory_id in referenced_ids
+            or not isinstance(snapshot.get("content"), str)
+            or not isinstance(snapshot.get("category"), str)
+            or not isinstance(snapshot.get("status"), str)
+            or not isinstance(snapshot.get("is_active"), bool)
+        ):
+            continue
+        referenced_ids.add(memory_id)
+        expected_state_fingerprint = ms.memory_state_fingerprint(
+            snapshot["content"],
+            category=snapshot["category"],
+            status=snapshot["status"],
+            is_active=snapshot["is_active"],
+        )
+        if kind == "delete":
+            normalized.append(
+                {
+                    "op": "delete",
+                    "id": memory_id,
+                    "expected_state_fingerprint": expected_state_fingerprint,
+                }
+            )
+            continue
+        content = op.get("content")
+        category = op.get("category")
+        if isinstance(content, str) and content.strip() and isinstance(category, str) and category in _CATEGORIES:
+            normalized.append(
+                {
+                    "op": "update",
+                    "id": memory_id,
+                    "category": category,
+                    "content": content.strip()[:_MAX_CONTENT_CHARS],
+                    "expected_state_fingerprint": expected_state_fingerprint,
+                }
+            )
+    return normalized
 
 
-async def generate_memory_if_applicable(*, conversation_id: str, project_id: str, user_id: str) -> None:
-    """메모리 모델이 지정돼 있으면 최근 대화에서 메모리 델타를 추출·반영(시스템 과금). 실패는 무시."""
+async def generate_memory_if_applicable(
+    *,
+    conversation_id: str,
+    project_id: str,
+    run_id: str,
+    user_id: str,
+) -> list[dict] | None:
+    """Return validated deltas; only no-model/malformed output is a terminal no-op."""
     try:
         resolved = await ps.resolve_memory_model()
-    except Exception:
-        logger.warning("메모리 추출 모델 조회 실패 conv=%s", conversation_id, exc_info=True)
-        return
+    except Exception as exc:
+        raise MemoryExtractionRetryable("memory model resolution failed") from exc
     if resolved is None:
-        return  # 메모리 모델 미지정 — 기능 비활성
+        return None
 
     try:
         existing = await ms.list_memories(user_id=user_id, project_id=project_id)
-        msgs = await cs.list_messages(conversation_id, user_id=user_id, project_id=project_id, limit=8)
-    except Exception:
-        return
-    active = [m for m in existing if m.get("is_active", True)][:_MAX_EXISTING]
-    existing_ids = {m["id"] for m in active}
-    # Assistant, tool, and fetched web text are not user-authored facts.
-    convo = [m for m in msgs if m.get("role") == "user" and m.get("content")]
-    if not convo:
-        return
+        msgs = await cs.list_messages_for_run(run_id, user_id=user_id, project_id=project_id)
+    except Exception as exc:
+        raise MemoryExtractionRetryable("memory source loading failed") from exc
+    active = [
+        memory
+        for memory in existing
+        if (
+            memory.get("is_active") is True
+            and memory.get("scope") == "project"
+            and memory.get("project_id") == project_id
+            and memory.get("status") == "active"
+        )
+    ][:_MAX_EXISTING]
+    existing_by_id = {memory["id"]: memory for memory in active if isinstance(memory.get("id"), int)}
+    user_messages = [message for message in msgs if message.get("role") == "user" and message.get("content")]
+    if not user_messages:
+        return None
 
-    existing_block = "\n".join(f"- (id {m['id']}) {str(m['content'])[:300]}" for m in active) if active else "(없음)"
-    convo_block = "\n".join(f"{m['role']}: {str(m['content'])[:500]}" for m in convo[-6:])
+    existing_block = (
+        "\n".join(
+            f"- (id {memory['id']}, {memory.get('category', 'general')}) {str(memory['content'])[:300]}"
+            for memory in active
+        )
+        if active
+        else "(없음)"
+    )
+    session_block = "\n".join(
+        f"{message['role']}: {str(message['content'])[:500]}"
+        for message in msgs
+        if message.get("role") in {"user", "assistant"} and message.get("content")
+    )
     messages = [
         {"role": "system", "content": _SYSTEM},
-        {"role": "user", "content": f"[기존 메모리]\n{existing_block}\n\n[최근 대화]\n{convo_block}"},
+        {"role": "user", "content": f"[기존 메모리]\n{existing_block}\n\n[최근 세션]\n{session_block}"},
     ]
     model = resolved["model_name"]
 
     try:
-        resp = await litellm_client.acompletion(
+        response = await litellm_client.acompletion(
             model,
             messages,
             custom_llm_provider=resolved.get("provider_type"),
@@ -138,25 +207,23 @@ async def generate_memory_if_applicable(*, conversation_id: str, project_id: str
             max_tokens=_MAX_TOKENS,
             temperature=0.2,
         )
-    except Exception:
-        logger.warning("메모리 추출 호출 실패 conv=%s model=%s", conversation_id, model, exc_info=True)
-        return
+    except Exception as exc:
+        raise MemoryExtractionRetryable("memory model request failed") from exc
 
-    text = _resp_text(resp)
-    ops = _parse_ops(text)
-    if ops:
-        await _apply_ops(ops, user_id, project_id, existing_ids)
+    text = _resp_text(response)
+    ops = _normalize_ops(_parse_ops(text), existing_by_id)
 
-    # 시스템 부담 과금 — 원장만 기록, 사용자 지갑 미차감. event_id 는 실행마다 고유.
+    # System-funded accounting is independent of the durable memory mutation.
+    # A ledger-write failure must not repeat a successfully received model call.
     try:
-        usage = getattr(resp, "usage", None)
-        if usage is None and isinstance(resp, Mapping):
-            usage = resp.get("usage")
-        pt, ct = litellm_client.extract_usage(model, messages, text, usage)
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, Mapping):
+            usage = response.get("usage")
+        prompt_tokens, completion_tokens = litellm_client.extract_usage(model, messages, text, usage)
         usage_cost = litellm_client.cost_from_usage(
             model,
-            pt,
-            ct,
+            prompt_tokens,
+            completion_tokens,
             input_price_per_token=resolved.get("input_price_per_token"),
             output_price_per_token=resolved.get("output_price_per_token"),
             price_source=resolved.get("price_source"),
@@ -168,8 +235,8 @@ async def generate_memory_if_applicable(*, conversation_id: str, project_id: str
             project_id=project_id,
             model_name=model,
             provider=resolved.get("provider_name"),
-            prompt_tokens=pt,
-            completion_tokens=ct,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             usage_cost=usage_cost,
             margin_multiplier=resolved["margin_multiplier"],
             conversation_id=conversation_id,
@@ -178,3 +245,4 @@ async def generate_memory_if_applicable(*, conversation_id: str, project_id: str
         )
     except Exception:
         logger.warning("메모리 추출 시스템 과금 기록 실패 conv=%s", conversation_id, exc_info=True)
+    return ops

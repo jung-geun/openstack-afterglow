@@ -35,7 +35,8 @@ from app.models.k3s import (
     K3sProgressStep,
     ScaleK3sClusterRequest,
 )
-from app.services import cinder, k3s_cloudinit, k3s_kube, keystone, neutron, nova, octavia
+from app.services import cinder, k3s_cloudinit, k3s_kube, k3s_plugins, keystone, neutron, nova, octavia
+from app.services import instance_orchestration as _instance_orch
 from app.services import k3s_db as k3s_cluster
 from app.services.cache import cached_call, invalidate, ttl_normal, ttl_slow
 from app.services.cache import invalidation as cache_invalidation
@@ -233,50 +234,10 @@ async def create_k3s_cluster_async(
     project_id = conn._afterglow_project_id
     s = get_settings()
 
-    # 설정 검증
-    os_type = req.os_type  # "ubuntu" | "fcos"
-    if os_type == "fcos":
-        server_image_id = s.k3s_fcos_image_id
-        if not server_image_id:
-            raise HTTPException(
-                status_code=503, detail="FCOS 이미지가 설정되지 않았습니다 (k3s_fcos_image_id). 관리자에게 문의하세요."
-            )
-    else:
-        server_image_id = s.k3s_server_image_id
-    server_flavor_id = s.k3s_server_flavor_id
-    if not server_image_id or not server_flavor_id:
-        raise HTTPException(
-            status_code=503, detail="k3s 서버 이미지 또는 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요."
-        )
-
-    agent_flavor_id = req.agent_flavor_id or s.k3s_default_agent_flavor_id
-    if req.agent_count > 0 and not agent_flavor_id:
-        raise HTTPException(status_code=503, detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요.")
-
-    # Default 네트워크 결정
-    network_id = req.network_id
-    if not network_id:
-        if s.default_network_enabled:
-            try:
-                from app.services.default_network import ensure_default_network as _ensure_net
-
-                default_net = await _ensure_net(
-                    conn,
-                    project_id,
-                    external_network_id=s.default_network_external_id or None,
-                    cidr=s.default_network_cidr,
-                )
-                network_id = default_net.id
-            except Exception:
-                import logging as _log
-
-                _log.getLogger(__name__).warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
-                network_id = s.default_network_id
-        else:
-            network_id = s.default_network_id
-
-    # 템플릿 적용 (지정 시 기본값 병합, 요청 본문 값이 있으면 override)
+    # Apply template defaults before resolving any policy. Explicit request
+    # values retain precedence over the template and administrator defaults.
     _template_snapshot: dict | None = None
+    template_default_image_id: str | None = None
     if req.template_id:
         from app.services import k3s_template as _tmpl_svc
 
@@ -284,31 +245,76 @@ async def create_k3s_cluster_async(
         if not _tmpl:
             raise HTTPException(status_code=400, detail=f"템플릿을 찾을 수 없습니다: {req.template_id}")
         _template_snapshot = dict(_tmpl)
-        # 요청 본문에 명시적 값이 없으면 템플릿 기본값 적용
         if req.agent_count == 1 and _tmpl.get("default_node_count") is not None:
             req = req.model_copy(update={"agent_count": _tmpl["default_node_count"]})
         if not req.agent_flavor_id and _tmpl.get("default_agent_flavor_id"):
             req = req.model_copy(update={"agent_flavor_id": _tmpl["default_agent_flavor_id"]})
         if req.os_type == "ubuntu" and _tmpl.get("os_type") and _tmpl["os_type"] != "ubuntu":
             req = req.model_copy(update={"os_type": _tmpl["os_type"]})
+        template_default_image_id = _tmpl.get("default_image_id") or None
 
-    k3s_version = s.k3s_version
+    from app.services.resource_policies import validate_existing_selection
+    from app.services.resource_policy_store import (
+        ResourcePolicyStorageUnavailable,
+        get_required_runtime_setting,
+        resolve_policy_snapshot,
+    )
+
+    os_type = req.os_type
+    image_policy_key = "k3s.fcos_image" if os_type == "fcos" else "k3s.server_image"
+    try:
+        policy_snapshot = await resolve_policy_snapshot(
+            conn=conn,
+            keys=(
+                image_policy_key,
+                "k3s.server_flavor",
+                "k3s.default_agent_flavor",
+                "cinder.default_volume_availability_zone",
+            ),
+        )
+    except ResourcePolicyStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail="resource policy storage is unavailable") from exc
+    server_image_id = policy_snapshot[image_policy_key]["id"]
+    server_flavor_id = policy_snapshot["k3s.server_flavor"]["id"]
+    volume_availability_zone = policy_snapshot["cinder.default_volume_availability_zone"]["id"]
+
+    if req.agent_flavor_id:
+        agent_selection = await validate_existing_selection(conn, "k3s.default_agent_flavor", req.agent_flavor_id)
+        agent_flavor_id = agent_selection["id"]
+        policy_snapshot["k3s.default_agent_flavor"] = {"id": agent_selection["id"], "name": agent_selection["name"]}
+    else:
+        agent_flavor_id = policy_snapshot["k3s.default_agent_flavor"]["id"]
+    if req.agent_count > 0 and not agent_flavor_id:
+        raise HTTPException(status_code=503, detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요.")
+
+    agent_image_snapshot = dict(policy_snapshot[image_policy_key])
+    if template_default_image_id:
+        agent_image = await validate_existing_selection(conn, image_policy_key, template_default_image_id)
+        agent_image_id = agent_image["id"]
+        agent_image_snapshot = {"id": agent_image["id"], "name": agent_image["name"]}
+    policy_snapshot["effective_agent_image"] = agent_image_snapshot
+    optional_policy_keys = (
+        "k3s.occm_floating_network",
+        "k3s.occm_public_network",
+        "k3s.lb_subnet",
+        "k3s.api_lb_vip_network",
+        "k3s.api_lb_floating_network",
+        "k3s.octavia_ingress_floating_network",
+    )
+    from app.services.resource_policy_store import get_policy_snapshot
+
+    stored_optional = await get_policy_snapshot(optional_policy_keys)
+    for optional_key, stored_selection in stored_optional.items():
+        if stored_selection is None:
+            continue
+        selection = await validate_existing_selection(conn, optional_key, stored_selection["id"])
+        policy_snapshot[optional_key] = {"id": selection["id"], "name": selection["name"]}
+
+    plugin_settings = k3s_plugins.with_resource_policy_snapshot(s, policy_snapshot)
+    network_id = req.network_id or await _instance_orch.resolve_default_network(conn, s)
+    k3s_version = await get_required_runtime_setting("k3s.version")
     boot_volume_size = s.k3s_boot_volume_size_gb
     cluster_id = str(uuid.uuid4())
-
-    # flavor 이름 → ID 해석 (이름으로 설정된 경우)
-    def _resolve_flavor(conn_obj, flavor_ref: str) -> str:
-        if not flavor_ref:
-            return flavor_ref
-        try:
-            f = conn_obj.compute.find_flavor(flavor_ref)
-            return f.id if f else flavor_ref
-        except Exception:
-            return flavor_ref
-
-    server_flavor_id = _resolve_flavor(conn, server_flavor_id)
-    if agent_flavor_id:
-        agent_flavor_id = _resolve_flavor(conn, agent_flavor_id)
 
     async def progress_generator() -> AsyncGenerator[str, None]:
         _start_time = time.monotonic()
@@ -415,15 +421,15 @@ async def create_k3s_cluster_async(
 
             # --- Step 1-B: HA LB + FIP 생성 (master_count >= 3) ---
             if req.master_count >= 3:
-                yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 12, "HA API LB 생성 중...")
-                subnets_for_lb = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
-                lb_subnet_id = subnets_for_lb[0].id if subnets_for_lb else None
+                lb_subnet_id = (policy_snapshot.get("k3s.lb_subnet") or {}).get("id")
+                if not lb_subnet_id:
+                    raise RuntimeError("K3s API load-balancer subnet policy is required for HA clusters")
                 ha_lb = await asyncio.to_thread(
                     octavia.create_load_balancer,
                     conn,
                     f"k3s-ha-{req.name}-{cluster_id[:8]}",
-                    *(lb_subnet_id,) if lb_subnet_id else (),
-                    vip_network_id=s.k3s_api_lb_vip_network_id or None,
+                    lb_subnet_id,
+                    vip_network_id=(policy_snapshot.get("k3s.api_lb_vip_network") or {}).get("id"),
                 )
                 ha_lb_id = ha_lb["id"]
                 await asyncio.to_thread(octavia.wait_for_load_balancer, conn, ha_lb_id)
@@ -440,8 +446,8 @@ async def create_k3s_cluster_async(
                 )
                 ha_lb_pool_id = ha_lb_pool_id_raw["id"]
 
-                # FIP 할당 (모드 B: floating network)
-                _fip_net = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id or ""
+                # FIP allocation uses the dedicated API load-balancer policy.
+                _fip_net = (policy_snapshot.get("k3s.api_lb_floating_network") or {}).get("id", "")
                 if _fip_net:
                     _lb_vip_port = ha_lb.get("vip_port_id")
                     _fip = await asyncio.to_thread(
@@ -468,6 +474,7 @@ async def create_k3s_cluster_async(
                 f"{server_vm_name}-boot",
                 server_image_id,
                 boot_volume_size,
+                volume_availability_zone,
             )
             boot_volume_id = boot_vol.id
             yield event(K3sProgressStep.SERVER_VOLUME, 35, "서버 부트 볼륨 생성 완료")
@@ -496,8 +503,10 @@ async def create_k3s_cluster_async(
                 _internal_network_name = _net_obj.name or ""
             except Exception:
                 pass
-            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s, internal_network_name=_internal_network_name)
-            active_plugins = k3s_plugins.get_active_plugin_names(s)
+            cloud_conf = k3s_plugins.aggregate_cloud_conf(
+                project_id, plugin_settings, internal_network_name=_internal_network_name
+            )
+            active_plugins = k3s_plugins.get_active_plugin_names(plugin_settings)
             occm_active = active_plugins.get("occm", False)
 
             # PR1 — KMS 또는 Octavia Ingress 활성 시 cluster 별 App Credential 발급 (1회).
@@ -510,8 +519,7 @@ async def create_k3s_cluster_async(
                 app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
                 app_credential_id = app_cred["id"]
 
-            # PR2 — KMS 활성 시 project owner Barbican 에서 KEK 조회/발급 (per-project 공유).
-            # 글로벌 settings.k3s_barbican_kms_kek_id 가 있으면 fallback (lazy migration).
+            # KMS keys are project-owned; inability to obtain one is fatal.
             kek_id: str | None = None
             if active_plugins.get("barbican_kms", False):
                 yield event(K3sProgressStep.SERVER_CREATING, 39, "KEK (Barbican) 조회/발급 중...")
@@ -519,11 +527,10 @@ async def create_k3s_cluster_async(
 
                 try:
                     kek_id = await _barbican.ensure_project_kek(project_id)
-                except Exception:
-                    _logger.warning("ensure_project_kek 실패 — 글로벌 fallback 사용", exc_info=True)
-                    kek_id = s.k3s_barbican_kms_kek_id or None
+                except Exception as exc:
+                    raise RuntimeError("project Barbican KEK could not be resolved") from exc
 
-            # Octavia Ingress 만 — subnet 도출 + manifest_kwargs 추가
+            # Octavia Ingress derives its subnet from the cluster network.
             manifest_kwargs: dict = {}
             if active_plugins.get("octavia_ingress", False):
                 subnets = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
@@ -531,15 +538,17 @@ async def create_k3s_cluster_async(
                     raise RuntimeError(
                         f"네트워크 {network_id}에 subnet이 없습니다. Octavia Ingress를 위한 subnet 도출 실패."
                     )
-                cluster_subnet_id = subnets[0].id
+                floating_network_id = (policy_snapshot.get("k3s.octavia_ingress_floating_network") or {}).get("id")
+                if not floating_network_id:
+                    raise RuntimeError("Octavia ingress floating network policy is required when the plugin is enabled")
                 manifest_kwargs = {
-                    "subnet_id": cluster_subnet_id,
+                    "subnet_id": subnets[0].id,
                     "app_credential": app_cred,
-                    "floating_network_id": s.k3s_octavia_ingress_floating_network_id or None,
+                    "floating_network_id": floating_network_id,
                 }
 
             plugin_manifests, manifest_failures = k3s_plugins.aggregate_manifests(
-                req.name, project_id, s, **manifest_kwargs
+                req.name, project_id, plugin_settings, **manifest_kwargs
             )
             if manifest_failures:
                 err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
@@ -555,9 +564,9 @@ async def create_k3s_cluster_async(
                 )
                 yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
                 return
-            extra_server_args = k3s_plugins.aggregate_server_args(s)
+            extra_server_args = k3s_plugins.aggregate_server_args(plugin_settings)
             extra_write_files = k3s_plugins.aggregate_extra_write_files(
-                project_id, req.name, s, app_credential=app_cred, kek_id=kek_id
+                project_id, req.name, plugin_settings, app_credential=app_cred, kek_id=kek_id
             )
 
             userdata_result = k3s_cloudinit.generate_server_userdata(
@@ -566,11 +575,12 @@ async def create_k3s_cluster_async(
                 callback_url=callback_url,
                 callback_token=callback_token,
                 cloud_conf=cloud_conf,
+                primary_network_id=network_id,
                 plugin_manifests=plugin_manifests,
                 extra_server_args=extra_server_args,
                 extra_write_files=extra_write_files,
                 extra_tls_sans=extra_tls_sans,
-                needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
+                needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(plugin_settings),
                 os_type=os_type,
                 server_node_name=server_vm_name,
                 barbican_kms_enabled=any(p.name == "barbican_kms" for p in k3s_plugins.get_active_plugins(s)),
@@ -621,6 +631,8 @@ async def create_k3s_cluster_async(
                     "agent_count": req.agent_count,
                     "server_flavor_id": server_flavor_id,
                     "agent_flavor_id": agent_flavor_id,
+                    "server_image_id": server_image_id,
+                    "default_agent_image_id": agent_image_id,
                     "network_id": network_id,
                     "security_group_id": sg_id,
                     "server_ip": "",
@@ -644,6 +656,7 @@ async def create_k3s_cluster_async(
                     "app_credential_id": app_credential_id or "",
                     "template_id": req.template_id or None,
                     "template_snapshot": _template_snapshot,
+                    "resource_policy_snapshot": policy_snapshot,
                     "stampede_enabled": req.stampede_enabled,
                 },
             )
@@ -783,7 +796,7 @@ async def scale_k3s_cluster(
         await cache_invalidation.invalidate_mutation_count("k3s", project_id)
     except Exception:
         pass
-    asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
+    asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired, token_info["token"]))
     await rec(
         token_info,
         None,
@@ -800,10 +813,31 @@ async def _scale_agents(
     cluster_id: str,
     current_agent_ids: list[str],
     desired_count: int,
+    token: str | None = None,
+) -> None:
+    """Create a fresh project-scoped OpenStack connection for the detached task."""
+    if token:
+        conn = await asyncio.to_thread(keystone.get_openstack_connection, token, project_id)
+        conn._afterglow_token = token
+    else:
+        conn = await asyncio.to_thread(keystone.get_admin_connection_for_project, project_id)
+        conn._afterglow_token = ""
+    conn._afterglow_project_id = project_id
+    try:
+        await _scale_agents_with_conn(project_id, cluster_id, current_agent_ids, desired_count, conn)
+    finally:
+        await asyncio.to_thread(conn.close)
+
+
+async def _scale_agents_with_conn(
+    project_id: str,
+    cluster_id: str,
+    current_agent_ids: list[str],
+    desired_count: int,
+    conn,
 ) -> None:
     """에이전트 스케일링 백그라운드 태스크."""
     from app.config import get_settings
-    from app.services import k3s_plugins
 
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
@@ -818,48 +852,38 @@ async def _scale_agents(
     if desired_count > current_count:
         # 스케일 업
         add_count = desired_count - current_count
-        agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
+        resource_snapshot = cluster.get("resource_policy_snapshot") or {}
+        agent_flavor_id = cluster.get("agent_flavor_id") or ""
         network_id = cluster.get("network_id") or ""
         ssh_public_key = cluster.get("ssh_public_key") or None
         cluster_name = cluster.get("name") or cluster_id
-        k3s_version = cluster.get("k3s_version") or s.k3s_version
+        k3s_version = cluster.get("k3s_version") or ""
         scale_os_type = cluster.get("os_type") or "ubuntu"
-        image_id = s.k3s_fcos_image_id if scale_os_type == "fcos" else s.k3s_server_image_id
+        image_id = (
+            (resource_snapshot.get("effective_agent_image") or {}).get("id") or cluster.get("server_image_id") or ""
+        )
+        volume_availability_zone = (resource_snapshot.get("cinder.default_volume_availability_zone") or {}).get(
+            "id"
+        ) or ""
         boot_volume_size = s.k3s_boot_volume_size_gb
         sg_id = cluster.get("security_group_id") or None
-
-        try:
-            conn = keystone.get_admin_connection_for_project(project_id)
-        except Exception as e:
-            _logger.error("k3s scale up: cannot get OpenStack connection: %s", e)
-            await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 업 실패: {e}")
+        if not all((agent_flavor_id, network_id, k3s_version, image_id, volume_availability_zone)):
+            message = "스케일 업에 필요한 생성 시점 리소스 스냅샷이 없습니다"
+            _logger.error("k3s scale up: %s", message)
+            await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", message)
             return
-
-        # network_id 폴백: DB → 설정값
-        if not network_id:
-            if s.default_network_enabled:
-                try:
-                    from app.services.default_network import ensure_default_network as _ensure_net
-
-                    _default_net = await _ensure_net(
-                        conn,
-                        project_id,
-                        external_network_id=s.default_network_external_id or None,
-                        cidr=s.default_network_cidr,
-                    )
-                    network_id = _default_net.id
-                except Exception:
-                    _logger.warning("스케일 업: Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
-                    network_id = s.default_network_id
-            else:
-                network_id = s.default_network_id
 
         new_entries: list[dict] = []
         for _i in range(add_count):
             agent_name = f"{cluster_name}-{_rand_suffix()}"
             try:
                 vol = await asyncio.to_thread(
-                    cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
+                    cinder.create_volume_from_image,
+                    conn,
+                    f"{agent_name}-boot",
+                    image_id,
+                    boot_volume_size,
+                    volume_availability_zone,
                 )
                 _agent_args = k3s_plugins.aggregate_agent_args(s)
                 if not _agent_args and cluster.get("occm_enabled"):
@@ -870,6 +894,7 @@ async def _scale_agents(
                     server_ip=server_ip,
                     node_token=node_token or "",
                     ssh_public_key=ssh_public_key,
+                    primary_network_id=network_id,
                     extra_agent_args=_agent_args,
                     os_type=scale_os_type,
                 )
@@ -910,13 +935,6 @@ async def _scale_agents(
         if node_names:
             _logger.info("k3s scale down: K8s 노드 삭제 시작: %s", node_names)
             await k3s_kube.delete_k8s_nodes(cluster_id, node_names)
-
-        try:
-            conn = keystone.get_admin_connection_for_project(project_id)
-        except Exception as e:
-            _logger.error("k3s scale down: cannot get OpenStack connection: %s", e)
-            await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 다운 실패: {e}")
-            return
 
         for vm_id in remove_ids:
             try:
@@ -1205,6 +1223,7 @@ async def list_node_interfaces(
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
     node_role = _assert_vm_in_cluster(vm_id, cluster)
     ifaces = await asyncio.to_thread(lambda: list(conn.compute.server_interfaces(vm_id)))
+    primary_network_id = cluster.get("network_id") or ""
     return [
         K3sInterfaceInfo(
             port_id=i.port_id,
@@ -1212,6 +1231,7 @@ async def list_node_interfaces(
             fixed_ips=i.fixed_ips or [],
             vm_id=vm_id,
             node_role=node_role,
+            is_primary=bool(primary_network_id and i.net_id == primary_network_id),
         )
         for i in ifaces
     ]
@@ -1231,6 +1251,34 @@ async def attach_node_interface(
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
     node_role = _assert_vm_in_cluster(vm_id, cluster)
     try:
+        if cluster.get("status") != "ACTIVE":
+            detail = "ACTIVE 상태의 클러스터만 네트워크를 연결할 수 있습니다"
+            await rec(
+                token_info,
+                conn,
+                resource_type="k3s_cluster",
+                action="k3s.attach_interface",
+                status="failed",
+                resource_id=cluster_id,
+                error_message=detail,
+            )
+            raise HTTPException(status_code=409, detail=detail)
+
+        current_ifaces = await asyncio.to_thread(lambda: list(conn.compute.server_interfaces(vm_id)))
+        primary_network_id = cluster.get("network_id") or ""
+        if body.net_id == primary_network_id or any(i.net_id == body.net_id for i in current_ifaces):
+            detail = "이미 연결된 네트워크입니다"
+            await rec(
+                token_info,
+                conn,
+                resource_type="k3s_cluster",
+                action="k3s.attach_interface",
+                status="failed",
+                resource_id=cluster_id,
+                error_message=detail,
+            )
+            raise HTTPException(status_code=409, detail=detail)
+
         result = await asyncio.to_thread(nova.attach_interface, conn, vm_id, body.net_id)
         await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
         await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")
@@ -1250,6 +1298,7 @@ async def attach_node_interface(
             fixed_ips=result["fixed_ips"],
             vm_id=vm_id,
             node_role=node_role,
+            is_primary=False,
         )
     except HTTPException:
         raise
@@ -1280,6 +1329,47 @@ async def detach_node_interface(
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
     node_role = _assert_vm_in_cluster(vm_id, cluster)
     try:
+        current_ifaces = await asyncio.to_thread(lambda: list(conn.compute.server_interfaces(vm_id)))
+        resolved = next((iface for iface in current_ifaces if iface.port_id == port_id), None)
+        if resolved is None:
+            detail = "인터페이스를 찾을 수 없습니다"
+            await rec(
+                token_info,
+                conn,
+                resource_type="k3s_cluster",
+                action="k3s.detach_interface",
+                status="failed",
+                resource_id=cluster_id,
+                error_message=detail,
+            )
+            raise HTTPException(status_code=404, detail=detail)
+
+        primary_network_id = cluster.get("network_id") or ""
+        if not primary_network_id:
+            detail = "기본 인터페이스를 판별할 수 없습니다"
+            await rec(
+                token_info,
+                conn,
+                resource_type="k3s_cluster",
+                action="k3s.detach_interface",
+                status="failed",
+                resource_id=cluster_id,
+                error_message=detail,
+            )
+            raise HTTPException(status_code=409, detail=detail)
+        if resolved.net_id == primary_network_id:
+            detail = "기본 인터페이스는 제거할 수 없습니다"
+            await rec(
+                token_info,
+                conn,
+                resource_type="k3s_cluster",
+                action="k3s.detach_interface",
+                status="failed",
+                resource_id=cluster_id,
+                error_message=detail,
+            )
+            raise HTTPException(status_code=409, detail=detail)
+
         await asyncio.to_thread(nova.detach_interface, conn, vm_id, port_id)
         await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
         await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")

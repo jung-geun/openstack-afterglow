@@ -59,7 +59,13 @@ export interface ChatFeatureOptions {
 	advisor: { enabled: boolean; model_id?: number; max_uses: number };
 	memory: boolean;
 	response_format: { kind: 'text' | 'json_object' | 'json_schema'; name?: string; version?: string; schema?: Record<string, unknown> };
-	tool_policy: { mode: 'agent_default' | 'none'; approval_mode: 'required_for_mutations' | 'always'; enabled_tool_ids: string[] | null };
+	tool_policy: {
+		mode: 'agent_default' | 'none';
+		approval_mode: 'required_for_mutations' | 'always';
+		enabled_tool_ids: string[] | null;
+		enabled_mcp_ids?: number[] | null;
+		workspace_write_mode?: 'ask' | 'auto_edit';
+	};
 	output_modalities: Array<'text' | 'image' | 'audio' | 'video'>;
 	image_output?: { count: number; aspect_ratio: '1:1' | '16:9' | '9:16'; quality: 'standard' | 'high' };
 	audio_output?: { voice: string; format: 'mp3' | 'wav' | 'opus' };
@@ -72,10 +78,18 @@ export const defaultChatFeatureOptions = (): ChatFeatureOptions => ({
 	advisor: { enabled: false, max_uses: 1 },
 	memory: true,
 	response_format: { kind: 'text' },
-	tool_policy: { mode: 'agent_default', approval_mode: 'required_for_mutations', enabled_tool_ids: null },
+	tool_policy: {
+		mode: 'agent_default',
+		approval_mode: 'required_for_mutations',
+		enabled_tool_ids: null,
+		enabled_mcp_ids: null,
+		workspace_write_mode: 'ask'
+	},
 	output_modalities: ['text']
 });
 
+
+export type ChatExecutionMode = 'chat' | 'plan' | 'code';
 
 export interface ChatCompletionRequest {
 	parts: UserInputPart[];
@@ -83,6 +97,8 @@ export interface ChatCompletionRequest {
 	features: ChatFeatureOptions;
 	agent_id?: string;
 	skill_ids?: number[];
+	execution_mode?: ChatExecutionMode;
+	code_workspace_id?: string;
 }
 
 export interface RegenerateRequest {
@@ -90,10 +106,21 @@ export interface RegenerateRequest {
 	features: ChatFeatureOptions;
 }
 
+export type ChatRunStatus =
+	| 'queued'
+	| 'running'
+	| 'awaiting_approval'
+	| 'awaiting_input'
+	| 'waiting_children'
+	| 'finalizing'
+	| 'completed'
+	| 'failed'
+	| 'canceled';
+
 export interface ChatRunDescriptor {
 	run_id: string;
 	temp_thread_id?: string | null;
-	status: 'queued' | 'running' | 'awaiting_approval' | 'finalizing' | 'completed' | 'failed' | 'canceled';
+	status: ChatRunStatus;
 	events_url: string;
 	cancel_url: string;
 }
@@ -118,7 +145,7 @@ interface EventBase<T extends string, P> {
 	payload: P;
 }
 
-export type RunStage = 'queued' | 'model_request' | 'model_response' | 'tool_execution' | 'response_writing' | 'finalizing';
+export type RunStage = 'queued' | 'model_request' | 'model_response' | 'tool_execution' | 'response_writing' | 'awaiting_input' | 'finalizing';
 
 
 
@@ -130,9 +157,10 @@ export type ChatRunEvent =
 	| EventBase<'part.delta', { message_id: string; part_index: number; part_type: 'text' | 'reasoning'; delta: string }>
 	| EventBase<'part.completed', { message_id: string; part_index: number; part: ChatPart }>
 	| EventBase<'tool.call.started', { call_id: string; name: string; arguments: Record<string, unknown> }>
-	| EventBase<'tool.call.completed', { call_id: string; name: string; content: ChatPart[]; status: 'completed' | 'failed' }>
-	| EventBase<'tool.approval_required', { call_id: string; name: string; arguments: Record<string, unknown>; expires_at: string }>
-	| EventBase<'tool.approval_resolved', { call_id: string; decision: 'approve' | 'deny' }>
+	| EventBase<'tool.call.completed', { call_id: string; name: string; content: ChatPart[]; status: 'completed' | 'failed'; error_code: string | null }>
+	| EventBase<'tool.approval_required', { call_id: string; name: string; source: 'builtin' | 'managed' | 'custom_http' | 'mcp' | 'workspace' | 'agent'; effect: 'read' | 'workspace_write' | 'process' | 'external_mutation'; destination: string | null; redacted_arguments: Record<string, unknown>; preview: ChatPart[]; expected_state_revision: number | null; writer_fence: number | null; expires_at: string }>
+	| EventBase<'tool.approval_resolved', { call_id: string; decision: 'approve' | 'deny'; decided_by_user_id: string | null; decided_at: string }>
+	| EventBase<'interaction.resolved', { interaction_id: string; status: 'answered' | 'timeout' | 'canceled'; response: { option_ids: string[]; text: string | null } | null }>
 	| EventBase<'usage.updated', { components: UsageComponent[]; prompt_tokens: number; completion_tokens: number; raw_cost: string; credited_cost: string }>
 	| EventBase<'run.completed', { status: 'completed'; message_id: string | null }>
 	| EventBase<'run.failed', { status: 'failed'; message_id: string | null; error_code: string; safe_message: string }>
@@ -302,7 +330,7 @@ export function parseChatRunEvent(value: unknown): ChatRunEvent {
 		}
 		case 'run.stage.changed': {
 			exact(payload, ['stage', 'tool_name'], 'run.stage.changed payload');
-			const stage = enumValue(payload.stage, ['queued', 'model_request', 'model_response', 'tool_execution', 'response_writing', 'finalizing'] as const, 'run stage');
+			const stage = enumValue(payload.stage, ['queued', 'model_request', 'model_response', 'tool_execution', 'response_writing', 'awaiting_input', 'finalizing'] as const, 'run stage');
 			const toolName = nullableText(payload.tool_name, 'tool_name');
 			if ((stage === 'tool_execution') !== (toolName !== null)) throw new ChatContractError('tool stage and tool name differ');
 			return { ...base, type, payload: { stage, tool_name: toolName } };
@@ -328,18 +356,78 @@ export function parseChatRunEvent(value: unknown): ChatRunEvent {
 			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, arguments: record(payload.arguments, 'tool arguments') } };
 		}
 		case 'tool.call.completed': {
-			exact(payload, ['call_id', 'name', 'content', 'status'], 'tool.call.completed payload');
-			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, content: parseChatPartsStrict(payload.content), status: enumValue(payload.status, ['completed', 'failed'] as const, 'tool status') } };
+			const hasErrorCode = payload.error_code !== undefined;
+			exact(payload, hasErrorCode ? ['call_id', 'name', 'content', 'status', 'error_code'] : ['call_id', 'name', 'content', 'status'], 'tool.call.completed payload');
+			const errorCode = payload.error_code === undefined || payload.error_code === null ? null : text(payload.error_code, 'tool error code')!;
+			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, content: parseChatPartsStrict(payload.content), status: enumValue(payload.status, ['completed', 'failed'] as const, 'tool status'), error_code: errorCode } };
 		}
 		case 'tool.approval_required': {
-			exact(payload, ['call_id', 'name', 'arguments', 'expires_at'], 'tool.approval_required payload');
+			exact(payload, ['call_id', 'name', 'source', 'effect', 'destination', 'redacted_arguments', 'preview', 'expected_state_revision', 'writer_fence', 'expires_at'], 'tool.approval_required payload');
 			const expiresAt = text(payload.expires_at, 'expires_at')!;
 			if (Number.isNaN(Date.parse(expiresAt))) throw new ChatContractError('invalid approval expiry');
-			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, arguments: record(payload.arguments, 'tool arguments'), expires_at: expiresAt } };
+			const nullableInteger = (value: unknown, label: string): number | null => value === null ? null : integer(value, label);
+			return {
+				...base,
+				type,
+				payload: {
+					call_id: text(payload.call_id, 'call_id')!,
+					name: text(payload.name, 'tool name')!,
+					source: enumValue(payload.source, ['builtin', 'managed', 'custom_http', 'mcp', 'workspace', 'agent'] as const, 'tool source'),
+					effect: enumValue(payload.effect, ['read', 'workspace_write', 'process', 'external_mutation'] as const, 'tool effect'),
+					destination: nullableText(payload.destination, 'tool destination'),
+					redacted_arguments: record(payload.redacted_arguments, 'redacted tool arguments'),
+					preview: parseChatPartsStrict(payload.preview),
+					expected_state_revision: nullableInteger(payload.expected_state_revision, 'expected state revision'),
+					writer_fence: nullableInteger(payload.writer_fence, 'writer fence'),
+					expires_at: expiresAt
+				}
+			};
 		}
 		case 'tool.approval_resolved': {
-			exact(payload, ['call_id', 'decision'], 'tool.approval_resolved payload');
-			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, decision: enumValue(payload.decision, ['approve', 'deny'] as const, 'approval decision') } };
+			exact(payload, ['call_id', 'decision', 'decided_by_user_id', 'decided_at'], 'tool.approval_resolved payload');
+			const decidedAt = text(payload.decided_at, 'approval decision time')!;
+			if (Number.isNaN(Date.parse(decidedAt))) throw new ChatContractError('invalid approval decision time');
+			return {
+				...base,
+				type,
+				payload: {
+					call_id: text(payload.call_id, 'call_id')!,
+					decision: enumValue(payload.decision, ['approve', 'deny'] as const, 'approval decision'),
+					decided_by_user_id: nullableText(payload.decided_by_user_id, 'approval deciding user'),
+					decided_at: decidedAt
+				}
+			};
+		}
+		case 'interaction.resolved': {
+			exact(payload, ['interaction_id', 'status', 'response'], 'interaction.resolved payload');
+			const response = payload.response === null ? null : record(payload.response, 'interaction response');
+			const interactionStatus = enumValue(payload.status, ['answered', 'timeout', 'canceled'] as const, 'interaction status');
+			if (response !== null) {
+				if (
+					!Array.isArray(response.option_ids) ||
+					response.option_ids.length > 5 ||
+					response.option_ids.some((optionId) => !text(optionId, 'interaction option id')) ||
+					new Set(response.option_ids).size !== response.option_ids.length
+				) {
+					throw new ChatContractError('invalid interaction option ids');
+				}
+				exact(response, ['option_ids', 'text'], 'interaction response');
+				if (response.text !== null && (typeof response.text !== 'string' || response.text.length > 4000)) {
+					throw new ChatContractError('invalid interaction text');
+				}
+			}
+			if ((interactionStatus === 'answered') !== (response !== null)) {
+				throw new ChatContractError('interaction status and response differ');
+			}
+			return {
+				...base,
+				type,
+				payload: {
+					interaction_id: text(payload.interaction_id, 'interaction id')!,
+					status: interactionStatus,
+					response: response === null ? null : { option_ids: response.option_ids as string[], text: response.text as string | null }
+				}
+			};
 		}
 		case 'usage.updated': {
 			exact(payload, ['components', 'prompt_tokens', 'completion_tokens', 'raw_cost', 'credited_cost'], 'usage.updated payload');

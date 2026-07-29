@@ -23,7 +23,13 @@
 		headers?: Record<string, string> | null; // 값은 서버에서 마스킹됨
 		has_headers?: boolean;
 		auth_requirements?: AuthRequirement[];
+		auth_mode?: 'none' | 'headers' | 'oauth';
 		is_active: boolean;
+	}
+	interface McpOAuthStatus {
+		required: boolean;
+		connected: boolean;
+		expires_at: string | null;
 	}
 	interface CustomTool {
 		id: number;
@@ -65,6 +71,8 @@
 	let credValues = $state<Record<string, string>>({});
 	let credFilled = $state<string[]>([]);
 	let savingCred = $state(false);
+	let oauthStatus = $state<Record<number, McpOAuthStatus>>({});
+	let connectingOAuthId = $state<number | null>(null);
 
 	/** 'Header-Name: value' 형식 줄들을 dict 로 파싱. 빈 줄/':' 없는 줄 무시. */
 	function parseHeaders(text: string): Record<string, string> {
@@ -134,6 +142,35 @@
 		}
 	}
 
+
+	async function connectOAuth(m: McpServer) {
+		connectingOAuthId = m.id;
+		try {
+			const result = await api.post<{ authorization_url: string }>(
+				`${base}/mcp-servers/${m.id}/oauth/start`,
+				{},
+				token,
+				projectId
+			);
+			if (!result.authorization_url) throw new Error('missing authorization URL');
+			window.location.assign(result.authorization_url);
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : 'OAuth 연결을 시작하지 못했습니다');
+		} finally {
+			connectingOAuthId = null;
+		}
+	}
+
+	async function disconnectOAuth(m: McpServer) {
+		if (!(await confirmDialog(`${m.name} OAuth 연결을 해제하시겠습니까?`))) return;
+		try {
+			await api.delete(`${base}/mcp-servers/${m.id}/oauth`, token, projectId);
+			await load();
+			toast.success('OAuth 연결을 해제했습니다');
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : 'OAuth 연결 해제 실패');
+		}
+	}
 	let tName = $state('');
 	let tDesc = $state('');
 	let tMethod = $state('GET');
@@ -157,6 +194,16 @@
 			mcps = ms;
 			tools = ts;
 			skills = ss;
+			oauthStatus = Object.fromEntries(
+				await Promise.all(
+					ms
+						.filter((mcp) => mcp.auth_mode === 'oauth')
+						.map(async (mcp) => [
+							mcp.id,
+							await api.get<McpOAuthStatus>(`${base}/mcp-servers/${mcp.id}/oauth`, token, projectId)
+						] as const)
+				)
+			);
 		} catch {
 			toast.error('목록을 불러오지 못했습니다');
 		} finally {
@@ -310,14 +357,13 @@
 		</div>
 		<div class="mt-3">
 			<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-authreq">
-				사용자 인증 요구사항 (선택) — 한 줄에 하나, <code>헤더키: 라벨</code>. Notion/Gmail 처럼
-				<b>사용자마다 다른 인증</b>이 필요할 때, 값은 넣지 말고 <b>요구사항만 선언</b>하세요. 각 사용자가 자기 값을 채웁니다.
+				사용자 인증 요구사항 (선택) — 한 줄에 하나, <code>헤더키: 라벨</code>. Notion MCP URL은 자동으로 사용자별 OAuth 연결을 요구합니다. 다른 정적 헤더 인증만 여기에서 선언하세요.
 			</label>
 			<textarea
 				id="mcp-authreq"
 				class="{inputCls} font-mono"
 				rows="2"
-				placeholder={'Authorization: Notion Integration Token\nX-Api-Key: Gmail API Key'}
+				placeholder={'Authorization: Service access token\nX-Api-Key: External service key'}
 				bind:value={mAuthReq}
 			></textarea>
 		</div>
@@ -341,12 +387,24 @@
 								<span class="text-xs text-[var(--color-ink-3)]">{m.transport}</span>
 								{#if m.has_headers}<span class="text-xs text-[var(--color-ink-3)]" title="공용 인증 헤더 설정됨">🔒</span>{/if}
 								{#if m.auth_requirements?.length}<span class="text-xs text-[var(--color-ink-3)]" title="사용자별 인증 필요">👤🔑</span>{/if}
+								{#if m.auth_mode === 'oauth'}
+									<span class="text-xs text-[var(--color-state-info)]" title="사용자별 OAuth 연결 필요">OAuth</span>
+								{/if}
 							</div>
 							{#if m.url}<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{m.url}</div>{/if}
 						</div>
 						<div class="flex shrink-0 items-center gap-3 text-xs">
 							{#if !isAdmin && m.auth_requirements?.length}
 								<button class="text-[var(--color-accent)] hover:opacity-80" onclick={() => openCred(m)}>인증 정보</button>
+							{/if}
+							{#if !isAdmin && m.auth_mode === 'oauth'}
+								{#if oauthStatus[m.id]?.connected}
+									<button class="text-[var(--color-state-success)] hover:opacity-80" onclick={() => disconnectOAuth(m)}>OAuth 연결됨</button>
+								{:else}
+									<button class="text-[var(--color-accent)] hover:opacity-80" disabled={connectingOAuthId === m.id} onclick={() => connectOAuth(m)}>
+										{connectingOAuthId === m.id ? '연결 준비 중…' : `${m.name} OAuth 연결`}
+									</button>
+								{/if}
 							{/if}
 							<button class="text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]" onclick={() => toggle('mcp-servers', m.id, m.is_active)}>{m.is_active ? '비활성화' : '활성화'}</button>
 							<button class="text-[var(--color-state-danger)] hover:opacity-80" onclick={() => removeItem('mcp-servers', m.id)}>삭제</button>

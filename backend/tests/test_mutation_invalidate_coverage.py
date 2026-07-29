@@ -109,6 +109,9 @@ EXEMPT_ROUTERS: set[str] = {
     "chat/completions.py",  # 스트리밍 completions (사용량 원장 append-only)
     "chat/extensions.py",  # MCP 서버/커스텀툴 CRUD (DB 직접, app 캐시 미사용)
     "chat/code_workspaces.py",  # workspace/credential metadata is read directly from its SQLAlchemy store
+    # MCP OAuth/control-plane state is DB-backed and bypasses app resource caches.
+    "mcp.py",
+    "identity/mcp_access.py",
 }
 
 # ---------------------------------------------------------------------------

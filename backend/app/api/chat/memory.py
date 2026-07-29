@@ -26,6 +26,7 @@ _MAX_CONTENT = 4000
 
 class MemoryCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=_MAX_CONTENT)
+    category: Literal["interest", "development", "habit", "preference", "general"] = "general"
     scope: Literal["account", "project", "workspace"] = "account"
     workspace_id: int | None = Field(default=None, gt=0)
 
@@ -39,6 +40,7 @@ class MemorySearch(BaseModel):
 class MemoryUpdate(BaseModel):
     content: str | None = Field(default=None, max_length=_MAX_CONTENT)
     is_active: bool | None = None
+    category: Literal["interest", "development", "habit", "preference", "general"] | None = None
 
 
 def _map_error(exc: Exception) -> HTTPException:
@@ -81,6 +83,7 @@ async def create_memory(payload: MemoryCreate, token_info: dict = Depends(get_to
             scope=payload.scope,
             project_id=project_id,
             workspace_id=workspace_id,
+            category=payload.category,
         )
     except (ms.MemoryValidationError, ms.ChatStorageUnavailable) as exc:
         raise _map_error(exc) from exc

@@ -19,7 +19,7 @@ class RunStoreError(RuntimeError):
     pass
 
 
-NONTERMINAL = {"queued", "running", "awaiting_approval", "finalizing"}
+NONTERMINAL = {"queued", "running", "awaiting_approval", "awaiting_input", "waiting_children", "finalizing"}
 TERMINAL = {"completed", "failed", "canceled"}
 
 
@@ -57,9 +57,18 @@ def load_segment_payload(ciphertext: str | None) -> dict[str, Any] | None:
 
 
 def _event_payload(event: ChatRunEvent) -> str:
-    return encrypt_chat_content(
-        json.dumps(event.payload.model_dump(mode="json", by_alias=True, exclude_none=True), separators=(",", ":"))
-    )
+    return encrypt_chat_content(json.dumps(event.payload.model_dump(mode="json", by_alias=True), separators=(",", ":")))
+
+
+def _normalize_replayed_payload(row: ChatRunEventRow, payload: object) -> object:
+    """Supply v2 resolution provenance for pre-provenance journal rows."""
+    if row.event_type != "tool.approval_resolved" or not isinstance(payload, dict):
+        return payload
+    return {
+        **payload,
+        "decided_by_user_id": payload.get("decided_by_user_id"),
+        "decided_at": payload.get("decided_at", _as_utc(row.created_at).isoformat()),
+    }
 
 
 async def load_owned_run(
@@ -104,7 +113,7 @@ async def replay_events(session: AsyncSession, run: ChatRun, *, after_seq: int) 
     ).scalars()
     events: list[ChatRunEvent] = []
     for row in rows:
-        payload = json.loads(decrypt_chat_content(row.payload))
+        payload = _normalize_replayed_payload(row, json.loads(decrypt_chat_content(row.payload)))
         events.append(
             validate_chat_run_event(
                 {

@@ -108,7 +108,9 @@ async def create_default_nodegroups(
     *,
     cluster_id: str,
     server_flavor_id: str | None,
+    server_image_id: str | None,
     agent_flavor_id: str | None,
+    agent_image_id: str | None,
     agent_count: int,
 ) -> None:
     """신규 클러스터용 기본 server/agent 노드그룹을 같은 DB 트랜잭션에 추가한다."""
@@ -129,6 +131,7 @@ async def create_default_nodegroups(
                 role="server",
                 node_count=1,
                 flavor_id=server_flavor_id,
+                image_id=server_image_id,
                 is_default=True,
                 min_size=1,
                 max_size=1,
@@ -143,6 +146,7 @@ async def create_default_nodegroups(
                 role="agent",
                 node_count=max(0, int(agent_count or 0)),
                 flavor_id=agent_flavor_id,
+                image_id=agent_image_id,
                 is_default=True,
                 min_size=0,
                 max_size=max(5, int(agent_count or 0)),

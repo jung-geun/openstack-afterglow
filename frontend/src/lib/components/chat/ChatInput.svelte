@@ -31,6 +31,9 @@
 		/** 스킬 선택 — opt-in(기본 미선택 [], 선택된 것만 주입). 모든 모델에서 사용 가능(프롬프트 주입). */
 		availableSkills?: { id: number; name: string }[];
 		selectedSkillIds?: number[];
+		/** @ mention으로 바인딩할 수 있는 현재 프로젝트 에이전트. */
+		availableAgents?: { id: number; name: string }[];
+		onSelectAgent?: (agentId: number) => void;
 		token?: string;
 		projectId?: string;
 		onSend: () => void;
@@ -51,6 +54,8 @@
 		selectedMcpIds = $bindable(null),
 		availableSkills = [],
 		selectedSkillIds = $bindable([]),
+		availableAgents = [],
+		onSelectAgent,
 		token,
 		projectId,
 		onSend,
@@ -79,6 +84,34 @@
 	// 스킬은 프롬프트 주입이라 tool_call 없이도 사용 가능.
 	const canUseSkills = $derived(availableSkills.length > 0);
 	const hasPlus = $derived(canAttach || canUseTools || canUseSkills);
+
+	type ComposerShortcut = { kind: 'agent' | 'skill'; id: number; name: string };
+	const composerShortcuts = $derived.by((): ComposerShortcut[] => {
+		const match = value.match(/(?:^|\s)([@/])([^\s]*)$/);
+		if (!match) return [];
+		const [, prefix, query] = match;
+		const normalized = query.toLocaleLowerCase();
+		if (prefix === '@') {
+			return availableAgents
+				.filter((agent) => agent.name.toLocaleLowerCase().startsWith(normalized))
+				.slice(0, 5)
+				.map((agent) => ({ kind: 'agent', id: agent.id, name: agent.name }));
+		}
+		return availableSkills
+			.filter((skill) => skill.name.toLocaleLowerCase().startsWith(normalized))
+			.slice(0, 5)
+			.map((skill) => ({ kind: 'skill', id: skill.id, name: skill.name }));
+	});
+
+	function applyShortcut(shortcut: ComposerShortcut) {
+		if (shortcut.kind === 'agent') {
+			onSelectAgent?.(shortcut.id);
+		} else if (!selectedSkillIds.includes(shortcut.id)) {
+			selectedSkillIds = [...selectedSkillIds, shortcut.id];
+		}
+		value = value.replace(/(^|\s)[@/][^\s]*$/, '$1');
+		ta?.focus();
+	}
 	const attachmentUnavailableReason = $derived.by(() => {
 		if (!modelCaps) return '모델 기능을 확인하는 중입니다';
 		const imageGate = modelCaps.feature_gates?.image_input;
@@ -237,10 +270,28 @@
 			bind:value
 			{placeholder}
 			rows="1"
+
 			disabled={disabled && !streaming}
 			onkeydown={onKeydown}
 			oninput={autoGrow}
 		></textarea>
+		{#if composerShortcuts.length && !streaming}
+			<div class="shortcut-menu" role="listbox" aria-label="채팅 명령 제안">
+				{#each composerShortcuts as shortcut (shortcut.kind + shortcut.id)}
+					<button
+						type="button"
+						role="option"
+						aria-selected={shortcut.kind === 'skill' && selectedSkillIds.includes(shortcut.id)}
+						class="shortcut-option"
+						onclick={() => applyShortcut(shortcut)}
+					>
+						<span class="shortcut-prefix">{shortcut.kind === 'agent' ? '@' : '/'}</span>
+						<span class="shortcut-name">{shortcut.name}</span>
+						<span class="shortcut-kind">{shortcut.kind === 'agent' ? '에이전트' : '스킬'}</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
 
 		<div class="toolbar">
 			<div class="tb-left">
@@ -382,6 +433,50 @@
 	}
 	textarea::placeholder {
 		color: var(--color-ink-3);
+	}
+	.shortcut-menu {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		max-height: 12rem;
+		overflow-y: auto;
+		padding: 0.3rem;
+		border: 1px solid var(--color-line);
+		border-radius: 0.6rem;
+		background: var(--color-surface-sunken);
+	}
+	.shortcut-option {
+		display: grid;
+		grid-template-columns: 1.1rem minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0.35rem;
+		width: 100%;
+		padding: 0.42rem 0.48rem;
+		border: none;
+		border-radius: 0.42rem;
+		background: transparent;
+		color: var(--color-ink-1);
+		cursor: pointer;
+		font-size: 0.78rem;
+		text-align: left;
+	}
+	.shortcut-option:hover,
+	.shortcut-option:focus-visible {
+		background: var(--color-surface-raised);
+	}
+	.shortcut-prefix {
+		color: var(--color-accent);
+		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+		font-weight: 700;
+	}
+	.shortcut-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.shortcut-kind {
+		color: var(--color-ink-3);
+		font-size: 0.68rem;
 	}
 	.toolbar {
 		display: flex;

@@ -12,7 +12,7 @@
 		parseChatRunDescriptor,
 		type ChatRunDescriptor
 	} from '$lib/api/chatStream';
-	import { createRunViewState, reduceRunEvent } from '$lib/api/chatRunReducer';
+	import { createRunViewState, reduceRunEvent, type RunActivityItem } from '$lib/api/chatRunReducer';
 	import {
 		computeMetrics,
 		estimateTokens,
@@ -23,13 +23,18 @@
 	import { normalizeEffort } from '$lib/api/chatEffort';
 	import { createChatRevealBuffer } from '$lib/api/chatRevealBuffer';
 	import { createChatRunAttachment } from '$lib/api/chatRunAttachment';
+	import { taskLabelForStage, taskLabelForTool } from '$lib/api/chatTaskLabels';
 	import {
 		clearActiveConversationId,
 		loadActiveConversationId,
 		saveActiveConversationId
 	} from '$lib/api/chatSession';
 	import { toInputParts, type ChatAttachment } from '$lib/api/chatAttachments';
-	import { defaultChatFeatureOptions, type UserInputPart } from '$lib/api/chatContracts';
+	import {
+		defaultChatFeatureOptions,
+		type RunStage,
+		type UserInputPart
+	} from '$lib/api/chatContracts';
 	import { SvelteMap } from 'svelte/reactivity';
 	import {
 		buildActivePath,
@@ -56,6 +61,7 @@
 	import ModelPickerOverlay from './ModelPickerOverlay.svelte';
 	import ConversationWorkspacePicker from './ConversationWorkspacePicker.svelte';
 
+	import ChatToolApproval, { type ChatToolApproval as ChatToolApprovalItem } from './ChatToolApproval.svelte';
 	interface Conversation {
 		id: string;
 		title: string | null;
@@ -76,6 +82,7 @@
 		metrics?: StreamMetrics | null;
 		toolItems?: ToolActivityItem[];
 		reasoning?: string | null;
+		activityItems?: RunActivityItem[];
 	};
 
 	type AgentActivity = {
@@ -83,20 +90,15 @@
 		startedAt: string;
 	};
 
+	type PendingToolApproval = ChatToolApprovalItem & { runId: string };
+
 	function activityForRunStage(
-		stage: 'queued' | 'model_request' | 'model_response' | 'tool_execution' | 'response_writing' | 'finalizing',
+		stage: RunStage,
 		startedAt: string,
 		toolName: string | null
-	): AgentActivity {
-		const label = {
-			queued: '실행 대기열에 등록되었습니다',
-			model_request: '모델에 작업을 요청하는 중입니다',
-			model_response: '모델 응답을 처리하는 중입니다',
-			tool_execution: `${toolName} 도구를 실행 중입니다`,
-			response_writing: '응답을 작성하는 중입니다',
-			finalizing: '응답을 저장하는 중입니다'
-		}[stage];
-		return { label, startedAt };
+	): AgentActivity | null {
+		const label = taskLabelForStage(stage, toolName);
+		return label ? { label, startedAt } : null;
 	}
 
 
@@ -132,6 +134,7 @@
 		const features = defaultChatFeatureOptions();
 		features.tool_policy.enabled_tool_ids =
 			selectedToolIds === null ? null : selectedToolIds.map(String);
+		features.tool_policy.enabled_mcp_ids = selectedMcpIds;
 		return features;
 	}
 	let selectionGeneration = 0;
@@ -140,8 +143,37 @@
 	let activeLeafId = $state<string | null>(null);
 	let input = $state('');
 	let error = $state<string | null>(null);
+	let pendingToolApprovals = $state<PendingToolApproval[]>([]);
+	let resolvingToolApprovalId = $state<string | null>(null);
 	let toolActivity = $state<string | null>(null);
 	let agentActivity = $state<AgentActivity | null>(null);
+	const lumenStarterPrompts = [
+		{
+			label: '프로젝트 현황',
+			prompt: '현재 프로젝트의 컴퓨팅, 스토리지, 네트워크 리소스를 읽기 전용으로 요약해 주세요.'
+		},
+		{
+			label: 'VM 생성 계획',
+			prompt: '새 VM을 만들기 전에 현재 이미지, flavor, 네트워크를 확인하고 안전한 생성 계획을 제안해 주세요.'
+		},
+		{
+			label: '스토리지·네트워크 진단',
+			prompt: '현재 프로젝트의 스토리지와 네트워크 구성을 점검하고 가능한 문제를 진단해 주세요.'
+		},
+		{
+			label: '데이터베이스 준비',
+			prompt: '현재 데이터베이스 인스턴스를 확인한 뒤 새 데이터베이스를 준비하는 절차를 제안해 주세요.'
+		},
+		{
+			label: '컨테이너 준비',
+			prompt: '현재 컨테이너 상태를 확인한 뒤 새 컨테이너 작업을 위한 안전한 절차를 제안해 주세요.'
+		}
+	] as const;
+
+	function insertLumenStarterPrompt(prompt: string) {
+		input = prompt;
+		requestAnimationFrame(() => composerAnchor?.querySelector<HTMLTextAreaElement>('textarea')?.focus());
+	}
 	let streaming = $state(false);
 	let runningConversationIds = $state<Set<string>>(new Set());
 	let treeNodes = $state<ChatTreeNode[]>([]);
@@ -231,6 +263,15 @@
 			pendingWorkspaceId = initialWorkspaceId;
 		}
 	});
+	type FailedPersistentSubmission = {
+		conversationId: string | null;
+		message: DisplayMessage;
+		path: string;
+		body: unknown;
+		idempotencyKey: string;
+		modelName: string;
+	};
+	let failedSubmission = $state<FailedPersistentSubmission | null>(null);
 	let stream = $state<{
 		base: DisplayMessage[];
 		assistant: DisplayMessage;
@@ -322,6 +363,7 @@
 			return [...stream.base, stream.assistant];
 		}
 		if (tempMode) return tempMessages;
+		if (failedSubmission?.conversationId === activeConvId) return [...activePath, failedSubmission.message];
 		return activePath;
 	});
 	const isEmpty = $derived(displayPath.length === 0);
@@ -806,10 +848,18 @@
 			for await (const evt of followChatRun(descriptor, { token, projectId, signal: controller.signal })) {
 				if (destroyed || generation !== streamGeneration) return;
 				runState = reduceRunEvent(runState, evt);
+				draft.activityItems = runState.activity;
+				if (evt.type === 'message.created') {
+					reveal.clear();
+					draft.content = '';
+					draft.reasoning = '';
+					draft.citations = [];
+				}
 				if (evt.type === 'run.stage.changed') {
 					agentActivity = activityForRunStage(evt.payload.stage, evt.created_at, evt.payload.tool_name);
 				}
 				if (evt.type === 'part.delta' || evt.type === 'part.completed') {
+					if (evt.payload.message_id !== runState.messageId) continue;
 					const authoritativeText = runState.parts
 						.filter((part) => part.type === 'text')
 						.map((part) => part.text)
@@ -842,9 +892,30 @@
 						name: tool.name,
 						args: JSON.stringify(tool.arguments),
 						result: completedToolText(tool.content),
-						running: tool.status === 'running'
+						running: tool.status === 'running',
+						status: tool.status === 'running' ? undefined : tool.status,
+						errorCode: tool.errorCode
 					}));
-					toolActivity = evt.type === 'tool.call.started' ? evt.payload.name : null;
+					toolActivity = evt.type === 'tool.call.started' ? taskLabelForTool(evt.payload.name) : null;
+				} else if (evt.type === 'tool.approval_required') {
+					pendingToolApprovals = [
+						...pendingToolApprovals.filter(
+							(approval) => approval.runId !== descriptor.run_id || approval.callId !== evt.payload.call_id
+						),
+						{
+							runId: descriptor.run_id,
+							callId: evt.payload.call_id,
+							name: evt.payload.name,
+							effect: evt.payload.effect,
+							argumentKeys: Object.keys(evt.payload.redacted_arguments),
+							preview: evt.payload.preview,
+							expiresAt: evt.payload.expires_at
+						}
+					];
+				} else if (evt.type === 'tool.approval_resolved') {
+					pendingToolApprovals = pendingToolApprovals.filter(
+						(approval) => approval.runId !== descriptor.run_id || approval.callId !== evt.payload.call_id
+					);
 				} else if (evt.type === 'usage.updated') {
 					draft.metrics = computeMetrics(
 						evt.payload.completion_tokens,
@@ -853,6 +924,7 @@
 						false
 					);
 				} else if (evt.type === 'run.completed') {
+					pendingToolApprovals = pendingToolApprovals.filter((approval) => approval.runId !== descriptor.run_id);
 					await finishReveal();
 					if (generation !== streamGeneration || destroyed) return;
 					draft.streaming = false;
@@ -861,9 +933,15 @@
 					endStream();
 					return;
 				} else if (evt.type === 'run.failed' || evt.type === 'run.canceled') {
+					pendingToolApprovals = pendingToolApprovals.filter((approval) => approval.runId !== descriptor.run_id);
 					drainReveal();
 					error = evt.payload.safe_message;
 					endStream();
+					if (descriptor.conversation_id && activeConvId === descriptor.conversation_id && !tempMode) {
+						setConversationRun(descriptor.conversation_id, false);
+						await loadMessages(descriptor.conversation_id, selectionGeneration);
+						void loadConversations();
+					}
 					return;
 				}
 			}
@@ -874,7 +952,8 @@
 			endStream();
 		} finally {
 			streamAttachment.release(controller);
-			revealCompletion?.();
+			const pendingRevealCompletion = revealCompletion as (() => void) | null;
+			pendingRevealCompletion?.();
 			revealCompletion = null;
 			if (revealFrame !== null) {
 				cancelAnimationFrame(revealFrame);
@@ -888,19 +967,22 @@
 		body: unknown,
 		draft: DisplayMessage,
 		onDone: (metrics: StreamMetrics | null) => Promise<void> | void,
-		onStarted?: (descriptor: ChatRunDescriptor) => void
-	) {
+		onStarted?: (descriptor: ChatRunDescriptor) => void,
+		idempotencyKey?: string
+	): Promise<boolean> {
 		const generation = streamGeneration;
 		try {
-			const descriptor = await createChatRun(path, body, { token, projectId });
-			if (destroyed || generation !== streamGeneration) return;
+			const descriptor = await createChatRun(path, body, { token, projectId, idempotencyKey });
+			if (destroyed || generation !== streamGeneration) return false;
 			currentRun = descriptor;
 			onStarted?.(descriptor);
 			await followRun(descriptor, draft, onDone, generation);
+			return true;
 		} catch (caught) {
-			if (destroyed || generation !== streamGeneration) return;
+			if (destroyed || generation !== streamGeneration) return false;
 			error = caught instanceof Error ? caught.message : '채팅 실행 중 오류가 발생했습니다';
 			endStream();
+			return false;
 		}
 	}
 
@@ -960,6 +1042,23 @@
 		}
 	}
 
+	async function resolveToolApproval(approval: PendingToolApproval, decision: 'approve' | 'deny') {
+		if (!token || !projectId || resolvingToolApprovalId) return;
+		resolvingToolApprovalId = approval.callId;
+		try {
+			await api.post(
+				`/api/v1/chat/runs/${encodeURIComponent(approval.runId)}/approvals/${encodeURIComponent(approval.callId)}`,
+				{ decision },
+				token,
+				projectId
+			);
+		} catch (cause) {
+			toast.error(cause instanceof Error ? cause.message : '도구 승인 결정을 저장하지 못했습니다.');
+		} finally {
+			resolvingToolApprovalId = null;
+		}
+	}
+
 	// --- 전송 ---
 	async function send() {
 		const text = input.trim();
@@ -986,6 +1085,30 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : '대화를 생성하지 못했습니다';
 			endStream();
+			const failedUserMsg: DisplayMessage = {
+				id: tempId(),
+				conversation_id: '',
+				role: 'user',
+				parent_id: null,
+				content: text,
+				created_at: null,
+				execution: { status: 'failed', retryable: true }
+			};
+			failedSubmission = {
+				conversationId: null,
+				message: failedUserMsg,
+				path: '',
+				body: {
+					parts: inputParts,
+					model_id: selectedModel,
+					features: selectedFeatureOptions(),
+					reasoning_effort: effort,
+					agent_id: activeAgent?.id,
+					skill_ids: selectedSkillIds,
+				},
+				idempotencyKey: crypto.randomUUID(),
+				modelName: selectedModel
+			};
 			return;
 		}
 		if (!convId) {
@@ -1005,16 +1128,19 @@
 		// $state 프록시를 경유해 mutate 해야 반응성이 발생한다(raw draft 직접 쓰기는 트랩 우회).
 		const live = stream.assistant;
 
-		await runStream(
-			`/api/v1/chat/conversations/${convId}/completions`,
-			{
-				parts: inputParts,
-				model_id: selectedModel,
-				features: selectedFeatureOptions(),
-				reasoning_effort: effort,
-				agent_id: activeAgent?.id,
-				skill_ids: selectedSkillIds,
-			},
+		const path = `/api/v1/chat/conversations/${convId}/completions`;
+		const body = {
+			parts: inputParts,
+			model_id: selectedModel,
+			features: selectedFeatureOptions(),
+			reasoning_effort: effort,
+			agent_id: activeAgent?.id,
+			skill_ids: selectedSkillIds,
+		};
+		const idempotencyKey = crypto.randomUUID();
+		const started = await runStream(
+			path,
+			body,
 			live,
 			async (metrics) => {
 				setConversationRun(convId!, false);
@@ -1027,8 +1153,22 @@
 				void loadConversations();
 				void loadUsage();
 			},
-			() => setConversationRun(convId!, true)
+			() => setConversationRun(convId!, true),
+			idempotencyKey
 		);
+		if (!started) {
+			failedSubmission = {
+				conversationId: convId,
+				message: {
+					...userMsg,
+					execution: { status: 'failed', retryable: true },
+				},
+				path,
+				body,
+				idempotencyKey,
+				modelName: selectedModel
+			};
+		}
 	}
 
 	async function sendTemp(
@@ -1088,6 +1228,95 @@
 				reasoning_effort: effort,
 				skill_ids: selectedSkillIds,
 			},
+			live,
+			async (metrics) => {
+				setConversationRun(conversationId, false);
+				if (activeConvId === conversationId && !tempMode) {
+					const selection = selectionGeneration;
+					if (await loadMessages(conversationId, selection) && metrics && activeLeafId) {
+						metricsById.set(activeLeafId, metrics);
+					}
+				}
+				void loadConversations();
+				void loadUsage();
+			},
+			() => setConversationRun(conversationId, true)
+		);
+	}
+
+	async function retryFailedTurn(messageId: string) {
+		if (streaming || tempMode || !token || !projectId) return;
+		if (failedSubmission?.message.id === messageId) {
+			const submission = failedSubmission;
+			error = null;
+			streaming = true;
+			let convId = submission.conversationId || activeConvId;
+			if (!convId) {
+				try {
+					convId = await ensureConversation(submission.message.content);
+				} catch (e) {
+					error = e instanceof Error ? e.message : '대화를 생성하지 못했습니다';
+					endStream();
+					return;
+				}
+			}
+			if (!convId) {
+				endStream();
+				return;
+			}
+			submission.conversationId = convId;
+			submission.path = `/api/v1/chat/conversations/${convId}/completions`;
+			const userMsg: DisplayMessage = {
+				...submission.message,
+				conversation_id: convId,
+				parent_id: activeLeafId
+			};
+			stream = {
+				base: [...activePath, userMsg],
+				assistant: newAssistantDraft(submission.modelName),
+				conversationId: convId,
+				temp: false
+			};
+			const live = stream.assistant;
+			const started = await runStream(
+				submission.path,
+				submission.body,
+				live,
+				async (metrics) => {
+					setConversationRun(convId!, false);
+					if (activeConvId === convId && !tempMode) {
+						const selection = selectionGeneration;
+						if (await loadMessages(convId!, selection) && metrics && activeLeafId) {
+							metricsById.set(activeLeafId, metrics);
+						}
+					}
+					void loadConversations();
+					void loadUsage();
+				},
+				() => setConversationRun(convId!, true),
+				submission.idempotencyKey
+			);
+			if (started) failedSubmission = null;
+			return;
+		}
+		if (!activeConvId) return;
+		const conversationId = activeConvId;
+		const idx = activePath.findIndex((message) => message.id === messageId);
+		const message = activePath[idx];
+		const targetRunId = message?.execution?.run_id;
+		if (idx === -1 || message?.role !== 'user' || !targetRunId || message.execution?.retryable !== true) return;
+		error = null;
+		streaming = true;
+		stream = {
+			base: activePath.slice(0, idx + 1),
+			assistant: newAssistantDraft(selectedModel),
+			conversationId,
+			temp: false
+		};
+		const live = stream.assistant;
+		await runStream(
+			`/api/v1/chat/conversations/${conversationId}/runs/${targetRunId}/retry`,
+			{},
 			live,
 			async (metrics) => {
 				setConversationRun(conversationId, false);
@@ -1335,15 +1564,26 @@
 			{agentActivity}
 			{error}
 			empty={isEmpty}
+			starterPrompts={lumenStarterPrompts}
+			onStarterPrompt={insertLumenStarterPrompt}
 			conversationKey={activeConvId ?? (tempMode ? tempThreadId ?? 'temporary' : '')}
 			hasOlder={historyHasMore}
 			loadingOlder={historyLoading}
 			onLoadOlder={loadOlderMessages}
 			onCopy={copy}
 			onRegenerate={regenerate}
+			onRetry={retryFailedTurn}
 			onFork={fork}
 			onSwitchVersion={switchVersion}
 		/>
+
+		{#each pendingToolApprovals as approval (approval.runId + approval.callId)}
+			<ChatToolApproval
+				{approval}
+				busy={resolvingToolApprovalId === approval.callId}
+				onDecision={(callId, decision) => void resolveToolApproval(approval, decision)}
+			/>
+		{/each}
 
 
 			<div class="composer-anchor" bind:this={composerAnchor}>
@@ -1357,6 +1597,10 @@
 					{availableTools}
 					{availableMcp}
 					{availableSkills}
+					availableAgents={agents}
+					onSelectAgent={(agentId) => {
+						activeAgent = agents.find((agent) => agent.id === agentId) ?? activeAgent;
+					}}
 					{token}
 					{projectId}
 					modelCaps={selectedModelObj?.capabilities}

@@ -41,13 +41,24 @@ async def create_waygate_server(
     """Waygate 서버 프로비저닝 요청 — CREATING 상태로 즉시 응답, 백그라운드에서 부팅."""
     _require_db()
     settings = get_settings()
-    if not settings.waygate_provider_network_id or not settings.waygate_image_id:
-        raise HTTPException(
-            status_code=503,
-            detail="Waygate 서비스가 설정되지 않았습니다 (afterglow.conf [waygate] provider_network_id/image_id 필요)",
-        )
-
     project_id = token_info["project_id"]
+    from app.services.keystone import get_admin_connection_for_project
+    from app.services.resource_policy_store import get_policy_snapshot, resolve_policy_snapshot
+
+    conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+    try:
+        snapshot = await resolve_policy_snapshot(
+            conn=conn,
+            keys=("waygate.provider_network", "waygate.image", "waygate.flavor"),
+        )
+        floating_network = (await get_policy_snapshot(("waygate.floating_network",)))["waygate.floating_network"]
+        if floating_network is not None:
+            snapshot["waygate.floating_network"] = floating_network
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Waygate resource policy is unavailable: {exc}") from exc
+    finally:
+        await asyncio.to_thread(conn.close)
+
     server_id = str(uuid.uuid4())
 
     await waygate_db.create_server_record(
@@ -58,6 +69,10 @@ async def create_waygate_server(
             "status": "CREATING",
             "listen_port": settings.waygate_default_listen_port,
             "tunnel_cidr": settings.waygate_default_tunnel_cidr,
+            "image_id": snapshot["waygate.image"]["id"],
+            "provider_network_id": snapshot["waygate.provider_network"]["id"],
+            "floating_network_id": (snapshot.get("waygate.floating_network") or {}).get("id"),
+            "resource_policy_snapshot": snapshot,
             "created_by_user_id": token_info.get("user_id"),
             "created_by_username": token_info.get("username"),
         },

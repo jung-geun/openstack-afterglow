@@ -5,6 +5,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _enable_global_notion_sync(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.resource_policy_store.get_runtime_setting",
+        AsyncMock(return_value=True),
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_notion_config_requires_admin(non_admin_client):
     resp = await non_admin_client.get("/api/v1/admin/notion/config")

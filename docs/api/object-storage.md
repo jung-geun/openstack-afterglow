@@ -11,7 +11,7 @@ nav_order: 63
 
 OpenStack Swift(Ceph RGW) 기반의 오브젝트 스토리지를 관리합니다. 컨테이너(버킷)와 오브젝트의 CRUD, 스트리밍 업로드/다운로드, 복사·이동·이름변경, 그리고 소프트 삭제(휴지통) 기능을 제공합니다.
 
-> **활성화 조건:** `config.toml [services] swift = true`
+> **활성화 조건:** `afterglow.conf [services] swift = true`
 > 비활성화 상태에서 이 엔드포인트에 접근하면 라우터가 등록되지 않습니다.
 
 ---

@@ -9,7 +9,9 @@ litellm_client.acompletion_stream 을 mock 해 네트워크 없이 검증:
 """
 
 import json
+from datetime import UTC, datetime
 
+from app.models.chat_contracts import validate_chat_run_event
 from app.services.chat import engine, graph, litellm_client, tool_runtime
 
 _MSGS = [{"role": "user", "content": "안녕하세요"}]
@@ -132,7 +134,7 @@ class TestGraphStream:
                 captured["state"] = state
                 captured["config"] = config
                 captured["stream_mode"] = stream_mode
-                yield {"type": "token", "text": "ok"}
+                yield ("custom", {"type": "token", "text": "ok"})
 
         monkeypatch.setattr(graph, "_build_graph", lambda *_args: FakeGraph())
 
@@ -309,6 +311,71 @@ class TestGraphStream:
         assert [call.get("reasoning_effort") for call in calls] == [None]
         assert [call.get("extra") for call in calls] == [{"reasoning_effort": "none"}]
         graph._TOOL_REASONING_EXPLICIT_NONE.discard(model)
+
+    async def test_gpt5_tools_auto_starts_with_explicit_none_before_durable_boundary(self, monkeypatch):
+        model = "gpt-5.6-luna"
+        calls: list[dict] = []
+
+        async def fake_schemas(_ctx):
+            return [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+
+        async def fake_stream(**kwargs):
+            calls.append(kwargs)
+            return _aiter([_Chunk("답변")])
+
+        class Hooks:
+            async def provider_started(self, **_payload):
+                return None
+
+            async def provider_failed(self, **_payload):
+                raise AssertionError("compatible first request must not fail its durable boundary")
+
+        monkeypatch.setattr(tool_runtime, "context_tool_schemas", fake_schemas)
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+
+        events = [
+            ev
+            async for ev in graph.stream(
+                model=model,
+                messages=_MSGS,
+                project_id="p1",
+                user_id="u1",
+                custom_llm_provider="openai",
+                reasoning_effort="auto",
+                execution_hooks=Hooks(),
+            )
+        ]
+
+        assert any(event["type"] == "token" for event in events)
+        assert [call.get("extra") for call in calls] == [{"reasoning_effort": "none"}]
+
+    async def test_gpt5_tools_preserve_explicit_reasoning_effort(self, monkeypatch):
+        calls: list[dict] = []
+
+        async def fake_schemas(_ctx):
+            return [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+
+        async def fake_stream(**kwargs):
+            calls.append(kwargs)
+            return _aiter([_Chunk("답변")])
+
+        monkeypatch.setattr(tool_runtime, "context_tool_schemas", fake_schemas)
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+
+        _ = [
+            ev
+            async for ev in graph.stream(
+                model="gpt-5.6-luna",
+                messages=_MSGS,
+                project_id="p1",
+                user_id="u1",
+                custom_llm_provider="openai",
+                reasoning_effort="high",
+            )
+        ]
+
+        assert [call.get("extra") for call in calls] == [None]
+        assert [call.get("reasoning_effort") for call in calls] == ["high"]
 
     async def test_reasoning_rejection_falls_back_and_caches(self, monkeypatch):
         """reasoning 파라미터 400(예: Claude thinking.type 불일치) → reasoning 없이 재시도해 채팅 유지 +
@@ -497,6 +564,94 @@ class TestToolLoop:
             "content": "대화 3개",
         }
 
+    async def test_long_provider_tool_id_uses_bounded_journal_id_and_is_echoed_to_provider(self, monkeypatch):
+        provider_call_id = f"call__thought__{'x' * 256}"
+        responses = [
+            [_ChunkTC(_DeltaTC(tool_calls=[_ToolCallDelta(0, provider_call_id, "list_my_conversations", "{}")]))],
+            [_ChunkTC(_DeltaTC(content="완료"))],
+        ]
+        stream_index = 0
+        captured: dict[str, object] = {}
+        journaled_call_ids: list[str] = []
+
+        async def fake_stream(**kwargs):
+            nonlocal stream_index
+            if stream_index == 1:
+                captured["messages"] = kwargs["messages"]
+            response = responses[stream_index]
+            stream_index += 1
+            return _aiter(response)
+
+        async def fake_execute(*_args):
+            return tool_runtime.ToolExecutionResult("대화 3개")
+
+        class Hooks:
+            async def provider_started(self, **_payload):
+                return None
+
+            async def provider_completed(self, **_payload):
+                return None
+
+            async def tool_started(self, *, tool_call_id, **_payload):
+                event = validate_chat_run_event(
+                    {
+                        "event_id": "run-1:1",
+                        "run_id": "run-1",
+                        "seq": 1,
+                        "type": "tool.call.started",
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "payload": {
+                            "call_id": tool_call_id,
+                            "name": "list_my_conversations",
+                            "arguments": {},
+                        },
+                    }
+                )
+                journaled_call_ids.append(event.payload.call_id)
+                return None
+
+            async def tool_completed(self, **_payload):
+                return None
+
+        monkeypatch.setattr(litellm_client, "acompletion_stream", fake_stream)
+        monkeypatch.setattr(tool_runtime, "context_execute_result", fake_execute)
+
+        events = [
+            event
+            async for event in graph.stream(
+                model="gemini-3.6-flash",
+                messages=_MSGS,
+                project_id="p1",
+                user_id="u1",
+                execution_hooks=Hooks(),
+            )
+        ]
+
+        assert len(journaled_call_ids) == 1
+        assert journaled_call_ids[0] != provider_call_id
+        assert len(journaled_call_ids[0]) <= 190
+        assert {
+            "type": "tool_call",
+            "tool_call_id": journaled_call_ids[0],
+            "name": "list_my_conversations",
+            "args": "{}",
+        } in events
+        assistant_message = next(
+            message
+            for message in captured["messages"]
+            if message.get("role") == "assistant" and message.get("tool_calls")
+        )
+        assert assistant_message["tool_calls"][0]["id"] == provider_call_id
+        assert captured["messages"][-1] == {
+            "role": "tool",
+            "tool_call_id": provider_call_id,
+            "name": "list_my_conversations",
+            "content": "대화 3개",
+        }
+
+    def test_provider_tool_call_id_falls_back_to_legacy_checkpoint_id(self):
+        assert graph._provider_tool_call_id({"id": "legacy-call-id"}) == "legacy-call-id"
+
     async def test_hooks_fence_each_provider_attempt_and_tool_call(self, monkeypatch):
         responses = [
             [
@@ -657,13 +812,11 @@ class TestToolLoop:
             )
         ]
 
-        assert {
-            "type": "tool_result",
-            "tool_call_id": "call_1",
-            "name": "list_my_conversations",
-            "content": "replayed tool result",
-            "hidden": False,
-        } in events
+        replayed = next(event for event in events if event.get("type") == "tool_result")
+        assert replayed["tool_call_id"] == "call_1"
+        assert replayed["name"] == "list_my_conversations"
+        assert replayed["content"] == "replayed tool result"
+        assert replayed["hidden"] is False
 
     async def test_provider_completed_boundary_replays_without_provider_call(self, monkeypatch):
         async def fail_stream(**_kwargs):
@@ -758,13 +911,11 @@ class TestToolLoop:
         monkeypatch.setattr(tool_runtime, "context_execute_result", fake_execute)
         events = [event async for event in graph.stream(model="m", messages=_MSGS, project_id="p1", user_id="u1")]
 
-        assert {
-            "type": "tool_result",
-            "tool_call_id": "advisor_1",
-            "name": "managed_advisor",
-            "content": "",
-            "hidden": True,
-        } in events
+        hidden_result = next(event for event in events if event.get("type") == "tool_result")
+        assert hidden_result["tool_call_id"] == "advisor_1"
+        assert hidden_result["name"] == "managed_advisor"
+        assert hidden_result["content"] == ""
+        assert hidden_result["hidden"] is True
         assert {"type": "warning", "code": "advisor_call_failed", "safe_message": "Advisor request failed."} in events
         assert captured["messages"][-1]["content"] == "private advice"
 

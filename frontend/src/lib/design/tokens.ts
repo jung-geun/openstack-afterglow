@@ -45,3 +45,23 @@ export function usageTone(
 	if (percent >= thresholds.warning) return 'warning';
 	return 'accent';
 }
+
+export const CHAT_MESSAGE_CSS_VAR = {
+	gap: 'var(--chat-message-gap)',
+	metaGap: 'var(--chat-message-meta-gap)',
+	metaInset: 'var(--chat-message-meta-inset)',
+	metaSize: 'var(--chat-message-meta-size)',
+	radius: 'var(--chat-message-radius)',
+	directionalCorner: 'var(--chat-message-directional-corner)',
+	paddingBlock: 'var(--chat-message-padding-block)',
+	paddingInline: 'var(--chat-message-padding-inline)',
+	assistantMaxInline: 'var(--chat-message-assistant-max-inline)',
+	userMaxInline: 'var(--chat-message-user-max-inline)'
+} as const;
+
+export const SCROLLBAR_CSS_VAR = {
+	size: 'var(--scrollbar-size)',
+	track: 'var(--scrollbar-track)',
+	thumb: 'var(--scrollbar-thumb)',
+	thumbHover: 'var(--scrollbar-thumb-hover)'
+} as const;

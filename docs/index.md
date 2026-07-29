@@ -13,6 +13,23 @@ nav_order: 1
 
 Afterglow는 OpenStack 클라우드 환경을 위한 오픈소스 웹 대시보드입니다. 기존 Horizon의 안정성과 기능 완성도를 유지하면서, Skyline의 현대적인 UI/UX를 결합합니다. 또한 Magnum을 대체하는 **k3s 기반 Kubernetes 프로비저닝**을 내장합니다.
 
+## 실제 운영 서비스
+
+Afterglow는 현재 [DMS Cloud 연구 클라우드 제공 콘솔](https://cloud.dmslab.re.kr)로 운영되고 있습니다. 실제 서비스는 연구원·실습팀의 자원 신청, 운영자의 쿼터·권한 기반 배정, 사용량·상태·토폴로지 관측, 라이브러리 레이어·스냅샷 재사용을 하나의 흐름으로 묶습니다.
+
+### 운영 화면과 저장소 구현의 연결
+
+| 운영 표면 | 실제 구현 |
+|---|---|
+| VM·GPU·vCPU·스토리지 | Nova VM 생성과 프로젝트 쿼터, 이미지·네트워크·키페어 조합 |
+| Kubernetes 클러스터 | cloud-init 기반 k3s 제어 plane·워커 구성과 상태·워크로드 추적 |
+| 공유 데이터 공간 | Manila CephFS/NFS share와 스냅샷 |
+| AI/ML 라이브러리 | squashfs/NFS content-addressable 불변 레이어 체인을 Manila share에 저장하고 소비 VM에서 OverlayFS로 조합·재사용 |
+| 운영 제어 | 프로젝트·사용자·역할·쿼터, Grafana·Prometheus, 감사 로그 |
+
+브라우저는 SvelteKit 프론트엔드를 통해 FastAPI `/api/v1` 게이트웨이에 접속하고, 백엔드는 `openstacksdk`로 OpenStack 서비스와 통신합니다. Redis는 캐시와 세션을 담당합니다. 자세한 흐름은 [아키텍처](architecture.md)와 [Palimpsest 레이어 문서](palimpsest.md)를 참고하세요.
+
+
 ---
 
 ## 빠른 링크
@@ -37,8 +54,8 @@ Afterglow는 OpenStack 클라우드 환경을 위한 오픈소스 웹 대시보�
 ### k3s 클러스터 프로비저닝
 OpenStack VM에 k3s를 직접 설치하여 Kubernetes 환경을 즉시 제공합니다. Magnum의 복잡한 설정 없이, cloud-init 기반으로 마스터/워커 노드를 자동 구성합니다.
 
-### OverlayFS 라이브러리 레이어
-Manila NFS/CephFS share를 OverlayFS lower layer로 마운트, AI/ML 라이브러리(Python, PyTorch, vLLM)를 여러 VM이 공유합니다. 스토리지 효율과 부팅 속도를 동시에 달성합니다.
+### squashfs/NFS 라이브러리 레이어
+레이어별 Manila NFS share에 `.sqsh` artifact를 저장하고, 소비 VM이 share를 읽기 전용으로 마운트한 뒤 OverlayFS로 체인을 합성합니다. 이 운영 파이프라인의 상세 구현은 [squashfs 레이어 파이프라인](squashfs-layer-pipeline.md)을 참고하세요.
 
 ### 모니터링 통합
 Grafana JWT 임베드를 통해 대시보드를 직접 삽입하고, Prometheus http_sd로 VM 고정 IP 기반 노드 익스포터 타깃을 자동 노출합니다. 신규 프로젝트·인스턴스 생성 시 Monitoring ingress SG를 자동으로 연결합니다.

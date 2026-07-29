@@ -1,12 +1,13 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.chat import completions
 from app.models.chat_contracts import ChatFeatureOptions, ChatRunDescriptor, UserAssetInputPart
+from app.services.chat import capabilities, credit, durable_runs
 from app.services.chat import conversation_store as cs
-from app.services.chat import credit, durable_runs
 from app.services.chat import provider_store as ps
 
 _BASE = "/api/v1/chat/conversations"
@@ -17,7 +18,7 @@ def _request(text: str = "hello", **extra):
     return {"parts": [{"type": "text", "text": text}], "model_id": "gpt-3.5-turbo", "features": {}, **extra}
 
 
-async def test_selected_skills_are_loaded_only_from_owned_active_extensions(monkeypatch):
+async def test_selected_skills_are_loaded_once_from_owned_active_extensions(monkeypatch):
     async def fake_list(kind, **kwargs):
         assert kind == "skill"
         assert kwargs == {"user_id": "u1", "project_id": "p1", "active_only": True}
@@ -27,8 +28,100 @@ async def test_selected_skills_are_loaded_only_from_owned_active_extensions(monk
         ]
 
     monkeypatch.setattr(completions.es, "list_for_user", fake_list)
-    assert await completions._load_skill_instructions(None, [1], "u1", "p1") == ["first"]
-    assert await completions._load_skill_snapshot(None, [1], "u1", "p1") == (["first"], [{"id": 1, "name": "safe"}])
+    instructions, provenance = await completions._load_skill_snapshot(None, [1], "u1", "p1")
+
+    assert instructions == ["first"]
+    assert provenance[0]["id"] == 1
+    assert provenance[0]["name"] == "safe"
+    assert len(provenance[0]["content_hash"]) == 64
+
+
+async def test_extension_selection_never_expands_omitted_or_empty_ids(monkeypatch):
+    async def fake_list(kind, **_kwargs):
+        return [
+            {
+                "id": 7,
+                "name": f"{kind}-seven",
+                "url": "https://tool.example/v1",
+                "method": "GET",
+                "transport": "http",
+                "params_schema": {"type": "object"},
+                "config_version": 1,
+                "effect": "read",
+            },
+            {
+                "id": 8,
+                "name": f"{kind}-eight",
+                "url": "https://tool.example/v2",
+                "method": "POST",
+                "transport": "http",
+                "params_schema": {"type": "object"},
+                "config_version": 1,
+                "effect": "external_mutation",
+            },
+        ]
+
+    monkeypatch.setattr(completions.es, "list_for_user", fake_list)
+    no_agent = await completions._resolve_extension_selection(None, ChatFeatureOptions(), user_id="u1", project_id="p1")
+    assert no_agent == {"tools": [], "mcp": []}
+
+    agent = {"tool_ids": [7], "mcp_ids": []}
+    agent_default = await completions._resolve_extension_selection(
+        agent, ChatFeatureOptions(), user_id="u1", project_id="p1"
+    )
+    assert [item["id"] for item in agent_default["tools"]] == [7]
+    assert agent_default["mcp"] == []
+
+    explicit = await completions._resolve_extension_selection(
+        agent,
+        ChatFeatureOptions(tool_policy={"enabled_tool_ids": [], "enabled_mcp_ids": []}),
+        user_id="u1",
+        project_id="p1",
+    )
+    assert explicit == {"tools": [], "mcp": []}
+
+
+async def test_mcp_selection_snapshots_credential_version(monkeypatch):
+    async def fake_list(kind, **_kwargs):
+        assert kind == "mcp"
+        return [
+            {
+                "id": 7,
+                "name": "mcp-seven",
+                "url": "https://mcp.example",
+                "transport": "http",
+                "config_version": 1,
+            }
+        ]
+
+    async def credential_versions(server_ids, *, user_id, project_id):
+        assert server_ids == [7]
+        assert (user_id, project_id) == ("u1", "p1")
+        return {7: 4}
+
+    monkeypatch.setattr(completions.es, "list_for_user", fake_list)
+    monkeypatch.setattr(completions.es, "mcp_credential_versions", credential_versions)
+
+    selection = await completions._resolve_extension_selection(
+        {"tool_ids": [], "mcp_ids": [7]},
+        ChatFeatureOptions(),
+        user_id="u1",
+        project_id="p1",
+    )
+
+    assert selection["mcp"][0]["credential_version"] == 4
+
+
+async def test_extension_selection_rejects_agent_allowlist_bypass(monkeypatch):
+    monkeypatch.setattr(completions.es, "list_for_user", lambda *_args, **_kwargs: _return([]))
+
+    with pytest.raises(HTTPException, match="allowlist"):
+        await completions._resolve_extension_selection(
+            {"tool_ids": [7], "mcp_ids": []},
+            ChatFeatureOptions(tool_policy={"enabled_tool_ids": [8]}),
+            user_id="u1",
+            project_id="p1",
+        )
 
 
 async def _ok_precheck(user_id, project_id=None):
@@ -65,10 +158,71 @@ async def _patch_text_execution(monkeypatch):
     monkeypatch.setattr(cs, "add_message", lambda *args, **kwargs: _return({"id": 1}))
     monkeypatch.setattr(ps, "resolve_model", lambda *args, **kwargs: _return(_resolved()))
     monkeypatch.setattr(durable_runs, "existing_run_for_intent", lambda *args, **kwargs: _return(None))
+    monkeypatch.setattr(completions.ms, "active_contents_for_run", lambda *args, **kwargs: _return([]))
+    monkeypatch.setattr(completions.ws, "get_instructions_for_run", lambda *args, **kwargs: _return(None))
 
 
 async def _return(value):
     return value
+
+
+class TestRuntimeCapabilities:
+    def test_runtime_capabilities_fail_closed_without_sandbox_policy(self):
+        runtime = capabilities.runtime_capabilities(
+            SimpleNamespace(chat_sandbox_workspace_url="https://workspace.example")
+        )
+
+        assert runtime["workspace_ready"] is False
+        assert runtime["feature_gates"]["code_interpreter"]["available"] is False
+        assert runtime["feature_gates"]["code_workspace"]["reason_code"] == "execution_protocol_v2_unavailable"
+
+    def test_runtime_tool_features_require_model_function_calling(self):
+        runtime = {
+            "checkpointer_ready": True,
+            "workspace_ready": True,
+            "feature_gates": {"mcp": {"available": True, "mode": "native", "reason_code": None}},
+        }
+
+        effective = capabilities.effective_runtime_capabilities({"function_calling": False}, runtime)
+
+        assert effective["feature_gates"]["mcp"] == {
+            "available": False,
+            "mode": "none",
+            "reason_code": "model_function_calling_unsupported",
+            "pricing_available": False,
+        }
+
+    async def test_capability_endpoint_intersects_model_and_runtime(self, client, monkeypatch):
+        async def resolve(model_id):
+            assert model_id == 7
+            return {"model_name": "configured-model", "capabilities": {"function_calling": True}}
+
+        monkeypatch.setattr(ps, "resolve_model_by_id", resolve)
+        monkeypatch.setattr(
+            capabilities,
+            "runtime_capabilities",
+            lambda: {
+                "checkpointer_ready": True,
+                "workspace_ready": False,
+                "feature_gates": {
+                    "mcp": {"available": True, "mode": "native", "reason_code": None},
+                    "code_workspace": {
+                        "available": False,
+                        "mode": "none",
+                        "reason_code": "workspace_or_checkpointer_unavailable",
+                    },
+                },
+            },
+        )
+
+        response = await client.get("/api/v1/chat/capabilities?model_id=7")
+
+        assert response.status_code == 200
+        assert response.json()["model_name"] == "configured-model"
+        assert response.json()["runtime"]["feature_gates"]["mcp"]["available"] is True
+        assert response.json()["runtime"]["feature_gates"]["code_workspace"]["reason_code"] == (
+            "workspace_or_checkpointer_unavailable"
+        )
 
 
 class TestReasoningEffortValidation:
@@ -92,6 +246,21 @@ class TestReasoningEffortValidation:
         resolved = {"capabilities": {"reasoning": True, "reasoning_options": [{"type": "toggle"}]}}
         with pytest.raises(HTTPException, match="지원하지 않습니다"):
             completions._validated_reasoning_effort("low", resolved)
+
+    def test_gpt5_tools_reject_explicit_reasoning_but_allow_auto_or_none(self):
+        resolved = {"provider_type": "openai", "model_name": "gpt-5.6-luna"}
+        tools_enabled = ChatFeatureOptions()
+
+        completions._validate_tool_reasoning_compatibility("auto", resolved, tools_enabled)
+        completions._validate_tool_reasoning_compatibility("none", resolved, tools_enabled)
+        with pytest.raises(HTTPException, match="도구 사용과 명시적 추론 강도"):
+            completions._validate_tool_reasoning_compatibility("high", resolved, tools_enabled)
+
+    def test_gpt5_explicit_reasoning_is_allowed_when_tools_are_disabled(self):
+        resolved = {"provider_type": "openai", "model_name": "gpt-5.6-luna"}
+        tools_disabled = ChatFeatureOptions(tool_policy={"mode": "none"})
+
+        completions._validate_tool_reasoning_compatibility("high", resolved, tools_disabled)
 
 
 class TestExecutionCapabilityGate:
@@ -389,6 +558,57 @@ class TestCanonicalCompletionRequests:
         assert response.json()["run_id"] == "run-1"
         assert seen["request_payload"]["input_messages"][-1] == {"role": "user", "content": "first"}
         assert seen["intent"]["parts"] == [{"type": "text", "text": "first"}]
+        assert seen["execution_protocol_version"] == 1
+        assert seen["capability_snapshot"]["execution_protocol_version"] == 1
+
+    async def test_v2_completion_freezes_effective_agent_policy(self, client, monkeypatch):
+        await _patch_text_execution(monkeypatch)
+        seen = {}
+        settings = completions.get_settings().model_copy(update={"chat_execution_protocol_version": 2})
+        monkeypatch.setattr(completions, "get_settings", lambda: settings)
+        monkeypatch.setattr(durable_runs, "_require_supported_execution_protocol_version", lambda _version: None)
+        monkeypatch.setattr(
+            completions,
+            "_resolve_agent",
+            lambda *_args: _return(
+                {
+                    "id": 9,
+                    "role": "general",
+                    "instructions": None,
+                    "params": {},
+                    "tool_ids": [],
+                    "mcp_ids": [],
+                    "execution_policy": {
+                        "allowed_modes": ["chat"],
+                        "can_delegate_read": False,
+                        "can_delegate_write": False,
+                        "max_model_turns": 3,
+                        "max_tool_calls": 7,
+                        "max_children": 0,
+                        "max_parallel_children": 0,
+                        "max_child_depth": 0,
+                    },
+                }
+            ),
+        )
+
+        async def create_persistent_run(**kwargs):
+            seen.update(kwargs)
+            return ChatRunDescriptor(
+                run_id="run-policy",
+                status="queued",
+                events_url="/api/v1/chat/runs/run-policy/events",
+                cancel_url="/api/v1/chat/runs/run-policy/cancel",
+            )
+
+        monkeypatch.setattr(durable_runs, "create_persistent_run", create_persistent_run)
+        response = await client.post(f"{_BASE}/c1/completions", headers=_HEADERS, json=_request(agent_id="9"))
+
+        assert response.status_code == 202
+        policy = seen["request_payload"]["execution_policy"]
+        assert policy["max_model_turns"] == 3
+        assert policy["max_tool_calls"] == 7
+        assert seen["capability_snapshot"]["execution_policy"] == policy
 
     async def test_same_idempotency_key_returns_existing_before_user_message_write(self, client, monkeypatch):
         await _patch_text_execution(monkeypatch)
@@ -399,6 +619,7 @@ class TestCanonicalCompletionRequests:
             cancel_url="/api/v1/chat/runs/run-existing/cancel",
         )
         monkeypatch.setattr(durable_runs, "existing_run_for_intent", lambda *args, **kwargs: _return(existing))
+        monkeypatch.setattr(completions, "get_settings", lambda: SimpleNamespace(chat_execution_protocol_version=2))
 
         async def unavailable_model(*_args, **_kwargs):
             raise AssertionError("retry must not resolve a mutable model route")
@@ -473,6 +694,160 @@ class TestCanonicalCompletionRequests:
             json={"model": "gpt-3.5-turbo"},
         )
         assert response.status_code == 422
+
+
+class TestRetryFailedRun:
+    async def test_retry_preserves_agent_and_mcp_extensions(self, client, monkeypatch):
+        await _patch_text_execution(monkeypatch)
+        monkeypatch.setattr(
+            completions,
+            "get_settings",
+            lambda: SimpleNamespace(chat_execution_protocol_version=1, chat_credit_per_usd=1000.0),
+        )
+
+        class FakeSourceRun:
+            id = "run-source-1"
+            conversation_id = "c1"
+            user_message_id = 12
+            user_id = "test-user-123"
+            project_id = "test-project-123"
+            status = "failed"
+            model_name = "gpt-3.5-turbo"
+            agent_id = 7
+            execution_mode = "chat"
+            request_payload = cs._enc(
+                json.dumps(
+                    {
+                        "features": {},
+                        "reasoning_effort": "auto",
+                        "skill_ids": [3],
+                        "input_parts": [{"type": "text", "text": "retry turn"}],
+                    }
+                )
+            )
+
+        def fake_factory():
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                async def execute(self, query):
+                    class FakeResult:
+                        def scalars(self):
+                            class FakeScalars:
+                                def first(self):
+                                    return FakeSourceRun()
+
+                            return FakeScalars()
+
+                    return FakeResult()
+
+            return lambda: FakeSession()
+
+        monkeypatch.setattr(durable_runs, "existing_run_for_intent", lambda *args, **kwargs: _return(None))
+        monkeypatch.setattr(durable_runs, "_factory", fake_factory)
+        monkeypatch.setattr(
+            completions,
+            "_resolve_agent",
+            lambda agent_id, user_id, project_id: _return({"id": 7, "instructions": "agent-7"}),
+        )
+        mcp_item = {
+            "id": 99,
+            "name": "mcp-server",
+            "transport": "http",
+            "url": "https://mcp.example",
+            "effect": "read",
+            "origin": "https://mcp.example",
+            "config_fingerprint": "a" * 64,
+        }
+        monkeypatch.setattr(
+            completions,
+            "_resolve_extension_selection",
+            lambda agent, features, *, user_id, project_id: _return({"tools": [], "mcp": [mcp_item]}),
+        )
+
+        async def fake_list_for_user(kind, **kwargs):
+            if kind == "skill":
+                return [{"id": 3, "name": "skill-3", "instructions": "skill-3-instructions"}]
+            return []
+
+        monkeypatch.setattr(completions.es, "list_for_user", fake_list_for_user)
+        monkeypatch.setattr(
+            cs,
+            "path_ending_at",
+            lambda conversation_id, user_id, project_id, message_id: _return(
+                [{"role": "user", "content": "retry turn"}]
+            ),
+        )
+
+        seen_create = {}
+
+        async def fake_create_run(**kwargs):
+            seen_create.update(kwargs)
+            return ChatRunDescriptor(
+                run_id="run-retry-1",
+                conversation_id="c1",
+                status="queued",
+                events_url="/events",
+                cancel_url="/cancel",
+            )
+
+        monkeypatch.setattr(durable_runs, "create_run", fake_create_run)
+
+        response = await client.post(f"{_BASE}/c1/runs/run-source-1/retry", headers=_HEADERS)
+
+        assert response.status_code == 202, f"Failed with: {response.json()}"
+        assert seen_create["request_payload"]["extension_snapshot"] == {"tools": [], "mcp": [mcp_item]}
+        assert seen_create["request_payload"]["skill_ids"] == [3]
+
+    async def test_retry_idempotency_returns_same_descriptor_on_lost_response(self, client, monkeypatch):
+        await _patch_text_execution(monkeypatch)
+        created_descriptor = ChatRunDescriptor(
+            run_id="run-retry-existing",
+            conversation_id="c1",
+            status="queued",
+            events_url="/events",
+            cancel_url="/cancel",
+        )
+
+        async def fake_existing(project_id, user_id, client_request_id, intent, conversation_id):
+            assert intent["endpoint"] == "retry"
+            assert intent["source_run_id"] == "run-source-1"
+            assert client_request_id == _HEADERS["Idempotency-Key"]
+            return created_descriptor
+
+        monkeypatch.setattr(durable_runs, "existing_run_for_intent", fake_existing)
+
+        async def unexpected_db_lookup(*args, **kwargs):
+            raise AssertionError("a replayed retry with the same idempotency key must not query DB for the source run")
+
+        monkeypatch.setattr(durable_runs, "_factory", unexpected_db_lookup)
+
+        response = await client.post(f"{_BASE}/c1/runs/run-source-1/retry", headers=_HEADERS)
+
+        assert response.status_code == 202
+        assert response.json()["run_id"] == "run-retry-existing"
+
+    async def test_retry_rejects_quota_exceeded_before_creating_run(self, client, monkeypatch):
+        await _patch_text_execution(monkeypatch)
+
+        async def quota_exceeded(user_id, project_id=None):
+            raise credit.QuotaExceeded("월간 사용량 쿼터를 초과했습니다")
+
+        monkeypatch.setattr(credit, "precheck", quota_exceeded)
+
+        async def unexpected_create(*args, **kwargs):
+            raise AssertionError("create_run must not be called when credit precheck raises QuotaExceeded")
+
+        monkeypatch.setattr(durable_runs, "create_run", unexpected_create)
+
+        response = await client.post(f"{_BASE}/c1/runs/run-source-1/retry", headers=_HEADERS)
+
+        assert response.status_code == 402
+        assert "월간 사용량 쿼터" in response.json()["detail"]
 
 
 class TestCanonicalTempCompletion:

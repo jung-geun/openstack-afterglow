@@ -211,7 +211,7 @@
 		</button>
 	</div>
 
-	<nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+	<nav class="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-0.5">
 		<!-- 개요 -->
 		<a
 			href="/admin"
@@ -268,7 +268,7 @@
 		</div>
 
 		<!-- 모바일 전용 -->
-		<div class="p-3 sm:hidden">
+		<div class="p-3 lg:hidden">
 			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
 			<ProjectSelector />
 		</div>

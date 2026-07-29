@@ -16,7 +16,7 @@ from sqlalchemy import (
     LargeBinary,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.mysql import MEDIUMBLOB, MEDIUMTEXT
+from sqlalchemy.dialects.mysql import DATETIME, MEDIUMBLOB, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -39,6 +39,7 @@ class K3sCluster(Base):
     server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     server_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    server_image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
@@ -91,6 +92,7 @@ class K3sCluster(Base):
     # Template 추적 (생성 시 사용한 템플릿)
     template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Stampede 오토스케일 모드
     stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
@@ -141,7 +143,7 @@ class GpuQuota(Base):
 
 
 class GpuDeviceCatalog(Base):
-    """관리자가 추가한 GPU PCI 장치 카탈로그. 내장 기본값 + config.toml 위에 overlay된다."""
+    """관리자가 추가한 GPU PCI 장치 카탈로그. 내장 기본값 + afterglow.conf 위에 overlay된다."""
 
     __tablename__ = "gpu_device_catalog"
 
@@ -275,6 +277,8 @@ class LibraryBuild(Base):
     console_log_excerpt: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     # queued/booting/installing/finalizing/success/failure/indeterminate
     cloud_init_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
+    # OpenStack IDs/names selected before the build was queued.
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 상태: pending, creating_share, creating_access, creating_vm, building, verifying, cleanup, complete, error, timeout
     status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
@@ -326,6 +330,10 @@ class LayerBuild(Base):
         nullable=True,
     )
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    # OpenStack IDs/names selected before the build was queued.
+    builder_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    builder_network_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 빌더 VM 추적
     server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
@@ -359,6 +367,7 @@ class LayerConsume(Base):
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
     artifact_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     server_name: Mapped[str | None] = mapped_column(VARCHAR(128))
 
     # 상태: creating/active/error
@@ -481,6 +490,7 @@ class LayerImportJob(Base):
     planned_layers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     artifact_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     build_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -769,12 +779,15 @@ class WaygateServer(Base):
     # OpenStack 리소스 ID
     server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     provider_network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    floating_network_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     provider_port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     endpoint_ip: Mapped[str | None] = mapped_column(VARCHAR(45))  # FIP 또는 provider fixed IP
     key_name: Mapped[str | None] = mapped_column(VARCHAR(255))
+    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 에이전트 제어채널 자격증명 — AES-256-GCM 암호화 저장(도메인 wg_agent_token).
     # Redis(휘발성)가 아니라 여기에 durable 하게 보관해, Redis eviction/재시작이나 이전
@@ -914,14 +927,27 @@ from app.models.chat_db import (  # noqa: E402,F401
     ChatConversation,
     ChatCustomTool,
     ChatMcpCredential,
+    ChatMcpOAuthConnection,
+    ChatMcpOAuthRequest,
     ChatMcpServer,
     ChatMemory,
+    ChatMemoryOwnerLock,
     ChatMessage,
     ChatSkill,
     ChatUsageLog,
     ChatWorkspace,
     LlmModel,
     LlmProvider,
+    McpDelegatedGrant,
+    McpLumenSelection,
+    McpOAuthAuthorizationRequest,
+    McpOAuthClient,
+    McpOAuthCode,
+    McpOAuthToken,
+    McpOAuthTokenFamily,
+    McpOwnerLock,
+    McpPersonalToken,
+    McpToolInvocation,
     UserWallet,
 )
 from app.models.chat_jobs import ChatInputDerivation, ChatJob, ChatMemoryOutbox, ChatMemoryProvenance  # noqa: E402,F401
@@ -947,8 +973,17 @@ class VmCloudInitSnippet(Base):
     kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)  # history | preset
     name: Mapped[str | None] = mapped_column(VARCHAR(100))
     content_encrypted: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+        onupdate=_now,
+    )
 
     __table_args__ = (
         Index("idx_vm_cloud_init_snippets_user_kind_created", "user_id", "kind", "created_at"),
@@ -971,3 +1006,15 @@ class ResourcePolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
     __table_args__ = (Index("idx_resource_policies_kind", "resource_kind"),)
+
+
+class RuntimeSetting(Base):
+    """Allowlisted scalar runtime settings owned by the administrator."""
+
+    __tablename__ = "runtime_settings"
+
+    setting_key: Mapped[str] = mapped_column(VARCHAR(100), primary_key=True)
+    value_json: Mapped[object] = mapped_column(JSON, nullable=False)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

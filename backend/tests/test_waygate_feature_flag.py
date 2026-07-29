@@ -1,10 +1,4 @@
-"""services.waygate 피처 플래그 회귀 테스트.
-
-관리자가 afterglow.conf [services] waygate 으로 Waygate 기능을 켜고 끌 수 있다.
-- 플래그 false → services.waygate=false (사이드바/페이지 게이팅, 라우터 미등록)
-- 플래그 true + [waygate] 미설정 → services.waygate=false (페이지의 미설정 안내 유지)
-- 플래그 true + [waygate] 설정 → services.waygate=true
-"""
+"""Waygate public service availability regression tests."""
 
 from app.config import Settings, get_settings
 from app.services.site_branding import configured_public_site_config
@@ -15,18 +9,12 @@ def _settings_with(**overrides) -> Settings:
 
 
 def test_services_waygate_false_when_flag_disabled():
-    """[waygate]이 설정돼 있어도 services.waygate=false 면 기능 비활성."""
-    s = _settings_with(service_waygate_enabled=False, waygate_provider_network_id="net-1", waygate_image_id="img-1")
+    s = _settings_with(service_waygate_enabled=False)
     assert configured_public_site_config(s)["services"]["waygate"] is False
 
 
-def test_services_waygate_false_when_flag_enabled_but_unconfigured():
-    s = _settings_with(service_waygate_enabled=True, waygate_provider_network_id="", waygate_image_id="")
-    assert configured_public_site_config(s)["services"]["waygate"] is False
-
-
-def test_services_waygate_true_when_flag_enabled_and_configured():
-    s = _settings_with(service_waygate_enabled=True, waygate_provider_network_id="net-1", waygate_image_id="img-1")
+def test_services_waygate_true_when_flag_enabled():
+    s = _settings_with(service_waygate_enabled=True)
     assert configured_public_site_config(s)["services"]["waygate"] is True
 
 

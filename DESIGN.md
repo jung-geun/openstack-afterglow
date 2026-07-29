@@ -37,6 +37,11 @@ Afterglow는 dark-first cloud operations UI다. 기본 감성은 고밀도 운�
 - `--gradient-warm: linear-gradient(135deg, var(--color-warm), var(--color-warm-2))`는 `Button variant="primary"`와 one-primary-CTA-per-surface only.
 - `--gradient-usage`, `--gradient-usage-warning`, `--gradient-usage-danger`는 quantitative usage bars only. Progress/usage 임계값 기본값은 warning `>=80`, danger `>=95`; 기존 특정 리소스가 다른 임계값을 쓰면 `UsageBar` props로 명시한다.
 
+## Scrollbars
+
+- Scrollbars are global, token-backed UI chrome: `--scrollbar-size`, `--scrollbar-track`, `--scrollbar-thumb`, and `--scrollbar-thumb-hover`.
+- Use the global treatment rather than component-scoped scrollbar declarations. Tracks recede into their owning surface; thumbs remain visible enough for pointer use and lighten only on hover.
+
 ### Editorial public surfaces
 
 - `--gradient-editorial-canvas`, `--pattern-editorial-grid`, and `--gradient-editorial-grid-mask` are public/editorial surfaces. They are dark-first but resolve through the standard color-token mapping under `html.light`.
@@ -44,6 +49,13 @@ Afterglow는 dark-first cloud operations UI다. 기본 감성은 고밀도 운�
 - `--gradient-editorial-cta` is limited to the single closing editorial panel; it never replaces `Button variant="primary"`.
 - Approved external SVG plates may retain their equivalent embedded palette only when loaded through `<img>`.
 - Approved panel composition: `Card surface="subtle"` is the visual surface around semantic outer capability/workflow articles; the method matrix is one Card around direct semantic step articles.
+
+## Chat messages
+
+- `ChatBubble` is the chat-message primitive. It provides the semantic `chat-start`/`chat-end`, header, bubble, and optional action footer structure; feature components supply only message content and actions.
+- Direction is expressed with the compact directional corner token (`--chat-message-directional-corner`), not a pseudo-element tail. Start uses `--color-surface-raised` with `--color-line`; end uses `--color-accent` with `--color-action-on-accent`.
+- The message primitive owns `--chat-message-*` spacing, radius, padding, and width tokens. Do not create per-route bubble sizes, colors, or duplicate chat structures.
+- Shared values are `--chat-message-gap`, `--chat-message-meta-gap`, `--chat-message-meta-inset`, `--chat-message-meta-size`, `--chat-message-radius`, `--chat-message-directional-corner`, `--chat-message-padding-block`, `--chat-message-padding-inline`, `--chat-message-assistant-max-inline`, and `--chat-message-user-max-inline`.
 
 ## Resource selection
 

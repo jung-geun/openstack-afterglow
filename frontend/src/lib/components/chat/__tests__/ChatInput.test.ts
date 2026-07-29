@@ -66,3 +66,31 @@ describe('ChatInput attachments', () => {
 		);
 	});
 });
+
+
+describe('ChatInput shortcuts', () => {
+	it('binds an @ mention to the selected agent', async () => {
+		const onSelectAgent = vi.fn();
+		const { getByRole } = render(ChatInput, {
+			value: '@ops',
+			availableAgents: [{ id: 7, name: 'ops-reviewer' }],
+			onSelectAgent,
+			onSend: vi.fn(),
+			onStop: vi.fn()
+		});
+
+		await fireEvent.click(getByRole('option', { name: /ops-reviewer.*에이전트/i }));
+		expect(onSelectAgent).toHaveBeenCalledWith(7);
+	});
+
+	it('shows a slash skill suggestion without pretending it is an unrestricted shell command', () => {
+		const { getByRole } = render(ChatInput, {
+			value: '/research',
+			availableSkills: [{ id: 3, name: 'research' }],
+			onSend: vi.fn(),
+			onStop: vi.fn()
+		});
+
+		expect(getByRole('option', { name: /research.*스킬/i })).toBeTruthy();
+	});
+});

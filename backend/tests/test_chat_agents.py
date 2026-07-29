@@ -46,6 +46,7 @@ class TestCreateAndList:
         resp = await client.post(_URL, json={"name": "코드 리뷰어", "instructions": "리뷰해", "visibility": "public"})
         assert resp.status_code == 201
         assert captured["owner_user_id"] == "test-user-123"  # 소유자는 token 에서만
+        assert captured["project_id"] == "test-project-123"
         assert captured["visibility"] == "public"
 
     async def test_list_own(self, client, monkeypatch):
@@ -59,6 +60,7 @@ class TestCreateAndList:
         resp = await client.get(_URL)
         assert resp.status_code == 200
         assert captured["user_id"] == "test-user-123"
+        assert captured["project_id"] == "test-project-123"
 
     async def test_list_graceful_empty_on_storage_unavailable(self, client, monkeypatch):
         """저장소 미가용/데이터 없음은 503 이 아니라 빈 목록(200)으로 degrade."""
@@ -95,6 +97,7 @@ class TestHubAndClone:
         resp = await client.get(f"{_URL}/hub?query=리뷰&limit=10")
         assert resp.status_code == 200
         assert captured["query"] == "리뷰" and captured["limit"] == 10
+        assert captured["project_id"] == "test-project-123"
         assert captured["user_id"] == "test-user-123"
         assert resp.json()[0]["clone_count"] == 5
 
@@ -110,6 +113,7 @@ class TestHubAndClone:
         resp = await client.post(f"{_URL}/9/clone")
         assert resp.status_code == 201
         assert captured["agent_id"] == 9 and captured["user_id"] == "test-user-123"
+        assert captured["project_id"] == "test-project-123"
         assert resp.json()["cloned_from_id"] == 9
 
     async def test_clone_forbidden_403(self, client, monkeypatch):
@@ -145,3 +149,30 @@ class TestOwnership:
         monkeypatch.setattr(ags, "delete_agent", fake_delete)
         resp = await client.delete(f"{_URL}/5")
         assert resp.status_code == 403
+
+    async def test_get_update_and_delete_inject_project(self, client, monkeypatch):
+        captured = {}
+
+        async def fake_get(agent_id, **kwargs):
+            captured["get"] = (agent_id, kwargs)
+            return _public(id=agent_id)
+
+        async def fake_update(agent_id, **kwargs):
+            captured["update"] = (agent_id, kwargs)
+            return _public(id=agent_id, name=kwargs["patch"]["name"])
+
+        async def fake_delete(agent_id, **kwargs):
+            captured["delete"] = (agent_id, kwargs)
+
+        monkeypatch.setattr(ags, "get_agent", fake_get)
+        monkeypatch.setattr(ags, "update_agent", fake_update)
+        monkeypatch.setattr(ags, "delete_agent", fake_delete)
+
+        assert (await client.get(f"{_URL}/7")).status_code == 200
+        assert (await client.patch(f"{_URL}/7", json={"name": "수정"})).status_code == 200
+        assert (await client.delete(f"{_URL}/7")).status_code == 204
+
+        for agent_id, kwargs in captured.values():
+            assert agent_id == 7
+            assert kwargs["user_id"] == "test-user-123"
+            assert kwargs["project_id"] == "test-project-123"

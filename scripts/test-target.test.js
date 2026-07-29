@@ -274,3 +274,14 @@ test("--parallel returns a non-zero exit code when one lane fails", async () => 
 		cleanupRun(result)
 	}
 })
+
+test("--validate checks the complete target catalog", async () => {
+	const result = await runCli(["--validate"]);
+	try {
+		assert.equal(result.signal, null);
+		assert.equal(result.code, 0, result.stderr || result.stdout);
+		assert.deepEqual(result.events, []);
+	} finally {
+		cleanupRun(result);
+	}
+});

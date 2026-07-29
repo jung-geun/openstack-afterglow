@@ -6,6 +6,7 @@
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import (
     BIGINT,
@@ -107,6 +108,9 @@ class ChatConversation(Base):
     forked_from_message_id: Mapped[int | None] = mapped_column(BIGINT)
     # 소속 프로젝트(chat_workspaces). OpenStack project_id 와 별개 개념. 완료 시 워크스페이스 지침 주입.
     workspace_id: Mapped[int | None] = mapped_column(BIGINT)
+    code_workspace_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("chat_code_workspaces.id", ondelete="SET NULL")
+    )
     lifecycle_status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="active")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -121,6 +125,7 @@ class ChatConversation(Base):
         Index("idx_chat_conversations_owner", "project_id", "user_id"),
         Index("idx_chat_conversations_user_updated", "user_id", "updated_at"),  # 사용자별 목록(프로젝트 무관)
         Index("idx_chat_conversations_updated", "updated_at"),
+        Index("idx_chat_conversations_code_workspace", "code_workspace_id"),
     )
 
 
@@ -219,6 +224,7 @@ class ChatMcpServer(Base):
     scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
     owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
     transport: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="http")  # HTTPS streamable HTTP only
     url: Mapped[str | None] = mapped_column(VARCHAR(500))
@@ -229,6 +235,13 @@ class ChatMcpServer(Base):
     # 사용자별 인증 요구사항(비밀 아님) — [{"key","label","description"}]. 공용 시크릿 대신
     # 사용자가 자신의 값(chat_mcp_credentials)을 채우도록 어떤 헤더가 필요한지 선언.
     auth_requirements: Mapped[list | None] = mapped_column(JSON)
+    # none|headers|oauth. Hosted Notion MCP is always oauth; OAuth tokens are per user/project.
+    auth_mode: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="none")
+    tool_effect_overrides: Mapped[dict | None] = mapped_column(JSON)
+    config_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    source_package_id: Mapped[str | None] = mapped_column(CHAR(36))
+    source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
+    managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -237,6 +250,7 @@ class ChatMcpServer(Base):
     __table_args__ = (
         Index("idx_chat_mcp_scope", "scope"),
         Index("idx_chat_mcp_owner", "owner_user_id"),
+        Index("idx_chat_mcp_servers_project", "project_id"),
     )
 
 
@@ -254,6 +268,8 @@ class ChatMcpCredential(Base):
     owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     encrypted_values: Mapped[str] = mapped_column(TEXT, nullable=False)
+    credential_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -262,6 +278,47 @@ class ChatMcpCredential(Base):
         UniqueConstraint("mcp_server_id", "owner_user_id", "owner_project_id", name="uq_chat_mcp_cred"),
         Index("idx_chat_mcp_cred_owner", "owner_user_id", "owner_project_id"),
     )
+
+
+class ChatMcpOAuthConnection(Base):
+    """Per-user/project OAuth token bundle for a remote MCP server."""
+
+    __tablename__ = "chat_mcp_oauth_connections"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    mcp_server_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    encrypted_tokens: Mapped[str] = mapped_column(TEXT, nullable=False)
+    credential_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="active")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        UniqueConstraint("mcp_server_id", "owner_user_id", "owner_project_id", name="uq_chat_mcp_oauth_connection"),
+        Index("idx_chat_mcp_oauth_connection_owner", "owner_user_id", "owner_project_id", "status"),
+    )
+
+
+class ChatMcpOAuthRequest(Base):
+    """Short-lived, single-use server-held OAuth state and PKCE verifier."""
+
+    __tablename__ = "chat_mcp_oauth_requests"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    state_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    mcp_server_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    encrypted_payload: Mapped[str] = mapped_column(TEXT, nullable=False)
+    status: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (Index("idx_chat_mcp_oauth_request_expiry", "expires_at", "status"),)
 
 
 class ChatApiKey(Base):
@@ -302,12 +359,18 @@ class ChatCustomTool(Base):
     scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
     owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)  # 영숫자/언더스코어
     description: Mapped[str] = mapped_column(VARCHAR(500), nullable=False)
     method: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="GET")  # GET|POST
     url: Mapped[str] = mapped_column(VARCHAR(500), nullable=False)
     params_schema: Mapped[dict | None] = mapped_column(JSON)
     timeout_seconds: Mapped[int] = mapped_column(INT, nullable=False, default=10)
+    effect: Mapped[str] = mapped_column(VARCHAR(30), nullable=False, default="external_mutation")
+    config_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    source_package_id: Mapped[str | None] = mapped_column(CHAR(36))
+    source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
+    managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -316,6 +379,7 @@ class ChatCustomTool(Base):
     __table_args__ = (
         Index("idx_chat_tool_scope", "scope"),
         Index("idx_chat_tool_owner", "owner_user_id"),
+        Index("idx_chat_custom_tools_project", "project_id"),
     )
 
 
@@ -333,9 +397,18 @@ class ChatSkill(Base):
     scope: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="user")
     owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
     description: Mapped[str | None] = mapped_column(VARCHAR(500))
     instructions: Mapped[str] = mapped_column(TEXT, nullable=False)  # 암호문(chat_content 도메인)
+    slug: Mapped[str | None] = mapped_column(VARCHAR(100))
+    argument_hint: Mapped[str | None] = mapped_column(VARCHAR(500))
+    user_invocable: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    model_invocable: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64))
+    source_package_id: Mapped[str | None] = mapped_column(CHAR(36))
+    source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
+    managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -344,6 +417,8 @@ class ChatSkill(Base):
     __table_args__ = (
         Index("idx_chat_skill_scope", "scope"),
         Index("idx_chat_skill_owner", "owner_user_id"),
+        Index("idx_chat_skills_project", "project_id"),
+        UniqueConstraint("project_id", "slug", name="uq_chat_skills_project_slug"),
     )
 
 
@@ -359,6 +434,7 @@ class ChatAgent(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
     owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
     description: Mapped[str | None] = mapped_column(VARCHAR(500))
     avatar: Mapped[str | None] = mapped_column(VARCHAR(500))  # 이모지 또는 URL
@@ -368,10 +444,19 @@ class ChatAgent(Base):
     params: Mapped[dict | None] = mapped_column(JSON)  # {temperature, max_tokens, ...}
     mcp_ids: Mapped[list | None] = mapped_column(JSON)  # 바인딩된 ChatMcpServer id 목록
     tool_ids: Mapped[list | None] = mapped_column(JSON)  # 바인딩된 ChatCustomTool id 목록
+    skill_ids: Mapped[list | None] = mapped_column(JSON)
     visibility: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="private")  # private|public
+    role: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="general")
+    execution_policy: Mapped[dict | None] = mapped_column(JSON)
+    delegable_agent_ids: Mapped[list | None] = mapped_column(JSON)
     # 허브 복제 출처(감사·표시용): 이 에이전트가 어떤 공개 에이전트에서 복제됐는지.
     cloned_from_id: Mapped[int | None] = mapped_column(BIGINT)
     clone_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)  # 허브 인기 지표
+    is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    content_hash: Mapped[str | None] = mapped_column(CHAR(64))
+    source_package_id: Mapped[str | None] = mapped_column(CHAR(36))
+    source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
+    managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -379,6 +464,8 @@ class ChatAgent(Base):
     __table_args__ = (
         Index("idx_chat_agents_owner", "owner_user_id"),
         Index("idx_chat_agents_visibility", "visibility"),
+        Index("idx_chat_agents_project", "project_id"),
+        Index("idx_chat_agents_project_active", "project_id", "is_active"),
     )
 
 
@@ -413,6 +500,7 @@ class ChatMemory(Base):
     project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     workspace_id: Mapped[int | None] = mapped_column(BIGINT)
     scope: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="account")
+    category: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="general")
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="active")
@@ -433,4 +521,226 @@ class ChatMemory(Base):
         ),
         Index("idx_chat_memories_user", "user_id"),
         Index("idx_chat_memories_scope", "user_id", "project_id", "workspace_id", "status", "is_active"),
+    )
+
+
+class ChatMemoryOwnerLock(Base):
+    """Serializes automatic memory deltas for one user and project."""
+
+    __tablename__ = "chat_memory_owner_locks"
+
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class McpOwnerLock(Base):
+    """Per-user/project serialization row for delegated MCP authority."""
+
+    __tablename__ = "mcp_owner_locks"
+
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    lumen_selection_generation: Mapped[int] = mapped_column(BIGINT, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class McpDelegatedGrant(Base):
+    """Server-held, project-fixed Keystone application-credential delegation."""
+
+    __tablename__ = "mcp_delegated_grants"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    upstream_credential_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(VARCHAR(100), nullable=False)
+    source: Mapped[str] = mapped_column(VARCHAR(20), nullable=False)
+    access_level: Mapped[str] = mapped_column(VARCHAR(10), nullable=False)
+    status: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="pending")
+    application_credential_id: Mapped[str | None] = mapped_column(VARCHAR(128))
+    credential_ciphertext: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    credential_epoch: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_pending: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    cleanup_last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    orphan_recovery_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    orphan_recovery_nonce: Mapped[str | None] = mapped_column(CHAR(36))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('personal_token', 'oauth')", name="chk_mcp_grant_source"),
+        CheckConstraint("access_level IN ('read', 'manage')", name="chk_mcp_grant_access"),
+        CheckConstraint("status IN ('pending', 'active', 'revoked', 'expired')", name="chk_mcp_grant_status"),
+        Index("idx_mcp_grants_owner_status", "owner_user_id", "owner_project_id", "status"),
+        Index("idx_mcp_grants_expiry", "expires_at", "status"),
+    )
+
+
+class McpPersonalToken(Base):
+    """One-time-visible personal MCP token; its plaintext never reaches storage."""
+
+    __tablename__ = "mcp_personal_tokens"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    grant_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    visible_prefix: Mapped[str] = mapped_column(VARCHAR(32), nullable=False)
+    token_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("idx_mcp_personal_tokens_grant", "grant_id"),)
+
+
+class McpLumenSelection(Base):
+    """Exactly one selected active personal-token grant per user/project."""
+
+    __tablename__ = "mcp_lumen_selections"
+
+    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    grant_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="RESTRICT"), nullable=False
+    )
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class McpOAuthClient(Base):
+    __tablename__ = "mcp_oauth_clients"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    client_id: Mapped[str] = mapped_column(VARCHAR(512), nullable=False, unique=True)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, nullable=False)
+    redirect_uris: Mapped[list] = mapped_column(JSON, nullable=False)
+    client_id_issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class McpOAuthAuthorizationRequest(Base):
+    __tablename__ = "mcp_oauth_authorization_requests"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    ticket_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    client_id: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
+    client_fingerprint: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(VARCHAR(2048), nullable=False)
+    resource: Mapped[str] = mapped_column(VARCHAR(2048), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, nullable=False)
+    code_challenge: Mapped[str] = mapped_column(VARCHAR(256), nullable=False)
+    state: Mapped[str | None] = mapped_column(VARCHAR(2048))
+    owner_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    owner_project_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    grant_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    grant_id: Mapped[str | None] = mapped_column(CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'denied', 'expired')", name="chk_mcp_oauth_request_status"),
+        Index("idx_mcp_oauth_requests_owner", "owner_user_id", "owner_project_id", "status"),
+        Index("idx_mcp_oauth_requests_expiry", "expires_at", "status"),
+    )
+
+
+class McpOAuthCode(Base):
+    __tablename__ = "mcp_oauth_codes"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    code_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    grant_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(VARCHAR(2048), nullable=False)
+    resource: Mapped[str] = mapped_column(VARCHAR(2048), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, nullable=False)
+    code_challenge: Mapped[str] = mapped_column(VARCHAR(256), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class McpOAuthTokenFamily(Base):
+    __tablename__ = "mcp_oauth_token_families"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    grant_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    generation: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class McpOAuthToken(Base):
+    __tablename__ = "mcp_oauth_tokens"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    family_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_oauth_token_families.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False, unique=True)
+    token_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False)
+    resource: Mapped[str] = mapped_column(VARCHAR(2048), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, nullable=False)
+    generation: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("token_type IN ('access', 'refresh')", name="chk_mcp_oauth_token_type"),
+        Index("idx_mcp_oauth_tokens_family", "family_id", "token_type", "generation"),
+        Index("idx_mcp_oauth_tokens_expiry", "expires_at", "token_type"),
+    )
+
+
+class McpToolInvocation(Base):
+    __tablename__ = "mcp_tool_invocations"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid4()))
+    grant_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("mcp_delegated_grants.id", ondelete="RESTRICT"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(VARCHAR(10), nullable=False)
+    tool_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(VARCHAR(128))
+    arguments_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    registry_version: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    status: Mapped[str] = mapped_column(VARCHAR(24), nullable=False, default="claimed")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatch_authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[str | None] = mapped_column(MEDIUMTEXT)
+    error: Mapped[str | None] = mapped_column(TEXT)
+    resource_ref: Mapped[str | None] = mapped_column(VARCHAR(512))
+    operation_ref: Mapped[str | None] = mapped_column(VARCHAR(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('mcp', 'lumen')", name="chk_mcp_invocation_source"),
+        CheckConstraint(
+            "status IN ('claimed', 'dispatch_authorized', 'succeeded', 'failed', 'unknown')",
+            name="chk_mcp_invocation_status",
+        ),
+        UniqueConstraint("grant_id", "source", "tool_name", "idempotency_key", name="uq_mcp_invocation_claim"),
+        Index("idx_mcp_invocations_grant_created", "grant_id", "created_at"),
     )

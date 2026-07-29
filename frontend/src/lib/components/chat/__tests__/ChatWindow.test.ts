@@ -6,26 +6,55 @@ import ChatWindow from '../ChatWindow.svelte';
 const callbacks = {
 	onCopy: () => {},
 	onRegenerate: () => {},
+	onRetry: () => {},
 	onFork: () => {},
 	onSwitchVersion: () => {}
 };
 
 describe('ChatWindow', () => {
-	it('shows the durable agent stage and elapsed time', () => {
+	it('shows a user-facing active task and elapsed time', () => {
 		const { getByRole } = render(ChatWindow, {
 			activePath: [],
-			allMessages: [],
 			models: [],
 			agentActivity: {
-				label: 'web_search 도구를 실행 중입니다',
+				label: '웹 검색 진행 중',
 				startedAt: new Date(Date.now() - 2_000).toISOString()
 			},
 			...callbacks
 		});
 
 		const status = getByRole('status');
-		expect(status.textContent).toContain('web_search 도구를 실행 중입니다');
+		expect(status.textContent).toContain('웹 검색 진행 중');
 		expect(status.textContent).toContain('초');
+	});
+
+
+	it('renders the mapped tool task instead of a backend identifier', () => {
+		const { getByRole, queryByText } = render(ChatWindow, {
+			activePath: [],
+			models: [],
+			toolActivity: '웹 검색',
+			...callbacks
+		});
+
+		expect(getByRole('status').textContent).toContain('웹 검색 진행 중');
+		expect(queryByText(/managed_web_search|mcp__/)).toBeNull();
+	});
+
+	it('inserts a Lumen starter prompt through the normal chat input callback', async () => {
+		const onStarterPrompt = vi.fn();
+		const { getByRole } = render(ChatWindow, {
+			activePath: [],
+			models: [],
+			empty: true,
+			starterPrompts: [{ label: '프로젝트 현황', prompt: '현재 프로젝트를 요약해 주세요.' }],
+			onStarterPrompt,
+			...callbacks
+		});
+
+		await fireEvent.click(getByRole('button', { name: '프로젝트 현황' }));
+
+		expect(onStarterPrompt).toHaveBeenCalledWith('현재 프로젝트를 요약해 주세요.');
 	});
 
 	it('renders a non-empty conversation without an undefined component error', () => {
@@ -47,10 +76,72 @@ describe('ChatWindow', () => {
 		expect(getByText('확인할 메시지')).toBeTruthy();
 	});
 
+	it('shows a visible retry action for a failed user turn and invokes it', async () => {
+		const onRetry = vi.fn();
+		const { getByRole, getByText } = render(ChatWindow, {
+			activePath: [
+				{
+					id: 'failed-user-message',
+					conversation_id: 'conversation-1',
+					role: 'user',
+					parent_id: null,
+					content: '다시 전송할 메시지',
+					execution: { run_id: 'run-failed', status: 'failed', retryable: true },
+					created_at: '2026-07-23T00:00:00Z'
+				}
+			],
+			models: [],
+			...callbacks,
+			onRetry
+		});
+
+		expect(getByText('응답 생성에 실패했습니다')).toBeTruthy();
+		await fireEvent.click(getByRole('button', { name: '다시 전송' }));
+		expect(onRetry).toHaveBeenCalledOnce();
+		expect(onRetry).toHaveBeenCalledWith('failed-user-message');
+	});
+
+	it('uses start/end chat anatomy with role metadata and a compact corner tail', () => {
+		const { container, getByText } = render(ChatWindow, {
+			activePath: [
+				{
+					id: 'message-1',
+					conversation_id: 'conversation-1',
+					role: 'user',
+					parent_id: null,
+					content: '배포 상태를 확인해 주세요.',
+					created_at: '2026-07-23T00:00:00Z'
+				},
+				{
+					id: 'message-2',
+					conversation_id: 'conversation-1',
+					role: 'assistant',
+					parent_id: 'message-1',
+					content: '현재 배포는 정상입니다.',
+					model_name: 'afterglow-chat',
+					created_at: '2026-07-23T00:01:00Z'
+				}
+			],
+			models: [{ id: 1, model_name: 'afterglow-chat', display_name: 'Afterglow Chat' }],
+			...callbacks
+		});
+
+		const chats = container.querySelectorAll('article.chat');
+		expect(chats).toHaveLength(2);
+		expect(chats[0].classList.contains('chat-end')).toBe(true);
+		expect(chats[0].querySelector('.chat-header')).toBeTruthy();
+		expect(chats[0].querySelector('.chat-bubble')).toBeTruthy();
+		expect(chats[0].querySelector('.chat-footer')).toBeTruthy();
+		expect(chats[1].classList.contains('chat-start')).toBe(true);
+		expect(chats[1].querySelector('.chat-bubble')).toBeTruthy();
+		expect(getByText('나')).toBeTruthy();
+		expect(getByText('Afterglow')).toBeTruthy();
+		expect(getByText('Afterglow Chat')).toBeTruthy();
+	});
+
 	it('shows an explicit follow control after the reader scrolls away from streaming output', async () => {
 		const { container, getByRole } = render(ChatWindow, {
 			activePath: [],
-			allMessages: [],
 			models: [],
 			busy: true,
 			...callbacks
@@ -76,7 +167,6 @@ describe('ChatWindow', () => {
 		});
 		const { container } = render(ChatWindow, {
 			activePath: [],
-			allMessages: [],
 			models: [],
 			hasOlder: true,
 			onLoadOlder,

@@ -172,33 +172,62 @@ async def test_reconcile_schedules_resume_task_for_server_id():
 
 @pytest.mark.asyncio
 async def test_background_tasks_set_populated_on_start_ephemeral_build():
-    """start_ephemeral_build 호출 시 _background_tasks에 태스크 참조가 추가된다."""
+    """start_ephemeral_build retains its snapshot-driven background task."""
     from app.services import library_builder
 
-    # 이미 빌드 중인 항목 없어야 함
     library_builder._active_builds.clear()
-
-    mock_lib = MagicMock()
-    mock_lib.id = "python311"
-    mock_lib.version = "3.11"
+    started = asyncio.Event()
+    release = asyncio.Event()
+    mock_lib = MagicMock(id="python311", version="3.11")
+    recipe = MagicMock(base_image_id="img-001", share_proto="NFS", share_size_gb=5)
+    service_conn = MagicMock()
 
     async def fake_ephemeral_task(**kwargs):
-        await asyncio.sleep(0)
+        started.set()
+        await release.wait()
+
+    async def get_recipe(_library_id):
+        return recipe
+
+    async def resolve_policy_snapshot(**kwargs):
+        return {
+            "builder.flavor": {"id": "flavor-001", "name": "builder"},
+            "builder.network": {"id": "network-001", "name": "builder-net"},
+            "manila.nfs_share_type": {"id": "share-type-001", "name": "nfs"},
+            "manila.share_network": {"id": "share-network-001", "name": "share-net"},
+        }
+
+    async def get_policy_snapshot(_keys):
+        return {"openstack.service_project": {"id": "service-project", "name": "service"}}
 
     with (
         patch("app.services.library_builder.lib_svc.get_by_id", return_value=mock_lib),
+        patch("app.services.library_recipes.get_recipe", side_effect=get_recipe),
+        patch(
+            "app.services.resource_policy_store.get_service_project_connection",
+            new=AsyncMock(return_value=service_conn),
+        ),
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(side_effect=resolve_policy_snapshot),
+        ),
+        patch(
+            "app.services.resource_policy_store.get_policy_snapshot",
+            new=AsyncMock(side_effect=get_policy_snapshot),
+        ),
         patch("app.database.get_session_factory", return_value=None),
         patch(
             "app.services.library_builder._ephemeral_build_task",
             side_effect=fake_ephemeral_task,
         ),
     ):
-        before = len(library_builder._background_tasks)
+        service_conn.image.get_image.return_value = MagicMock(name="Ubuntu")
         await library_builder.start_ephemeral_build("python311")
-        # 태스크가 추가됐는지 확인 (완료 전)
-        assert len(library_builder._background_tasks) >= before
+        await started.wait()
+        assert library_builder._background_tasks
+        release.set()
+        await asyncio.sleep(0)
 
-    # 정리
     library_builder._active_builds.clear()
 
 

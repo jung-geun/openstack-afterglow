@@ -9,7 +9,7 @@ nav_order: 42
 > 태그: `clusters`, `containers`  
 > 기본 경로: `/api/v1/clusters`, `/api/v1/containers`
 
-Magnum 쿠버네티스 클러스터와 Zun 컨테이너를 관리합니다. **config.toml에서 각 서비스가 활성화된 경우에만 사용 가능합니다.**
+Magnum 쿠버네티스 클러스터와 Zun 컨테이너를 관리합니다. **afterglow.conf에서 각 서비스가 활성화된 경우에만 사용 가능합니다.**
 
 ---
 
@@ -34,7 +34,7 @@ Magnum 쿠버네티스 클러스터와 Zun 컨테이너를 관리합니다. **co
 > 태그: `clusters`  
 > 기본 경로: `/api/v1/clusters`
 
-**config.toml에서 Magnum 서비스가 활성화된 경우에만 사용 가능합니다.**
+**afterglow.conf에서 Magnum 서비스가 활성화된 경우에만 사용 가능합니다.**
 
 ### 엔드포인트 목록
 
@@ -96,7 +96,7 @@ Magnum 쿠버네티스 클러스터와 Zun 컨테이너를 관리합니다. **co
 > 태그: `containers`  
 > 기본 경로: `/api/v1/containers`
 
-**config.toml에서 Zun 서비스가 활성화된 경우에만 사용 가능합니다.**
+**afterglow.conf에서 Zun 서비스가 활성화된 경우에만 사용 가능합니다.**
 
 ### 엔드포인트 목록
 

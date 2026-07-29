@@ -6,6 +6,28 @@ import pytest
 
 from tests.conftest import make_mock_conn
 
+
+@pytest.fixture(autouse=True)
+def _resolve_default_placement_policies(monkeypatch):
+    """Keep cross-project instance tests independent of placement policy storage."""
+
+    async def resolve_zones(_conn, _requested_zone):
+        return "", ""
+
+    monkeypatch.setattr(
+        "app.services.instance_orchestration.resolve_availability_zones",
+        resolve_zones,
+    )
+
+    async def resolve_network(_conn, _settings):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.instance_orchestration.resolve_default_network",
+        resolve_network,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 헬퍼
 # ---------------------------------------------------------------------------

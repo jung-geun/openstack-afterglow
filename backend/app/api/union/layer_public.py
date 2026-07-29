@@ -20,9 +20,9 @@ from app.services import vm_cloud_init_library
 from app.services.cache import invalidate
 from app.services.cache import invalidation as cache_invalidation
 from app.services.k3s_cloudinit import _validate_ssh_public_key
-from app.services.keystone import get_service_project_connection
 from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
 from app.services.layer_ubuntu import normalize_ubuntu_base
+from app.services.resource_policy_store import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
@@ -419,8 +419,17 @@ async def consume_public_squashfs(
                 status_code=400, detail=f"선택한 키페어의 공개키를 조회할 수 없습니다: {req.key_name!r}"
             )
 
-    share_conn = await asyncio.to_thread(get_service_project_connection)
-    from app.services.layer_build import run_layer_consume
+    from app.services.layer_build import resolve_layer_consume_resource_snapshot, run_layer_consume
+
+    try:
+        resource_snapshot = await resolve_layer_consume_resource_snapshot(
+            conn,
+            flavor_ref=req.flavor_id,
+            network_id=req.network_id,
+        )
+        share_conn = await get_service_project_connection()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async with factory() as session:
         row = LayerConsume(
@@ -428,7 +437,8 @@ async def consume_public_squashfs(
             project_id=project_id,
             artifact_ids=[row.id for row in artifacts],
             server_name=req.server_name,
-            share_id=get_settings().union_layer_store_ro_share_id or "squashfs-public",
+            share_id=artifacts[0].share_id,
+            resource_snapshot=resource_snapshot,
             status="creating",
         )
         session.add(row)
@@ -452,6 +462,7 @@ async def consume_public_squashfs(
             share_conn=share_conn,
             artifact_ids=[row.id for row in artifacts],
             resolved_artifacts=resolved,
+            resource_snapshot=resource_snapshot,
         )
         await invalidate(f"afterglow:nova:{project_id}:instances")
         await cache_invalidation.invalidate_mutation_count("nova", project_id)
@@ -467,3 +478,8 @@ async def consume_public_squashfs(
     except Exception as exc:
         _logger.exception("[layer_public] public squashfs consume failed")
         raise HTTPException(status_code=500, detail="squashfs consume 생성 실패") from exc
+    finally:
+        try:
+            await asyncio.to_thread(share_conn.close)
+        except Exception:
+            _logger.warning("[layer_public] service share connection close failed", exc_info=True)

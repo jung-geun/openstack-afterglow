@@ -324,6 +324,53 @@ async def list_messages(
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
+async def list_messages_for_run(
+    run_id: str,
+    *,
+    user_id: str,
+    project_id: str,
+) -> list[dict]:
+    """Load the exact persisted user/assistant messages for one owned run."""
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            run = (
+                await session.execute(
+                    select(ChatRun).where(
+                        ChatRun.id == run_id,
+                        ChatRun.user_id == user_id,
+                        ChatRun.project_id == project_id,
+                        ChatRun.conversation_id.is_not(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if run is None or run.user_message_id is None:
+                return []
+            turn_message_ids = list(
+                (
+                    await session.execute(
+                        select(ChatRunTurn.assistant_message_id)
+                        .where(ChatRunTurn.run_id == run.id, ChatRunTurn.assistant_message_id.is_not(None))
+                        .order_by(ChatRunTurn.ordinal)
+                    )
+                ).scalars()
+            )
+            message_ids = [run.user_message_id, *turn_message_ids]
+            rows = (
+                await session.execute(
+                    select(ChatMessage).where(
+                        ChatMessage.id.in_(message_ids),
+                        ChatMessage.conversation_id == run.conversation_id,
+                    )
+                )
+            ).scalars()
+            by_id = {row.id: row for row in rows}
+            return [_msg_public(by_id[message_id]) for message_id in message_ids if message_id in by_id]
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
 async def add_message(
     conv_id: str,
     *,
@@ -585,7 +632,25 @@ async def list_message_tree(
             page = rows[:page_size]
             page.reverse()
             active_leaf_id = page[-1][1]
-            messages = [_msg_public(message) for message, _leaf in page]
+            user_message_ids = [message.id for message, _leaf in page if message.role == "user"]
+            execution_by_message: dict[int, dict] = {}
+            if user_message_ids:
+                run_rows = (
+                    await session.execute(
+                        select(ChatRun)
+                        .where(ChatRun.user_message_id.in_(user_message_ids))
+                        .order_by(ChatRun.updated_at.desc(), ChatRun.id.desc())
+                    )
+                ).scalars()
+                for run in run_rows:
+                    if run.user_message_id is None or run.user_message_id in execution_by_message:
+                        continue
+                    execution_by_message[run.user_message_id] = {
+                        "run_id": run.id,
+                        "status": run.status,
+                        "retryable": run.status in {"failed", "canceled"},
+                    }
+            messages = [_msg_public(message, execution=execution_by_message.get(message.id)) for message, _leaf in page]
             return {
                 "messages": messages,
                 "tree_nodes": tree_nodes,

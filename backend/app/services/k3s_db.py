@@ -35,6 +35,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "agent_count": cluster.agent_count,
         "server_flavor_id": cluster.server_flavor_id,
         "agent_flavor_id": cluster.agent_flavor_id,
+        "server_image_id": cluster.server_image_id,
         "network_id": cluster.network_id,
         "security_group_id": cluster.security_group_id,
         "server_ip": cluster.server_ip,
@@ -61,6 +62,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "os_type": cluster.os_type or "ubuntu",
         "template_id": cluster.template_id or None,
         "template_snapshot": cluster.template_snapshot or None,
+        "resource_policy_snapshot": cluster.resource_policy_snapshot or None,
         "master_count": cluster.master_count if hasattr(cluster, "master_count") else 1,
         "stampede_enabled": bool(cluster.stampede_enabled) if hasattr(cluster, "stampede_enabled") else False,
     }
@@ -89,6 +91,7 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             server_vm_id=data.get("server_vm_id") or None,
             server_flavor_id=data.get("server_flavor_id") or None,
             agent_flavor_id=data.get("agent_flavor_id") or None,
+            server_image_id=data.get("server_image_id") or None,
             network_id=data.get("network_id") or None,
             security_group_id=data.get("security_group_id") or None,
             server_ip=data.get("server_ip") or None,
@@ -109,6 +112,7 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             app_credential_id=data.get("app_credential_id") or None,
             template_id=data.get("template_id") or None,
             template_snapshot=data.get("template_snapshot") or None,
+            resource_policy_snapshot=data.get("resource_policy_snapshot") or None,
             master_count=int(data.get("master_count") or 1),
             stampede_enabled=bool(data.get("stampede_enabled", False)),
         )
@@ -119,7 +123,9 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             session,
             cluster_id=cluster_id,
             server_flavor_id=data.get("server_flavor_id") or None,
+            server_image_id=data.get("server_image_id") or None,
             agent_flavor_id=data.get("agent_flavor_id") or None,
+            agent_image_id=data.get("default_agent_image_id") or data.get("server_image_id") or None,
             agent_count=int(data.get("agent_count") or 0),
         )
         await session.commit()

@@ -7,6 +7,19 @@ import pytest
 from app.models.compute import InstanceInfo
 
 
+@pytest.fixture(autouse=True)
+def _resolve_default_placement_policies(monkeypatch):
+    """Keep security-group tests independent of persistence-backed placement selection."""
+
+    async def resolve_zones(_conn, _requested_zone):
+        return "", ""
+
+    monkeypatch.setattr(
+        "app.api.compute.instances.instance_orch.resolve_availability_zones",
+        resolve_zones,
+    )
+
+
 def make_instance(instance_id: str = "inst-1", name: str = "test-vm", status: str = "ACTIVE") -> InstanceInfo:
     return InstanceInfo(
         id=instance_id,

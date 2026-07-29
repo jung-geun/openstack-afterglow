@@ -18,7 +18,7 @@ import pytest
 
 
 def _make_settings():
-    """config.toml 독립적으로 테스트를 실행하기 위한 최소 Settings mock."""
+    """설정 파일과 독립적으로 테스트를 실행하기 위한 최소 Settings mock."""
     s = MagicMock()
     s.builder_network_id = "test-network-id"
     s.default_network_id = ""
@@ -26,6 +26,21 @@ def _make_settings():
     s.builder_ssh_key_path = ""
     s.builder_image_id = ""
     return s
+
+
+def _resource_snapshot() -> dict:
+    return {
+        "openstack.service_project": {"id": "service-project", "name": "service-project"},
+        "base_image": {"id": "img-uuid", "name": "base-image"},
+        "builder.flavor": {"id": "test-flavor-id", "name": "test-flavor-id"},
+        "builder.network": {"id": "test-network-id", "name": "test-network-id"},
+        "manila": {
+            "share_proto": "NFS",
+            "share_type": "nfs-type",
+            "share_network_id": "net-manila",
+            "share_size_gb": 20,
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -53,8 +68,7 @@ async def test_run_ephemeral_build_existing_share_skips_creation():
             return_value=mock_recipe,
         ),
         patch("app.services.ephemeral_build.lib_svc.get_by_id", return_value=MagicMock(version="3.11")),
-        patch("app.services.ephemeral_build.get_service_project_connection", return_value=MagicMock()),
-        patch("app.services.ephemeral_build.get_settings", return_value=_make_settings()),
+        patch("app.services.keystone.get_admin_connection_for_project", return_value=MagicMock()),
         patch("app.services.ephemeral_build._update_db", new_callable=AsyncMock),
         patch("app.services.ephemeral_build.manila.get_file_storage") as mock_get_share,
         patch("app.services.ephemeral_build.manila.update_share_metadata") as mock_update_meta,
@@ -73,7 +87,12 @@ async def test_run_ephemeral_build_existing_share_skips_creation():
         from app.services.ephemeral_build import run_ephemeral_build
 
         # run_ephemeral_build는 내부에서 모든 예외를 처리하고 정상 반환한다
-        await run_ephemeral_build(library_id, build_db_id, existing_share_id=existing_share_id)
+        await run_ephemeral_build(
+            library_id,
+            build_db_id,
+            existing_share_id=existing_share_id,
+            resource_snapshot=_resource_snapshot(),
+        )
 
         # ── 핵심 검증 ──────────────────────────────────────────────────────
 
@@ -119,8 +138,7 @@ async def test_run_ephemeral_build_existing_share_guard_raises_on_not_found():
             return_value=mock_recipe,
         ),
         patch("app.services.ephemeral_build.lib_svc.get_by_id", return_value=MagicMock(version="3.11")),
-        patch("app.services.ephemeral_build.get_service_project_connection", return_value=MagicMock()),
-        patch("app.services.ephemeral_build.get_settings", return_value=_make_settings()),
+        patch("app.services.keystone.get_admin_connection_for_project", return_value=MagicMock()),
         patch("app.services.ephemeral_build._update_db", new_callable=AsyncMock),
         # share 조회 실패 시뮬레이션
         patch(
@@ -135,7 +153,12 @@ async def test_run_ephemeral_build_existing_share_guard_raises_on_not_found():
         from app.services.ephemeral_build import run_ephemeral_build
 
         # guard 실패 → 외부 except가 처리 → 함수 정상 반환
-        await run_ephemeral_build(library_id, build_db_id, existing_share_id=missing_share_id)
+        await run_ephemeral_build(
+            library_id,
+            build_db_id,
+            existing_share_id=missing_share_id,
+            resource_snapshot=_resource_snapshot(),
+        )
 
         # guard 실패 시 create_builder_share는 호출되지 않아야 한다
         mock_create_share.assert_not_called()
@@ -162,8 +185,7 @@ async def test_run_ephemeral_build_no_existing_share_creates_new():
             return_value=mock_recipe,
         ),
         patch("app.services.ephemeral_build.lib_svc.get_by_id", return_value=MagicMock(version="3.11")),
-        patch("app.services.ephemeral_build.get_service_project_connection", return_value=MagicMock()),
-        patch("app.services.ephemeral_build.get_settings", return_value=_make_settings()),
+        patch("app.services.keystone.get_admin_connection_for_project", return_value=MagicMock()),
         patch("app.services.ephemeral_build._update_db", new_callable=AsyncMock),
         patch("app.services.ephemeral_build.manila.get_file_storage") as mock_get_share,
         patch(
@@ -180,7 +202,7 @@ async def test_run_ephemeral_build_no_existing_share_creates_new():
         from app.services.ephemeral_build import run_ephemeral_build
 
         # run_ephemeral_build는 내부에서 모든 예외를 처리하고 정상 반환한다
-        await run_ephemeral_build(library_id, build_db_id)  # existing_share_id 없음
+        await run_ephemeral_build(library_id, build_db_id, resource_snapshot=_resource_snapshot())
 
         # 기본 경로: create_builder_share가 호출되어야 한다
         mock_create_share.assert_called_once()

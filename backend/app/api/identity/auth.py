@@ -110,21 +110,24 @@ async def _prewarm_dashboard(token: str, project_id: str):
     except Exception:
         pass  # best-effort: 실패해도 로그인에는 영향 없음
 
-    # Default 네트워크 확인/생성 (프로젝트 최초 로드 시 1회)
+    # Default network provisioning remains best-effort for login latency, but
+    # never substitutes an arbitrary external network or deployment selector.
     settings = get_settings()
     if settings.default_network_enabled:
         try:
             from app.services.default_network import ensure_default_network
+            from app.services.resource_policy_store import resolve_policies
 
             conn2 = keystone.get_openstack_connection(token, project_id)
+            policies = await resolve_policies(conn=conn2, keys=("nova.default_external_network",))
             await ensure_default_network(
                 conn2,
                 project_id,
-                external_network_id=settings.default_network_external_id or None,
+                external_network_id=policies["nova.default_external_network"],
                 cidr=settings.default_network_cidr,
             )
         except Exception:
-            pass  # best-effort: 실패해도 로그인에는 영향 없음
+            _logger.warning("default network prewarm failed", exc_info=True)
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -44,6 +44,86 @@ describe('chat run reducer', () => {
 		});
 	});
 
+	it('replays the backend awaiting-input approval stage into the activity journal', () => {
+		const state = reduceRunEvent(
+			createRunViewState('run-1'),
+			event(1, 'run.stage.changed', { stage: 'awaiting_input', tool_name: null })
+		);
+		expect(state).toMatchObject({
+			stage: 'awaiting_input',
+			stageToolName: null,
+			activity: [expect.objectContaining({ kind: 'stage', stage: 'awaiting_input', toolName: null })]
+		});
+	});
+
+	it('replays stages, user-visible reasoning, and a tool call in durable sequence', () => {
+		let state = createRunViewState('run-1');
+		state = reduceRunEvent(state, event(1, 'run.stage.changed', { stage: 'model_response', tool_name: null }));
+		state = reduceRunEvent(
+			state,
+			event(2, 'part.delta', { message_id: '42', part_index: 1, part_type: 'reasoning', delta: '문서를 확인합니다.' })
+		);
+		state = reduceRunEvent(
+			state,
+			event(3, 'tool.call.started', { call_id: 'call-1', name: 'web_search', arguments: { query: 'Afterglow' } })
+		);
+		state = reduceRunEvent(
+			state,
+			event(4, 'tool.call.completed', {
+				call_id: 'call-1',
+				name: 'web_search',
+				content: [{ type: 'text', text: '결과' }],
+				status: 'completed',
+				error_code: null
+			})
+		);
+
+		expect(state.activity).toEqual([
+			expect.objectContaining({ kind: 'stage', seq: 1, stage: 'model_response' }),
+			expect.objectContaining({ kind: 'reasoning', seq: 2, text: '문서를 확인합니다.', active: true }),
+			expect.objectContaining({
+				kind: 'tool',
+				seq: 3,
+				callId: 'call-1',
+				status: 'completed',
+				content: [{ type: 'text', text: '결과' }]
+			})
+		]);
+	});
+
+	it('preserves same-index reasoning from successive model messages around a tool call', () => {
+		let state = createRunViewState('run-1');
+		state = reduceRunEvent(state, event(1, 'message.created', { message_id: 'assistant-1', role: 'assistant', parent_id: null }));
+		state = reduceRunEvent(
+			state,
+			event(2, 'part.delta', { message_id: 'assistant-1', part_index: 1, part_type: 'reasoning', delta: '첫 번째 판단' })
+		);
+		state = reduceRunEvent(
+			state,
+			event(3, 'tool.call.started', { call_id: 'call-1', name: 'web_search', arguments: { query: 'Afterglow' } })
+		);
+		state = reduceRunEvent(state, event(4, 'message.created', { message_id: 'assistant-2', role: 'assistant', parent_id: null }));
+		state = reduceRunEvent(
+			state,
+			event(5, 'part.completed', {
+				message_id: 'assistant-1',
+				part_index: 1,
+				part: { type: 'reasoning', text: '첫 번째 판단 완료', visibility: 'user' }
+			})
+		);
+		state = reduceRunEvent(
+			state,
+			event(6, 'part.delta', { message_id: 'assistant-2', part_index: 1, part_type: 'reasoning', delta: '두 번째 판단' })
+		);
+
+		expect(state.activity).toEqual([
+			expect.objectContaining({ kind: 'reasoning', id: 'reasoning:assistant-1:1', seq: 2, text: '첫 번째 판단 완료', active: false }),
+			expect.objectContaining({ kind: 'tool', id: 'tool:call-1', seq: 3 }),
+			expect.objectContaining({ kind: 'reasoning', id: 'reasoning:assistant-2:1', seq: 6, text: '두 번째 판단' })
+		]);
+		expect(state.parts[1]).toEqual({ type: 'reasoning', text: '두 번째 판단', visibility: 'user' });
+	});
+
 	it('deduplicates old events and rejects a sequence gap', () => {
 		const state = createRunViewState('run-1');
 		const started = { conversation_id: null, temp_thread_id: null, model_name: 'm', effective_features: {} };

@@ -49,7 +49,7 @@ export interface ChatMessage {
 	citations?: unknown;
 	parts?: unknown;
 	status?: 'streaming' | 'complete' | 'failed' | 'canceled' | null;
-	execution?: { run_id?: string; agent_id?: string | null; skill_ids?: number[]; skills?: { id: number; name: string }[] } | null;
+	execution?: { run_id?: string; agent_id?: string | null; skill_ids?: number[]; skills?: { id: number; name: string }[]; status?: string; retryable?: boolean } | null;
 	reasoning?: string | null;
 	token_prompt?: number | null;
 	token_completion?: number | null;

@@ -3,6 +3,8 @@ export { default as Alert } from './Alert.svelte';
 export { default as Button } from './Button.svelte';
 export { default as CapacityBar } from './CapacityBar.svelte';
 export { default as Card } from './Card.svelte';
+export { default as ChatBubble } from './ChatBubble.svelte';
+export type { ChatBubbleAlignment } from './ChatBubble.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { default as DetailHeader } from './DetailHeader.svelte';
 export { default as Donut } from './Donut.svelte';

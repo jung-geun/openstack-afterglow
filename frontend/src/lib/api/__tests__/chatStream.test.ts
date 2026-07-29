@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { __test__, ChatProtocolError } from '../chatStream';
+import { __test__, ChatProtocolError, parseChatRunDescriptor } from '../chatStream';
 
 describe('durable chat SSE framing', () => {
 	it('preserves multiline data and ignores keepalive comments', () => {
@@ -21,4 +21,20 @@ describe('durable chat SSE framing', () => {
 	it('identifies malformed protocol failures distinctly', () => {
 		expect(new ChatProtocolError('bad event').name).toBe('ChatProtocolError');
 	});
+
+	it.each(['awaiting_input', 'waiting_children'] as const)(
+		'accepts the v2 %s descriptor status',
+		(status) => {
+			expect(
+				parseChatRunDescriptor({
+					run_id: 'run-1',
+					conversation_id: 'conversation-1',
+					temp_thread_id: null,
+					status,
+					events_url: '/api/v1/chat/runs/run-1/events',
+					cancel_url: '/api/v1/chat/runs/run-1/cancel'
+				})
+			).toMatchObject({ status });
+		}
+	);
 });

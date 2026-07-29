@@ -25,30 +25,24 @@ _logger = logging.getLogger(__name__)
 async def ensure_default_network(
     conn: openstack.connection.Connection,
     project_id: str,
-    external_network_id: str | None = None,
+    external_network_id: str,
     cidr: str = "192.168.0.0/24",
 ) -> NetworkInfo:
-    """프로젝트의 Default 네트워크를 조회하거나 생성한다 (비동기).
+    """Return the persisted project network or provision one with an exact edge.
 
-    처리 순서:
-      1. DB에서 project_id로 조회 → 있으면 Neutron 존재 확인 후 반환
-      2. Neutron에서 "Default" 이름 네트워크 검색 또는 신규 생성 (asyncio.to_thread)
-      3. DB에 기록 후 반환
+    A stale project record is actionable: it is not silently replaced by a
+    different network during a provisioning request.
     """
     from app.services.neutron import _net_to_info, provision_default_network
 
-    # ── 1. DB 조회 ────────────────────────────────────────────────────────────
     row = await _db_get(project_id)
     if row:
         network_id = row["network_id"]
-        try:
-            n = await asyncio.to_thread(conn.network.get_network, network_id)
-            return _net_to_info(n)
-        except Exception:
-            # 네트워크가 삭제된 경우 → 재생성
-            _logger.warning("DB에 기록된 Default 네트워크(%s)를 찾을 수 없음, 재생성", network_id)
+        network = await asyncio.to_thread(conn.network.get_network, network_id)
+        if network is None:
+            raise RuntimeError("persisted project default network is unavailable")
+        return _net_to_info(network)
 
-    # ── 2. Neutron 조회/생성 ──────────────────────────────────────────────────
     net_id, subnet_id, router_id, newly_created = await asyncio.to_thread(
         provision_default_network, conn, project_id, external_network_id, cidr
     )

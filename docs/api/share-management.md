@@ -12,7 +12,7 @@ parent: API 레퍼런스
 Manila share의 스냅샷, share 네트워크, security service를 관리합니다.
 [파일 스토리지 API](file-storage.md)의 보조 리소스 계층에 해당합니다.
 
-> **활성화 조건:** `config.toml`(또는 `afterglow.conf`) `[services] manila = true`.
+> **활성화 조건:** `afterglow.conf [services] manila = true`.
 > Manila 비활성화 시 이 라우터들도 마운트되지 않아 모든 경로가 `404`를 반환합니다.
 
 ---

@@ -10,6 +10,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from app.config import get_settings
 from app.services.layer_ubuntu import normalize_ubuntu_base
 
 
@@ -74,6 +75,44 @@ async def start_layer_build(
         effective_ubuntu_base = normalize_ubuntu_base(ubuntu_base)
     if source_metadata is not None:
         base_image_snapshot = {**(base_image_snapshot or {}), "source_metadata": source_metadata}
+
+    if not base_image_snapshot or not base_image_snapshot.get("base_image_id"):
+        raise ValueError("root and imported layer builds require an explicit base image")
+    from app.services.resource_policy_store import (
+        get_policy_snapshot,
+        get_service_project_connection,
+        resolve_policy_snapshot,
+    )
+
+    service_conn = await get_service_project_connection()
+    try:
+        policies = await resolve_policy_snapshot(
+            conn=service_conn,
+            keys=(
+                "builder.flavor",
+                "builder.network",
+                "manila.share_network",
+                "manila.nfs_share_type",
+            ),
+        )
+        service_project = (await get_policy_snapshot(("openstack.service_project",)))["openstack.service_project"]
+        if service_project is None:
+            raise ValueError("service project policy is not configured")
+    finally:
+        await asyncio.to_thread(service_conn.close)
+    resource_snapshot = {
+        "base_image": {
+            "id": base_image_snapshot["base_image_id"],
+            "name": base_image_snapshot.get("base_image_name") or base_image_snapshot["base_image_id"],
+        },
+        "openstack.service_project": service_project,
+        "manila": {
+            "share_network_id": policies["manila.share_network"]["id"],
+            "share_type": policies["manila.nfs_share_type"]["name"],
+            "share_proto": "NFS",
+            "share_size_gb": get_settings().builder_layer_share_size_gb,
+        },
+    }
     build_db_id: int | None = None
     factory = get_session_factory()
     if factory:
@@ -87,6 +126,9 @@ async def start_layer_build(
                 ubuntu_base=effective_ubuntu_base,
                 parent_artifact_id=parent_artifact_id,
                 share_id="",  # 동적 share — run_layer_build에서 생성 후 갱신
+                builder_flavor_id=policies["builder.flavor"]["id"],
+                builder_network_id=policies["builder.network"]["id"],
+                resource_snapshot=resource_snapshot,
                 status="queued",
                 cloud_init_status="queued",
                 progress_step="빌드 대기",
@@ -135,6 +177,7 @@ async def start_layer_build(
             nvidia_driver_branch=nvidia_driver_branch,
             ubuntu_base=effective_ubuntu_base,
             base_image_snapshot=base_image_snapshot,
+            resource_snapshot=resource_snapshot,
             source_metadata=source_metadata,
         )
     )
@@ -166,6 +209,7 @@ async def _build_task(
     nvidia_driver_branch: str | None = None,
     ubuntu_base: str | None = None,
     base_image_snapshot: dict | None = None,
+    resource_snapshot: dict | None = None,
     source_metadata: dict | None = None,
 ) -> None:
     """백그라운드 빌드 래퍼 — 완료 시 _active_builds에서 제거."""
@@ -186,6 +230,7 @@ async def _build_task(
             nvidia_driver_branch=nvidia_driver_branch,
             ubuntu_base=ubuntu_base,
             base_image_snapshot=base_image_snapshot,
+            resource_snapshot=resource_snapshot,
             source_metadata=source_metadata,
         )
     except Exception:

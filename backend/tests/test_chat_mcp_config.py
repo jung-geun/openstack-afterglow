@@ -72,6 +72,12 @@ class TestUrlValidation:
         es._apply_fields("mcp", row, {"url": "https://mcp.example/mcp"})
         assert row.url == "https://mcp.example/mcp"
 
+    def test_hosted_notion_is_classified_as_oauth(self):
+        row = _row()
+        es._apply_fields("mcp", row, {"url": "https://mcp.notion.com/mcp/"})
+        assert row.auth_mode == "oauth"
+        assert es._public_mcp(row)["auth_mode"] == "oauth"
+
 
 class TestHeaderEncryption:
     def test_headers_encrypted_at_rest_not_plaintext(self):

@@ -7,10 +7,18 @@
 	import NotionTargetEditForm from '$lib/components/admin/notion/NotionTargetEditForm.svelte';
 	import NotionTargetCard from '$lib/components/admin/notion/NotionTargetCard.svelte';
 	import type { NotionTarget } from '$lib/components/admin/notion/NotionTargetCard.svelte';
+	import { Alert, Button, Card } from '$lib/components/ui';
 	import { toast } from '$lib/stores/toast';
 
 
+	interface RuntimeSetting {
+		key: 'notion.sync_enabled';
+		value: boolean | null;
+	}
+
 	let targets = $state<NotionTarget[]>([]);
+	let notionSyncEnabled = $state<boolean | null>(null);
+	let savingGlobalGate = $state(false);
 	let loading = $state(true);
 	let error = $state('');
 	let showAddForm = $state(false);
@@ -22,16 +30,41 @@
 	async function fetchTargets() {
 		loading = true;
 		try {
-			targets = await api.get<NotionTarget[]>(
-				'/api/v1/admin/notion/targets',
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			error = '';
+			const [loadedTargets, runtimeSettings] = await Promise.all([
+				api.get<NotionTarget[]>(
+					'/api/v1/admin/notion/targets',
+					$auth.token ?? undefined,
+					$auth.projectId ?? undefined
+				),
+				api.get<RuntimeSetting[]>(
+					'/api/v1/admin/runtime-settings',
+					$auth.token ?? undefined,
+					$auth.projectId ?? undefined
+				)
+			]);
+			targets = loadedTargets;
+			notionSyncEnabled = runtimeSettings.find((setting) => setting.key === 'notion.sync_enabled')?.value ?? false;
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function setGlobalGate(enabled: boolean) {
+		savingGlobalGate = true;
+		try {
+			await api.put(
+				'/api/v1/admin/runtime-settings/notion.sync_enabled',
+				{ value: enabled },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			notionSyncEnabled = enabled;
+		} catch (cause) {
+			error = cause instanceof ApiError ? `전역 동기화 설정 저장 실패: ${cause.message}` : '전역 동기화 설정 저장 실패';
+		} finally {
+			savingGlobalGate = false;
 		}
 	}
 
@@ -102,8 +135,26 @@
 	</PageHeader>
 
 	{#if error}
-		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
+		<Alert tone="danger">{error}</Alert>
 	{/if}
+
+	<Card padding="md" surface="subtle">
+		<div class="global-gate">
+			<div>
+				<p class="gate-eyebrow">Global synchronization gate</p>
+				<h2>Notion 전체 동기화</h2>
+				<p>비활성화하면 worker와 수동 테스트 모두 외부 Notion·OpenStack 호출 전에 중단합니다. 대상과 자격 증명은 유지됩니다.</p>
+			</div>
+			<Button
+				variant={notionSyncEnabled ? 'primary' : 'secondary'}
+				size="sm"
+				disabled={savingGlobalGate || notionSyncEnabled === null}
+				onclick={() => setGlobalGate(!notionSyncEnabled)}
+			>
+				{savingGlobalGate ? '저장 중…' : notionSyncEnabled ? '동기화 켜짐' : '동기화 꺼짐'}
+			</Button>
+		</div>
+	</Card>
 
 	<NotionTargetAddForm bind:open={showAddForm} onAdded={fetchTargets} />
 
@@ -157,3 +208,41 @@
 		</ol>
 	</div>
 </div>
+
+<style>
+	.global-gate {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.gate-eyebrow {
+		margin: 0 0 0.25rem;
+		color: var(--admin-tone, var(--color-warm));
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+	}
+
+	h2 {
+		margin: 0;
+		color: var(--color-ink-0);
+		font-size: 1rem;
+	}
+
+	.global-gate p:not(.gate-eyebrow) {
+		margin: 0.35rem 0 0;
+		color: var(--color-ink-2);
+		font-size: 0.82rem;
+		line-height: 1.5;
+	}
+
+	@media (max-width: 640px) {
+		.global-gate {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+	}
+</style>

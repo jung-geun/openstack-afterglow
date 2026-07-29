@@ -4,7 +4,7 @@
 
 ```
 deploy/k8s-template/
-├── configmap.yaml        # afterglow.conf/config.toml ConfigMap
+├── configmap.yaml        # afterglow.conf ConfigMap
 ├── secret.yaml           # afterglow-secrets 예시
 ├── ingress.yaml
 ├── cert-manager.yaml

@@ -29,6 +29,7 @@ class SiteServicesResponse(BaseModel):
     barbican: bool
     waygate: bool
     chat: bool
+    mcp: bool
 
 
 class PublicSiteConfigResponse(BaseModel):

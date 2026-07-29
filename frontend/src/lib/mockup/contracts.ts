@@ -71,6 +71,7 @@ export const MOCKUP_SERVICE_OVERRIDES = {
 	barbican: true,
 	waygate: false,
 	chat: false,
+	mcp: false,
 } as const;
 
 export function isMockupProfileId(value: unknown): value is MockupProfileId {

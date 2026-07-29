@@ -8,7 +8,7 @@ nav_order: 62
 
 Trove 기반 관리형 데이터베이스(DBaaS)를 프로비저닝하고 관리합니다. MySQL·MariaDB·PostgreSQL 등의 인스턴스를 생성하고, 그 안의 데이터베이스·유저·백업을 관리하며, floating IP를 붙여 외부에 노출할 수 있습니다.
 
-> **선택 서비스** — `config.toml [services]` 에서 활성화해야 사용할 수 있습니다.
+> **선택 서비스** — `afterglow.conf [services]` 에서 활성화해야 사용할 수 있습니다.
 > 비활성화 상태에서 이 엔드포인트에 접근하면 라우터 미등록(404)이 반환됩니다.
 
 ---

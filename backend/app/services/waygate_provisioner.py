@@ -19,28 +19,6 @@ _WG_INGRESS_SG_NAME = "afterglow-waygate-wireguard"
 
 
 # ---------------------------------------------------------------------------
-# flavor 이름 → ID 해석
-# ---------------------------------------------------------------------------
-
-
-def _resolve_flavor_id(conn, flavor_name: str, override_flavor_id: str) -> str:
-    """flavor_name(예: cpu.1c_2g)을 conn.compute.flavors()에서 찾아 ID로 해석한다.
-
-    override_flavor_id가 설정돼 있으면 이름 조회 없이 바로 사용한다.
-    """
-    if override_flavor_id:
-        return override_flavor_id
-
-    from app.services import nova as nova_svc
-
-    flavors = nova_svc.list_flavors(conn)
-    for f in flavors:
-        if f.name == flavor_name:
-            return f.id
-    raise RuntimeError(f"flavor '{flavor_name}' 를 찾을 수 없습니다 (config.toml [waygate] flavor_id 로 override 가능)")
-
-
-# ---------------------------------------------------------------------------
 # WireGuard ingress SG (idempotent) — neutron._ensure_single_port_ingress_sg 미러
 # ---------------------------------------------------------------------------
 
@@ -125,14 +103,17 @@ async def provision_waygate_server(
 
         name = server_record["name"]
         listen_port = server_record["listen_port"]
-
-        provider_network_id = settings.waygate_provider_network_id
-        if not provider_network_id:
-            raise RuntimeError("config.toml [waygate] provider_network_id 가 설정되지 않았습니다")
-
-        flavor_id = await asyncio.to_thread(
-            _resolve_flavor_id, conn, settings.waygate_flavor_name, settings.waygate_flavor_id
-        )
+        snapshot = server_record.get("resource_policy_snapshot") or {}
+        provider_network_id = server_record.get("provider_network_id") or (
+            snapshot.get("waygate.provider_network") or {}
+        ).get("id")
+        flavor_id = server_record.get("flavor_id") or (snapshot.get("waygate.flavor") or {}).get("id")
+        image_id = server_record.get("image_id") or (snapshot.get("waygate.image") or {}).get("id")
+        floating_network_id = server_record.get("floating_network_id") or (
+            snapshot.get("waygate.floating_network") or {}
+        ).get("id")
+        if not all((provider_network_id, flavor_id, image_id)):
+            raise RuntimeError("Waygate resource policy snapshot is incomplete")
 
         # 1. WireGuard ingress SG (idempotent)
         sg_id = await asyncio.to_thread(_ensure_wireguard_sg, conn, project_id, listen_port)
@@ -159,14 +140,6 @@ async def provision_waygate_server(
             bootstrap_token=bootstrap_token,
         )
 
-        # 4. VM 생성 (openstacksdk 직접 호출 — builder_vm.create_ephemeral_vm 패턴 미러.
-        #    nova.create_server는 volume-boot 전용이라 image_id + port 지정 부팅에 맞지 않음)
-        image_id = settings.waygate_image_id
-        if not image_id:
-            raise RuntimeError("config.toml [waygate] image_id 가 설정되지 않았습니다")
-
-        # key_name 은 선택 사항. 비어 있으면 kwargs 에서 아예 제외한다 — Nova 는 key_name: null 을
-        # 거부한다("None is not of type 'string'"). None 전달 대신 필드 자체를 생략해야 한다.
         create_kwargs: dict = {
             "name": name,
             "image_id": image_id,
@@ -175,9 +148,6 @@ async def provision_waygate_server(
             "user_data": userdata,
             "metadata": {"afterglow_managed": "true", "waygate_type": "gateway", "waygate_server_id": server_id},
         }
-        if settings.waygate_key_name:
-            create_kwargs["key_name"] = settings.waygate_key_name
-
         server = await asyncio.to_thread(conn.compute.create_server, **create_kwargs)
         created_server_vm_id = server.id
         await waygate_db.update_server_status(
@@ -198,10 +168,8 @@ async def provision_waygate_server(
         if not fixed_ip:
             raise RuntimeError(f"Waygate VM {server.id}: fixed IP를 찾을 수 없습니다")
 
-        # 6. endpoint IP 결정 — floating_network_id 설정 시 FIP, 아니면 fixed IP 그대로 사용
-        #    (builder_vm.create_ephemeral_vm 233-238행과 동일 분기)
-        if settings.waygate_floating_network_id:
-            fip_addr, fip_id = await _allocate_new_fip(conn, server.id, settings.waygate_floating_network_id)
+        if floating_network_id:
+            fip_addr, fip_id = await _allocate_new_fip(conn, server.id, floating_network_id)
             created_fip_id = fip_id
             endpoint_ip = fip_addr
         else:
@@ -217,7 +185,7 @@ async def provision_waygate_server(
             only_if_status="CREATING",
             endpoint_ip=endpoint_ip,
             fip_id=fip_id,
-            key_name=settings.waygate_key_name or None,
+            key_name=None,
         )
         _logger.info(
             "waygate_provisioner: server %s VM active (vm_id=%s, endpoint=%s), waiting for agent register",

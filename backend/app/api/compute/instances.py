@@ -241,6 +241,10 @@ async def create_instance(
         if resolved_net_id:
             req = req.model_copy(update={"network_id": resolved_net_id})
 
+    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+        conn, req.availability_zone
+    )
+
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
     created_access_ids: list[tuple[str, str]] = []  # (file_storage_id, access_id)
@@ -302,7 +306,7 @@ async def create_instance(
                 f"{req.name}-boot",
                 req.image_id,
                 req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                req.availability_zone or settings.default_availability_zone,
+                volume_availability_zone,
             )
             boot_volume_id = boot_vol.id
             await asyncio.to_thread(
@@ -328,7 +332,7 @@ async def create_instance(
                     conn,
                     f"union-upper-{req.name}",
                     settings.upper_volume_size_gb,
-                    req.availability_zone or settings.default_availability_zone,
+                    volume_availability_zone,
                 )
                 upper_volume_id = upper_vol.id
                 created_upper = True
@@ -409,7 +413,7 @@ async def create_instance(
             userdata=userdata,
             key_name=req.key_name,
             admin_pass=req.admin_pass,
-            availability_zone=req.availability_zone or settings.default_availability_zone,
+            availability_zone=compute_availability_zone,
             metadata=meta,
             delete_boot_volume_on_termination=(
                 False if boot_volume_was_provided else req.delete_boot_volume_on_termination
@@ -528,6 +532,10 @@ async def create_instance_async(
         if resolved_net_id:
             req = req.model_copy(update={"network_id": resolved_net_id})
 
+    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+        conn, req.availability_zone
+    )
+
     async def progress_generator():
         import time
 
@@ -614,7 +622,7 @@ async def create_instance_async(
                     name=f"{req.name}-boot",
                     image_id=req.image_id,
                     size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                    availability_zone=volume_availability_zone,
                 )
                 boot_volume_id = boot_vol.id
                 await asyncio.to_thread(
@@ -641,7 +649,7 @@ async def create_instance_async(
                         conn,
                         name=f"union-upper-{req.name}",
                         size_gb=settings.upper_volume_size_gb,
-                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                        availability_zone=volume_availability_zone,
                     )
                     upper_volume_id = upper_vol.id
                     created_upper = True
@@ -710,7 +718,7 @@ async def create_instance_async(
                 userdata=userdata,
                 key_name=req.key_name,
                 admin_pass=req.admin_pass,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
+                availability_zone=compute_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=(
                     False if boot_volume_was_provided else req.delete_boot_volume_on_termination
@@ -1657,18 +1665,24 @@ async def _prepare_dynamic_file_storage(
 
     share_proto에 따라 CephFS 또는 NFS share를 생성한다.
     """
-    # 프로토콜에 따른 share type 선택
+    from app.services.resource_policy_store import resolve_policy_snapshot
+
+    policy_key = "manila.nfs_share_type" if share_proto.upper() == "NFS" else "manila.cephfs_share_type"
+    policies = await resolve_policy_snapshot(conn=conn, keys=(policy_key,))
+    share_type = policies[policy_key]["name"]
+    share_network_id = ""
     if share_proto.upper() == "NFS":
-        share_type = settings.os_manila_nfs_share_type
-    else:
-        share_type = settings.os_manila_share_type
+        raise HTTPException(
+            status_code=422,
+            detail="NFS dynamic shares require a tenant-visible share network selected by the request",
+        )
 
     file_storage = await asyncio.to_thread(
         manila.create_file_storage,
         conn,
         f"union-dyn-{instance_name}",
         settings.upper_volume_size_gb,
-        settings.os_manila_share_network_id,
+        share_network_id,
         share_type,
         share_proto,
         {

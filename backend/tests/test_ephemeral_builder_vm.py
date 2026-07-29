@@ -1,218 +1,89 @@
-"""임시 Builder VM 생성/삭제 및 smoke 엔드포인트 단위 테스트."""
+"""Ephemeral Builder VM snapshot and cleanup regression tests."""
 
+from __future__ import annotations
+
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# 헬퍼
-# ---------------------------------------------------------------------------
+
+def _server(server_id: str = "srv-abc", fixed_ip: str = "10.0.0.5") -> MagicMock:
+    result = MagicMock()
+    result.id = server_id
+    result.status = "ACTIVE"
+    result.addresses = {"internal": [{"addr": fixed_ip, "OS-EXT-IPS:type": "fixed"}]}
+    return result
 
 
-def _make_server(server_id: str = "srv-abc", fixed_ip: str = "10.0.0.5") -> MagicMock:
-    server = MagicMock()
-    server.id = server_id
-    server.status = "ACTIVE"
-    server.addresses = {
-        "internal": [
-            {"addr": fixed_ip, "OS-EXT-IPS:type": "fixed"},
-        ]
-    }
-    return server
+def test_extract_fixed_ip_ignores_floating_addresses():
+    from app.services.builder_vm import _extract_fixed_ip
+
+    server = MagicMock(addresses={"net": [{"addr": "1.2.3.4", "OS-EXT-IPS:type": "floating"}]})
+    assert _extract_fixed_ip(server) is None
 
 
-def _make_fip(addr: str = "1.2.3.4", fip_id: str = "fip-123") -> MagicMock:
-    fip = MagicMock()
-    fip.floating_ip_address = addr
-    fip.id = fip_id
-    return fip
+@pytest.mark.asyncio
+async def test_create_requires_explicit_snapshot_resources():
+    from app.services.builder_vm import create_ephemeral_vm
+
+    with pytest.raises(ValueError, match="image_id"):
+        await create_ephemeral_vm(MagicMock(), image_id="", flavor_id="flavor", network_id="network")
 
 
-def _make_settings(**kwargs) -> MagicMock:
-    s = MagicMock()
-    s.builder_image_id = kwargs.get("builder_image_id", "img-ubuntu")
-    s.builder_flavor_id = kwargs.get("builder_flavor_id", "flv-4c4g")
-    s.builder_network_id = kwargs.get("builder_network_id", "net-svc")
-    s.builder_floating_network_id = kwargs.get("builder_floating_network_id", "ext-net")
-    s.builder_ssh_user = kwargs.get("builder_ssh_user", "ubuntu")
-    s.builder_ssh_key_path = kwargs.get("builder_ssh_key_path", "/tmp/builder.key")
-    s.default_network_id = kwargs.get("default_network_id", "net-default")
-    return s
+@pytest.mark.asyncio
+async def test_create_uses_explicit_resources_and_one_use_keypair():
+    from app.services.builder_vm import EphemeralBuilderVM, create_ephemeral_vm
 
-
-# ---------------------------------------------------------------------------
-# _extract_fixed_ip
-# ---------------------------------------------------------------------------
-
-
-class TestExtractFixedIp:
-    def test_returns_fixed_ip(self):
-        from app.services.builder_vm import _extract_fixed_ip
-
-        server = _make_server(fixed_ip="192.168.1.10")
-        assert _extract_fixed_ip(server) == "192.168.1.10"
-
-    def test_returns_none_when_no_fixed(self):
-        from app.services.builder_vm import _extract_fixed_ip
-
-        server = MagicMock()
-        server.addresses = {"net": [{"addr": "1.2.3.4", "OS-EXT-IPS:type": "floating"}]}
-        assert _extract_fixed_ip(server) is None
-
-    def test_returns_none_when_addresses_empty(self):
-        from app.services.builder_vm import _extract_fixed_ip
-
-        server = MagicMock()
-        server.addresses = {}
-        assert _extract_fixed_ip(server) is None
-
-
-# ---------------------------------------------------------------------------
-# create_ephemeral_vm
-# ---------------------------------------------------------------------------
-
-
-class TestCreateEphemeralVm:
-    @pytest.mark.asyncio
-    async def test_raises_when_builder_policies_are_invalid(self):
-        """Builder policies must be present and usable in the service project."""
-        from app.services.builder_vm import create_ephemeral_vm
-        from app.services.resource_policies import ResourcePolicyValidationError
-
-        with patch(
-            "app.services.resource_policy_store.resolve_policies",
+    connection = MagicMock()
+    connection.compute.create_server.return_value = _server("srv-xyz", "10.0.0.7")
+    connection.compute.get_server.return_value = _server("srv-xyz", "10.0.0.7")
+    settings = MagicMock(builder_ssh_user="ubuntu")
+    with (
+        patch("app.services.builder_vm.get_settings", return_value=settings),
+        patch(
+            "app.services.builder_vm._create_one_use_keypair",
             new_callable=AsyncMock,
-            side_effect=ResourcePolicyValidationError("missing policy"),
-        ):
-            with pytest.raises(RuntimeError, match="리소스 정책"):
-                await create_ephemeral_vm(MagicMock())
+            return_value=("one-use-key", "/tmp/one-use-key"),
+        ),
+        patch("app.services.builder_vm._wait_for_active", new_callable=AsyncMock),
+        patch("app.services.builder_vm._wait_for_ssh", new_callable=AsyncMock),
+        patch("app.services.builder_vm._wait_for_cloud_init", new_callable=AsyncMock),
+    ):
+        vm = await create_ephemeral_vm(
+            connection,
+            image_id="snapshot-image",
+            flavor_id="snapshot-flavor",
+            network_id="snapshot-network",
+        )
 
-    @pytest.mark.asyncio
-    async def test_create_returns_ephemeral_vm(self):
-        """정상 흐름에서 EphemeralBuilderVM이 반환된다."""
-        from app.services.builder_vm import EphemeralBuilderVM, create_ephemeral_vm
-
-        server = _make_server(server_id="srv-xyz", fixed_ip="10.0.0.7")
-        fip = _make_fip(addr="5.5.5.5", fip_id="fip-999")
-        port = MagicMock()
-        port.id = "port-abc"
-        svc_conn = MagicMock()
-        svc_conn.compute.create_server.return_value = server
-        svc_conn.compute.get_server.return_value = server
-        svc_conn.network.create_ip.return_value = fip
-        svc_conn.network.ports.return_value = [port]
-
-        with (
-            patch(
-                "app.services.builder_vm.get_settings",
-                return_value=_make_settings(),
-            ),
-            patch(
-                "app.services.resource_policy_store.resolve_policies",
-                new_callable=AsyncMock,
-                return_value={
-                    "builder.image": "policy-image",
-                    "builder.flavor": "policy-flavor",
-                    "builder.network": "policy-network",
-                },
-            ),
-            patch(
-                "app.services.builder_vm._ensure_ephemeral_keypair",
-                new_callable=AsyncMock,
-                return_value="afterglow-ephemeral-key",
-            ),
-            patch("app.services.builder_vm._wait_for_active", new_callable=AsyncMock),
-            patch("app.services.builder_vm._wait_for_ssh", new_callable=AsyncMock),
-            patch("app.services.builder_vm._wait_for_cloud_init", new_callable=AsyncMock),
-        ):
-            vm = await create_ephemeral_vm(svc_conn)
-
-        assert isinstance(vm, EphemeralBuilderVM)
-        assert vm.server_id == "srv-xyz"
-        assert vm.internal_ip == "10.0.0.7"
-        assert vm.host == "5.5.5.5"
-        assert vm.fip_id == "fip-999"
-        assert vm.username == "ubuntu"
-
-    @pytest.mark.asyncio
-    async def test_create_raises_when_no_internal_ip(self):
-        """Fixed IP 없는 서버는 RuntimeError."""
-        from app.services.builder_vm import create_ephemeral_vm
-
-        server = MagicMock()
-        server.id = "srv-nip"
-        server.addresses = {}
-        svc_conn = MagicMock()
-        svc_conn.compute.create_server.return_value = server
-        svc_conn.compute.get_server.return_value = server
-
-        with (
-            patch(
-                "app.services.builder_vm.get_settings",
-                return_value=_make_settings(),
-            ),
-            patch(
-                "app.services.resource_policy_store.resolve_policies",
-                new_callable=AsyncMock,
-                return_value={
-                    "builder.image": "policy-image",
-                    "builder.flavor": "policy-flavor",
-                    "builder.network": "policy-network",
-                },
-            ),
-            patch(
-                "app.services.builder_vm._ensure_ephemeral_keypair",
-                new_callable=AsyncMock,
-                return_value="kp",
-            ),
-            patch("app.services.builder_vm._wait_for_active", new_callable=AsyncMock),
-        ):
-            with pytest.raises(RuntimeError, match="internal IP"):
-                await create_ephemeral_vm(svc_conn)
+    assert isinstance(vm, EphemeralBuilderVM)
+    assert vm.server_id == "srv-xyz"
+    assert vm.keypair_name == "one-use-key"
+    kwargs = connection.compute.create_server.call_args.kwargs
+    assert kwargs["image_id"] == "snapshot-image"
+    assert kwargs["flavor_id"] == "snapshot-flavor"
+    assert kwargs["networks"] == [{"uuid": "snapshot-network"}]
+    assert kwargs["key_name"] == "one-use-key"
 
 
-# ---------------------------------------------------------------------------
-# delete_ephemeral_vm
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_delete_cleans_fip_server_keypair_and_local_private_key(tmp_path):
+    from app.services.builder_vm import delete_ephemeral_vm
 
+    key_path = tmp_path / "ephemeral.key"
+    key_path.write_text("private")
+    connection = MagicMock()
 
-class TestDeleteEphemeralVm:
-    @pytest.mark.asyncio
-    async def test_delete_calls_fip_then_server(self):
-        """FIP 반납 후 VM을 삭제한다."""
-        from app.services.builder_vm import delete_ephemeral_vm
+    await delete_ephemeral_vm(
+        connection,
+        server_id="srv-del",
+        fip_id="fip-del",
+        keypair_name="one-use-key",
+        key_path=str(key_path),
+    )
 
-        svc_conn = MagicMock()
-        svc_conn.network.delete_ip = MagicMock()
-        svc_conn.compute.delete_server = MagicMock()
-
-        await delete_ephemeral_vm(svc_conn, "srv-del", "fip-del")
-
-        svc_conn.network.delete_ip.assert_called_once_with("fip-del")
-        svc_conn.compute.delete_server.assert_called_once_with("srv-del")
-
-    @pytest.mark.asyncio
-    async def test_delete_skips_fip_when_none(self):
-        """fip_id=None이면 FIP 반납 없이 VM만 삭제."""
-        from app.services.builder_vm import delete_ephemeral_vm
-
-        svc_conn = MagicMock()
-        svc_conn.compute.delete_server = MagicMock()
-
-        await delete_ephemeral_vm(svc_conn, "srv-del", None)
-
-        svc_conn.network.delete_ip.assert_not_called()
-        svc_conn.compute.delete_server.assert_called_once_with("srv-del")
-
-    @pytest.mark.asyncio
-    async def test_delete_tolerates_fip_failure(self):
-        """FIP 반납 실패해도 VM 삭제는 계속 시도한다."""
-        from app.services.builder_vm import delete_ephemeral_vm
-
-        svc_conn = MagicMock()
-        svc_conn.network.delete_ip.side_effect = Exception("network error")
-        svc_conn.compute.delete_server = MagicMock()
-
-        await delete_ephemeral_vm(svc_conn, "srv-del", "fip-bad")
-
-        svc_conn.compute.delete_server.assert_called_once_with("srv-del")
+    connection.network.delete_ip.assert_called_once_with("fip-del")
+    connection.compute.delete_server.assert_called_once_with("srv-del")
+    connection.compute.delete_keypair.assert_called_once_with("one-use-key")
+    assert not os.path.exists(key_path)

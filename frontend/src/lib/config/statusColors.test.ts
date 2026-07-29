@@ -9,4 +9,11 @@ describe('chat run status style', () => {
 			label: '실행 중'
 		});
 	});
+
+	it('uses explicit authority labels for MCP access levels and terminal grants', () => {
+		expect(getStatusStyle('read')).toEqual({ tone: 'info', label: '읽기' });
+		expect(getStatusStyle('manage')).toEqual({ tone: 'warning', label: '관리' });
+		expect(getStatusStyle('revoked')).toEqual({ tone: 'neutral', label: '폐기됨' });
+		expect(getStatusStyle('expired')).toEqual({ tone: 'neutral', label: '만료됨' });
+	});
 });

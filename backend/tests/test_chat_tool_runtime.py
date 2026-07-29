@@ -317,6 +317,55 @@ class TestMcpTools:
         monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
         assert await tool_runtime._load_mcp(_CTX) == []
 
+    async def test_unavailable_mcp_secret_blocks_discovery_without_network_io(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        async def secret_unavailable(*_args, **_kwargs):
+            raise es.ExtensionSecretUnavailable("cannot decrypt")
+
+        async def unexpected_network_io(*_args, **_kwargs):
+            raise AssertionError("MCP network I/O must not occur")
+
+        monkeypatch.setattr(es, "list_for_user", secret_unavailable)
+        monkeypatch.setattr(tool_runtime.mcp_client, "list_tools", unexpected_network_io)
+
+        schemas = await tool_runtime.context_tool_schemas(_CTX)
+
+        assert all(not schema["function"]["name"].startswith("mcp__") for schema in schemas)
+
+    async def test_rotated_credential_blocks_mcp_dispatch_without_network_io(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        async def fake_list_for_user(*_args, **_kwargs):
+            return [{"id": 7, "transport": "http", "url": "https://mcp.example", "headers": {}}]
+
+        async def no_creds(**_kwargs):
+            return {}
+
+        async def rotated_version(*_args, **_kwargs):
+            return {7: 2}
+
+        async def unexpected_network_io(*_args, **_kwargs):
+            raise AssertionError("MCP network I/O must not occur")
+
+        monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
+        monkeypatch.setattr(es, "mcp_all_credentials", no_creds)
+        monkeypatch.setattr(es, "mcp_credential_versions", rotated_version)
+        monkeypatch.setattr(tool_runtime.mcp_client, "call_tool", unexpected_network_io)
+
+        output = await tool_runtime.context_execute(
+            "mcp__7__search",
+            {"q": "x"},
+            ToolContext(
+                project_id="p1",
+                user_id="u1",
+                selected_mcp_ids=(7,),
+                expected_mcp_credential_versions=((7, 1),),
+            ),
+        )
+
+        assert output == "선택되지 않았거나 접근 불가한 MCP 서버입니다."
+
     async def test_unsatisfied_requirement_server_skipped(self, monkeypatch):
         """사용자 인증 요구사항 미충족 서버는 노출되지 않고(스킵), 값 채우면 병합되어 노출된다."""
         import app.services.chat.extensions_store as es
@@ -351,3 +400,35 @@ class TestMcpTools:
         servers = await tool_runtime._load_mcp(_CTX)
         assert len(servers) == 1
         assert servers[0]["headers"]["Authorization"] == "Bearer mine"
+
+    async def test_disconnected_oauth_server_is_not_exposed(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+        import app.services.chat.mcp_oauth as oauth
+
+        async def fake_list_for_user(*_args, **_kwargs):
+            return [
+                {
+                    "id": 7,
+                    "name": "notion",
+                    "transport": "http",
+                    "url": "https://mcp.notion.com/mcp",
+                    "headers": {},
+                    "auth_mode": "oauth",
+                    "auth_requirements": [],
+                }
+            ]
+
+        async def no_headers(*, user_id, project_id):
+            return {}
+
+        async def connected_headers(*, user_id, project_id):
+            return {7: {"Authorization": "Bearer user-oauth-token"}}
+
+        monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
+        monkeypatch.setattr(es, "mcp_all_credentials", no_headers)
+        monkeypatch.setattr(oauth, "headers_for_user", no_headers)
+        assert await tool_runtime._load_mcp(_CTX) == []
+
+        monkeypatch.setattr(oauth, "headers_for_user", connected_headers)
+        servers = await tool_runtime._load_mcp(_CTX)
+        assert servers[0]["headers"]["Authorization"] == "Bearer user-oauth-token"

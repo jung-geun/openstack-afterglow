@@ -103,6 +103,14 @@ EXPECTED_PUBLIC = frozenset(
         ("POST", "/api/v1/waygate/servers/{server_id}/agent/register"),
         ("GET", "/api/v1/waygate/servers/{server_id}/agent/desired-state"),
         ("POST", "/api/v1/waygate/servers/{server_id}/agent/status"),
+        # MCP OAuth client redirect — validates signed state plus initiating-browser nonce cookie.
+        ("GET", "/api/v1/chat/mcp-oauth/callback"),
+        # MCP OAuth public-client endpoints validate their own signed/browser-bound requests.
+        ("POST", "/api/v1/mcp/oauth/register"),
+        ("GET", "/api/v1/mcp/oauth/authorize"),
+        ("POST", "/api/v1/mcp/oauth/token"),
+        ("POST", "/api/v1/mcp/oauth/revoke"),
+        ("OPTIONS", "/api/v1/mcp/oauth/{path:path}"),
     }
 )
 

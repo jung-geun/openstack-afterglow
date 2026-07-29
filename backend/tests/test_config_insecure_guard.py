@@ -146,3 +146,48 @@ def test_development_with_docker_worker_runtime_succeeds():
     with patch.dict(os.environ, {"AFTERGLOW_ENV": "development", "AFTERGLOW_ALLOW_INSECURE": "1"}, clear=False):
         settings = Settings(secret_key="a" * 64, worker_runtime_mode="docker")
     assert settings.worker_runtime_mode == "docker"
+
+
+def test_production_mcp_requires_absolute_https_public_api_base():
+    with pytest.raises(ValueError, match="services.mcp requires an absolute HTTPS"):
+        _build_settings_with_env(
+            {
+                "AFTERGLOW_ENV": "production",
+                "AFTERGLOW_ALLOW_INSECURE": "",
+                "SECRET_KEY": "a" * 64,
+                "SERVICE_MCP_ENABLED": "true",
+                "PUBLIC_API_BASE": "http://api.example.test",
+            }
+        )
+
+
+def test_development_mcp_allows_absolute_http_public_api_base():
+    settings = _build_settings_with_env(
+        {
+            "AFTERGLOW_ENV": "development",
+            "AFTERGLOW_ALLOW_INSECURE": "",
+            "SECRET_KEY": "a" * 64,
+            "SERVICE_MCP_ENABLED": "true",
+            "PUBLIC_API_BASE": "http://127.0.0.1:8000",
+        }
+    )
+    assert settings.service_mcp_enabled is True
+
+
+def test_mcp_oauth_callback_url_requires_absolute_https_without_query_or_fragment():
+    from app.config import Settings
+
+    settings = Settings(
+        secret_key="a" * 64,
+        chat_mcp_oauth_callback_url="https://oauth.example.test/custom/mcp-callback",
+    )
+    assert settings.chat_mcp_oauth_callback_url == "https://oauth.example.test/custom/mcp-callback"
+
+    for invalid in (
+        "http://oauth.example.test/callback",
+        "https://user:pass@oauth.example.test/callback",
+        "https://oauth.example.test/callback?target=attacker",
+        "https://oauth.example.test/callback#fragment",
+    ):
+        with pytest.raises(ValueError, match="chat.mcp_oauth_callback_url"):
+            Settings(secret_key="a" * 64, chat_mcp_oauth_callback_url=invalid)

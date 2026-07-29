@@ -23,7 +23,20 @@ import pytest_asyncio
 from sqlalchemy import select, text
 
 import app.models.db  # noqa: F401 — side-effect: Base 에 ORM 모델 등록
-from app.models.chat_db import ChatUsageLog, LlmProvider, UserWallet
+from app.models.chat_db import (
+    ChatMcpCredential,
+    ChatMcpOAuthRequest,
+    ChatMcpServer,
+    ChatUsageLog,
+    LlmProvider,
+    McpDelegatedGrant,
+    McpOAuthClient,
+    McpOAuthCode,
+    McpOAuthToken,
+    McpOAuthTokenFamily,
+    UserWallet,
+)
+from app.models.chat_runs import ChatRun
 from app.services.chat.litellm_client import UsageCost
 
 pytestmark = [pytest.mark.db, pytest.mark.asyncio]
@@ -45,6 +58,7 @@ def _usage_cost(raw: Decimal) -> UsageCost:
 _CHAT_TABLES = (
     "chat_run_segments",
     "chat_run_turns",
+    "chat_run_interactions",
     "chat_tool_approvals",
     "chat_run_events",
     "chat_run_providers",
@@ -59,10 +73,25 @@ _CHAT_TABLES = (
     "chat_conversations",
     "chat_agents",
     "chat_workspaces",
+    "chat_mcp_oauth_connections",
+    "chat_mcp_oauth_requests",
+    "chat_mcp_credentials",
+    "chat_mcp_servers",
     "chat_memories",
     "user_wallets",
     "llm_models",
     "llm_providers",
+    "mcp_oauth_tokens",
+    "mcp_oauth_token_families",
+    "mcp_oauth_codes",
+    "mcp_oauth_authorization_requests",
+    "mcp_oauth_clients",
+    "mcp_lumen_selections",
+    "mcp_personal_tokens",
+    "mcp_delegated_grants",
+    "mcp_owner_locks",
+    "mcp_tool_invocations",
+    "activity_logs",
 )
 
 
@@ -631,7 +660,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
     assert canceled_run.status == "canceled"
 
 
-async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, execution_snapshots, monkeypatch):
+async def test_worker_projects_failed_policy_limit_tool_result(chat_db, execution_snapshots, monkeypatch):
     from app.models.chat_db import ChatMessage, ChatUsageLog
     from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatRunSegment, ChatRunTurn
     from app.services.chat import conversation_store as cs
@@ -685,7 +714,7 @@ async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, executio
                 round_index=0,
                 tool_index=0,
                 tool_call_id="call_1",
-                tool_name="list_my_conversations",
+                tool_name="builtin_read_status",
                 arguments={},
             )
             is None
@@ -693,7 +722,7 @@ async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, executio
         yield {
             "type": "tool_call",
             "tool_call_id": "call_1",
-            "name": "list_my_conversations",
+            "name": "builtin_read_status",
             "args": "{}",
             "_durable_journaled": True,
         }
@@ -701,14 +730,20 @@ async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, executio
             round_index=0,
             tool_index=0,
             tool_call_id="call_1",
-            tool_name="list_my_conversations",
-            result_payload={"content": "[]"},
+            tool_name="builtin_read_status",
+            result_payload={
+                "content": "Tool call exceeded the run policy limit.",
+                "status": "failed",
+                "error_code": "policy_limit_exceeded",
+            },
         )
         yield {
             "type": "tool_result",
             "tool_call_id": "call_1",
-            "name": "list_my_conversations",
-            "content": "[]",
+            "name": "builtin_read_status",
+            "content": "Tool call exceeded the run policy limit.",
+            "status": "failed",
+            "error_code": "policy_limit_exceeded",
             "_durable_journaled": True,
         }
         assert await hooks.provider_started(round_index=1, attempt=1) is None
@@ -760,6 +795,7 @@ async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, executio
             [part.model_dump(by_alias=True, exclude_none=True) for part in deserialize_parts(message.parts)]
             for message in messages
         ]
+        replayed = await durable_runs.replay_events(session, run, after_seq=0)
     public_messages = await cs.list_messages(conversation["id"], user_id="u1", project_id="projA")
     assert [turn.ordinal for turn in turns] == [0, 1]
     assert all(turn.message_event_seq is not None for turn in turns)
@@ -772,10 +808,19 @@ async def test_worker_creates_and_finalizes_each_provider_turn(chat_db, executio
     assert tool_segment.started_event_seq is not None
     assert tool_segment.completed_event_seq is not None
     assert tool_events == ["tool.call.started", "tool.call.completed"]
+    completed_event = next(event for event in replayed if event.type == "tool.call.completed")
+    assert completed_event.payload.status == "failed"
+    assert completed_event.payload.error_code == "policy_limit_exceeded"
     assert [component["kind"] for component in usage_log.usage_components] == ["input_tokens", "output_tokens"]
     assert [part["type"] for part in persisted_parts[0]] == ["text", "tool_call", "tool_result"]
-    assert persisted_parts[0][1]["name"] == "list_my_conversations"
-    assert persisted_parts[0][2]["content"] == [{"type": "text", "text": "[]"}]
+    assert persisted_parts[0][1]["name"] == "builtin_read_status"
+    assert persisted_parts[0][2] == {
+        "type": "tool_result",
+        "call_id": "call_1",
+        "name": "builtin_read_status",
+        "content": [{"type": "text", "text": "Tool call exceeded the run policy limit."}],
+        "is_error": True,
+    }
     assert public_messages[1]["parts"] == persisted_parts[0]
     assert public_messages[1]["execution"] == {
         "run_id": descriptor.run_id,
@@ -1182,6 +1227,56 @@ async def test_first_temp_run_idempotency_reuses_thread(chat_db, execution_snaps
     assert second.temp_thread_id == first.temp_thread_id
 
 
+async def test_v2_temp_run_freezes_execution_policy_before_encryption(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_runs import ChatRun
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    monkeypatch.setattr(durable_runs, "is_supported", lambda version: version in {1, 2})
+    created = await durable_runs.create_temp_run(
+        project_id="projA",
+        user_id="u1",
+        client_request_id="51a4b3f2-79ee-4e1d-82c5-7e6b29efee5d",
+        intent={
+            "endpoint": "temp_completion",
+            "temp_thread_id": None,
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+        },
+        temp_thread_id=None,
+        model_name="m",
+        request_payload={
+            "input_messages": [{"role": "user", "content": "hello"}],
+            "input_parts": [{"type": "text", "text": "hello"}],
+            "features": {},
+            "execution_policy": {
+                "allowed_modes": ["chat"],
+                "can_delegate_read": False,
+                "can_delegate_write": False,
+                "max_model_turns": 3,
+                "max_tool_calls": 7,
+                "max_children": 0,
+                "max_parallel_children": 0,
+                "max_child_depth": 0,
+            },
+        },
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+        execution_protocol_version=2,
+    )
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, created.run_id)
+
+    payload = json.loads(decrypt_chat_content(run.request_payload))
+    assert payload["execution_policy"]["max_model_turns"] == 3
+    assert payload["v2_max_model_turns"] == 3
+    assert payload["v2_max_tool_calls"] == 7
+
+
 async def test_next_temp_run_includes_completed_thread_history(chat_db, execution_snapshots):
     from app.models.chat_runs import ChatRun
     from app.services.chat import durable_runs
@@ -1425,59 +1520,67 @@ async def test_resource_policy_schema_persists_global_selection(chat_db):
 
 
 async def test_agent_crud_hub_clone(chat_db):
-    """에이전트 실 로직: instructions 암호화 왕복·소유권·공개 허브 검색·복제 독립성."""
+    """Agent storage enforces owner/project scope while retaining public-template cloning."""
     from sqlalchemy import select as _select
 
     from app.models.chat_db import ChatAgent
     from app.services.chat import agent_store as ags
 
     factory = chat_db.get_session_factory()
+    source_project = "project-owner"
+    clone_project = "project-clone"
 
-    # 생성(공개) + instructions 암호화 저장
-    a = await ags.create_agent(
+    source = await ags.create_agent(
         owner_user_id="owner",
+        project_id=source_project,
         name="리뷰 봇",
         description="코드 리뷰",
         instructions="너는 리뷰어야",
         model_name="gpt-4o",
         visibility="public",
     )
-    async with factory() as s:
-        row = (await s.execute(_select(ChatAgent).where(ChatAgent.id == a["id"]))).scalar_one()
-        assert row.instructions.startswith("v3:")  # 암호문 저장
+    async with factory() as session:
+        row = (await session.execute(_select(ChatAgent).where(ChatAgent.id == source["id"]))).scalar_one()
+        assert row.instructions.startswith("v3:")
         assert "리뷰어" not in row.instructions
 
-    # 소유자 조회 → instructions 평문 복원
-    got = await ags.get_agent(a["id"], user_id="owner")
+    got = await ags.get_agent(source["id"], user_id="owner", project_id=source_project)
     assert got["instructions"] == "너는 리뷰어야" and got["is_owner"] is True
+    assert [agent["id"] for agent in await ags.list_agents(user_id="owner", project_id=source_project)] == [
+        source["id"]
+    ]
 
-    # 타인이 공개 에이전트 조회 가능(is_owner=False), 비공개면 불가
-    other_view = await ags.get_agent(a["id"], user_id="stranger")
-    assert other_view["is_owner"] is False
-    priv = await ags.create_agent(owner_user_id="owner", name="비밀", visibility="private")
-    with pytest.raises(ags.AgentForbidden):
-        await ags.get_agent(priv["id"], user_id="stranger")
+    for operation in (
+        ags.get_agent(source["id"], user_id="owner", project_id="project-other"),
+        ags.update_agent(source["id"], user_id="owner", project_id="project-other", patch={"name": "탈취"}),
+        ags.delete_agent(source["id"], user_id="owner", project_id="project-other"),
+    ):
+        with pytest.raises(ags.AgentNotFound):
+            await operation
 
-    # 허브 검색(이름 부분일치)
-    hub = await ags.list_public(query="리뷰", user_id="stranger")
-    assert any(h["id"] == a["id"] for h in hub)
+    private = await ags.create_agent(
+        owner_user_id="owner",
+        project_id=source_project,
+        name="비밀",
+        visibility="private",
+    )
+    with pytest.raises(ags.AgentNotFound):
+        await ags.clone_agent(private["id"], user_id="owner", project_id="project-other")
 
-    # 복제 → 본인 소유 private 사본 + 출처 clone_count 증가
-    clone = await ags.clone_agent(a["id"], user_id="stranger")
+    hub = await ags.list_public(query="리뷰", user_id="stranger", project_id=clone_project)
+    assert any(agent["id"] == source["id"] for agent in hub)
+
+    clone = await ags.clone_agent(source["id"], user_id="stranger", project_id=clone_project)
     assert clone["owner_user_id"] == "stranger"
     assert clone["visibility"] == "private"
-    assert clone["cloned_from_id"] == a["id"]
-    assert clone["instructions"] == "너는 리뷰어야"  # 복호화 왕복
-    src_after = await ags.get_agent(a["id"], user_id="owner")
-    assert src_after["clone_count"] == 1
+    assert clone["cloned_from_id"] == source["id"]
+    assert clone["instructions"] == "너는 리뷰어야"
+    assert clone["mcp_ids"] == [] and clone["tool_ids"] == []
+    assert (await ags.get_agent(source["id"], user_id="owner", project_id=source_project))["clone_count"] == 1
 
-    # 타인은 원본 수정 불가(소유자만)
-    with pytest.raises(ags.AgentForbidden):
-        await ags.update_agent(a["id"], user_id="stranger", patch={"name": "탈취"})
-    # 복제본은 stranger 소유라 수정 가능(원본 독립)
-    await ags.update_agent(clone["id"], user_id="stranger", patch={"name": "내 리뷰 봇"})
-    assert (await ags.get_agent(clone["id"], user_id="stranger"))["name"] == "내 리뷰 봇"
-    assert (await ags.get_agent(a["id"], user_id="owner"))["name"] == "리뷰 봇"  # 원본 불변
+    await ags.update_agent(clone["id"], user_id="stranger", project_id=clone_project, patch={"name": "내 리뷰 봇"})
+    assert (await ags.get_agent(clone["id"], user_id="stranger", project_id=clone_project))["name"] == "내 리뷰 봇"
+    assert (await ags.get_agent(source["id"], user_id="owner", project_id=source_project))["name"] == "리뷰 봇"
 
 
 async def test_chat_content_encryption_at_rest(chat_db):
@@ -1888,4 +1991,923 @@ async def test_timeseries_fine_buckets_round_and_filter_in_mysql(chat_db):
     assert await totals("5m", model_name="alpha") == {
         bucket(0): 11,
         bucket(15): 33,
+    }
+
+
+async def test_v2_durable_input_resolution_is_atomic_and_idempotent(chat_db, monkeypatch):
+    from app.models.chat_agent_platform import ChatRunInteraction
+    from app.models.chat_runs import ChatRun, ChatRunEventRow, ChatToolApproval
+    from app.services.chat import durable_runs
+
+    monkeypatch.setattr(durable_runs, "v2_runtime_ready", lambda _version: True)
+    woke: list[str] = []
+
+    async def wake(run_id: str) -> None:
+        woke.append(run_id)
+
+    monkeypatch.setattr(durable_runs, "wake_run", wake)
+    run_id = "f86c642c-4f25-4274-a26d-11974f72f5b9"
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        session.add(
+            ChatRun(
+                id=run_id,
+                run_scope="conversation",
+                project_id="approval-project",
+                user_id="approval-user",
+                model_name="approval-model",
+                capability_snapshot={},
+                pricing_snapshot={},
+                client_request_id="e571a99e-298f-4caa-99b5-c94e2a2d1520",
+                request_fingerprint="approval-test",
+                fingerprint_version=1,
+                execution_protocol_version=2,
+                status="awaiting_input",
+            )
+        )
+        await session.flush()
+        expires_at = datetime.now(UTC) + timedelta(minutes=15)
+
+        def approval(call_id: str, tool_name: str, expiry: datetime) -> ChatToolApproval:
+            arguments = {"call_id": call_id}
+            preview_fingerprint = durable_runs._approval_preview_fingerprint([])
+            dispatch_hmac = durable_runs._approval_dispatch_hmac(
+                run_id=run_id,
+                owner_user_id="approval-user",
+                project_id="approval-project",
+                call_id=call_id,
+                name=tool_name,
+                arguments=arguments,
+                source="workspace",
+                effect="workspace_write",
+                tool_definition_hash="a" * 64,
+                config_fingerprint=None,
+                destination_origin=None,
+                preview_fingerprint=preview_fingerprint,
+                expires_at=expiry,
+            )
+            return ChatToolApproval(
+                run_id=run_id,
+                call_id=call_id,
+                tool_name=tool_name,
+                arguments="{}",
+                arguments_ciphertext=durable_runs.encrypt_chat_content(
+                    json.dumps(arguments, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                ),
+                dispatch_hmac=dispatch_hmac,
+                preview_fingerprint=preview_fingerprint,
+                source="workspace",
+                effect="workspace_write",
+                tool_definition_hash="a" * 64,
+                status="pending",
+                expires_at=expiry,
+            )
+
+        session.add_all(
+            [
+                approval("call-a", "workspace.write_file", expires_at),
+                approval("call-b", "workspace.run", expires_at),
+                approval("call-expired", "workspace.run", datetime.now(UTC) - timedelta(minutes=1)),
+                ChatRunInteraction(
+                    run_id=run_id,
+                    id="75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+                    status="pending",
+                    request_ciphertext="v3:opaque-request",
+                    response_schema={"option_ids": ["yes", "no"], "allow_multiple": False, "allow_text": True},
+                    expires_at=expires_at,
+                ),
+            ]
+        )
+
+    first = await durable_runs.resolve_tool_approval(
+        run_id=run_id,
+        call_id="call-a",
+        decision="approve",
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert first["status"] == "approved"
+    assert first["run_status"] == "awaiting_input"
+    assert first["pending_approvals"] == 2
+    assert woke == []
+
+    expired = await durable_runs.resolve_tool_approval(
+        run_id=run_id,
+        call_id="call-expired",
+        decision="approve",
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert expired["decision"] == "deny"
+    assert expired["status"] == "denied"
+    assert expired["pending_approvals"] == 1
+
+    final = await durable_runs.resolve_tool_approval(
+        run_id=run_id,
+        call_id="call-b",
+        decision="deny",
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert final["status"] == "denied"
+    assert final["run_status"] == "awaiting_input"
+    assert final["pending_approvals"] == 0
+    assert final["pending_interactions"] == 1
+    assert woke == []
+
+    interaction = await durable_runs.resolve_run_interaction(
+        run_id=run_id,
+        interaction_id="75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+        response={"option_ids": ["yes"], "text": None},
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert interaction["status"] == "answered"
+    assert interaction["run_status"] == "queued"
+    assert interaction["pending_interactions"] == 0
+    assert woke == [run_id]
+
+    async with factory() as session, session.begin():
+        run = await session.get(ChatRun, run_id, with_for_update=True)
+        assert run is not None
+        run.status = "running"
+
+    repeated_interaction = await durable_runs.resolve_run_interaction(
+        run_id=run_id,
+        interaction_id="75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+        response={"option_ids": ["yes"], "text": None},
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert repeated_interaction["status"] == "answered"
+    assert repeated_interaction["run_status"] == "running"
+    assert woke == [run_id]
+
+    with pytest.raises(durable_runs.DurableRunConflict):
+        await durable_runs.resolve_run_interaction(
+            run_id=run_id,
+            interaction_id="75dcc8d9-dc8d-460b-a6ca-6a5fdd1e10d6",
+            response={"option_ids": ["no"], "text": None},
+            project_id="approval-project",
+            user_id="approval-user",
+        )
+
+    repeated = await durable_runs.resolve_tool_approval(
+        run_id=run_id,
+        call_id="call-b",
+        decision="deny",
+        project_id="approval-project",
+        user_id="approval-user",
+    )
+    assert repeated["status"] == "denied"
+    assert repeated["run_status"] == "running"
+    assert repeated["pending_interactions"] == 0
+    assert woke == [run_id]
+
+    with pytest.raises(durable_runs.DurableRunConflict):
+        await durable_runs.resolve_tool_approval(
+            run_id=run_id,
+            call_id="call-b",
+            decision="approve",
+            project_id="approval-project",
+            user_id="approval-user",
+        )
+
+    async with factory() as session:
+        run = await session.get(ChatRun, run_id)
+        rows = (
+            (
+                await session.execute(
+                    select(ChatRunEventRow.event_type)
+                    .where(ChatRunEventRow.run_id == run_id)
+                    .order_by(ChatRunEventRow.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert run is not None and run.status == "running"
+    assert rows == [
+        "tool.approval_resolved",
+        "tool.approval_resolved",
+        "tool.approval_resolved",
+        "interaction.resolved",
+        "run.stage.changed",
+    ]
+
+
+async def test_v2_input_expiry_sweep_skips_v1_rows_and_resumes_without_client(chat_db, monkeypatch):
+    from app.models.chat_agent_platform import ChatRunInteraction
+    from app.models.chat_runs import ChatRun, ChatToolApproval
+    from app.services.chat import durable_runs
+
+    monkeypatch.setattr(durable_runs, "v2_runtime_ready", lambda _version: True)
+    woke: list[str] = []
+
+    async def wake(run_id: str) -> None:
+        woke.append(run_id)
+
+    monkeypatch.setattr(durable_runs, "wake_run", wake)
+    old_run_id = "473bf8cc-17c2-4d8d-b9ef-94ca621c2687"
+    v2_run_id = "8df63a6f-d70e-4fbb-b838-3ce2c54d452e"
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        session.add_all(
+            [
+                ChatRun(
+                    id=old_run_id,
+                    run_scope="conversation",
+                    project_id="expiry-project",
+                    user_id="expiry-user",
+                    model_name="expiry-model",
+                    capability_snapshot={},
+                    pricing_snapshot={},
+                    client_request_id="5d2bb22f-94ca-42e1-99c6-04ab83c7830c",
+                    request_fingerprint="expiry-v1",
+                    fingerprint_version=1,
+                    execution_protocol_version=1,
+                    status="awaiting_approval",
+                ),
+                ChatRun(
+                    id=v2_run_id,
+                    run_scope="conversation",
+                    project_id="expiry-project",
+                    user_id="expiry-user",
+                    model_name="expiry-model",
+                    capability_snapshot={},
+                    pricing_snapshot={},
+                    client_request_id="df3a5ffd-e153-4c34-88e0-4c190f98d11e",
+                    request_fingerprint="expiry-v2",
+                    fingerprint_version=1,
+                    execution_protocol_version=2,
+                    status="awaiting_input",
+                ),
+            ]
+        )
+        await session.flush()
+        expired_at = datetime.now(UTC) - timedelta(minutes=1)
+        session.add_all(
+            [
+                ChatToolApproval(
+                    run_id=old_run_id,
+                    call_id="v1-call",
+                    tool_name="legacy.write",
+                    arguments="{}",
+                    status="pending",
+                    expires_at=expired_at,
+                ),
+                ChatToolApproval(
+                    run_id=v2_run_id,
+                    call_id="v2-call",
+                    tool_name="workspace.write_file",
+                    arguments="{}",
+                    status="pending",
+                    expires_at=expired_at,
+                ),
+                ChatRunInteraction(
+                    run_id=v2_run_id,
+                    id="45bf67b0-535c-4c86-a0d7-0bfbb4fe0f87",
+                    status="pending",
+                    request_ciphertext="v3:opaque-request",
+                    response_schema={"option_ids": ["continue"], "allow_multiple": False, "allow_text": False},
+                    expires_at=expired_at,
+                ),
+            ]
+        )
+
+    assert await durable_runs.expire_pending_inputs(limit=1) == [v2_run_id]
+    assert woke == [v2_run_id]
+
+    async with factory() as session:
+        v1_approval = await session.get(ChatToolApproval, (old_run_id, "v1-call"))
+        v2_approval = await session.get(ChatToolApproval, (v2_run_id, "v2-call"))
+        v2_interaction = await session.get(ChatRunInteraction, (v2_run_id, "45bf67b0-535c-4c86-a0d7-0bfbb4fe0f87"))
+        v2_run = await session.get(ChatRun, v2_run_id)
+        assert v2_run is not None
+        events = await durable_runs.replay_events(session, v2_run, after_seq=0)
+        event_types = [event.type for event in events]
+    assert v1_approval is not None and v1_approval.status == "pending"
+    assert v2_approval is not None and v2_approval.status == "denied"
+    assert v2_interaction is not None and v2_interaction.status == "timeout"
+    assert v2_run is not None and v2_run.status == "queued"
+    assert event_types == ["tool.approval_resolved", "interaction.resolved", "run.stage.changed"]
+    assert events[0].payload.decided_by_user_id is None
+    assert events[0].payload.decided_at is not None
+
+
+async def test_v2_queued_cancellation_finalizes_pending_inputs_and_streaming_message(chat_db):
+    from app.models.chat_agent_platform import ChatRunInteraction
+    from app.models.chat_db import ChatConversation, ChatMessage
+    from app.models.chat_runs import ChatRun, ChatToolApproval
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    run_id = "a8ec3ee0-8a28-4e91-9d17-285d8f843b85"
+    conversation_id = "9ced4b80-c986-4564-a941-85ddf79ddf5f"
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        session.add(
+            ChatConversation(
+                id=conversation_id,
+                project_id="cancel-project",
+                user_id="cancel-user",
+                title=None,
+                model_name="cancel-model",
+            )
+        )
+        await session.flush()
+        message = ChatMessage(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=None,
+            status="streaming",
+            model_name="cancel-model",
+        )
+        session.add(message)
+        await session.flush()
+        message_id = message.id
+        run = ChatRun(
+            id=run_id,
+            run_scope="conversation",
+            conversation_id=conversation_id,
+            assistant_message_id=message.id,
+            project_id="cancel-project",
+            user_id="cancel-user",
+            model_name="cancel-model",
+            capability_snapshot={},
+            pricing_snapshot={},
+            client_request_id="ee2e1c7d-f529-497b-bb1c-3eb0ec377813",
+            request_fingerprint="cancel-test",
+            fingerprint_version=1,
+            execution_protocol_version=2,
+            status="queued",
+        )
+        session.add(run)
+        await session.flush()
+        session.add_all(
+            [
+                ChatToolApproval(
+                    run_id=run_id,
+                    call_id="cancel-call",
+                    tool_name="workspace.write_file",
+                    arguments="{}",
+                    status="pending",
+                    expires_at=datetime.now(UTC) + timedelta(minutes=15),
+                ),
+                ChatRunInteraction(
+                    run_id=run_id,
+                    id="c24e7647-0106-4de7-a673-8f143802f502",
+                    status="pending",
+                    request_ciphertext="v3:opaque-request",
+                    response_schema={"option_ids": ["continue"], "allow_multiple": False, "allow_text": False},
+                    expires_at=datetime.now(UTC) + timedelta(minutes=15),
+                ),
+            ]
+        )
+        await durable_runs.append_event(
+            session,
+            run,
+            durable_runs._event(
+                run,
+                "part.delta",
+                {
+                    "message_id": str(message_id),
+                    "part_index": 0,
+                    "part_type": "text",
+                    "delta": "partial answer",
+                },
+            ),
+        )
+
+    cancelled = await durable_runs.request_cancelled(
+        run_id=run_id,
+        project_id="cancel-project",
+        user_id="cancel-user",
+    )
+    assert cancelled.status == "canceled"
+    assert cancelled.terminal
+
+    async with factory() as session:
+        run = await session.get(ChatRun, run_id)
+        approval = await session.get(ChatToolApproval, (run_id, "cancel-call"))
+        interaction = await session.get(ChatRunInteraction, (run_id, "c24e7647-0106-4de7-a673-8f143802f502"))
+        message = await session.get(ChatMessage, message_id)
+        assert run is not None
+        events = await durable_runs.replay_events(session, run, after_seq=0)
+    assert approval is not None and approval.status == "canceled"
+    assert interaction is not None and interaction.status == "canceled"
+    assert message is not None and message.status == "canceled"
+    assert decrypt_chat_content(message.content or "") == "partial answer"
+    assert [event.type for event in events] == [
+        "part.delta",
+        "tool.approval_resolved",
+        "interaction.resolved",
+        "run.stage.changed",
+        "run.canceled",
+    ]
+    assert events[-1].payload.message_id == str(message_id)
+
+
+async def test_v2_queued_cancellation_releases_matching_temp_thread(chat_db):
+    from app.models.chat_runs import ChatRun, ChatTempThread
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import encrypt_chat_content
+
+    run_id = "7c9479a8-a3f2-4e31-87e5-889c234d3dfa"
+    thread_id = "c81df781-a4f2-4f5a-b9c1-2aef4bfd8e25"
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        session.add(
+            ChatTempThread(
+                id=thread_id,
+                project_id="cancel-project",
+                user_id="cancel-user",
+                history=encrypt_chat_content("[]"),
+                active_run_id=run_id,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        session.add(
+            ChatRun(
+                id=run_id,
+                run_scope="temp",
+                temp_thread_id=thread_id,
+                project_id="cancel-project",
+                user_id="cancel-user",
+                model_name="cancel-model",
+                capability_snapshot={},
+                pricing_snapshot={},
+                client_request_id="29e10a30-854a-46d4-a0c4-33f49293c52d",
+                request_fingerprint="temp-cancel-test",
+                fingerprint_version=1,
+                execution_protocol_version=2,
+                status="queued",
+            )
+        )
+
+    cancelled = await durable_runs.request_cancelled(
+        run_id=run_id,
+        project_id="cancel-project",
+        user_id="cancel-user",
+    )
+    assert cancelled.status == "canceled"
+
+    async with factory() as session:
+        thread = await session.get(ChatTempThread, thread_id)
+    assert thread is not None
+    assert thread.active_run_id is None
+
+
+async def test_v2_graph_interrupt_persists_hmac_bound_approval_before_resume(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_runs import ChatRun, ChatToolApproval
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+    from app.services.k3s_crypto import decrypt_chat_content
+
+    monkeypatch.setattr(durable_runs, "is_supported", lambda version: version in {1, 2})
+    monkeypatch.setattr(durable_runs, "SUPPORTED_EXECUTION_PROTOCOL_VERSIONS", {1, 2})
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(
+        project_id="pause-project",
+        user_id="pause-user",
+        title="Pause",
+        model_name="m",
+    )
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="pause-project",
+        user_id="pause-user",
+        client_request_id="9d244277-2a9f-43f9-b2af-5247ec5b46f6",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "mutate"}],
+            "features": {},
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="mutate",
+        user_parts=[{"type": "text", "text": "mutate"}],
+        request_payload={
+            "input_messages": [{"role": "user", "content": "mutate"}],
+            "features": {"tool_policy": {"approval_mode": "required_for_mutations"}},
+        },
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+        execution_protocol_version=2,
+    )
+
+    async def interrupted_stream(**_kwargs):
+        yield {
+            "type": "input.interrupted",
+            "payload": {
+                "kind": "tool_approval",
+                "calls": [
+                    {
+                        "call_id": "call-1",
+                        "name": "custom__7__mutate_1",
+                        "arguments": '{"value":"change"}',
+                        "source": "custom_http",
+                        "effect": "external_mutation",
+                        "tool_definition_hash": "a" * 64,
+                        "config_fingerprint": "b" * 64,
+                        "destination_origin": "https://api.example.com",
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(durable_runs.engine, "stream", interrupted_stream)
+
+    assert await durable_runs.execute_queued_run(descriptor.run_id, owner="pause-worker")
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session:
+        run = await session.get(ChatRun, descriptor.run_id)
+        approval = await session.get(ChatToolApproval, (descriptor.run_id, "call-1"))
+        assert run is not None
+        events = await durable_runs.replay_events(session, run, after_seq=0)
+    assert durable_runs._payload(run)["v2_max_tool_calls"] == 24
+    assert run.status == "awaiting_input", [(event.type, event.payload.model_dump()) for event in events]
+    assert approval is not None
+    assert approval.arguments == "{}"
+    assert approval.dispatch_hmac is not None
+    assert decrypt_chat_content(approval.arguments_ciphertext or "") == '{"value":"change"}'
+    assert approval.source == "custom_http"
+    assert approval.effect == "external_mutation"
+    assert approval.tool_definition_hash == "a" * 64
+    assert approval.config_fingerprint == "b" * 64
+    assert approval.destination_origin == "https://api.example.com"
+    assert [event.type for event in events][-2:] == ["tool.approval_required", "run.stage.changed"]
+    monkeypatch.setattr(durable_runs, "v2_runtime_ready", lambda _version: True)
+    resolved = await durable_runs.resolve_tool_approval(
+        run_id=descriptor.run_id,
+        call_id="call-1",
+        decision="approve",
+        project_id="pause-project",
+        user_id="pause-user",
+    )
+    assert resolved["run_status"] == "queued"
+    async with factory() as session, session.begin():
+        assert await durable_runs.claim_queued_run(session, descriptor.run_id, owner="resume-worker")
+    assert await durable_runs._v2_approval_resume(run_id=descriptor.run_id, owner="resume-worker") == [
+        {"call_id": "call-1", "decision": "approve"}
+    ]
+
+
+async def test_v2_duplicate_approval_interrupt_rolls_back_all_calls(chat_db, execution_snapshots, monkeypatch):
+    from app.models.chat_runs import ChatToolApproval
+    from app.services.chat import conversation_store as cs
+    from app.services.chat import durable_runs
+
+    monkeypatch.setattr(durable_runs, "is_supported", lambda version: version in {1, 2})
+    monkeypatch.setattr(durable_runs, "SUPPORTED_EXECUTION_PROTOCOL_VERSIONS", {1, 2})
+
+    capability_snapshot, pricing_snapshot = execution_snapshots
+    conversation = await cs.create_conversation(
+        project_id="duplicate-project",
+        user_id="duplicate-user",
+        title="Duplicate",
+        model_name="m",
+    )
+    descriptor = await durable_runs.create_persistent_run(
+        project_id="duplicate-project",
+        user_id="duplicate-user",
+        client_request_id="f30592c4-bc4c-467d-a85f-b3b0c35d315e",
+        intent={
+            "endpoint": "completion",
+            "model_id": "m",
+            "parts": [{"type": "text", "text": "mutate"}],
+            "features": {},
+        },
+        conversation_id=conversation["id"],
+        model_name="m",
+        agent_id=None,
+        user_content="mutate",
+        user_parts=[{"type": "text", "text": "mutate"}],
+        request_payload={
+            "input_messages": [{"role": "user", "content": "mutate"}],
+            "features": {"tool_policy": {"approval_mode": "required_for_mutations"}},
+        },
+        capability_snapshot=capability_snapshot,
+        pricing_snapshot=pricing_snapshot,
+        execution_protocol_version=2,
+    )
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        assert await durable_runs.claim_queued_run(session, descriptor.run_id, owner="duplicate-worker")
+
+    call = {
+        "call_id": "call-duplicate",
+        "name": "custom__7__mutate_1",
+        "arguments": '{"value":"change"}',
+        "source": "custom_http",
+        "effect": "external_mutation",
+        "tool_definition_hash": "a" * 64,
+        "config_fingerprint": "b" * 64,
+        "destination_origin": "https://api.example.com",
+    }
+    with pytest.raises(durable_runs.DurableRunError, match="duplicate call IDs"):
+        await durable_runs._persist_v2_approval_interrupt(
+            run_id=descriptor.run_id,
+            owner="duplicate-worker",
+            calls=[call, dict(call)],
+        )
+
+    async with factory() as session:
+        approvals = list(
+            (
+                await session.execute(select(ChatToolApproval).where(ChatToolApproval.run_id == descriptor.run_id))
+            ).scalars()
+        )
+    assert approvals == []
+
+
+async def test_mcp_credential_mutations_serialize_version_updates(chat_db, monkeypatch):
+    """A locked credential row prevents concurrent rotations from reusing a version."""
+    from app.services.chat import extensions_store as es
+
+    factory = chat_db.get_session_factory()
+    async with factory() as session, session.begin():
+        server = ChatMcpServer(
+            scope="user",
+            owner_user_id="u-mcp",
+            owner_project_id="p-mcp",
+            project_id="p-mcp",
+            name="locked-mcp",
+            transport="http",
+            url="https://mcp.example",
+            auth_requirements=[{"key": "Authorization"}],
+            is_active=True,
+        )
+        session.add(server)
+        await session.flush()
+        server_id = server.id
+        session.add(
+            ChatMcpCredential(
+                mcp_server_id=server_id,
+                owner_user_id="u-mcp",
+                owner_project_id="p-mcp",
+                encrypted_values=es.encrypt_llm_provider_key('{"Authorization":"first"}'),
+                credential_version=1,
+            )
+        )
+
+    original = es._get_credential_row
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    calls = 0
+
+    async def interleaved_get(session, *args, **kwargs):
+        nonlocal calls
+        row = await original(session, *args, **kwargs)
+        calls += 1
+        if calls == 1:
+            first_locked.set()
+            await release_first.wait()
+        return row
+
+    monkeypatch.setattr(es, "_get_credential_row", interleaved_get)
+    first = asyncio.create_task(
+        es.set_mcp_credentials(server_id, {"Authorization": "second"}, user_id="u-mcp", project_id="p-mcp")
+    )
+    await first_locked.wait()
+    second = asyncio.create_task(
+        es.set_mcp_credentials(server_id, {"Authorization": "third"}, user_id="u-mcp", project_id="p-mcp")
+    )
+    await asyncio.sleep(0.05)
+    assert not second.done()
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    async with factory() as session:
+        credential = (
+            await session.execute(select(ChatMcpCredential).where(ChatMcpCredential.mcp_server_id == server_id))
+        ).scalar_one()
+    assert credential.credential_version == 3
+    assert es._decrypt_mcp_credential_values(credential, fail_closed=True) == {"Authorization": "third"}
+
+
+async def test_mcp_oauth_refresh_replay_revokes_the_durable_family_and_grant(chat_db, monkeypatch):
+    """A second refresh of the same token is a committed security transition, not a rollback."""
+    from app.services.mcp_control_plane.oauth import hash_oauth_value, oauth_urls, pkce_s256
+    from app.services.mcp_control_plane.oauth_authority import (
+        McpOAuthAuthorityError,
+        exchange_authorization_code,
+        refresh_tokens,
+    )
+
+    monkeypatch.setattr(
+        "app.services.mcp_control_plane.oauth_authority.get_settings",
+        lambda: SimpleNamespace(mcp_access_token_ttl_seconds=900),
+    )
+    factory = chat_db.get_session_factory()
+    now = datetime.now(UTC)
+    code_verifier = "a" * 43
+    urls = oauth_urls("https://api.example.test", production=True)
+    async with factory() as session, session.begin():
+        grant = McpDelegatedGrant(
+            id="00000000-0000-0000-0000-000000000101",
+            owner_user_id="mcp-user",
+            owner_project_id="mcp-project",
+            upstream_credential_name="afterglow-mcp-00000000-0000-0000-0000-000000000101",
+            display_name="OAuth test",
+            source="oauth",
+            access_level="manage",
+            status="active",
+            application_credential_id="credential-a",
+            credential_ciphertext="mcp-ac1:opaque",
+            expires_at=now + timedelta(days=1),
+            issued_at=now,
+        )
+        session.add_all(
+            [
+                grant,
+                McpOAuthClient(
+                    client_id="afterglow-dcr-test",
+                    metadata_json={
+                        "client_id": "afterglow-dcr-test",
+                        "redirect_uris": ["https://client.example.test/callback"],
+                        "grant_types": ["authorization_code", "refresh_token"],
+                        "token_endpoint_auth_method": "none",
+                    },
+                    redirect_uris=["https://client.example.test/callback"],
+                ),
+                McpOAuthCode(
+                    code_hash=hash_oauth_value("code-a"),
+                    grant_id=grant.id,
+                    client_id="afterglow-dcr-test",
+                    redirect_uri="https://client.example.test/callback",
+                    resource=urls.resource,
+                    scopes=["mcp:read", "mcp:write"],
+                    code_challenge=pkce_s256(code_verifier),
+                    expires_at=now + timedelta(minutes=5),
+                ),
+            ]
+        )
+
+    initial = await exchange_authorization_code(
+        factory,
+        code="code-a",
+        client_id="afterglow-dcr-test",
+        redirect_uri="https://client.example.test/callback",
+        resource=urls.resource,
+        urls=urls,
+        code_verifier=code_verifier,
+    )
+    rotated = await refresh_tokens(
+        factory,
+        refresh_token=initial.refresh_token,
+        resource=urls.resource,
+        urls=urls,
+        scope=None,
+    )
+    assert rotated.refresh_token != initial.refresh_token
+
+    with pytest.raises(McpOAuthAuthorityError, match="refresh token"):
+        await refresh_tokens(
+            factory,
+            refresh_token=initial.refresh_token,
+            resource=urls.resource,
+            urls=urls,
+            scope=None,
+        )
+
+    async with factory() as session:
+        grant = await session.get(McpDelegatedGrant, "00000000-0000-0000-0000-000000000101")
+        family = await session.scalar(select(McpOAuthTokenFamily).where(McpOAuthTokenFamily.grant_id == grant.id))
+        tokens = (await session.scalars(select(McpOAuthToken).where(McpOAuthToken.family_id == family.id))).all()
+    assert grant.status == "revoked"
+    assert family.revoked_at is not None
+    assert all(token.revoked_at is not None for token in tokens)
+
+
+async def test_mcp_oauth_nonce_mismatch_commits_failure_and_blocks_replay(chat_db, monkeypatch):
+    """A victim-browser callback consumes the attacker-created authorization request."""
+    from app.services.chat import mcp_oauth as remote_oauth
+
+    factory = chat_db.get_session_factory()
+    state = "attacker-created-state"
+    initiator_nonce = "a" * 43
+    token_exchange_attempts = 0
+    now = datetime.now(UTC)
+
+    def unexpected_token_exchange():
+        nonlocal token_exchange_attempts
+        token_exchange_attempts += 1
+        raise AssertionError("a rejected OAuth request must not reach the token endpoint")
+
+    monkeypatch.setattr(
+        remote_oauth,
+        "_decrypt",
+        lambda _encrypted_payload: {
+            "initiator_nonce_hash": remote_oauth._hash(initiator_nonce),
+            "callback_url": "https://console.example/api/v1/chat/mcp-oauth/callback",
+            "client_id": "client-id",
+            "code_verifier": "verifier",
+            "resource": "https://mcp.example/mcp",
+            "token_endpoint": "https://auth.example/token",
+        },
+    )
+    monkeypatch.setattr(remote_oauth, "_http_client", unexpected_token_exchange)
+
+    async with factory() as session, session.begin():
+        session.add_all(
+            [
+                ChatMcpServer(
+                    id=901,
+                    scope="user",
+                    owner_user_id="attacker",
+                    owner_project_id="project-a",
+                    name="Notion",
+                    transport="http",
+                    url="https://mcp.notion.com/mcp",
+                    auth_mode="oauth",
+                ),
+                ChatMcpOAuthRequest(
+                    id="00000000-0000-0000-0000-000000000901",
+                    state_hash=remote_oauth._hash(state),
+                    mcp_server_id=901,
+                    owner_user_id="attacker",
+                    owner_project_id="project-a",
+                    encrypted_payload="opaque",
+                    status="pending",
+                    expires_at=now + timedelta(minutes=5),
+                ),
+            ]
+        )
+
+    with pytest.raises(remote_oauth.McpOAuthError, match="not initiated by this browser"):
+        await remote_oauth.complete(
+            state=state,
+            code="victim-authorization-code",
+            error=None,
+            initiator_nonce="victim-browser-nonce",
+        )
+
+    async with factory() as session:
+        request = await session.get(ChatMcpOAuthRequest, "00000000-0000-0000-0000-000000000901")
+    assert request.status == "failed"
+    assert request.completed_at is not None
+
+    with pytest.raises(remote_oauth.McpOAuthError, match="expired or was already used"):
+        await remote_oauth.complete(
+            state=state,
+            code="replayed-authorization-code",
+            error=None,
+            initiator_nonce=initiator_nonce,
+        )
+    assert token_exchange_attempts == 0
+
+
+async def test_message_tree_marks_failed_user_run_retryable(chat_db):
+    from app.services.chat import conversation_store as cs
+
+    factory = chat_db.get_session_factory()
+    conversation = await cs.create_conversation(
+        user_id="retry-user",
+        project_id="retry-project",
+        title=None,
+        model_name=None,
+    )
+    message = await cs.add_message(
+        conversation["id"],
+        role="user",
+        content="다시 전송할 메시지",
+        set_leaf=True,
+    )
+    async with factory() as session, session.begin():
+        session.add(
+            ChatRun(
+                id="00000000-0000-0000-0000-000000000902",
+                run_scope="persistent",
+                conversation_id=conversation["id"],
+                user_message_id=message["id"],
+                project_id="retry-project",
+                user_id="retry-user",
+                model_name="test-model",
+                capability_snapshot={},
+                pricing_snapshot={},
+                client_request_id="00000000-0000-0000-0000-000000000903",
+                request_fingerprint="retryable-turn",
+                fingerprint_version=1,
+                last_seq=1,
+                current_ordinal=0,
+                status="failed",
+            )
+        )
+
+    tree = await cs.list_message_tree(
+        conversation["id"],
+        user_id="retry-user",
+        project_id="retry-project",
+    )
+
+    assert len(tree["messages"]) == 1
+    assert tree["messages"][0]["id"] == message["id"]
+    assert tree["messages"][0]["role"] == "user"
+    assert tree["messages"][0]["execution"] == {
+        "run_id": "00000000-0000-0000-0000-000000000902",
+        "status": "failed",
+        "retryable": True,
     }

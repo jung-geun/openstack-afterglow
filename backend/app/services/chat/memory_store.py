@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.exc import OperationalError
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
-from app.models.chat_db import ChatMemory
+from app.models.chat_db import ChatMemory, ChatMemoryOwnerLock
 from app.models.chat_jobs import ChatMemoryOutbox
 from app.services.k3s_crypto import decrypt_chat_content, derive_encryption_subkey, encrypt_chat_content
 
@@ -25,9 +27,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_INJECT = 30  # 컨텍스트 주입 시 메모리 개수 상한(비용 방어)
 _SCOPES = frozenset({"account", "project", "workspace"})
+_CATEGORIES = frozenset({"interest", "development", "habit", "preference", "general"})
 
 
 _FINGERPRINT_DOMAIN = b"chat_memory_content_fingerprint"
+_STATE_FINGERPRINT_DOMAIN = b"chat_memory_state_fingerprint"
 
 
 def memory_content_fingerprint(plaintext: str) -> str:
@@ -35,6 +39,26 @@ def memory_content_fingerprint(plaintext: str) -> str:
     return hmac.new(
         derive_encryption_subkey(_FINGERPRINT_DOMAIN),
         plaintext.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def memory_state_fingerprint(
+    plaintext: str,
+    *,
+    category: str,
+    status: str,
+    is_active: bool,
+) -> str:
+    """Keyed optimistic-concurrency marker for a model-derived target."""
+    payload = json.dumps(
+        [plaintext, category, status, is_active],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hmac.new(
+        derive_encryption_subkey(_STATE_FINGERPRINT_DOMAIN),
+        payload.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
@@ -75,6 +99,7 @@ def _public(row: ChatMemory) -> dict:
         "project_id": row.project_id,
         "workspace_id": row.workspace_id,
         "scope": row.scope,
+        "category": row.category,
         "content": decrypt_chat_content(row.content) if row.content else None,
         "confidence": str(row.confidence) if row.confidence is not None else None,
         "expires_at": _iso(row.expires_at),
@@ -95,6 +120,11 @@ def _validate_namespace(*, scope: str, project_id: str | None, workspace_id: int
     if scope == "workspace" and project_id and isinstance(workspace_id, int) and workspace_id > 0:
         return
     raise MemoryValidationError("메모리 scope namespace 가 올바르지 않습니다")
+
+
+def _validate_category(category: str) -> None:
+    if category not in _CATEGORIES:
+        raise MemoryValidationError("지원하지 않는 메모리 category 입니다")
 
 
 def _visible_in_project(row: ChatMemory, project_id: str | None) -> bool:
@@ -171,16 +201,19 @@ async def create_memory(
     scope: str = "account",
     project_id: str | None = None,
     workspace_id: int | None = None,
+    category: str = "general",
 ) -> dict:
     if not content or not content.strip():
         raise MemoryValidationError("content 는 필수입니다")
     _validate_namespace(scope=scope, project_id=project_id, workspace_id=workspace_id)
+    _validate_category(category)
     factory = _require_db()
     row = ChatMemory(
         user_id=user_id,
         project_id=project_id,
         workspace_id=workspace_id,
         scope=scope,
+        category=category,
         content=encrypt_chat_content(content.strip()),
     )
     try:
@@ -264,11 +297,17 @@ async def update_memory(memory_id: int, *, user_id: str, project_id: str | None 
         async with factory() as session, session.begin():
             row = await _load_owned(session, memory_id, user_id, project_id)
             if "content" in patch:
-                c = (patch["content"] or "").strip()
-                if not c:
+                content = (patch["content"] or "").strip()
+                if not content:
                     raise MemoryValidationError("content 는 필수입니다")
-                row.content = encrypt_chat_content(c)
-                await _queue_semantic_mutation(session, row=row, mutation="upsert", plaintext=c)
+                row.content = encrypt_chat_content(content)
+                await _queue_semantic_mutation(session, row=row, mutation="upsert", plaintext=content)
+            if "category" in patch:
+                category = patch["category"]
+                if not isinstance(category, str):
+                    raise MemoryValidationError("category 가 올바르지 않습니다")
+                _validate_category(category)
+                row.category = category
             if patch.get("is_active") is not None:
                 row.is_active = bool(patch["is_active"])
             return _public(row)
@@ -286,6 +325,120 @@ async def delete_memory(memory_id: int, *, user_id: str, project_id: str | None 
             row.is_active = False
             plaintext = decrypt_chat_content(row.content) if row.content else ""
             await _queue_semantic_mutation(session, row=row, mutation="delete", plaintext=plaintext)
+    except OperationalError as exc:
+        mark_db_unhealthy()
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def apply_automatic_ops_in_transaction(
+    session,
+    *,
+    ops: list[dict],
+    user_id: str,
+    project_id: str,
+) -> dict[str, int]:
+    """Apply only project-scoped, unchanged automatic deltas in the caller's transaction."""
+    applied = {"add": 0, "update": 0, "delete": 0}
+    await session.execute(
+        insert(ChatMemoryOwnerLock).values(user_id=user_id, project_id=project_id).prefix_with("IGNORE")
+    )
+    await session.execute(
+        select(ChatMemoryOwnerLock)
+        .where(
+            ChatMemoryOwnerLock.user_id == user_id,
+            ChatMemoryOwnerLock.project_id == project_id,
+        )
+        .with_for_update()
+    )
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        kind = op.get("op")
+        memory_id = op.get("id")
+        category = op.get("category")
+        if kind == "add":
+            content = op.get("content")
+            if not isinstance(content, str) or not content.strip() or not isinstance(category, str):
+                continue
+            try:
+                _validate_category(category)
+            except MemoryValidationError:
+                continue
+            row = ChatMemory(
+                user_id=user_id,
+                project_id=project_id,
+                scope="project",
+                category=category,
+                content=encrypt_chat_content(content.strip()),
+            )
+            session.add(row)
+            await session.flush()
+            await _queue_semantic_mutation(session, row=row, mutation="upsert", plaintext=content.strip())
+            applied["add"] += 1
+            continue
+        if kind not in {"update", "delete"} or not isinstance(memory_id, int):
+            continue
+        expected_state_fingerprint = op.get("expected_state_fingerprint")
+        if not isinstance(expected_state_fingerprint, str):
+            continue
+        row = (
+            await session.execute(select(ChatMemory).where(ChatMemory.id == memory_id).with_for_update())
+        ).scalar_one_or_none()
+        if (
+            row is None
+            or row.user_id != user_id
+            or row.scope != "project"
+            or row.project_id != project_id
+            or row.status != "active"
+            or row.is_active is not True
+            or (row.expires_at is not None and row.expires_at <= datetime.now(UTC))
+        ):
+            continue
+        plaintext = decrypt_chat_content(row.content) if row.content else ""
+        current_state_fingerprint = memory_state_fingerprint(
+            plaintext,
+            category=row.category,
+            status=row.status,
+            is_active=row.is_active,
+        )
+        if not hmac.compare_digest(expected_state_fingerprint, current_state_fingerprint):
+            continue
+        if kind == "update":
+            content = op.get("content")
+            if not isinstance(content, str) or not content.strip() or not isinstance(category, str):
+                continue
+            try:
+                _validate_category(category)
+            except MemoryValidationError:
+                continue
+            row.content = encrypt_chat_content(content.strip())
+            row.category = category
+            await _queue_semantic_mutation(session, row=row, mutation="upsert", plaintext=content.strip())
+            applied["update"] += 1
+        else:
+            row.status = "deleting"
+            row.is_active = False
+            await _queue_semantic_mutation(session, row=row, mutation="delete", plaintext=plaintext)
+            applied["delete"] += 1
+    return applied
+
+
+async def apply_automatic_ops(
+    *,
+    ops: list[dict],
+    user_id: str,
+    project_id: str,
+) -> dict[str, int]:
+    """Apply model-derived deltas atomically after serializing one owner/project."""
+    factory = _require_db()
+    try:
+        async with factory() as session, session.begin():
+            return await apply_automatic_ops_in_transaction(
+                session,
+                ops=ops,
+                user_id=user_id,
+                project_id=project_id,
+            )
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc

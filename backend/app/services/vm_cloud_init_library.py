@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, select
 
 from app.database import get_session_factory
@@ -8,6 +10,14 @@ from app.services.k3s_crypto import decrypt_vm_cloud_init, encrypt_vm_cloud_init
 
 _HISTORY_LIMIT = 20
 _MAX_CONTENT_LENGTH = 65_536
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
 
 
 class CloudInitSnippetNotFound(Exception):
@@ -29,8 +39,8 @@ def _public(row: VmCloudInitSnippet) -> dict:
         "kind": row.kind,
         "name": row.name,
         "content": decrypt_vm_cloud_init(row.content_encrypted),
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "created_at": _isoformat(row.created_at),
+        "updated_at": _isoformat(row.updated_at),
     }
 
 

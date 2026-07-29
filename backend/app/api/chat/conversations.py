@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_token_info
+from app.services.chat import capabilities, provider_store
 from app.services.chat import conversation_store as cs
-from app.services.chat import provider_store
 
 router = APIRouter()
 
@@ -51,6 +51,25 @@ async def list_available_models(token_info: dict = Depends(get_token_info)):
             }
         )
     return result
+
+
+@router.get("/capabilities")
+async def get_chat_capabilities(model_id: int = Query(..., ge=1), token_info: dict = Depends(get_token_info)):
+    """Expose selected-model and deployment runtime gates without secrets."""
+    del token_info
+    try:
+        resolved = await provider_store.resolve_model_by_id(model_id)
+    except provider_store.ChatStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail="chat model configuration is unavailable") from exc
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="chat model not found")
+    runtime = capabilities.runtime_capabilities()
+    effective = capabilities.effective_runtime_capabilities(resolved.get("capabilities"), runtime)
+    return {
+        "model_id": model_id,
+        "model_name": resolved["model_name"],
+        "runtime": effective,
+    }
 
 
 class ConversationCreateRequest(BaseModel):

@@ -5,6 +5,8 @@
 
 import inspect
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 from app.config import Settings
 
@@ -26,6 +28,28 @@ ALL_PLUGINS = [
     KeystoneAuthPlugin(),
     BarbicanKmsPlugin(),
 ]
+
+
+@dataclass(frozen=True)
+class K3sPluginContext:
+    """Read-only plugin view of deployment settings plus a frozen resource snapshot."""
+
+    settings: Settings
+    resource_snapshot: dict[str, dict[str, Any]]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.settings, name)
+
+    def resource_id(self, key: str) -> str:
+        return str((self.resource_snapshot.get(key) or {}).get("id") or "")
+
+    def resource_name(self, key: str) -> str:
+        return str((self.resource_snapshot.get(key) or {}).get("name") or "")
+
+
+def with_resource_policy_snapshot(settings: Settings, snapshot: dict[str, dict[str, Any]] | None) -> K3sPluginContext:
+    """Bind plugin rendering to the operation's immutable policy snapshot."""
+    return K3sPluginContext(settings=settings, resource_snapshot=snapshot or {})
 
 
 def get_active_plugins(settings: Settings) -> list:

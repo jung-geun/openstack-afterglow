@@ -25,14 +25,8 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models.db import LayerArtifact, LayerBuild, LayerImportJob, LayerProfile
 from app.services import manila, neutron, nova
-from app.services.builder_vm import _ensure_ephemeral_keypair
-from app.services.keystone import get_service_project_connection
 from app.services.layer_base_images import resolve_base_image_snapshot
-from app.services.layer_build import (
-    LAYER_BUILD_IMAGE_PACKAGES,
-    _resolve_flavor_id,
-    _wait_for_shutoff,
-)
+from app.services.layer_build import LAYER_BUILD_IMAGE_PACKAGES, _wait_for_shutoff
 from app.services.layer_ubuntu import normalize_ubuntu_base
 from app.services.palimpsest_digest import parse_digest_sentinels
 from app.services.palimpsest_layers import resolve_digest_fields
@@ -740,7 +734,7 @@ def _job_to_dict(job: LayerImportJob) -> dict:
         "base_image_os_hash_algo": job.base_image_os_hash_algo,
         "base_image_os_hash_value": job.base_image_os_hash_value,
         "base_image_min_disk": job.base_image_min_disk,
-        "planned_layers": job.planned_layers or [],
+        "resource_snapshot": job.resource_snapshot,
         "artifact_ids": job.artifact_ids or [],
         "build_ids": job.build_ids or [],
         "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -753,7 +747,37 @@ async def create_import_job(plan: DockerfilePlan) -> dict:
     factory = get_session_factory()
     if factory is None:
         raise DockerfileImportError("DB가 초기화되지 않았습니다")
-    fields = _base_fields(plan.base_image_snapshot)
+    from app.services.resource_policy_store import (
+        get_policy_snapshot,
+        get_service_project_connection,
+        resolve_policy_snapshot,
+    )
+
+    service_conn = await get_service_project_connection()
+    try:
+        policies = await resolve_policy_snapshot(
+            conn=service_conn,
+            keys=("builder.flavor", "builder.network", "manila.share_network", "manila.nfs_share_type"),
+        )
+        service_project = (await get_policy_snapshot(("openstack.service_project",)))["openstack.service_project"]
+        if service_project is None:
+            raise DockerfileImportError("service project policy is not configured")
+    finally:
+        await asyncio.to_thread(service_conn.close)
+    resource_snapshot = {
+        "openstack.service_project": service_project,
+        "base_image": {
+            "id": plan.base_image_snapshot["base_image_id"],
+            "name": plan.base_image_snapshot["base_image_name"],
+        },
+        **policies,
+        "manila": {
+            "share_network_id": policies["manila.share_network"]["id"],
+            "share_type": policies["manila.nfs_share_type"]["name"],
+            "share_proto": "NFS",
+            "share_size_gb": get_settings().builder_layer_share_size_gb,
+        },
+    }
     async with factory() as session:
         job = LayerImportJob(
             source_type=plan.source_type,
@@ -774,7 +798,7 @@ async def create_import_job(plan: DockerfilePlan) -> dict:
             # 캐시 재사용분을 미리 채워 둔다 — 빌드 루프가 여기서 이어 쌓는다.
             artifact_ids=list(plan.cached_artifact_ids),
             build_ids=[],
-            **fields,
+            resource_snapshot=resource_snapshot,
         )
         session.add(job)
         await session.commit()
@@ -1016,6 +1040,22 @@ async def run_dockerfile_import_job(import_id: int) -> None:
             job = await session.get(LayerImportJob, import_id)
             if job is None:
                 return
+            resource_snapshot = job.resource_snapshot or {}
+            service_project = resource_snapshot.get("openstack.service_project") or {}
+            builder_flavor = resource_snapshot.get("builder.flavor") or {}
+            builder_network = resource_snapshot.get("builder.network") or {}
+            manila_snapshot = resource_snapshot.get("manila") or {}
+            if not all(
+                (
+                    service_project.get("id"),
+                    builder_flavor.get("id"),
+                    builder_network.get("id"),
+                    manila_snapshot.get("share_network_id"),
+                    manila_snapshot.get("share_type"),
+                    manila_snapshot.get("share_size_gb"),
+                )
+            ):
+                raise DockerfileImportError("import resource snapshot is incomplete")
             await _update_job(import_id, status="validating", progress_step="빌드 레코드 생성", progress_pct=5)
             parent_id = None
             for step in job.planned_layers or []:
@@ -1027,6 +1067,9 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                     apt_packages=[],
                     parent_artifact_id=parent_id,
                     share_id="",
+                    builder_flavor_id=builder_flavor["id"],
+                    builder_network_id=builder_network["id"],
+                    resource_snapshot=resource_snapshot,
                     status="queued",
                     cloud_init_status="queued",
                     progress_step="Dockerfile import 대기",
@@ -1046,13 +1089,11 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                 parent_id = None
             job.build_ids = build_ids
             await session.commit()
-        settings = get_settings()
-        flavor_id = settings.builder_flavor_id
-        network_id = settings.builder_network_id or settings.default_network_id
-        if not flavor_id or not network_id:
-            raise DockerfileImportError("builder flavor/network 설정이 필요합니다")
-        conn = await asyncio.to_thread(get_service_project_connection)
-        resolved_flavor_id = await asyncio.to_thread(_resolve_flavor_id, conn, flavor_id)
+        from app.services.keystone import get_admin_connection_for_project
+
+        conn = await asyncio.to_thread(get_admin_connection_for_project, service_project["id"])
+        flavor_id = builder_flavor["id"]
+        network_id = builder_network["id"]
         token = uuid.uuid4().hex
         port = await asyncio.to_thread(neutron.create_port, conn, network_id, f"afterglow-layer-import-{token[:8]}")
         port_id = port["id"]
@@ -1068,9 +1109,9 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                     manila.create_file_storage,
                     conn,
                     share_name,
-                    settings.builder_layer_share_size_gb,
-                    settings.os_manila_share_network_id or "",
-                    settings.os_manila_nfs_share_type,
+                    manila_snapshot["share_size_gb"],
+                    manila_snapshot["share_network_id"],
+                    manila_snapshot["share_type"],
                     "NFS",
                     {"afterglow_role": "dockerfile-layer", "afterglow_layer_name": step["name"]},
                 )
@@ -1090,15 +1131,13 @@ async def run_dockerfile_import_job(import_id: int) -> None:
         if len(exports) != len(share_ids):
             raise DockerfileImportError("import share export location을 찾을 수 없습니다")
         user_data = _dockerfile_cloud_config(job, exports, token)
-        keypair_name = await _ensure_ephemeral_keypair(conn, settings.builder_ssh_key_path)
         server = await asyncio.to_thread(
             conn.compute.create_server,
             name=f"afterglow-layer-import-{job.layer_prefix}-{token[:8]}",
             image_id=job.base_image_id,
-            flavor_id=resolved_flavor_id,
+            flavor_id=flavor_id,
             networks=[{"port": port_id}],
             user_data=base64.b64encode(user_data.encode()).decode(),
-            key_name=keypair_name,
             metadata={
                 "union_type": "dockerfile-layer-import",
                 "afterglow_managed": "true",
@@ -1234,6 +1273,12 @@ async def run_dockerfile_import_job(import_id: int) -> None:
                     await asyncio.to_thread(neutron.delete_port, conn, port_id)
                 except Exception:
                     pass
+    finally:
+        if conn is not None:
+            try:
+                await asyncio.to_thread(conn.close)
+            except Exception:
+                _logger.warning("[dockerfile_import] service connection close failed", exc_info=True)
 
 
 async def _set_build_running(build_id: int, server_id: str, port_id: str, token: str) -> None:

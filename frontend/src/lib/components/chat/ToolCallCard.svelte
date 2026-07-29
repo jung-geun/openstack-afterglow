@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatToolArgs, type ToolActivityItem } from '$lib/api/chatToolActivity';
+	import { taskLabelForTool } from '$lib/api/chatTaskLabels';
 
 	interface Props {
 		item: ToolActivityItem;
@@ -8,10 +9,12 @@
 
 	let open = $state(false);
 	const argsText = $derived(formatToolArgs(item.args));
-	const hasDetail = $derived(Boolean(argsText) || Boolean(item.result));
+	const hasDetail = $derived(Boolean(argsText) || Boolean(item.result) || Boolean(item.errorCode));
+	const taskName = $derived(taskLabelForTool(item.name));
+	const statusLabel = $derived(item.running ? '실행 중…' : item.status === 'failed' ? '실패' : '완료');
 </script>
 
-<div class="tool-card" class:running={item.running}>
+<div class="tool-card" class:running={item.running} class:failed={item.status === 'failed'}>
 	<button
 		type="button"
 		class="tool-head"
@@ -26,8 +29,8 @@
 				<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-2.5 2.5-2.5z" stroke-linejoin="round" />
 			</svg>
 		{/if}
-		<span class="tool-name">{item.name}</span>
-		<span class="tool-status">{item.running ? '실행 중…' : '완료'}</span>
+		<span class="tool-name">{taskName}</span>
+		<span class="tool-status">{statusLabel}</span>
 		{#if hasDetail}
 			<svg class="chevron" class:open viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
@@ -47,6 +50,12 @@
 				<div class="detail-block">
 					<div class="detail-label">결과</div>
 					<pre class="detail-pre">{item.result}</pre>
+				</div>
+			{/if}
+			{#if item.errorCode}
+				<div class="detail-block">
+					<div class="detail-label">실패 코드</div>
+					<code class="error-code">{item.errorCode}</code>
 				</div>
 			{/if}
 		</div>
@@ -86,11 +95,13 @@
 	.tool-name {
 		font-weight: 600;
 		color: var(--color-ink-1);
-		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 	}
 	.tool-status {
 		color: var(--color-ink-3);
 		font-size: 0.7rem;
+	}
+	.tool-card.failed .tool-status {
+		color: var(--color-state-danger);
 	}
 	.chevron {
 		margin-left: auto;
@@ -129,6 +140,18 @@
 		max-height: 16rem;
 		overflow-y: auto;
 		color: var(--color-ink-1);
+	}
+	.error-code {
+		display: inline-flex;
+		width: fit-content;
+		padding: 0.2rem 0.35rem;
+		border: 1px solid color-mix(in oklab, var(--color-state-danger) 35%, var(--color-line));
+		border-radius: 0.3rem;
+		background: color-mix(in oklab, var(--color-state-danger) 9%, var(--color-surface-base));
+		color: var(--color-state-danger);
+		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+		font-size: 0.68rem;
+		overflow-wrap: anywhere;
 	}
 	.spinner {
 		flex-shrink: 0;

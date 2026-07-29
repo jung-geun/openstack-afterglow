@@ -68,6 +68,7 @@ export interface Memory {
 	id: number;
 	user_id?: string;
 	content: string;
+	category: 'interest' | 'development' | 'habit' | 'preference' | 'general';
 	is_active: boolean;
 	created_at?: string | null;
 	updated_at?: string | null;

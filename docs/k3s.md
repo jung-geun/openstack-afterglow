@@ -238,7 +238,7 @@ kubectl config set-cluster default \
 
 ## Cloud Provider OpenStack 플러그인
 
-k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다。
+k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `afterglow.conf [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다。
 
 ### 지원 플러그인
 
@@ -251,7 +251,7 @@ k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통
 | **Keystone Auth** | `keystone_auth_enabled` | Kubernetes 인증 → Keystone 토큰 연동 |
 | **Barbican KMS** | `barbican_kms_enabled` | Kubernetes Secret at-rest 암호화 → Barbican 연동 |
 
-### config.toml 예시
+### afterglow.conf 예시
 
 ```toml
 [k3s]

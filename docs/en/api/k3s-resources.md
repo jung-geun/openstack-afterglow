@@ -12,7 +12,7 @@ This is a proxy-style API that queries/manipulates the **Kubernetes resources in
 
 For the cluster lifecycle (create/delete/scale/health/node groups/certificates), see the [k3s Cluster (k3s)](k3s.md) document.
 
-> **Activation condition:** `config.toml [services] k3s = true`
+> **Activation condition:** `afterglow.conf [services] k3s = true`
 
 ---
 

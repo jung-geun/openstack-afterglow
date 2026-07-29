@@ -12,7 +12,7 @@ The k3s provisioner is a subsystem that installs and operates k3s (lightweight K
 
 For the proxy-style API that queries/manipulates Kubernetes resources inside the cluster (Pod/Deployment/ConfigMap/Secret/Cloud Shell, etc.), see the separate document [k3s Resource Management](k3s-resources.md).
 
-> **Activation condition:** `config.toml [services] k3s = true`
+> **Activation condition:** `afterglow.conf [services] k3s = true`
 > When disabled, the router is not mounted and `404` is returned.
 
 ---
@@ -101,7 +101,7 @@ data: {"step": "failed", "progress": 0, "message": "클러스터 생성 실패: 
 
 ## Cloud Provider OpenStack Plugins
 
-k3s clusters integrate with OpenStack services through a plugin registry (`backend/app/services/k3s_plugins/`). Each plugin is independently enabled in the `config.toml [k3s]` section.
+k3s clusters integrate with OpenStack services through a plugin registry (`backend/app/services/k3s_plugins/`). Each plugin is independently enabled in the `afterglow.conf [k3s]` section.
 
 | Plugin | Config key | Deployed resources | Purpose |
 |---------|--------|-----------|------|
@@ -202,7 +202,7 @@ Asynchronously creates a cluster over an SSE stream. **Rate limit: 5/min.** Depe
 |------|------|------|------|
 | `name` | string | — | Cluster name. Starts with a letter/digit, allows letters/digits/hyphens/underscores (max 63 chars). If unspecified, auto-generated as `k3s-<hex8>` |
 | `agent_count` | int | — | Worker node count. Default `1`, range `0–10` |
-| `agent_flavor_id` | string | — | Worker flavor. If unset, `config.toml [k3s] default_agent_flavor_id` |
+| `agent_flavor_id` | string | — | Worker flavor. If unset, the administrator `k3s.default_agent_flavor` policy is used. |
 | `network_id` | string | — | Network ID. If unset, the default network is auto-determined/fallen back to |
 | `key_name` | string | — | SSH keypair name |
 | `os_type` | string | — | `ubuntu` (default) or `fcos`. `fcos` requires the `k3s_fcos_image_id` setting |
@@ -259,7 +259,7 @@ Attaches/detaches additional Neutron ports to server/agent VMs. If `vm_id` does 
 
 ## Stampede Autoscale
 
-Controls the per-cluster autoscale mode. If the server-global setting `config.toml [k3s] stampede_enabled` is off, enabling returns `400`.
+Controls the per-cluster autoscale mode. If the server-global setting `afterglow.conf [k3s] stampede_enabled` is off, enabling returns `400`.
 
 | Method | Path | Description |
 |--------|------|------|

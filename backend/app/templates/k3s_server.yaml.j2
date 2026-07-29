@@ -35,26 +35,45 @@ write_files:
 {{ wf.content | indent(6, first=True) }}
 
 {% endfor %}
+  - path: /opt/k3s/pin-primary-network.sh
+    permissions: "0750"
+    content: |
+{{ pin_script | indent(6, first=True) }}
+
   - path: /usr/local/sbin/afterglow-nic-up.sh
     permissions: "0750"
     content: |
       #!/bin/bash
       set -euo pipefail
       IFACE="${1:-}"
-      [ -z "${IFACE}" ] && exit 0
-      # 가상/루프 인터페이스 제외
+      [ -n "${IFACE}" ] || exit 0
+      [[ "${IFACE}" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]] || exit 0
       case "${IFACE}" in
         lo|lo:*|cni*|flannel*|veth*|kube*|dummy*|tunl*) exit 0 ;;
       esac
+      PIN_ENV="/etc/rancher/k3s/afterglow-primary-network.env"
+      for _second in $(seq 0 300); do
+        if [ -r "${PIN_ENV}" ]; then
+          . "${PIN_ENV}"
+          [[ "${AFTERGLOW_K3S_PRIMARY_IFACE:-}" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]] && break
+        fi
+        [ "${_second}" -lt 300 ] && sleep 1
+      done
+      [ -n "${AFTERGLOW_K3S_PRIMARY_IFACE:-}" ] || exit 1
+      [ "${IFACE}" = "${AFTERGLOW_K3S_PRIMARY_IFACE}" ] && exit 0
       NETPLAN_FILE="/etc/netplan/90-afterglow-${IFACE}.yaml"
       LOCK="/run/afterglow-nic.lock"
       exec 9>"${LOCK}"
       flock -x 9
+      BACKUP="${NETPLAN_FILE}.bak.$$"
+      TMP="${NETPLAN_FILE}.tmp.$$"
       if [ -f "${NETPLAN_FILE}" ]; then
-        echo "[afterglow-nic-up] ${IFACE}: netplan already configured, skipping" | systemd-cat -t afterglow-nic-up
-        exit 0
+        cp -p "${NETPLAN_FILE}" "${BACKUP}"
       fi
-      cat > "${NETPLAN_FILE}" <<EOF
+      umask 077
+      : > "${TMP}"
+      chmod 600 "${TMP}"
+      cat > "${TMP}" <<EOF
       network:
         version: 2
         ethernets:
@@ -65,13 +84,21 @@ write_files:
             optional: true
             dhcp4-overrides:
               use-routes: false
+              use-dns: false
       EOF
+      mv -f -- "${TMP}" "${NETPLAN_FILE}"
       echo "[afterglow-nic-up] ${IFACE}: applying netplan..." | systemd-cat -t afterglow-nic-up
       if netplan apply 2>&1 | systemd-cat -t afterglow-nic-up; then
+        rm -f "${BACKUP}"
         echo "[afterglow-nic-up] ${IFACE}: done" | systemd-cat -t afterglow-nic-up
       else
+        if [ -f "${BACKUP}" ]; then
+          mv -f -- "${BACKUP}" "${NETPLAN_FILE}"
+        else
+          rm -f "${NETPLAN_FILE}"
+        fi
+        rm -f "${TMP}"
         echo "[afterglow-nic-up] ${IFACE}: netplan apply failed, rolling back" | systemd-cat -t afterglow-nic-up
-        rm -f "${NETPLAN_FILE}"
       fi
 
   - path: /etc/systemd/system/afterglow-nic-up@.service
@@ -79,11 +106,13 @@ write_files:
     content: |
       [Unit]
       Description=Afterglow NIC up handler for %i
-      After=network.target
+      After=network-online.target
+      Wants=network-online.target
 
       [Service]
       Type=oneshot
       ExecStart=/usr/local/sbin/afterglow-nic-up.sh %i
+      TimeoutStartSec=330s
       StandardOutput=journal
       StandardError=journal
 
@@ -100,6 +129,16 @@ write_files:
       set -o pipefail
       CALLBACK_URL="{{ callback_url }}"
       CALLBACK_TOKEN="{{ callback_token }}"
+      PIN_ENV="/etc/rancher/k3s/afterglow-primary-network.env"
+      if [ ! -r "${PIN_ENV}" ] || ! . "${PIN_ENV}" 2>/dev/null || \
+          [[ ! "${AFTERGLOW_K3S_NODE_IP:-}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || \
+          [[ ! "${AFTERGLOW_K3S_PRIMARY_IFACE:-}" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]]; then
+        echo "[k3s-callback] ERROR: primary network pin missing" | tee -a /var/log/k3s-callback.log
+        curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+          -H "Content-Type: application/json" \
+          -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"primary network pin missing\"}" || true
+        exit 1
+      fi
 
       log() { echo "[k3s-callback] $*" | tee -a /var/log/k3s-callback.log; }
 
@@ -189,8 +228,7 @@ write_files:
       fi
 
 {% endfor %}
-      SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); break}}')
-      [ -z "${SERVER_IP}" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
+      SERVER_IP="${AFTERGLOW_K3S_NODE_IP}"
       KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
       # 127.0.0.1 → 실제 서버 IP로 치환
       KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")
@@ -237,6 +275,13 @@ write_files:
       fi
 
 runcmd:
+  - |
+    if ! /bin/bash /opt/k3s/pin-primary-network.sh; then
+      curl -sf -X POST {{ (callback_url ~ "/api/k3s/callback") | shlex_quote }} \
+        -H "Content-Type: application/json" \
+        -d '{"token": {{ callback_token | shlex_quote }}, "success": false, "error": "primary network pin missing"}' || true
+      exit 1
+    fi
   - udevadm control --reload-rules
 {% if barbican_kms_enabled %}
   # KMS plugin 을 k3s 보다 먼저 install + start (sock 가 k3s 시작 전 존재해야 apiserver
@@ -259,7 +304,8 @@ runcmd:
 {% endif %}
   - |
     # k3s 서버 설치 (KMS sock 이 이미 존재해 자동 enable + start 가 정상 부팅)
-    SERVER_IP=$(hostname -I | awk '{print $1}')
+    . /etc/rancher/k3s/afterglow-primary-network.env
+    SERVER_IP="${AFTERGLOW_K3S_NODE_IP}"
     curl -sfL https://get.k3s.io | \
       INSTALL_K3S_VERSION={{ k3s_version | shlex_quote }} \
       sh -s - server \
@@ -268,7 +314,6 @@ runcmd:
         --tls-san {{ san | shlex_quote }} \
 {% endfor %}
         --write-kubeconfig-mode 644 \
-        --node-ip "${SERVER_IP}" \
 {% if cluster_init %}
         --cluster-init \
 {% elif join_url %}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -19,7 +20,9 @@ from typing import Any
 
 from sqlalchemy import delete, select, update
 
+from app.config import get_settings
 from app.database import get_session_factory, is_db_available
+from app.models.chat_agent_platform import ChatRunInteraction
 from app.models.chat_assets import ChatAsset, ChatMessageAsset, ChatRunAsset
 from app.models.chat_contracts import (
     ChatRunDescriptor,
@@ -39,11 +42,17 @@ from app.models.chat_runs import (
     ChatTempThread,
     ChatToolApproval,
 )
-from app.services.chat import assets, credit, engine
+from app.services.chat import assets, credit, engine, extensions_store, ssrf
 from app.services.chat import conversation_store as cs
 from app.services.chat import provider_store as ps
+from app.services.chat.agent_policy import default_execution_policy, resolve_direct_effects
+from app.services.chat.agent_protocol import AgentExecutionPolicy
+from app.services.chat.checkpointer import chat_checkpointer
+from app.services.chat.execution_protocol import SUPPORTED_EXECUTION_PROTOCOL_VERSIONS, is_supported, v2_runtime_ready
 from app.services.chat.litellm_client import UsageCost
+from app.services.chat.memory_jobs import enqueue_completed_run_in_transaction
 from app.services.chat.message_parts import serialize_parts
+from app.services.chat.run_protocol_v2 import transition_allowed
 from app.services.chat.run_store import (
     NONTERMINAL,
     RunStoreError,
@@ -59,14 +68,140 @@ from app.services.chat.run_store import (
     replay_events,
 )
 from app.services.chat.structured_output import StructuredOutputError, parse_structured_output
-from app.services.k3s_crypto import decrypt_chat_content, encrypt_chat_content
+from app.services.k3s_crypto import decrypt_chat_content, derive_encryption_subkey, encrypt_chat_content
 
 logger = logging.getLogger(__name__)
 _LEASE_SECONDS = 45
+_V2_DEFAULT_MAX_MODEL_TURNS = 8
+_V2_DEFAULT_MAX_TOOL_CALLS = 24
+
+
+def _freeze_v2_tool_call_limit(request_payload: dict[str, Any], execution_protocol_version: int) -> dict[str, Any]:
+    if execution_protocol_version != 2:
+        return request_payload
+    try:
+        policy = AgentExecutionPolicy.model_validate(
+            request_payload.get("execution_policy") or default_execution_policy().model_dump(mode="json")
+        )
+        execution_mode = str(request_payload.get("execution_mode") or "chat")
+        default_effects = resolve_direct_effects(None, execution_mode=execution_mode)
+        raw_effects = request_payload.get("allowed_direct_effects", default_effects)
+        if not isinstance(raw_effects, (list, tuple, set, frozenset)) or not all(
+            isinstance(effect, str) for effect in raw_effects
+        ):
+            raise ValueError("v2 direct effects are invalid")
+        direct_effects = frozenset(raw_effects)
+        if not direct_effects <= {"read", "workspace_write", "process", "external_mutation"}:
+            raise ValueError("v2 direct effects are invalid")
+    except Exception as exc:
+        raise DurableRunInputError("v2 execution policy is invalid") from exc
+    return {
+        **request_payload,
+        "execution_policy": policy.model_dump(mode="json"),
+        "allowed_direct_effects": sorted(direct_effects),
+        "v2_max_model_turns": policy.max_model_turns,
+        "v2_max_tool_calls": policy.max_tool_calls,
+    }
+
+
+def _require_supported_execution_protocol_version(version: int) -> None:
+    if not is_supported(version):
+        raise DurableRunInputError(f"execution protocol version {version} is not deployed")
+    if version == 2 and not chat_checkpointer.available:
+        raise DurableRunInputError("execution protocol version 2 requires an encrypted PostgreSQL checkpointer")
+
+
+async def _freeze_v2_lumen_snapshot(
+    request_payload: dict[str, Any],
+    *,
+    user_id: str,
+    project_id: str,
+    execution_protocol_version: int,
+) -> dict[str, Any]:
+    """Freeze the selected Lumen grant at run admission, never at worker execution."""
+    if execution_protocol_version != 2:
+        return request_payload
+    from app.services.mcp_control_plane import lumen as mcp_lumen
+
+    try:
+        snapshot = await mcp_lumen.selected_lumen_snapshot(user_id=user_id, project_id=project_id)
+    except mcp_lumen.McpLumenAuthorityError:
+        snapshot = None
+    return {
+        **request_payload,
+        "lumen_snapshot": mcp_lumen.snapshot_payload(snapshot) if snapshot is not None else None,
+    }
+
+
+def _tool_result_status(value: object) -> str:
+    return "completed" if value in (None, "completed") else "failed"
+
+
+def _tool_result_error_code(value: object) -> str | None:
+    return value if isinstance(value, str) and value and len(value) <= 100 else None
+
+
+def _tool_display_parts(payload: dict[str, Any], *, content: str, visible: bool) -> list[dict[str, Any]]:
+    """Project a validated v2 result into durable, display-only chat parts."""
+    raw_display = payload.get("display")
+    parts = list(raw_display) if isinstance(raw_display, list) else []
+    raw_artifacts = payload.get("artifacts")
+    seen_asset_ids = {
+        part.get("asset_id")
+        for part in parts
+        if isinstance(part, dict) and part.get("type") == "file" and isinstance(part.get("asset_id"), str)
+    }
+    if isinstance(raw_artifacts, list):
+        for artifact in raw_artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            asset_id = artifact.get("asset_id")
+            media_type = artifact.get("media_type")
+            name = artifact.get("name")
+            size_bytes = artifact.get("size_bytes")
+            if (
+                isinstance(asset_id, str)
+                and asset_id
+                and asset_id not in seen_asset_ids
+                and isinstance(media_type, str)
+                and media_type
+                and isinstance(name, str)
+                and name
+                and isinstance(size_bytes, int)
+                and size_bytes >= 0
+            ):
+                parts.append(
+                    {
+                        "type": "file",
+                        "asset_id": asset_id,
+                        "mime_type": media_type,
+                        "name": name,
+                        "size_bytes": size_bytes,
+                    }
+                )
+                seen_asset_ids.add(asset_id)
+    if not parts and visible:
+        return [{"type": "text", "text": content}]
+    return parts
+
+
+def _validate_run_protocol_payload(run: ChatRun, payload: dict[str, Any]) -> bool:
+    """Keep pre-rollout v1 payloads compatible; v2 must carry an exact version."""
+    payload_version = payload.get("execution_protocol_version")
+    if payload_version is None:
+        return run.execution_protocol_version == 1 and is_supported(run.execution_protocol_version)
+    return (
+        run.execution_protocol_version in SUPPORTED_EXECUTION_PROTOCOL_VERSIONS
+        and payload_version == run.execution_protocol_version
+    )
 
 
 class DurableRunError(RuntimeError):
     pass
+
+
+class DurableRunProtocolMismatch(DurableRunError):
+    """A queued payload cannot safely be interpreted by this worker."""
 
 
 class DurableRunInputError(DurableRunError):
@@ -192,6 +327,7 @@ def _tools_enabled(features: object) -> bool:
 
 
 def _selected_tool_ids(features: object) -> tuple[int, ...] | None:
+    """v1 compatibility only; v2 runs persist an encrypted extension snapshot."""
     if not isinstance(features, dict):
         raise DurableRunError("chat run feature payload is invalid")
     policy = features.get("tool_policy")
@@ -202,11 +338,35 @@ def _selected_tool_ids(features: object) -> tuple[int, ...] | None:
     ids = policy.get("enabled_tool_ids")
     if ids is None:
         return None
-    if not isinstance(ids, list) or any(
-        not isinstance(item, str) or not item.isdecimal() or int(item) < 1 for item in ids
-    ):
+    if not isinstance(ids, list):
         raise DurableRunError("chat run enabled tool IDs are invalid")
-    return tuple(int(item) for item in ids)
+    normalized: list[int] = []
+    for item in ids:
+        if isinstance(item, int) and item > 0:
+            normalized.append(item)
+        elif isinstance(item, str) and item.isdecimal() and int(item) > 0:
+            normalized.append(int(item))
+        else:
+            raise DurableRunError("chat run enabled tool IDs are invalid")
+    return tuple(normalized)
+
+
+def _selected_mcp_credential_versions(
+    snapshot: object, selected_mcp_ids: tuple[int, ...]
+) -> tuple[tuple[int, int], ...]:
+    """Project immutable expected MCP credential versions for every later tool dispatch."""
+    if not isinstance(snapshot, dict):
+        return ()
+    selected = set(selected_mcp_ids)
+    versions: list[tuple[int, int]] = []
+    for item in snapshot.get("mcp", []):
+        if not isinstance(item, dict):
+            continue
+        server_id = item.get("id")
+        version = item.get("credential_version")
+        if isinstance(server_id, int) and server_id in selected and isinstance(version, int):
+            versions.append((server_id, version))
+    return tuple(versions)
 
 
 def _temporary_history_messages(history_ciphertext: str) -> list[dict[str, str]]:
@@ -242,6 +402,754 @@ async def wake_run(run_id: str) -> None:
     except Exception:
         # A missed wakeup only adds up to the worker's bounded DB-poll delay.
         return
+
+
+def _normalize_interaction_response(response_schema: object, response: object) -> dict[str, Any]:
+    if not isinstance(response_schema, dict) or not isinstance(response, dict):
+        raise DurableRunInputError("interaction response is invalid")
+    option_ids = response.get("option_ids", [])
+    text = response.get("text")
+    allowed_option_ids = response_schema.get("option_ids", [])
+    allow_multiple = response_schema.get("allow_multiple")
+    allow_text = response_schema.get("allow_text")
+    if (
+        not isinstance(option_ids, list)
+        or len(option_ids) > 5
+        or not all(isinstance(option_id, str) and option_id for option_id in option_ids)
+        or len(set(option_ids)) != len(option_ids)
+        or not isinstance(allowed_option_ids, list)
+        or len(allowed_option_ids) > 5
+        or not all(isinstance(option_id, str) and option_id for option_id in allowed_option_ids)
+        or len(set(allowed_option_ids)) != len(allowed_option_ids)
+        or not isinstance(allow_multiple, bool)
+        or not isinstance(allow_text, bool)
+    ):
+        raise DurableRunInputError("interaction response is invalid")
+    if not set(option_ids) <= set(allowed_option_ids):
+        raise DurableRunInputError("interaction response selects an unknown option")
+    if option_ids and not allow_multiple and len(option_ids) != 1:
+        raise DurableRunInputError("interaction response must select exactly one option")
+    if text is not None and (not isinstance(text, str) or len(text) > 4_000):
+        raise DurableRunInputError("interaction response text is invalid")
+    if text is not None and not allow_text:
+        raise DurableRunInputError("interaction response does not allow text")
+    if not option_ids and not (text and text.strip()):
+        raise DurableRunInputError("interaction response cannot be empty")
+    return {"option_ids": sorted(option_ids), "text": text}
+
+
+def _approval_resolved_payload(approval: ChatToolApproval, decision: str) -> dict[str, Any]:
+    if approval.decided_at is None:
+        raise DurableRunError("resolved approval is missing its decision timestamp")
+    return {
+        "call_id": approval.call_id,
+        "decision": decision,
+        "decided_by_user_id": approval.decided_by_user_id,
+        "decided_at": approval.decided_at,
+    }
+
+
+_APPROVAL_HMAC_DOMAIN = b"chat-tool-approval-v1"
+
+
+def _approval_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def _approval_preview_fingerprint(parts: list[dict[str, Any]]) -> str:
+    canonical = json.dumps(parts, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _canonical_approval_dispatch(
+    *,
+    run_id: str,
+    owner_user_id: str,
+    project_id: str,
+    call_id: str,
+    name: str,
+    arguments: dict[str, Any],
+    source: str,
+    effect: str,
+    tool_definition_hash: str,
+    config_fingerprint: str | None,
+    destination_origin: str | None,
+    preview_fingerprint: str,
+    expires_at: datetime,
+):
+    return json.dumps(
+        {
+            "run_id": run_id,
+            "owner_user_id": owner_user_id,
+            "project_id": project_id,
+            "call_id": call_id,
+            "name": name,
+            "arguments": arguments,
+            "source": source,
+            "effect": effect,
+            "tool_definition_hash": tool_definition_hash,
+            "config_fingerprint": config_fingerprint,
+            "destination_origin": destination_origin,
+            "preview_fingerprint": preview_fingerprint,
+            "expires_at": _approval_timestamp(expires_at),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _approval_dispatch_hmac(**kwargs: Any) -> str:
+    return hmac.new(
+        derive_encryption_subkey(_APPROVAL_HMAC_DOMAIN), _canonical_approval_dispatch(**kwargs), hashlib.sha256
+    ).hexdigest()
+
+
+def _approval_decision_hmac(
+    *,
+    dispatch_hmac: str,
+    owner_user_id: str,
+    project_id: str,
+    call_id: str,
+    decision: str,
+    decided_by_user_id: str | None,
+    decided_at: datetime,
+) -> str:
+    return hmac.new(
+        derive_encryption_subkey(_APPROVAL_HMAC_DOMAIN),
+        json.dumps(
+            {
+                "dispatch_hmac": dispatch_hmac,
+                "owner_user_id": owner_user_id,
+                "project_id": project_id,
+                "call_id": call_id,
+                "decision": decision,
+                "decided_by_user_id": decided_by_user_id,
+                "decided_at": _approval_timestamp(decided_at),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _validated_approval_dispatch_hmac(*, run: ChatRun, approval: ChatToolApproval) -> str:
+    if (
+        not approval.arguments_ciphertext
+        or not approval.dispatch_hmac
+        or not isinstance(approval.preview_fingerprint, str)
+        or len(approval.preview_fingerprint) != 64
+    ):
+        raise DurableRunError("v2 approval dispatch identity is invalid")
+    try:
+        arguments = json.loads(decrypt_chat_content(approval.arguments_ciphertext))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise DurableRunError("v2 approval arguments are unreadable") from exc
+    if not isinstance(arguments, dict):
+        raise DurableRunError("v2 approval dispatch identity is invalid")
+    expected_hmac = _approval_dispatch_hmac(
+        run_id=run.id,
+        owner_user_id=run.user_id,
+        project_id=run.project_id,
+        call_id=approval.call_id,
+        name=approval.tool_name,
+        arguments=arguments,
+        source=approval.source or "",
+        effect=approval.effect or "",
+        tool_definition_hash=approval.tool_definition_hash or "",
+        config_fingerprint=approval.config_fingerprint,
+        destination_origin=approval.destination_origin,
+        preview_fingerprint=approval.preview_fingerprint,
+        expires_at=approval.expires_at,
+    )
+    if not hmac.compare_digest(approval.dispatch_hmac, expected_hmac):
+        raise DurableRunError("v2 approval dispatch identity changed")
+    return expected_hmac
+
+
+def _validated_approval_decision_hmac(
+    *,
+    run: ChatRun,
+    approval: ChatToolApproval,
+    decision: str,
+    dispatch_hmac: str,
+) -> None:
+    if not approval.decision_hmac or approval.decided_at is None:
+        raise DurableRunError("v2 approval decision identity is invalid")
+    expected_hmac = _approval_decision_hmac(
+        dispatch_hmac=dispatch_hmac,
+        owner_user_id=run.user_id,
+        project_id=run.project_id,
+        call_id=approval.call_id,
+        decision=decision,
+        decided_by_user_id=approval.decided_by_user_id,
+        decided_at=approval.decided_at,
+    )
+    if not hmac.compare_digest(approval.decision_hmac, expected_hmac):
+        raise DurableRunError("v2 approval decision identity changed")
+
+
+def _redact_approval_arguments(arguments: dict[str, Any]) -> dict[str, str]:
+    return {str(key): "[REDACTED]" for key in arguments}
+
+
+def _normalize_approval_destination(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise DurableRunError("v2 approval destination is invalid")
+    try:
+        hostname, _port, scheme = ssrf._parse_and_validate_url(value)
+    except ssrf.SsrfBlocked as exc:
+        raise DurableRunError("v2 approval destination is invalid") from exc
+    normalized = f"{scheme}://{hostname}"
+    if value != normalized:
+        raise DurableRunError("v2 approval destination is invalid")
+    return normalized
+
+
+async def _persist_v2_approval_interrupt(*, run_id: str, owner: str, calls: object) -> None:
+    if not isinstance(calls, list) or not calls:
+        raise DurableRunError("v2 approval interrupt is invalid")
+    factory = _factory()
+    async with factory() as session, session.begin():
+        run = (await session.execute(select(ChatRun).where(ChatRun.id == run_id).with_for_update())).scalar_one()
+        _require_owned_running_lease(run, owner)
+        if run.execution_protocol_version != 2:
+            raise DurableRunProtocolMismatch("v1 run emitted a v2 approval interrupt")
+        seen_call_ids: set[str] = set()
+        for raw_call in calls:
+            if not isinstance(raw_call, dict):
+                raise DurableRunError("v2 approval interrupt call is invalid")
+            call_id = raw_call.get("call_id")
+            name = raw_call.get("name")
+            source = raw_call.get("source")
+            effect = raw_call.get("effect")
+            if (
+                not isinstance(call_id, str)
+                or not call_id
+                or len(call_id) > 190
+                or not isinstance(name, str)
+                or not name
+                or source not in {"builtin", "managed", "custom_http", "mcp", "workspace", "agent"}
+                or effect not in {"read", "workspace_write", "process", "external_mutation"}
+            ):
+                raise DurableRunError("v2 approval interrupt call is invalid")
+            if call_id in seen_call_ids:
+                raise DurableRunError("v2 approval interrupt has duplicate call IDs")
+            seen_call_ids.add(call_id)
+            try:
+                arguments = json.loads(raw_call.get("arguments") or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise DurableRunError("v2 approval arguments are invalid") from exc
+            if not isinstance(arguments, dict):
+                raise DurableRunError("v2 approval arguments are invalid")
+            tool_definition_hash = raw_call.get("tool_definition_hash")
+            config_fingerprint = raw_call.get("config_fingerprint")
+            if (
+                not isinstance(tool_definition_hash, str)
+                or len(tool_definition_hash) != 64
+                or any(char not in "0123456789abcdef" for char in tool_definition_hash)
+                or (
+                    config_fingerprint is not None
+                    and (
+                        not isinstance(config_fingerprint, str)
+                        or len(config_fingerprint) != 64
+                        or any(char not in "0123456789abcdef" for char in config_fingerprint)
+                    )
+                )
+            ):
+                raise DurableRunError("v2 approval dispatch identity is invalid")
+            destination_origin = _normalize_approval_destination(raw_call.get("destination_origin"))
+            try:
+                preview_parts = validate_chat_parts(raw_call.get("preview", []))
+            except (TypeError, ValueError) as exc:
+                raise DurableRunError("v2 approval preview is invalid") from exc
+            expected_state_revision = raw_call.get("expected_state_revision")
+            writer_fence = raw_call.get("writer_fence")
+            if (
+                expected_state_revision is not None
+                and (type(expected_state_revision) is not int or expected_state_revision < 0)
+            ) or (writer_fence is not None and (type(writer_fence) is not int or writer_fence < 0)):
+                raise DurableRunError("v2 approval state fence is invalid")
+            preview_payload = [part.model_dump(mode="json") for part in preview_parts]
+            preview_fingerprint = _approval_preview_fingerprint(preview_payload)
+            approval = (
+                await session.execute(
+                    select(ChatToolApproval)
+                    .where(ChatToolApproval.run_id == run.id, ChatToolApproval.call_id == call_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            expires_at = approval.expires_at if approval is not None else _now() + timedelta(minutes=15)
+            expected_hmac = _approval_dispatch_hmac(
+                run_id=run.id,
+                owner_user_id=run.user_id,
+                project_id=run.project_id,
+                call_id=call_id,
+                name=name,
+                arguments=arguments,
+                source=source,
+                effect=effect,
+                tool_definition_hash=tool_definition_hash,
+                config_fingerprint=config_fingerprint,
+                destination_origin=destination_origin,
+                preview_fingerprint=preview_fingerprint,
+                expires_at=expires_at,
+            )
+            if approval is not None:
+                if not approval.dispatch_hmac or not hmac.compare_digest(approval.dispatch_hmac, expected_hmac):
+                    raise DurableRunError("v2 approval interrupt identity changed")
+                continue
+            approval = ChatToolApproval(
+                run_id=run.id,
+                call_id=call_id,
+                tool_name=name,
+                arguments="{}",
+                arguments_ciphertext=encrypt_chat_content(
+                    json.dumps(arguments, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                ),
+                dispatch_hmac=expected_hmac,
+                preview_fingerprint=preview_fingerprint,
+                source=source,
+                effect=effect,
+                tool_definition_hash=tool_definition_hash,
+                config_fingerprint=config_fingerprint,
+                destination_origin=destination_origin,
+                expected_state_revision=expected_state_revision,
+                writer_fence=writer_fence,
+                status="pending",
+                expires_at=expires_at,
+            )
+            session.add(approval)
+            await append_event(
+                session,
+                run,
+                _event(
+                    run,
+                    "tool.approval_required",
+                    {
+                        "call_id": call_id,
+                        "name": name,
+                        "source": source,
+                        "effect": effect,
+                        "destination": destination_origin,
+                        "redacted_arguments": _redact_approval_arguments(arguments),
+                        "preview": preview_payload,
+                        "expected_state_revision": expected_state_revision,
+                        "writer_fence": writer_fence,
+                        "expires_at": approval.expires_at,
+                    },
+                ),
+            )
+        if not transition_allowed(run.status, "awaiting_input"):
+            raise DurableRunConflict("approval interrupt cannot pause this run")
+        run.status = "awaiting_input"
+        run.lease_owner = None
+        run.lease_expires_at = None
+        await append_event(session, run, _event(run, "run.stage.changed", {"stage": "awaiting_input"}))
+
+
+async def _v2_approval_resume(*, run_id: str, owner: str) -> list[dict[str, str]] | None:
+    factory = _factory()
+    async with factory() as session:
+        run = (await session.execute(select(ChatRun).where(ChatRun.id == run_id).with_for_update())).scalar_one()
+        _require_owned_running_lease(run, owner)
+        if run.execution_protocol_version != 2:
+            return None
+        approvals = list(
+            (
+                await session.execute(
+                    select(ChatToolApproval)
+                    .where(ChatToolApproval.run_id == run.id)
+                    .order_by(ChatToolApproval.call_id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        if not approvals:
+            return None
+        if any(approval.status == "pending" for approval in approvals):
+            raise DurableRunError("queued v2 run has unresolved approvals")
+        decisions: list[dict[str, str]] = []
+        for approval in approvals:
+            if approval.status not in {"approved", "denied"}:
+                raise DurableRunError("v2 approval cannot resume")
+            dispatch_hmac = _validated_approval_dispatch_hmac(run=run, approval=approval)
+            decision = "approve" if approval.status == "approved" else "deny"
+            _validated_approval_decision_hmac(
+                run=run,
+                approval=approval,
+                decision=decision,
+                dispatch_hmac=dispatch_hmac,
+            )
+            decisions.append(
+                {"call_id": approval.call_id, "decision": "approve" if approval.status == "approved" else "deny"}
+            )
+        return decisions
+
+
+async def resolve_tool_approval(
+    *,
+    run_id: str,
+    call_id: str,
+    decision: str,
+    project_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """CAS-resolve one v2 approval without trusting client-supplied tool state."""
+    if decision not in {"approve", "deny"}:
+        raise DurableRunInputError("approval decision is invalid")
+    if not v2_runtime_ready(get_settings().chat_execution_protocol_version):
+        raise DurableRunInputError("approval tools are not available")
+
+    factory = _factory()
+    should_wake = False
+    async with factory() as session, session.begin():
+        try:
+            run = await load_owned_run(session, run_id, user_id=user_id, project_id=project_id, lock=True)
+        except RunStoreError as exc:
+            raise DurableRunNotFound("chat run was not found") from exc
+        if run.execution_protocol_version != 2:
+            raise DurableRunInputError("approval is not available for this run protocol")
+
+        approvals = list(
+            (
+                await session.execute(
+                    select(ChatToolApproval)
+                    .where(ChatToolApproval.run_id == run.id)
+                    .order_by(ChatToolApproval.call_id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        interactions = list(
+            (
+                await session.execute(
+                    select(ChatRunInteraction)
+                    .where(ChatRunInteraction.run_id == run.id)
+                    .order_by(ChatRunInteraction.id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        approval = next((item for item in approvals if item.call_id == call_id), None)
+        if approval is None:
+            raise DurableRunNotFound("tool approval was not found")
+        dispatch_hmac = _validated_approval_dispatch_hmac(run=run, approval=approval)
+
+        requested_status = "approved" if decision == "approve" else "denied"
+        resolved_now = False
+        actual_decision = decision
+        if approval.status != "pending":
+            if approval.status != requested_status:
+                raise DurableRunConflict("tool approval was already decided differently")
+            _validated_approval_decision_hmac(
+                run=run,
+                approval=approval,
+                decision=decision,
+                dispatch_hmac=dispatch_hmac,
+            )
+        else:
+            if run.status != "awaiting_input":
+                raise DurableRunConflict("chat run is not awaiting approval input")
+            now = _now()
+            expires_at = approval.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
+                approval.status = "denied"
+                approval.decided_at = now
+                approval.decided_by_user_id = None
+                actual_decision = "deny"
+            else:
+                approval.status = requested_status
+                approval.decided_at = now
+                approval.decided_by_user_id = user_id
+            if approval.decided_at is None:
+                raise DurableRunError("v2 approval decision timestamp is missing")
+            approval.decision_hmac = _approval_decision_hmac(
+                dispatch_hmac=dispatch_hmac,
+                owner_user_id=run.user_id,
+                project_id=run.project_id,
+                call_id=approval.call_id,
+                decision=actual_decision,
+                decided_by_user_id=approval.decided_by_user_id,
+                decided_at=approval.decided_at,
+            )
+            await append_event(
+                session,
+                run,
+                _event(run, "tool.approval_resolved", _approval_resolved_payload(approval, actual_decision)),
+            )
+            resolved_now = True
+
+        pending_approvals = sum(item.status == "pending" for item in approvals)
+        pending_interactions = sum(item.status == "pending" for item in interactions)
+        if resolved_now and pending_approvals + pending_interactions == 0 and run.status == "awaiting_input":
+            if not transition_allowed(run.status, "queued"):
+                raise DurableRunConflict("approval resolution cannot resume this run")
+            run.status = "queued"
+            run.lease_owner = None
+            run.lease_expires_at = None
+            await append_event(session, run, _event(run, "run.stage.changed", {"stage": "queued"}))
+            should_wake = True
+
+        result = {
+            "run_id": run.id,
+            "call_id": approval.call_id,
+            "decision": actual_decision,
+            "status": approval.status,
+            "run_status": run.status,
+            "pending_approvals": pending_approvals,
+            "pending_interactions": pending_interactions,
+        }
+    if should_wake:
+        await wake_run(run_id)
+    return result
+
+
+async def resolve_run_interaction(
+    *,
+    run_id: str,
+    interaction_id: str,
+    response: dict[str, Any],
+    project_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """CAS-resolve an owned v2 ask-user interaction from its frozen response schema."""
+    if not v2_runtime_ready(get_settings().chat_execution_protocol_version):
+        raise DurableRunInputError("approval tools are not available")
+
+    factory = _factory()
+    should_wake = False
+    async with factory() as session, session.begin():
+        try:
+            run = await load_owned_run(session, run_id, user_id=user_id, project_id=project_id, lock=True)
+        except RunStoreError as exc:
+            raise DurableRunNotFound("chat run was not found") from exc
+        if run.execution_protocol_version != 2:
+            raise DurableRunInputError("interaction is not available for this run protocol")
+
+        approvals = list(
+            (
+                await session.execute(
+                    select(ChatToolApproval)
+                    .where(ChatToolApproval.run_id == run.id)
+                    .order_by(ChatToolApproval.call_id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        interactions = list(
+            (
+                await session.execute(
+                    select(ChatRunInteraction)
+                    .where(ChatRunInteraction.run_id == run.id)
+                    .order_by(ChatRunInteraction.id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        interaction = next((item for item in interactions if item.id == interaction_id), None)
+        if interaction is None:
+            raise DurableRunNotFound("run interaction was not found")
+        normalized_response = _normalize_interaction_response(interaction.response_schema, response)
+
+        resolved_now = False
+        if interaction.status != "pending":
+            if interaction.status == "answered":
+                try:
+                    persisted_response = json.loads(decrypt_chat_content(interaction.response_ciphertext or ""))
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise DurableRunError("stored interaction response is invalid") from exc
+                actual = json.dumps(persisted_response, separators=(",", ":"), sort_keys=True)
+                requested = json.dumps(normalized_response, separators=(",", ":"), sort_keys=True)
+                if not hmac.compare_digest(actual, requested):
+                    raise DurableRunConflict("run interaction was already answered differently")
+        else:
+            if run.status != "awaiting_input":
+                raise DurableRunConflict("chat run is not awaiting interaction input")
+            now = _now()
+            expires_at = interaction.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
+                interaction.status = "timeout"
+                interaction.response_ciphertext = None
+                interaction.decided_at = now
+                interaction.decided_by_user_id = None
+                event_response = None
+            else:
+                interaction.status = "answered"
+                interaction.response_ciphertext = encrypt_chat_content(
+                    json.dumps(normalized_response, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                )
+                interaction.decided_at = now
+                interaction.decided_by_user_id = user_id
+                event_response = normalized_response
+            await append_event(
+                session,
+                run,
+                _event(
+                    run,
+                    "interaction.resolved",
+                    {
+                        "interaction_id": interaction.id,
+                        "status": interaction.status,
+                        "response": event_response,
+                    },
+                ),
+            )
+            resolved_now = True
+
+        pending_approvals = sum(item.status == "pending" for item in approvals)
+        pending_interactions = sum(item.status == "pending" for item in interactions)
+        if resolved_now and pending_approvals + pending_interactions == 0 and run.status == "awaiting_input":
+            if not transition_allowed(run.status, "queued"):
+                raise DurableRunConflict("interaction resolution cannot resume this run")
+            run.status = "queued"
+            run.lease_owner = None
+            run.lease_expires_at = None
+            await append_event(session, run, _event(run, "run.stage.changed", {"stage": "queued"}))
+            should_wake = True
+
+        result = {
+            "run_id": run.id,
+            "interaction_id": interaction.id,
+            "status": interaction.status,
+            "run_status": run.status,
+            "pending_approvals": pending_approvals,
+            "pending_interactions": pending_interactions,
+        }
+    if should_wake:
+        await wake_run(run_id)
+    return result
+
+
+def _is_due(value: datetime, now: datetime) -> bool:
+    return (value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)) <= now
+
+
+async def expire_pending_inputs(*, limit: int = 100) -> list[str]:
+    """CAS-expire v2 approvals/interactions even when the client never reconnects."""
+    if limit < 1:
+        return []
+    if not v2_runtime_ready(get_settings().chat_execution_protocol_version):
+        return []
+
+    factory = _factory()
+    now = _now()
+    resumed_run_ids: list[str] = []
+    async with factory() as session, session.begin():
+        approval_run_ids = (
+            await session.execute(
+                select(ChatToolApproval.run_id)
+                .join(ChatRun, ChatRun.id == ChatToolApproval.run_id)
+                .where(
+                    ChatToolApproval.status == "pending",
+                    ChatToolApproval.expires_at <= now,
+                    ChatRun.execution_protocol_version == 2,
+                    ChatRun.status == "awaiting_input",
+                )
+                .order_by(ChatToolApproval.expires_at, ChatToolApproval.run_id)
+                .limit(limit)
+            )
+        ).scalars()
+        interaction_run_ids = (
+            await session.execute(
+                select(ChatRunInteraction.run_id)
+                .join(ChatRun, ChatRun.id == ChatRunInteraction.run_id)
+                .where(
+                    ChatRunInteraction.status == "pending",
+                    ChatRunInteraction.expires_at <= now,
+                    ChatRun.execution_protocol_version == 2,
+                    ChatRun.status == "awaiting_input",
+                )
+                .order_by(ChatRunInteraction.expires_at, ChatRunInteraction.run_id)
+                .limit(limit)
+            )
+        ).scalars()
+        candidate_run_ids = sorted(set(approval_run_ids).union(interaction_run_ids))[:limit]
+        for run_id in candidate_run_ids:
+            run = (
+                await session.execute(
+                    select(ChatRun)
+                    .where(
+                        ChatRun.id == run_id,
+                        ChatRun.execution_protocol_version == 2,
+                        ChatRun.status == "awaiting_input",
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if run is None:
+                continue
+            approvals = list(
+                (
+                    await session.execute(
+                        select(ChatToolApproval)
+                        .where(ChatToolApproval.run_id == run.id)
+                        .order_by(ChatToolApproval.call_id)
+                        .with_for_update()
+                    )
+                ).scalars()
+            )
+            interactions = list(
+                (
+                    await session.execute(
+                        select(ChatRunInteraction)
+                        .where(ChatRunInteraction.run_id == run.id)
+                        .order_by(ChatRunInteraction.id)
+                        .with_for_update()
+                    )
+                ).scalars()
+            )
+            for approval in approvals:
+                if approval.status != "pending" or not _is_due(approval.expires_at, now):
+                    continue
+                approval.status = "denied"
+                approval.decided_at = now
+                approval.decided_by_user_id = None
+                await append_event(
+                    session,
+                    run,
+                    _event(run, "tool.approval_resolved", _approval_resolved_payload(approval, "deny")),
+                )
+            for interaction in interactions:
+                if interaction.status != "pending" or not _is_due(interaction.expires_at, now):
+                    continue
+                interaction.status = "timeout"
+                interaction.response_ciphertext = None
+                interaction.decided_at = now
+                interaction.decided_by_user_id = None
+                await append_event(
+                    session,
+                    run,
+                    _event(
+                        run,
+                        "interaction.resolved",
+                        {"interaction_id": interaction.id, "status": "timeout", "response": None},
+                    ),
+                )
+            if any(item.status == "pending" for item in approvals) or any(
+                item.status == "pending" for item in interactions
+            ):
+                continue
+            if not transition_allowed(run.status, "queued"):
+                raise DurableRunConflict("expired input batch cannot resume this run")
+            run.status = "queued"
+            run.lease_owner = None
+            run.lease_expires_at = None
+            await append_event(session, run, _event(run, "run.stage.changed", {"stage": "queued"}))
+            resumed_run_ids.append(run.id)
+    for run_id in resumed_run_ids:
+        await wake_run(run_id)
+    return resumed_run_ids
 
 
 async def existing_run_for_intent(
@@ -405,6 +1313,7 @@ async def create_persistent_run(
     request_payload: dict[str, Any],
     capability_snapshot: dict[str, Any],
     pricing_snapshot: dict[str, Any],
+    execution_protocol_version: int = 1,
 ) -> ChatRunDescriptor:
     """Atomically create the user turn, run, and first journal event.
 
@@ -415,6 +1324,15 @@ async def create_persistent_run(
         uuid.UUID(client_request_id)
     except ValueError as exc:
         raise DurableRunError("Idempotency-Key must be a UUID") from exc
+    _require_supported_execution_protocol_version(execution_protocol_version)
+    request_payload = {**request_payload, "execution_protocol_version": execution_protocol_version}
+    request_payload = _freeze_v2_tool_call_limit(request_payload, execution_protocol_version)
+    request_payload = await _freeze_v2_lumen_snapshot(
+        request_payload,
+        user_id=user_id,
+        project_id=project_id,
+        execution_protocol_version=execution_protocol_version,
+    )
     fingerprint = _fingerprint(intent)
     factory = _factory()
     async with factory() as session, session.begin():
@@ -480,6 +1398,7 @@ async def create_persistent_run(
             user_id=user_id,
             model_name=model_name,
             agent_id=agent_id,
+            execution_protocol_version=execution_protocol_version,
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
             request_payload=encrypt_chat_content(
@@ -536,6 +1455,7 @@ async def create_run(
     request_payload: dict[str, Any],
     capability_snapshot: dict[str, Any],
     pricing_snapshot: dict[str, Any],
+    execution_protocol_version: int = 1,
 ) -> ChatRunDescriptor:
     """Create/reuse one owner-scoped run and its first durable event.
 
@@ -547,6 +1467,15 @@ async def create_run(
         uuid.UUID(client_request_id)
     except ValueError as exc:
         raise DurableRunError("Idempotency-Key must be a UUID") from exc
+    _require_supported_execution_protocol_version(execution_protocol_version)
+    request_payload = {**request_payload, "execution_protocol_version": execution_protocol_version}
+    request_payload = _freeze_v2_tool_call_limit(request_payload, execution_protocol_version)
+    request_payload = await _freeze_v2_lumen_snapshot(
+        request_payload,
+        user_id=user_id,
+        project_id=project_id,
+        execution_protocol_version=execution_protocol_version,
+    )
     fingerprint = _fingerprint(intent)
     factory = _factory()
     async with factory() as session, session.begin():
@@ -613,6 +1542,7 @@ async def create_run(
             user_id=user_id,
             model_name=model_name,
             agent_id=agent_id,
+            execution_protocol_version=execution_protocol_version,
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
             request_payload=encrypt_chat_content(
@@ -660,12 +1590,22 @@ async def create_temp_run(
     request_payload: dict[str, Any],
     capability_snapshot: dict[str, Any],
     pricing_snapshot: dict[str, Any],
+    execution_protocol_version: int = 1,
 ) -> ChatRunDescriptor:
     """Atomically create/reuse a temporary thread and its first durable run."""
     try:
         uuid.UUID(client_request_id)
     except ValueError as exc:
         raise DurableRunError("Idempotency-Key must be a UUID") from exc
+    _require_supported_execution_protocol_version(execution_protocol_version)
+    request_payload = {**request_payload, "execution_protocol_version": execution_protocol_version}
+    request_payload = _freeze_v2_tool_call_limit(request_payload, execution_protocol_version)
+    request_payload = await _freeze_v2_lumen_snapshot(
+        request_payload,
+        user_id=user_id,
+        project_id=project_id,
+        execution_protocol_version=execution_protocol_version,
+    )
     fingerprint = _fingerprint(intent)
     factory = _factory()
     async with factory() as session, session.begin():
@@ -733,6 +1673,7 @@ async def create_temp_run(
             project_id=project_id,
             user_id=user_id,
             model_name=model_name,
+            execution_protocol_version=execution_protocol_version,
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
             request_payload=encrypt_chat_content(
@@ -1006,6 +1947,34 @@ async def _append_temp_history(
         thread.active_run_id = None
 
 
+async def _cancel_streaming_assistant_message(session, run: ChatRun) -> str | None:
+    if run.assistant_message_id is None:
+        return None
+    message = (
+        await session.execute(select(ChatMessage).where(ChatMessage.id == run.assistant_message_id).with_for_update())
+    ).scalar_one_or_none()
+    if message is None:
+        return None
+    if message.status == "streaming":
+        deltas: dict[str, list[str]] = {"text": [], "reasoning": []}
+        for event in await replay_events(session, run, after_seq=0):
+            if event.type != "part.delta":
+                continue
+            payload = event.payload.model_dump()
+            if payload.get("message_id") != str(message.id):
+                continue
+            part_type = payload.get("part_type")
+            delta = payload.get("delta")
+            if part_type in deltas and isinstance(delta, str):
+                deltas[part_type].append(delta)
+        if deltas["text"]:
+            message.content = encrypt_chat_content("".join(deltas["text"]))
+        if deltas["reasoning"]:
+            message.reasoning = encrypt_chat_content("".join(deltas["reasoning"]))
+        message.status = "canceled"
+    return str(message.id)
+
+
 async def request_cancelled(*, run_id: str, project_id: str, user_id: str) -> ChatRunResponse:
     factory = _factory()
     async with factory() as session, session.begin():
@@ -1015,6 +1984,84 @@ async def request_cancelled(*, run_id: str, project_id: str, user_id: str) -> Ch
             raise DurableRunNotFound(str(exc)) from exc
         if run.status in NONTERMINAL and run.cancel_requested_at is None:
             run.cancel_requested_at = _now()
+        if run.execution_protocol_version == 2 and run.status in {"awaiting_input", "queued"}:
+            now = _now()
+            approvals = list(
+                (
+                    await session.execute(
+                        select(ChatToolApproval)
+                        .where(ChatToolApproval.run_id == run.id, ChatToolApproval.status == "pending")
+                        .order_by(ChatToolApproval.call_id)
+                        .with_for_update()
+                    )
+                ).scalars()
+            )
+            interactions = list(
+                (
+                    await session.execute(
+                        select(ChatRunInteraction)
+                        .where(ChatRunInteraction.run_id == run.id, ChatRunInteraction.status == "pending")
+                        .order_by(ChatRunInteraction.id)
+                        .with_for_update()
+                    )
+                ).scalars()
+            )
+            for approval in approvals:
+                approval.status = "canceled"
+                approval.decided_at = now
+                approval.decided_by_user_id = user_id
+                await append_event(
+                    session,
+                    run,
+                    _event(run, "tool.approval_resolved", _approval_resolved_payload(approval, "deny")),
+                )
+            for interaction in interactions:
+                interaction.status = "canceled"
+                interaction.response_ciphertext = None
+                interaction.decided_at = now
+                interaction.decided_by_user_id = user_id
+                await append_event(
+                    session,
+                    run,
+                    _event(
+                        run,
+                        "interaction.resolved",
+                        {"interaction_id": interaction.id, "status": "canceled", "response": None},
+                    ),
+                )
+            if not transition_allowed(run.status, "finalizing", cancel_or_failure=True):
+                raise DurableRunConflict("cancellation cannot finalize this run")
+            run.status = "finalizing"
+            await append_event(session, run, _event(run, "run.stage.changed", {"stage": "finalizing"}))
+            message_id = await _cancel_streaming_assistant_message(session, run)
+            if run.temp_thread_id is not None:
+                thread = (
+                    await session.execute(
+                        select(ChatTempThread)
+                        .where(
+                            ChatTempThread.id == run.temp_thread_id,
+                            ChatTempThread.active_run_id == run.id,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if thread is not None:
+                    thread.active_run_id = None
+            run.status = "canceled"
+            await append_event(
+                session,
+                run,
+                _event(
+                    run,
+                    "run.canceled",
+                    {
+                        "status": "canceled",
+                        "message_id": message_id,
+                        "error_code": "canceled_by_user",
+                        "safe_message": "chat run canceled by user",
+                    },
+                ),
+            )
         return ChatRunResponse(
             run_id=run.id,
             status=run.status,
@@ -1198,6 +2245,15 @@ async def _finish(
                         message.reasoning = encrypt_chat_content("".join(recovered["reasoning"]))
                     message.status = status
         run.status = status
+        memory_enabled = False
+        if status == "completed":
+            try:
+                request = _payload(run)
+                features = request.get("features")
+                memory_enabled = isinstance(features, dict) and features.get("memory") is True
+            except DurableRunError:
+                logger.warning("completed chat run has unreadable memory feature setting run_id=%s", run.id)
+        await enqueue_completed_run_in_transaction(session, run, memory_enabled=memory_enabled)
         event_type = {"completed": "run.completed", "failed": "run.failed", "canceled": "run.canceled"}[status]
         payload: dict[str, Any] = {"status": status, "message_id": message_id}
         if status != "completed":
@@ -1549,6 +2605,9 @@ class _DurableExecutionHooks:
         if not isinstance(content, str):
             raise DurableRunError("tool result payload is missing text content")
         visible = result_payload.get("visible") is not False
+        status = _tool_result_status(result_payload.get("status"))
+        error_code = _tool_result_error_code(result_payload.get("error_code"))
+        display_parts = _tool_display_parts(result_payload, content=content, visible=visible)
         await self._complete(
             segment_id=f"tool:{round_index}:{tool_index}",
             ordinal=round_index * 1_000 + 500 + tool_index,
@@ -1561,8 +2620,9 @@ class _DurableExecutionHooks:
                 {
                     "call_id": tool_call_id,
                     "name": tool_name,
-                    "content": [{"type": "text", "text": content}] if visible else [],
-                    "status": "completed",
+                    "content": display_parts,
+                    "status": status,
+                    "error_code": error_code,
                 },
             ),
         )
@@ -1908,11 +2968,30 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
             response_writing = True
 
     try:
+        if not _validate_run_protocol_payload(run, payload):
+            raise DurableRunProtocolMismatch("run execution protocol does not match this worker")
         await _set_stage(run_id, "model_request", owner=owner)
         resolved = await ps.resolve_model_snapshot(capability_snapshot)
         if resolved is None:
             raise DurableRunError("requested model configuration is unavailable")
         managed_search, managed_fetch, managed_advisor = await _managed_tool_configs(payload, capability_snapshot)
+        extension_snapshot = payload.get("extension_snapshot")
+        if extension_snapshot is None:
+            selected_tool_ids = _selected_tool_ids(payload.get("features"))
+            selected_mcp_ids = None
+            expected_mcp_credential_versions = None
+        else:
+            try:
+                selected_tool_ids, selected_mcp_ids, warnings = await extensions_store.validated_frozen_selection(
+                    extension_snapshot, user_id=user_id, project_id=project_id
+                )
+            except extensions_store.ChatStorageUnavailable as exc:
+                raise DurableRunError("frozen extension configuration could not be verified") from exc
+            for warning in warnings:
+                await _append(
+                    run_id, "run.warning", {"code": "extension_config_changed", "safe_message": warning}, owner=owner
+                )
+            expected_mcp_credential_versions = _selected_mcp_credential_versions(extension_snapshot, selected_mcp_ids)
         input_messages = [dict(message) for message in payload["input_messages"]]
         input_parts = payload.get("input_parts")
         if isinstance(input_parts, list) and any(
@@ -1935,6 +3014,15 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
         awaiting_model_response = True
         pending_tool_results: int | None = None
         execution_hooks = _DurableExecutionHooks(run_id=run_id, owner=owner)
+        feature_options = payload.get("features")
+        tool_policy = feature_options.get("tool_policy") if isinstance(feature_options, dict) else None
+        approval_mode = tool_policy.get("approval_mode") if isinstance(tool_policy, dict) else None
+        workspace_write_mode = (
+            tool_policy.get("workspace_write_mode")
+            if isinstance(tool_policy, dict) and tool_policy.get("workspace_write_mode") in {"ask", "auto_edit"}
+            else "ask"
+        )
+        resume = await _v2_approval_resume(run_id=run_id, owner=owner) if run.execution_protocol_version == 2 else None
         hydrated_turn_ordinal: int | None = None
 
         async def hydrate_replayed_turn() -> None:
@@ -1950,6 +3038,9 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
 
         async for event in engine.stream(
             model=resolved["model_name"],
+            max_tool_calls=int(payload.get("v2_max_tool_calls", _V2_DEFAULT_MAX_TOOL_CALLS)),
+            max_model_turns=int(payload.get("v2_max_model_turns", _V2_DEFAULT_MAX_MODEL_TURNS)),
+            allowed_direct_effects=tuple(payload.get("allowed_direct_effects") or ()),
             messages=input_messages,
             project_id=project_id,
             user_id=user_id,
@@ -1960,14 +3051,21 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
             temperature=payload.get("temperature"),
             reasoning_effort=payload.get("reasoning_effort"),
             response_format=_provider_response_format(payload.get("features")),
-            selected_tool_ids=_selected_tool_ids(payload.get("features")),
-            selected_mcp_ids=None,
+            selected_tool_ids=selected_tool_ids,
+            selected_mcp_ids=selected_mcp_ids,
+            expected_mcp_credential_versions=expected_mcp_credential_versions,
             tools_enabled=_tools_enabled(payload.get("features")),
             managed_search=managed_search,
             managed_fetch=managed_fetch,
             managed_advisor=managed_advisor,
             run_id=run_id,
             execution_hooks=execution_hooks,
+            execution_protocol_version=run.execution_protocol_version,
+            lumen_snapshot=payload.get("lumen_snapshot") if isinstance(payload.get("lumen_snapshot"), dict) else None,
+            lumen_snapshot_frozen=run.execution_protocol_version == 2,
+            approval_mode=approval_mode if isinstance(approval_mode, str) else None,
+            workspace_write_mode=workspace_write_mode,
+            resume=resume,
         ):
             ensure_lease()
             active_message_id = execution_hooks.active_message_id
@@ -2015,6 +3113,12 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                 if etype == "assistant_tool_calls":
                     calls = event.get("tool_calls")
                     pending_tool_results = len(calls) if isinstance(calls, list) else None
+                elif etype == "input.interrupted":
+                    payload = event.get("payload")
+                    if not isinstance(payload, dict) or run.execution_protocol_version != 2:
+                        raise DurableRunError("unexpected durable input interrupt")
+                    await _persist_v2_approval_interrupt(run_id=run_id, owner=owner, calls=payload.get("calls"))
+                    return True
                 elif etype == "tool_call":
                     try:
                         arguments = json.loads(event.get("args") or "{}")
@@ -2043,6 +3147,13 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                         )
                 elif etype == "tool_result":
                     visible = event.get("hidden") is not True
+                    status = _tool_result_status(event.get("status"))
+                    error_code = _tool_result_error_code(event.get("error_code"))
+                    display_parts = _tool_display_parts(
+                        event,
+                        content=str(event.get("content") or ""),
+                        visible=visible,
+                    )
                     if event.get("_durable_journaled") is not True:
                         await _append(
                             run_id,
@@ -2050,10 +3161,9 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                             {
                                 "call_id": str(event.get("tool_call_id") or event.get("name")),
                                 "name": str(event.get("name") or "tool"),
-                                "content": [{"type": "text", "text": str(event.get("content") or "")}]
-                                if visible
-                                else [],
-                                "status": "completed",
+                                "content": display_parts,
+                                "status": status,
+                                "error_code": error_code,
                             },
                             owner=owner,
                         )
@@ -2069,14 +3179,14 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                             "status": "running",
                         },
                     )
-                    invocation["status"] = "completed"
+                    invocation["status"] = status
                     if visible:
                         tool_results[call_id] = {
                             "type": "tool_result",
                             "call_id": call_id,
                             "name": tool_name,
-                            "content": [{"type": "text", "text": str(event.get("content") or "")}],
-                            "is_error": False,
+                            "content": display_parts,
+                            "is_error": status == "failed",
                         }
                     if pending_tool_results is not None:
                         pending_tool_results -= 1
@@ -2290,6 +3400,15 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
             owner=owner,
             error_code="provider_result_unknown",
             safe_message="이전 모델 호출 결과를 안전하게 확인할 수 없습니다",
+        )
+    except DurableRunProtocolMismatch:
+        await _finish(
+            run_id,
+            status="failed",
+            message_id=message_id,
+            owner=owner,
+            error_code="execution_protocol_mismatch",
+            safe_message="chat run execution protocol is unavailable",
         )
     except Exception:
         try:

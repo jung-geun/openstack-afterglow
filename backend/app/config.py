@@ -1,34 +1,25 @@
 """Afterglow 설정 모듈.
 
-우선순위: 환경변수 > afterglow.conf/config.toml (프로젝트 루트) > 기본값
+우선순위: 환경변수 > afterglow.conf (프로젝트 루트) > 기본값
 """
 
-import logging
 import os
 import tomllib
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
 def _config_candidates() -> list[Path]:
-    """설정 파일 후보 경로 목록.
-
-    afterglow.conf는 TOML 문법을 유지하는 신규 기본 파일명이고,
-    config.toml/afterglow.toml은 기존 배포 호환을 위해 계속 지원한다.
-    """
+    """지원하는 기본 설정 파일 경로 목록."""
     return [
         Path.cwd() / "afterglow.conf",
         Path.cwd().parent / "afterglow.conf",
-        Path.cwd() / "config.toml",
-        Path.cwd().parent / "config.toml",
         Path("/app/afterglow.conf"),
-        Path("/app/config.toml"),
-        Path("/app/afterglow.toml"),  # 레거시 K8s ConfigMap 마운트 경로
-        Path.cwd() / "afterglow.toml",
     ]
 
 
@@ -47,37 +38,24 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _config_override_paths(base_path: Path) -> list[Path]:
-    """base_path와 같은 디렉토리에서 설정 오버라이드 파일을 알파벳순으로 반환.
-
-    예:
-    - base_path=/app/afterglow.conf → afterglow.*.conf, afterglow.*.toml, config.*.toml
-    - base_path=/app/config.toml → config.*.toml
-
-    base 자기자신과 크기 0 파일은 제외한다. afterglow.conf 전환 중에도 기존
-    config.gpu.toml 오버라이드를 그대로 재사용할 수 있게 config.*.toml도 허용한다.
-    """
-    parent = base_path.parent
+    """같은 디렉터리의 afterglow.*.conf와 GPU 맵 오버라이드를 반환한다."""
     patterns = [f"{base_path.stem}.*{base_path.suffix}"]
-    if base_path.suffix != ".toml":
-        patterns.append(f"{base_path.stem}.*.toml")
     if base_path.name == "afterglow.conf":
-        patterns.append("config.*.toml")
+        patterns.append("config.gpu.toml")
 
     overrides: dict[Path, Path] = {}
     for pattern in patterns:
-        for p in parent.glob(pattern):
+        for p in base_path.parent.glob(pattern):
             if p.name == base_path.name:
                 continue
             if not p.is_file() or p.stat().st_size == 0:
-                continue
-            if p.name == "config.toml":
                 continue
             overrides[p.resolve()] = p
     return [overrides[key] for key in sorted(overrides)]
 
 
 def _load_toml() -> dict:
-    """프로젝트 루트의 afterglow.conf/config.toml(+ 오버라이드)을 읽어 평탄화된 dict를 반환."""
+    """afterglow.conf(+ 오버라이드)을 읽어 평탄화된 dict를 반환."""
     data = load_raw_toml()
     if not data:
         return {}
@@ -151,12 +129,24 @@ def _load_toml() -> dict:
     flat["service_barbican_enabled"] = svc.get("barbican", False)
     flat["service_waygate_enabled"] = svc.get("waygate", False)
     flat["service_chat_enabled"] = svc.get("chat", False)
+    flat["service_mcp_enabled"] = svc.get("mcp", False)
+    mcp = data.get("mcp", {})
+    flat["mcp_authorization_ticket_ttl_seconds"] = mcp.get("authorization_ticket_ttl_seconds", 600)
+    flat["mcp_access_token_ttl_seconds"] = mcp.get("access_token_ttl_seconds", 900)
+    flat["mcp_default_grant_ttl_days"] = mcp.get("default_grant_ttl_days", 30)
+    flat["mcp_max_grant_ttl_days"] = mcp.get("max_grant_ttl_days", 90)
+    flat["mcp_max_personal_tokens"] = mcp.get("max_personal_tokens", 10)
+    flat["mcp_max_delegated_grants"] = mcp.get("max_delegated_grants", 20)
+    flat["mcp_request_max_bytes"] = mcp.get("request_max_bytes", 1048576)
+    flat["mcp_read_result_max_bytes"] = mcp.get("read_result_max_bytes", 524288)
+    flat["mcp_mutation_result_max_bytes"] = mcp.get("mutation_result_max_bytes", 65536)
+    flat["mcp_default_page_size"] = mcp.get("default_page_size", 50)
+    flat["mcp_max_page_size"] = mcp.get("max_page_size", 100)
+    flat["mcp_concurrent_calls_per_grant"] = mcp.get("concurrent_calls_per_grant", 4)
+    flat["mcp_read_rate_per_minute"] = mcp.get("read_rate_per_minute", 120)
+    flat["mcp_mutation_rate_per_minute"] = mcp.get("mutation_rate_per_minute", 20)
 
     k3s = data.get("k3s", {})
-    flat["k3s_version"] = k3s.get("version", "v1.34.6+k3s1")
-    flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
-    flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
-    flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
     flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
     flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
     flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
@@ -165,12 +155,9 @@ def _load_toml() -> dict:
         "occm_image",
         "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1",
     )
-    flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
-    flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
     # Cinder CSI
     flat["k3s_cinder_csi_enabled"] = k3s.get("cinder_csi_enabled", False)
     flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1")
-    flat["k3s_cinder_csi_default_az"] = k3s.get("cinder_csi_default_az", "nova")
     # Manila CSI
     flat["k3s_manila_csi_enabled"] = k3s.get("manila_csi_enabled", False)
     flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1")
@@ -188,8 +175,6 @@ def _load_toml() -> dict:
         "octavia_ingress_image",
         "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1",
     )
-    flat["k3s_octavia_ingress_subnet_id"] = k3s.get("octavia_ingress_subnet_id", "")
-    flat["k3s_octavia_ingress_floating_network_id"] = k3s.get("octavia_ingress_floating_network_id", "")
     # Barbican KMS
     flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
     flat["k3s_barbican_kms_image"] = k3s.get(
@@ -197,13 +182,6 @@ def _load_toml() -> dict:
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
     # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
-    flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
-    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정)
-    flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
-    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당)
-    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
-    # FCOS (Fedora CoreOS) 이미지 ID
-    flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
     # 인증서 회전
     flat["k3s_cert_rotation_node_timeout_sec"] = k3s.get("cert_rotation_node_timeout_sec", 300)
     flat["k3s_cert_rotation_job_image"] = k3s.get(
@@ -272,33 +250,14 @@ def _load_toml() -> dict:
     flat["token_ip_binding_mode"] = sess.get("token_ip_binding_mode", "subnet")
 
     nv = data.get("nova", {})
-    flat["default_network_id"] = nv.get("default_network_id", "")
-    flat["default_network_enabled"] = nv.get("default_network_enabled", True)
-    flat["default_network_cidr"] = nv.get("default_network_cidr", "192.168.0.0/24")
-    flat["default_network_external_id"] = nv.get("default_network_external_id", "")
-    flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
     flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
     flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
-    flat["server_image_id"] = nv.get("server_image_id", "")
 
     builder = data.get("builder", {})
-    flat["builder_image_id"] = builder.get("image_id", "")
-    flat["builder_ubuntu_18_04_image_id"] = builder.get("ubuntu_18_04_image_id", "")
-    flat["builder_ubuntu_20_04_image_id"] = builder.get("ubuntu_20_04_image_id", "")
-    flat["builder_ubuntu_22_04_image_id"] = builder.get("ubuntu_22_04_image_id", "")
-    flat["builder_ubuntu_24_04_image_id"] = builder.get("ubuntu_24_04_image_id", "")
-    flat["builder_flavor_id"] = builder.get("flavor_id", "")
-    flat["builder_network_id"] = builder.get("network_id", "")
     flat["builder_ssh_user"] = builder.get("ssh_user", "ubuntu")
     flat["builder_ssh_key_path"] = builder.get("ssh_key_path", "/etc/afterglow/ssh/builder.key")
-    flat["builder_floating_network_id"] = builder.get("floating_network_id", "")
     flat["builder_build_timeout"] = builder.get("build_timeout", 3600)
     flat["builder_layer_share_size_gb"] = builder.get("layer_share_size_gb", 20)
-
-    union = data.get("union", {})
-    flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
-    flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
-    flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
 
     palimpsest = data.get("palimpsest", {})
     flat["palimpsest_hub_local_path"] = palimpsest.get("hub_local_path", "")
@@ -309,11 +268,6 @@ def _load_toml() -> dict:
     flat["palimpsest_kvm_state_dir"] = palimpsest.get("kvm_state_dir", "/var/lib/palimpsest/domains")
 
     waygate = data.get("waygate", {})
-    flat["waygate_provider_network_id"] = waygate.get("provider_network_id", "")
-    flat["waygate_flavor_name"] = waygate.get("flavor_name", "cpu.1c_2g")
-    flat["waygate_flavor_id"] = waygate.get("flavor_id", "")
-    flat["waygate_image_id"] = waygate.get("image_id", "")
-    flat["waygate_floating_network_id"] = waygate.get("floating_network_id", "")
     flat["waygate_callback_base_url"] = waygate.get("callback_base_url", "")
     flat["waygate_key_name"] = waygate.get("key_name", "")
     flat["waygate_default_tunnel_cidr"] = waygate.get("default_tunnel_cidr", "10.8.0.0/24")
@@ -359,6 +313,7 @@ def _load_toml() -> dict:
     # "auto"는 provider/model 기본값(요청 파라미터 미주입), "none"은 명시적 비활성화다.
     # named effort는 모델 capability의 reasoning_options로 endpoint에서 검증한다.
     flat["chat_reasoning_effort"] = chat.get("reasoning_effort", "auto")
+    flat["chat_mcp_oauth_callback_url"] = chat.get("mcp_oauth_callback_url", "")
     # Phase 2: LangGraph 전용 Postgres 체크포인터(비밀 — secret.yaml 주입). 미설정 시 MemorySaver fallback.
     flat["chat_checkpointer_postgres_url"] = chat.get("checkpointer_postgres_url", "")
     flat["chat_run_event_retention_hours"] = chat.get("run_event_retention_hours", 24)
@@ -521,9 +476,26 @@ class Settings(BaseSettings):
     cache_ttl_identity_stable: int = 86400  # 개인 프로필, role/group 멤버십
     cache_ttl_catalog_slow: int = 900  # flavors, image 메타, 데이터스토어
     cache_ttl_project_meta: int = 300  # keypair, SG 정의, 네트워크 메타
+    mcp_authorization_ticket_ttl_seconds: int = 600
+    mcp_access_token_ttl_seconds: int = 900
+    mcp_default_grant_ttl_days: int = 30
+    mcp_max_grant_ttl_days: int = 90
+    mcp_max_personal_tokens: int = 10
+    mcp_max_delegated_grants: int = 20
+    mcp_request_max_bytes: int = 1048576
+    mcp_read_result_max_bytes: int = 524288
+    mcp_mutation_result_max_bytes: int = 65536
+    mcp_default_page_size: int = 50
+    mcp_max_page_size: int = 100
+    mcp_concurrent_calls_per_grant: int = 4
+    mcp_read_rate_per_minute: int = 120
+    mcp_mutation_rate_per_minute: int = 20
     cache_ttl_operational_live: int = 30  # instances/volumes/FIP/컨테이너 상태
     cache_ttl_admin_overview: int = 60  # admin 토폴로지, 하이퍼바이저
     cache_ttl_auth_token: int = 60  # Keystone 토큰 검증 결과
+    # 프로젝트별 기본 네트워크 자동 생성은 배포 운영 정책이다.
+    default_network_enabled: bool = True
+    default_network_cidr: str = "192.168.0.0/24"
 
     # 선택적 서비스
     service_magnum_enabled: bool = False
@@ -535,23 +507,18 @@ class Settings(BaseSettings):
     service_barbican_enabled: bool = False
     service_waygate_enabled: bool = False  # Waygate (활성화 시 [waygate] 섹션 설정도 필요)
     service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
+    service_mcp_enabled: bool = False  # inbound consumer MCP control plane (Stage 2 rollout gate)
 
     # k3s 설정
     k3s_version: str = "v1.34.6+k3s1"
-    k3s_server_flavor_id: str = ""
-    k3s_default_agent_flavor_id: str = ""
-    k3s_server_image_id: str = ""
     k3s_callback_base_url: str = ""
     k3s_kubeconfig_encryption_key: str = ""
     k3s_boot_volume_size_gb: int = 30
     k3s_occm_enabled: bool = False
     k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
-    k3s_occm_floating_network_id: str = ""
-    k3s_occm_public_network_name: str = ""
     # Cinder CSI
     k3s_cinder_csi_enabled: bool = False
     k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
-    k3s_cinder_csi_default_az: str = "nova"
     # Manila CSI
     k3s_manila_csi_enabled: bool = False
     k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
@@ -561,23 +528,13 @@ class Settings(BaseSettings):
     k3s_keystone_auth_enabled: bool = False
     k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
     k3s_keystone_auth_policy: str = ""
-    # Octavia Ingress
-    k3s_octavia_ingress_enabled: bool = False
-    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
-    k3s_octavia_ingress_subnet_id: str = ""
-    k3s_octavia_ingress_floating_network_id: str = ""
     # Barbican KMS
     k3s_barbican_kms_enabled: bool = False
     k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
     k3s_barbican_kms_kek_id: str = ""
-    # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
-    k3s_lb_subnet_id: str = ""
-    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정, 설정 시 FIP 불필요)
-    k3s_api_lb_vip_network_id: str = ""
-    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당, 미설정 시 k3s_occm_floating_network_id fallback)
-    k3s_api_lb_floating_network_id: str = ""
-    # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
-    k3s_fcos_image_id: str = ""
+    # Octavia Ingress
+    k3s_octavia_ingress_enabled: bool = False
+    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
     # 인증서 회전
     k3s_cert_rotation_node_timeout_sec: int = 300
     k3s_cert_rotation_job_image: str = "registry.k8s.io/util-linux/util-linux:latest"
@@ -634,11 +591,6 @@ class Settings(BaseSettings):
             raise ValueError("worker runtime replica counts and intervals must be non-negative")
         return v
 
-    # Union Mount 레이어 시스템 — Manila share ID
-    union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
-    union_layer_store_ro_share_id: str = ""  # layer-store-ro (User VM RO)
-    union_manifest_store_share_id: str = ""  # manifest-store
-
     # --- Palimpsest 허브 (레이어 레지스트리) — docs/palimpsest.md ---
     # 허브는 백엔드가 blob 을 직접 스트리밍 read/write 해야 성립하므로 Manila share 가 아니라
     # 별도 blob store 를 쓴다. 비어 있으면 허브 기능이 비활성(503)이다.
@@ -662,15 +614,10 @@ class Settings(BaseSettings):
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
 
     # Waygate (WireGuard 게이트웨이)
-    waygate_provider_network_id: str = ""  # Waygate VM이 부팅될 provider 네트워크 ID
-    waygate_flavor_name: str = "cpu.1c_2g"  # flavor 이름으로 해석 (flavor_id override 가능)
-    waygate_flavor_id: str = ""  # 설정 시 이름 조회 없이 바로 사용
-    waygate_image_id: str = ""  # Waygate VM 부팅 이미지 ID (Ubuntu 22.04+)
-    waygate_floating_network_id: str = ""  # 설정 시 FIP 할당, 미설정 시 provider fixed IP를 endpoint로 사용
-    waygate_callback_base_url: str = ""  # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
-    waygate_key_name: str = ""  # Waygate VM에 연결할 Nova keypair 이름 (옵션)
     waygate_default_tunnel_cidr: str = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값
     waygate_default_listen_port: int = 51820  # WireGuard UDP 리슨 포트 기본값
+    waygate_callback_base_url: str = ""
+    waygate_key_name: str = ""
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
@@ -694,7 +641,7 @@ class Settings(BaseSettings):
     grafana_dashboard_ceph_uid: str = "afterglow-ceph"
     grafana_dashboard_instance_cpu_uid: str = "afterglow-instance-cpu"
     grafana_dashboard_instance_gpu_uid: str = "afterglow-instance-gpu"
-    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > afterglow.conf/config.toml [monitoring].prometheus_base_url > 기본값
+    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > afterglow.conf [monitoring].prometheus_base_url > 기본값
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
@@ -710,6 +657,8 @@ class Settings(BaseSettings):
     chat_reasoning_effort: str = (
         "auto"  # auto=provider 기본, none=명시적 비활성화, named values는 모델별 capability 검증
     )
+    # Remote MCP OAuth callback URL. Empty derives the public API callback endpoint.
+    chat_mcp_oauth_callback_url: str = ""
     # Phase 2: LangGraph 전용 Postgres 체크포인터 접속 URL(secret.yaml 주입). 비면 MemorySaver 사용.
     chat_checkpointer_postgres_url: str = ""
     chat_run_event_retention_hours: int = 24
@@ -764,6 +713,26 @@ class Settings(BaseSettings):
             raise ValueError(f"token_ip_binding_mode={v!r} 은 유효하지 않습니다. 허용값: {sorted(_VALID_MODES)}")
         return v
 
+    @field_validator("chat_mcp_oauth_callback_url")
+    @classmethod
+    def validate_chat_mcp_oauth_callback_url(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "chat.mcp_oauth_callback_url must be an absolute HTTPS URL without credentials, query, or fragment"
+            )
+        return value
+
     @model_validator(mode="after")
     def validate_semantic_memory_settings(self) -> "Settings":
         if self.chat_semantic_memory_enabled:
@@ -786,28 +755,12 @@ class Settings(BaseSettings):
     login_backoff_base: int = 2  # 지수 백오프 밑수
 
     # Nova 기본값
-    default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)
-    default_network_enabled: bool = True  # 프로젝트별 Default 네트워크 자동 프로비저닝
-    default_network_cidr: str = "192.168.0.0/24"  # Default 서브넷 CIDR
-    default_network_external_id: str = ""  # 라우터 게이트웨이용 외부 네트워크 ID
-    default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
-    server_image_id: str = ""
-
-    # 라이브러리 빌더 VM 설정
-    builder_image_id: str = ""  # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
-    builder_ubuntu_18_04_image_id: str = ""  # 레이어 workflow Ubuntu 18.04 canonical image ID
-    builder_ubuntu_20_04_image_id: str = ""  # 레이어 workflow Ubuntu 20.04 canonical image ID
-    builder_ubuntu_22_04_image_id: str = ""  # 레이어 workflow Ubuntu 22.04 canonical image ID
-    builder_ubuntu_24_04_image_id: str = ""  # 레이어 workflow Ubuntu 24.04 canonical image ID
-    builder_flavor_id: str = ""  # 빌더 VM 플레이버 ID
-    builder_network_id: str = ""  # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
-    builder_ssh_user: str = "ubuntu"  # Builder VM SSH 사용자
-    builder_ssh_key_path: str = "/etc/afterglow/ssh/builder.key"  # SSH 개인키 경로
-    builder_floating_network_id: str = ""  # Builder VM FIP 할당용 외부 네트워크 ID
     builder_build_timeout: int = 3600  # 빌드 SSH 명령 최대 대기 시간 (초)
     builder_layer_share_size_gb: int = 20  # 레이어별 동적 Manila NFS share 용량 (GB)
+    builder_ssh_user: str = "ubuntu"
+    builder_ssh_key_path: str = "/etc/afterglow/ssh/builder.key"
 
     # 데이터베이스 (MariaDB/MySQL, 선택적)
     database_url: str = ""
@@ -918,6 +871,22 @@ class Settings(BaseSettings):
                 "Use mode='kubernetes' for production worker management."
             )
 
+        if self.service_mcp_enabled:
+            public_api = urlsplit(self.public_api_base)
+            if (
+                public_api.scheme not in {"http", "https"}
+                or (is_production and public_api.scheme != "https")
+                or not public_api.netloc
+                or public_api.username
+                or public_api.password
+                or public_api.query
+                or public_api.fragment
+            ):
+                scheme_requirement = "HTTPS" if is_production else "HTTP or HTTPS"
+                raise ValueError(
+                    f"services.mcp requires an absolute {scheme_requirement} public_api_base without credentials, query, or fragment"
+                )
+
         if self.secret_key == "change-me-in-production":
             if is_production:
                 raise ValueError(
@@ -949,6 +918,28 @@ class Settings(BaseSettings):
                 "(e.g. `openssl rand -hex 32`) before deploying to production.",
                 len(self.secret_key),
             )
+        mcp_positive = (
+            self.mcp_authorization_ticket_ttl_seconds,
+            self.mcp_access_token_ttl_seconds,
+            self.mcp_default_grant_ttl_days,
+            self.mcp_max_grant_ttl_days,
+            self.mcp_max_personal_tokens,
+            self.mcp_max_delegated_grants,
+            self.mcp_request_max_bytes,
+            self.mcp_read_result_max_bytes,
+            self.mcp_mutation_result_max_bytes,
+            self.mcp_default_page_size,
+            self.mcp_max_page_size,
+            self.mcp_concurrent_calls_per_grant,
+            self.mcp_read_rate_per_minute,
+            self.mcp_mutation_rate_per_minute,
+        )
+        if any(value <= 0 for value in mcp_positive):
+            raise ValueError("all [mcp] limits and TTLs must be positive")
+        if self.mcp_default_grant_ttl_days > self.mcp_max_grant_ttl_days:
+            raise ValueError("mcp.default_grant_ttl_days may not exceed mcp.max_grant_ttl_days")
+        if self.mcp_default_page_size > self.mcp_max_page_size:
+            raise ValueError("mcp.default_page_size may not exceed mcp.max_page_size")
         return self
 
     class Config:
@@ -970,7 +961,7 @@ def _record_source(path: Path, role: str) -> None:
 
 @lru_cache
 def load_raw_toml() -> dict:
-    """afterglow.conf/config.toml 원본(+ 같은 디렉토리 오버라이드 딥 머지)을 중첩 구조 그대로 반환.
+    """afterglow.conf 원본(+ 같은 디렉터리 오버라이드)을 중첩 구조 그대로 반환.
 
     머지 규칙: dict는 재귀 병합, 그 외는 오버라이드가 덮어쓴다. 오버라이드 파일은 알파벳순으로
     적용되어 뒤에 오는 파일이 앞의 값을 이긴다.
@@ -987,72 +978,6 @@ def load_raw_toml() -> dict:
                     merged = _deep_merge(merged, tomllib.load(f))
             return merged
     return {}
-
-
-# 로깅 시 값을 가려야 하는(비밀) 설정 키 판별용 키워드
-_SECRET_KEYWORDS = (
-    "password",
-    "secret",
-    "token",
-    "passphrase",
-    "credential",
-    "encryption_key",
-    "api_key",
-    "private_key",
-    "_dsn",
-    "sasl",
-)
-
-
-def _is_secret_key(key: str) -> bool:
-    kl = key.lower()
-    return any(w in kl for w in _SECRET_KEYWORDS)
-
-
-def _mask_url_credentials(value: str) -> str:
-    """redis://user:pass@host → redis://user:***@host (자격증명만 마스킹)."""
-    try:
-        import re as _re
-
-        return _re.sub(r"(://[^:/@]+:)[^@/]+@", r"\1***@", value)
-    except Exception:
-        return value
-
-
-def log_effective_config() -> None:
-    """부팅 시 1회: 로드된 설정 파일 소스 + 비밀값을 제외한 유효 설정을 로그로 남긴다(진단용).
-
-    비밀 키(password/secret/token/...)는 값을 '***'로 가리고, url 계열은 자격증명만 마스킹한다.
-    service_*/waygate_* 같은 비밀이 아닌 값은 그대로 남겨 waygate 미노출 등 설정 문제를 진단한다.
-    """
-    logger = logging.getLogger("app.config")
-    try:
-        load_raw_toml()  # _LOADED_CONFIG_SOURCES 채우기 보장
-        dump = get_settings().model_dump()
-    except Exception:
-        logger.warning("effective-config 로깅 실패", exc_info=True)
-        return
-
-    redacted: dict = {}
-    for k, v in dump.items():
-        if _is_secret_key(k):
-            redacted[k] = "***" if v not in (None, "", False) else v
-        elif isinstance(v, str) and "://" in v and "@" in v:
-            redacted[k] = _mask_url_credentials(v)
-        else:
-            redacted[k] = v
-
-    logger.info(
-        "effective-config",
-        extra={
-            "pid": os.getpid(),
-            "config_sources": list(_LOADED_CONFIG_SOURCES),
-            "cwd": str(Path.cwd()),
-            "service_flags": {k: v for k, v in dump.items() if k.startswith("service_")},
-            "waygate": {k: v for k, v in dump.items() if k.startswith("waygate_")},
-            "settings": redacted,
-        },
-    )
 
 
 @lru_cache

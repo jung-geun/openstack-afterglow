@@ -152,7 +152,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
-from app.api.identity import admin_router, auth_router, gitlab_auth_router
+from app.api.identity import admin_router, auth_router, gitlab_auth_router, mcp_access_router
 from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_announcements import router as admin_announcements_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
@@ -171,8 +171,10 @@ from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
+from app.api.mcp import router as mcp_router
 from app.api.union.layer_ops import router as admin_libraries_router
 from app.api.union.layer_public import router as squashfs_libraries_router
+from app.services.mcp_control_plane.transport import install_mcp_route, start_mcp_transport, stop_mcp_transport
 
 _mark("api.identity")
 
@@ -246,6 +248,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+install_mcp_route(app)
 
 
 @app.exception_handler(HTTPException)
@@ -352,6 +355,8 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/chat/runs", "chat_run"),
     ("/api/v1/chat/assets", "chat_asset"),
     ("/api/v1/chat/temp-threads", "chat_temp_thread"),
+    ("/api/v1/auth/mcp-oauth/grants", "mcp_grant"),
+    ("/api/v1/auth/mcp-tokens", "mcp_grant"),
     ("/api/v1/volumes/backups", "volume_backup"),
     ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
@@ -446,6 +451,14 @@ async def request_logging_middleware(request: Request, call_next):
 _CORS_ALLOW_HEADERS = "Content-Type, X-Project-Id, Authorization, Idempotency-Key, Last-Event-ID"
 _CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
 
+_MCP_OAUTH_NO_CORS_PATHS = {
+    "/api/v1/mcp/oauth/register",
+    "/api/v1/mcp/oauth/authorize",
+    "/api/v1/mcp/oauth/token",
+    "/api/v1/mcp/oauth/revoke",
+    "/api/v1/mcp",
+}
+
 
 def _get_allowed_origins() -> set[str]:
     from app.config import get_settings
@@ -456,6 +469,8 @@ def _get_allowed_origins() -> set[str]:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
+    if request.url.path in _MCP_OAUTH_NO_CORS_PATHS:
+        return await call_next(request)
     if request.method == "OPTIONS":
         if origin not in _get_allowed_origins():
             return JSONResponse(content="Forbidden", status_code=403)
@@ -530,6 +545,8 @@ async def activity_audit_middleware(request: Request, call_next):
 
 # Identity
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(mcp_access_router, prefix="/api/v1/auth", tags=["mcp-access"])
+app.include_router(mcp_router, tags=["mcp"])
 # OIDC/OAuth API routes follow the project-wide /api/v1 mount rule.
 app.include_router(gitlab_auth_router, prefix="/api/v1/auth", tags=["auth-oidc"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
@@ -571,7 +588,7 @@ app.include_router(networks_router, prefix="/api/v1/networks", tags=["networks"]
 app.include_router(routers_router, prefix="/api/v1/routers", tags=["routers"])
 app.include_router(loadbalancers_router, prefix="/api/v1/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups_router, prefix="/api/v1/security-groups", tags=["security-groups"])
-# Optional services — afterglow.conf/config.toml [services] 섹션에서 활성화
+# Optional services — afterglow.conf [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
 _svc_cfg = _get_cfg()
@@ -664,6 +681,7 @@ if _svc_cfg.service_chat_enabled:
         chat_conversations_router,
         chat_extensions_admin_router,
         chat_extensions_user_router,
+        chat_mcp_oauth_router,
         chat_memory_router,
         chat_stats_router,
         chat_usage_router,
@@ -683,6 +701,8 @@ if _svc_cfg.service_chat_enabled:
     app.include_router(chat_assets_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
     app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
+    # Browser callback is state-bound and intentionally has no browser bearer dependency.
+    app.include_router(chat_mcp_oauth_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone
     app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
     # 사용자 프로젝트(workspace, 대화 그룹+공통 지침) + 장기 메모리 — /workspaces, /memories
@@ -925,6 +945,22 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _mcp_cleanup_loop() -> None:
+    """Sweep expired delegated-authority state; Keystone cleanup stays owner-scoped."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            from app.database import get_session_factory
+            from app.services.mcp_control_plane.cleanup import sweep_delegated_authority
+
+            session_factory = get_session_factory()
+            if session_factory is not None:
+                await sweep_delegated_authority(session_factory)
+        except Exception:
+            _logger.warning("MCP delegated-authority cleanup failed", exc_info=True)
+        await asyncio.sleep(300)
+
+
 async def _trash_cleanup_loop() -> None:
     """1시간 간격으로 만료된 휴지통 오브젝트·버킷을 영구 삭제.
 
@@ -1164,36 +1200,8 @@ async def _deferred_load_gpu_catalog() -> None:
     _logger.warning("GPU 장치 카탈로그 DB 로드 최종 실패 — 내장/config 카탈로그로 동작")
 
 
-async def _deferred_load_resource_policies() -> None:
-    from app.database import is_db_available
-    from app.services.resource_policy_store import (
-        ResourcePolicyStorageUnavailable,
-        refresh_runtime_settings,
-    )
-
-    for attempt in range(8):
-        if is_db_available():
-            try:
-                await refresh_runtime_settings()
-                return
-            except ResourcePolicyStorageUnavailable:
-                pass
-            except Exception:
-                _logger.warning("리소스 정책 DB 로드 실패 (시도 %d)", attempt + 1, exc_info=True)
-        await asyncio.sleep(min(2**attempt, 30))
-    _logger.warning("리소스 정책 DB 로드 최종 실패 — 프로비저닝 정책은 사용할 수 없습니다")
-
-
 @app.on_event("startup")
 async def start_background_workers():
-    # 부팅 시 유효 설정(비밀값 제외)을 1회 로깅 — 설정 파일/오버라이드/서비스 플래그 진단용.
-    try:
-        from app.config import log_effective_config
-
-        log_effective_config()
-    except Exception:
-        _logger.warning("effective-config 로깅 실패", exc_info=True)
-
     # Redis 연결 pre-warm (첫 health check 지연 방지)
     try:
         from app.services.cache import _get_redis
@@ -1220,10 +1228,8 @@ async def start_background_workers():
             # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
             # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
             asyncio.create_task(_deferred_create_tables())
-            asyncio.create_task(_deferred_load_resource_policies())
         else:
             asyncio.create_task(_deferred_load_gpu_catalog())
-            asyncio.create_task(_deferred_load_resource_policies())
 
     if _db_cfg.chat_checkpointer_postgres_url:
         from app.services.chat.checkpointer import chat_checkpointer
@@ -1243,6 +1249,9 @@ async def start_background_workers():
         asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
+    if _svc_cfg.service_mcp_enabled:
+        await start_mcp_transport()
+        asyncio.create_task(_mcp_cleanup_loop())
 
     if _db_cfg.worker_runtime_mode != "static" and _db_cfg.worker_runtime_reconcile_interval > 0:
         from app.services.worker_runtime import reconcile_loop
@@ -1261,6 +1270,7 @@ async def shutdown_event():
     from app.services import prom_query
     from app.services.chat.checkpointer import chat_checkpointer
 
+    await stop_mcp_transport()
     await chat_checkpointer.close()
     await close_db()
     await prom_query.aclose_client()

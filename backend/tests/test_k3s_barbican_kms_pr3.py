@@ -152,6 +152,7 @@ def test_k3s_server_userdata_kms_enabled_orders_kms_before_k3s_install():
     from app.services import k3s_cloudinit
 
     result = k3s_cloudinit.generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.34.6+k3s1",
         callback_url="https://callback.example.com",
@@ -197,6 +198,7 @@ def test_k3s_server_userdata_kms_disabled_uses_default_flow():
     from app.services import k3s_cloudinit
 
     result = k3s_cloudinit.generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="test",
         k3s_version="v1.34.6+k3s1",
         callback_url="https://callback.example.com",
@@ -207,7 +209,7 @@ def test_k3s_server_userdata_kms_disabled_uses_default_flow():
         extra_write_files=[],
         extra_tls_sans=[],
         needs_external_cloud_provider=False,
-        # barbican_kms_enabled=False (default)
+        barbican_kms_enabled=False,
     )
     yaml_str = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "INSTALL_K3S_SKIP_START" not in yaml_str

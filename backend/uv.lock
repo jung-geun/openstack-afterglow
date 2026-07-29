@@ -61,6 +61,9 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+kvm = [
+    { name = "libvirt-python" },
+]
 
 [package.dev-dependencies]
 worker = [
@@ -98,6 +101,7 @@ requires-dist = [
     { name = "langchain-core", specifier = "==1.4.9" },
     { name = "langgraph", specifier = "==1.2.2" },
     { name = "langgraph-checkpoint-postgres", specifier = "==3.1.0" },
+    { name = "libvirt-python", marker = "extra == 'kvm'", specifier = ">=10.0.0" },
     { name = "litellm", specifier = "==1.93.0" },
     { name = "mcp", specifier = "==1.28.1" },
     { name = "mutagen", specifier = "==1.47.0" },
@@ -124,7 +128,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = "==0.39.0" },
     { name = "websockets", specifier = ">=14.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["kvm", "dev"]
 
 [package.metadata.requires-dev]
 worker = [
@@ -1405,6 +1409,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/93/7e/05db6baaed1383386
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/d5/2d8d84f5330aa773bae18644aaf7e3288b2f082e31640080784a7d908a24/langsmith-0.10.6-py3-none-any.whl", hash = "sha256:094285b755224f49fd396c3672b0f747294c7b8d9e8278a81d76b487b5cfdb56", size = 661257, upload-time = "2026-07-17T17:14:01.118Z" },
 ]
+
+[[package]]
+name = "libvirt-python"
+version = "12.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/5e/4c6a60e1ed061cfc2e1899178b8acc05a350bc93d212940ee61c142664d3/libvirt_python-12.5.0.tar.gz", hash = "sha256:25ea2261e0d6cab9d004b700911d88b57911b14528ed04b3487a617ec2b4cda9", size = 245493, upload-time = "2026-07-01T12:01:36.863Z" }
 
 [[package]]
 name = "limits"

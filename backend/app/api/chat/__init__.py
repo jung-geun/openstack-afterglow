@@ -8,6 +8,7 @@ _ROUTERS = {
     "chat_stats_router": ".stats",
     "chat_agents_router": ".agents",
     "chat_workspaces_router": ".workspaces",
+    "chat_code_workspaces_router": ".code_workspaces",
     "chat_memory_router": ".memory",
     "chat_admin_router": ".models",
     "chat_conversations_router": ".conversations",
@@ -16,6 +17,7 @@ _ROUTERS = {
     "chat_extensions_admin_router": (".extensions", "admin_router"),
     "chat_extensions_user_router": (".extensions", "user_router"),
     "chat_api_keys_router": ".api_keys",
+    "chat_mcp_oauth_router": ".mcp_oauth",
 }
 
 

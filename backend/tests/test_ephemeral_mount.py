@@ -36,6 +36,7 @@ def _make_vm(
         username="ubuntu",
         key_path="/tmp/k.key",
         internal_ip=internal_ip,
+        keypair_name="builder-keypair",
         fip_id="fip-xyz",
     )
 
@@ -52,20 +53,20 @@ class TestCreateBuilderShare:
         svc_conn = MagicMock()
         storage = _make_storage("share-nfs-1")
 
-        with (
-            patch(
-                "app.services.ephemeral_mount.get_settings",
-                return_value=_make_settings(),
-            ),
-            patch(
-                "app.services.ephemeral_mount.manila.create_file_storage",
-                return_value=storage,
-            ) as mock_create,
-        ):
+        with patch(
+            "app.services.ephemeral_mount.manila.create_file_storage",
+            return_value=storage,
+        ) as mock_create:
             result = await __import__(
                 "app.services.ephemeral_mount", fromlist=["create_builder_share"]
-            ).create_builder_share(svc_conn, "test-nfs", 5, "NFS")
-
+            ).create_builder_share(
+                svc_conn,
+                name="test-nfs",
+                size_gb=5,
+                share_proto="NFS",
+                share_type="nfstype",
+                share_network_id="net-manila",
+            )
         assert result == "share-nfs-1"
         call_kwargs = mock_create.call_args
         assert call_kwargs.kwargs["share_type"] == "nfstype"
@@ -78,19 +79,19 @@ class TestCreateBuilderShare:
         svc_conn = MagicMock()
         storage = _make_storage("share-ceph-1")
 
-        with (
-            patch(
-                "app.services.ephemeral_mount.get_settings",
-                return_value=_make_settings(),
-            ),
-            patch(
-                "app.services.ephemeral_mount.manila.create_file_storage",
-                return_value=storage,
-            ) as mock_create,
-        ):
+        with patch(
+            "app.services.ephemeral_mount.manila.create_file_storage",
+            return_value=storage,
+        ) as mock_create:
             from app.services.ephemeral_mount import create_builder_share
 
-            result = await create_builder_share(svc_conn, "test-cephfs", 10, "CEPHFS")
+            result = await create_builder_share(
+                svc_conn,
+                name="test-cephfs",
+                size_gb=10,
+                share_proto="CEPHFS",
+                share_type="cephfstype",
+            )
 
         assert result == "share-ceph-1"
         call_kwargs = mock_create.call_args

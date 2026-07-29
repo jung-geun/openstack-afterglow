@@ -259,7 +259,9 @@ async def test_create_default_nodegroups_adds_server_and_agent_rows():
         session,
         cluster_id=_CLUSTER_ID,
         server_flavor_id="server-flavor",
+        server_image_id="server-image",
         agent_flavor_id="agent-flavor",
+        agent_image_id="agent-image",
         agent_count=2,
     )
 
@@ -270,6 +272,8 @@ async def test_create_default_nodegroups_adds_server_and_agent_rows():
     assert added[1].role == "agent"
     assert added[1].node_count == 2
     assert added[1].flavor_id == "agent-flavor"
+    assert added[0].image_id == "server-image"
+    assert added[1].image_id == "agent-image"
 
 
 @pytest.mark.asyncio

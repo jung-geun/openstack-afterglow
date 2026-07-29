@@ -2,6 +2,8 @@
 
 import pytest
 
+from .conftest import RedactedCredentials
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_login_success(anon_client, credentials):
@@ -16,7 +18,7 @@ async def test_login_success(anon_client, credentials):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_login_bad_password(anon_client, credentials):
-    bad = {**credentials, "password": "wrong-password-12345"}
+    bad = RedactedCredentials({**credentials, "password": "wrong-password-12345"})
     resp = await anon_client.post("/api/v1/auth/login", json=bad)
     assert resp.status_code == 401
 

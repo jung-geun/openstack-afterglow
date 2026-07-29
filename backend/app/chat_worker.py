@@ -14,8 +14,11 @@ import socket
 from app.config import get_settings
 from app.database import init_db
 from app.services.cache import _get_redis
+from app.services.chat.agent_workspace_runtime import configured_workspace_policy
+from app.services.chat.code_workspace_service import delete_pending_workspaces, provision_pending_workspaces
 from app.services.chat.durable_runs import (
     execute_queued_run,
+    expire_pending_inputs,
     purge_expired_temp_threads,
     queued_run_ids,
     recover_stale_runs,
@@ -54,6 +57,7 @@ async def serve() -> None:
 
     if settings.chat_checkpointer_postgres_url:
         await chat_checkpointer.start(settings.chat_checkpointer_postgres_url)
+    from app.services.chat.memory_jobs import process_one as process_memory_extraction
     from app.services.chat.memory_outbox import process_one as process_memory_outbox
     from app.services.chat.semantic_memory import semantic_memory_available, setup_semantic_memory
 
@@ -68,6 +72,9 @@ async def serve() -> None:
     semaphore = asyncio.Semaphore(4)
     next_memory_outbox_at = 0.0
     next_temp_purge_at = 0.0
+    next_workspace_reconcile_at = 0.0
+    next_input_expiry_at = 0.0
+    memory_job_task: asyncio.Task[None] | None = None
 
     async def execute(run_id: str) -> None:
         async with semaphore:
@@ -75,6 +82,12 @@ async def serve() -> None:
                 await execute_queued_run(run_id, owner=owner)
             except Exception:
                 logger.exception("durable chat run failed run_id=%s", run_id)
+
+    async def extract_memory() -> None:
+        try:
+            await process_memory_extraction(owner=owner)
+        except Exception:
+            logger.exception("durable memory extraction job failed")
 
     try:
         while True:
@@ -87,6 +100,23 @@ async def serve() -> None:
                 except Exception:
                     logger.exception("temporary chat retention cleanup failed")
                 next_temp_purge_at = now + 3_600
+            if now >= next_workspace_reconcile_at:
+                workspace_policy = configured_workspace_policy(settings)
+                if workspace_policy is not None:
+                    try:
+                        await provision_pending_workspaces(workspace_policy)
+                        await delete_pending_workspaces(workspace_policy)
+                    except Exception:
+                        logger.exception("code workspace reconciliation failed")
+                next_workspace_reconcile_at = now + 1.0
+            if now >= next_input_expiry_at:
+                try:
+                    expired_run_ids = await expire_pending_inputs()
+                    if expired_run_ids:
+                        logger.info("expired durable chat inputs resumed count=%d", len(expired_run_ids))
+                except Exception:
+                    logger.exception("durable chat input expiry sweep failed")
+                next_input_expiry_at = now + 1.0
             if memory_outbox_enabled and now >= next_memory_outbox_at:
                 try:
                     # The outbox itself commits its lease before all provider/pgvector I/O.
@@ -94,6 +124,8 @@ async def serve() -> None:
                 except Exception:
                     logger.exception("semantic memory outbox processing failed")
                 next_memory_outbox_at = now + 0.5
+            if memory_job_task is None or memory_job_task.done():
+                memory_job_task = asyncio.create_task(extract_memory())
             try:
                 recovered_run_ids = await recover_stale_runs(owner=owner)
             except Exception:
@@ -105,6 +137,9 @@ async def serve() -> None:
                 continue
             await asyncio.gather(*(execute(run_id) for run_id in run_ids))
     finally:
+        if memory_job_task is not None:
+            memory_job_task.cancel()
+            await asyncio.gather(memory_job_task, return_exceptions=True)
         from app.database import close_db
 
         await chat_checkpointer.close()

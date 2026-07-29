@@ -6,6 +6,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import type { LoginResponse } from '$lib/types/auth';
 	import { resolvePostLoginProject } from '$lib/utils/authFlow';
+	import { postAuthDestination } from '$lib/utils/mcpConsent';
 
 	let error = $state('');
 	let loading = $state(true);
@@ -52,7 +53,7 @@
 				isSystemAdmin: data.is_system_admin ?? false,
 				federated: true,
 			});
-			await goto(resolution.target);
+			await goto(postAuthDestination(resolution.target));
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status}): ${e.message}` : 'GitLab 인증에 실패했습니다';
 			loading = false;

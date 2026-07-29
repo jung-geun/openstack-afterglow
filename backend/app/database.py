@@ -1,6 +1,6 @@
 """SQLAlchemy async 데이터베이스 연결 관리.
 
-설정: afterglow.conf/config.toml [database] 섹션 또는 DATABASE_URL 환경변수.
+설정: afterglow.conf [database] 섹션 또는 DATABASE_URL 환경변수.
 url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 """
 

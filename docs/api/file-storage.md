@@ -11,7 +11,7 @@ parent: API 레퍼런스
 
 Manila 공유 파일 시스템(CephFS/NFS)을 관리합니다.
 
-> **활성화 조건:** `config.toml`(또는 `afterglow.conf`) `[services] manila = true`.
+> **활성화 조건:** `afterglow.conf [services] manila = true`.
 > Manila는 선택 서비스이므로, 비활성화 상태에서는 이 라우터 자체가 마운트되지 않아
 > 모든 `/api/v1/file-storage*` 경로가 `404`를 반환합니다.
 

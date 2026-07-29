@@ -332,7 +332,23 @@ async def test_backfill_updates_pending_row_and_always_releases_resources():
 
     with (
         patch("app.services.palimpsest_backfill.get_session_factory", return_value=lambda: _FactorySession(store)),
-        patch("app.services.palimpsest_backfill.get_service_project_connection", MagicMock()),
+        patch(
+            "app.services.resource_policy_store.get_service_project_connection",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(
+                return_value={
+                    "builder.flavor": {"id": "flavor-1", "name": "builder"},
+                    "builder.network": {"id": "network-1", "name": "network"},
+                }
+            ),
+        ),
+        patch(
+            "app.services.resource_policy_store.get_policy_snapshot",
+            new=AsyncMock(return_value={"builder.floating_network": None}),
+        ),
         patch("app.services.palimpsest_backfill.create_ephemeral_vm", AsyncMock(return_value=vm)),
         patch("app.services.palimpsest_backfill.delete_ephemeral_vm", AsyncMock()) as delete_vm,
         patch("app.services.palimpsest_backfill.manila") as manila_mod,
@@ -365,7 +381,23 @@ async def test_backfill_marks_failed_and_still_releases_resources_on_ssh_error()
 
     with (
         patch("app.services.palimpsest_backfill.get_session_factory", return_value=lambda: _FactorySession(store)),
-        patch("app.services.palimpsest_backfill.get_service_project_connection", MagicMock()),
+        patch(
+            "app.services.resource_policy_store.get_service_project_connection",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(
+                return_value={
+                    "builder.flavor": {"id": "flavor-1", "name": "builder"},
+                    "builder.network": {"id": "network-1", "name": "network"},
+                }
+            ),
+        ),
+        patch(
+            "app.services.resource_policy_store.get_policy_snapshot",
+            new=AsyncMock(return_value={"builder.floating_network": None}),
+        ),
         patch("app.services.palimpsest_backfill.create_ephemeral_vm", AsyncMock(return_value=vm)),
         patch("app.services.palimpsest_backfill.delete_ephemeral_vm", AsyncMock()) as delete_vm,
         patch("app.services.palimpsest_backfill.manila") as manila_mod,
@@ -396,7 +428,23 @@ async def test_backfill_deletes_vm_even_when_hashing_raises_unexpectedly():
 
     with (
         patch("app.services.palimpsest_backfill.get_session_factory", return_value=lambda: _FactorySession(store)),
-        patch("app.services.palimpsest_backfill.get_service_project_connection", MagicMock()),
+        patch(
+            "app.services.resource_policy_store.get_service_project_connection",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.services.resource_policy_store.resolve_policy_snapshot",
+            new=AsyncMock(
+                return_value={
+                    "builder.flavor": {"id": "flavor-1", "name": "builder"},
+                    "builder.network": {"id": "network-1", "name": "network"},
+                }
+            ),
+        ),
+        patch(
+            "app.services.resource_policy_store.get_policy_snapshot",
+            new=AsyncMock(return_value={"builder.floating_network": None}),
+        ),
         patch("app.services.palimpsest_backfill.create_ephemeral_vm", AsyncMock(return_value=vm)),
         patch("app.services.palimpsest_backfill.delete_ephemeral_vm", AsyncMock()) as delete_vm,
         patch("app.services.palimpsest_backfill._hash_one", AsyncMock(side_effect=RuntimeError("boom"))),

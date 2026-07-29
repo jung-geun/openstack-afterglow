@@ -10,18 +10,25 @@
 	} from '$lib/api/chatTree';
 	import type { StreamMetrics } from '$lib/api/chatMetrics';
 	import { toolActivityFromCanonicalParts, type ToolActivityItem } from '$lib/api/chatToolActivity';
+	import type { RunActivityItem } from '$lib/api/chatRunReducer';
 
 	type DisplayMessage = ChatMsg & {
 		streaming?: boolean;
 		metrics?: StreamMetrics | null;
 		toolItems?: ToolActivityItem[];
 		reasoning?: string | null;
+		activityItems?: RunActivityItem[];
 	};
 
 	type AgentActivity = {
 		label: string;
 		startedAt: string;
 	};
+	type StarterPrompt = {
+		label: string;
+		prompt: string;
+	};
+
 	interface Props {
 		activePath: DisplayMessage[];
 		treeNodes?: ChatTreeNode[];
@@ -35,12 +42,15 @@
 		agentActivity?: AgentActivity | null;
 		error?: string | null;
 		empty?: boolean;
+		starterPrompts?: StarterPrompt[];
+		onStarterPrompt?: (prompt: string) => void;
 		conversationKey?: string;
 		hasOlder?: boolean;
 		loadingOlder?: boolean;
 		onLoadOlder?: () => Promise<void>;
 		onCopy: (text: string) => void;
 		onRegenerate: (messageId: string, modelName: string) => void;
+		onRetry: (messageId: string) => void;
 		onFork: (messageId: string) => void;
 		onSwitchVersion: (messageId: string, direction: -1 | 1) => void;
 	}
@@ -56,12 +66,15 @@
 		agentActivity = null,
 		error = null,
 		empty = false,
+		starterPrompts = [],
+		onStarterPrompt,
 		conversationKey = '',
 		hasOlder = false,
 		loadingOlder = false,
 		onLoadOlder,
 		onCopy,
 		onRegenerate,
+		onRetry,
 		onFork,
 		onSwitchVersion
 	}: Props = $props();
@@ -175,6 +188,15 @@
 				</div>
 				<h2>무엇을 도와드릴까요?</h2>
 				<p>아래에 메시지를 입력해 대화를 시작하세요.</p>
+				{#if starterPrompts.length}
+					<div class="starter-prompts" aria-label="Lumen 시작 제안">
+						{#each starterPrompts as starter (starter.label)}
+							<Button variant="outline" size="xs" onclick={() => onStarterPrompt?.(starter.prompt)}>
+								{starter.label}
+							</Button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		{:else}
 			<div class="stream">
@@ -191,11 +213,13 @@
 						metrics={msg.metrics ?? metricsById.get(msg.id) ?? null}
 						toolItems={restoredToolItems(msg)}
 						reasoning={msg.reasoning ?? ''}
+						activityItems={msg.activityItems ?? []}
 						siblingIndex={info.index}
 						siblingTotal={info.total}
 						modelDisplayName={modelDisplay(msg.model_name)}
 						{onCopy}
 						onRegenerate={(model) => onRegenerate(msg.id, model)}
+						onRetry={() => onRetry(msg.id)}
 						onFork={() => onFork(msg.id)}
 						onPrevVersion={() => onSwitchVersion(msg.id, -1)}
 						onNextVersion={() => onSwitchVersion(msg.id, 1)}
@@ -209,9 +233,9 @@
 						<span class="activity-elapsed" aria-hidden="true">· {activityElapsed(agentActivity.startedAt)}</span>
 					</div>
 				{:else if toolActivity}
-					<div class="tool-activity">
+					<div class="tool-activity" role="status" aria-live="polite">
 						<span class="spinner"></span>
-						도구 실행 중: {toolActivity}…
+						{toolActivity} 진행 중
 					</div>
 				{/if}
 			</div>
@@ -317,6 +341,14 @@
 		margin: 0;
 		font-size: 0.85rem;
 		color: var(--color-ink-3);
+	}
+	.starter-prompts {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.5rem;
+		max-width: 34rem;
+		margin-top: 0.85rem;
 	}
 	.tool-activity,
 	.agent-activity {

@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_token_info, require_admin
 from app.services.chat import extensions_store as es
+from app.services.chat import mcp_oauth
 
 admin_router = APIRouter(dependencies=[Depends(require_admin)])
 user_router = APIRouter()
@@ -77,10 +80,18 @@ def _http(exc: Exception) -> HTTPException:
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, es.ExtensionValidationError):
         return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, mcp_oauth.McpOAuthError):
+        return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=503, detail=str(exc))
 
 
-_EXC = (es.ExtensionNotFound, es.ExtensionForbidden, es.ExtensionValidationError, es.ChatStorageUnavailable)
+_EXC = (
+    es.ExtensionNotFound,
+    es.ExtensionForbidden,
+    es.ExtensionValidationError,
+    es.ExtensionSecretUnavailable,
+    es.ChatStorageUnavailable,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +272,45 @@ async def user_delete_mcp_credentials(item_id: int, token_info: dict = Depends(g
         await es.delete_mcp_credentials(item_id, user_id=uid, project_id=pid)
     except _EXC as exc:
         raise _http(exc) from exc
+
+
+@user_router.get("/mcp-servers/{item_id}/oauth")
+async def user_get_mcp_oauth_status(item_id: int, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        return await mcp_oauth.status(item_id, user_id=uid, project_id=pid)
+    except _EXC + (mcp_oauth.McpOAuthError,) as exc:
+        raise _http(exc) from exc
+
+
+@user_router.post("/mcp-servers/{item_id}/oauth/start")
+async def user_start_mcp_oauth(item_id: int, response: Response, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    initiator_nonce = secrets.token_urlsafe(32)
+    try:
+        result = await mcp_oauth.begin(item_id, user_id=uid, project_id=pid, initiator_nonce=initiator_nonce)
+    except _EXC + (mcp_oauth.McpOAuthError,) as exc:
+        raise _http(exc) from exc
+    response.set_cookie(
+        mcp_oauth.INITIATOR_COOKIE,
+        initiator_nonce,
+        max_age=600,
+        path="/api/v1/chat/mcp-oauth/callback",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+    return result
+
+
+@user_router.delete("/mcp-servers/{item_id}/oauth", status_code=204)
+async def user_disconnect_mcp_oauth(item_id: int, token_info: dict = Depends(get_token_info)):
+    uid, pid = _owner(token_info)
+    try:
+        await mcp_oauth.disconnect(item_id, user_id=uid, project_id=pid)
+    except _EXC + (mcp_oauth.McpOAuthError,) as exc:
+        raise _http(exc) from exc
+    return Response(status_code=204)
 
 
 @user_router.get("/custom-tools")

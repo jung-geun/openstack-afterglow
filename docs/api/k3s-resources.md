@@ -10,7 +10,7 @@ k3s 클러스터 **내부의 Kubernetes 리소스**(Namespace, Pod, Deployment, 
 
 클러스터 라이프사이클(생성/삭제/스케일/헬스/노드그룹/인증서)은 [k3s 클러스터 (k3s)](k3s.md) 문서를 참고하세요.
 
-> **활성화 조건:** `config.toml [services] k3s = true`
+> **활성화 조건:** `afterglow.conf [services] k3s = true`
 
 ---
 

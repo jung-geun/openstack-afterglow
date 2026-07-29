@@ -56,42 +56,30 @@ async def provision_nodegroup_vms(
     node_token = await k3s_cluster_svc.get_cluster_node_token(project_id, cluster_id)
     server_ip = cluster.get("server_ip") or ""
     cluster_name = cluster.get("name") or cluster_id
-    k3s_version = cluster.get("k3s_version") or s.k3s_version
+    resource_snapshot = cluster.get("resource_policy_snapshot") or {}
+    k3s_version = cluster.get("k3s_version") or ""
     os_type = cluster.get("os_type") or "ubuntu"
-    network_id = cluster.get("network_id") or s.default_network_id
+    network_id = cluster.get("network_id") or ""
     ssh_public_key = cluster.get("ssh_public_key") or None
     sg_id = cluster.get("security_group_id") or None
     boot_volume_size = s.k3s_boot_volume_size_gb
+    volume_availability_zone = (resource_snapshot.get("cinder.default_volume_availability_zone") or {}).get("id") or ""
 
-    # 이미지: 노드그룹 지정 → 클러스터 기본 → 설정값
+    # Explicit nodegroup image wins; otherwise use the cluster's immutable
+    # effective image instead of current global policy/settings.
     if not image_id:
-        image_id = s.k3s_fcos_image_id if os_type == "fcos" else s.k3s_server_image_id
-
-    # OpenStack 연결
-    try:
-        conn = keystone.get_admin_connection_for_project(project_id)
-    except Exception as e:
-        _logger.error("provision_nodegroup_vms: OpenStack 연결 실패: %s", e)
+        image_id = (
+            (resource_snapshot.get("effective_agent_image") or {}).get("id") or cluster.get("server_image_id") or ""
+        )
+    if not all((k3s_version, network_id, image_id, volume_availability_zone)):
+        _logger.error("provision_nodegroup_vms: creation-time resource snapshot is incomplete")
         return []
 
-    # network_id 폴백
-    if not network_id:
-        if s.default_network_enabled:
-            try:
-                from app.services.default_network import ensure_default_network as _ensure_net
-
-                _net = await _ensure_net(
-                    conn,
-                    project_id,
-                    external_network_id=s.default_network_external_id or None,
-                    cidr=s.default_network_cidr,
-                )
-                network_id = _net.id
-            except Exception:
-                _logger.warning("provision_nodegroup_vms: default network 조회 실패", exc_info=True)
-                network_id = s.default_network_id
-        else:
-            network_id = s.default_network_id
+    try:
+        conn = keystone.get_admin_connection_for_project(project_id)
+    except Exception as exc:
+        _logger.error("provision_nodegroup_vms: OpenStack connection failed: %s", exc)
+        return []
 
     # extra_agent_args 구성 (플러그인 + labels/taints + nodegroup 식별 라벨)
     _agent_args = k3s_plugins.aggregate_agent_args(s)
@@ -131,12 +119,14 @@ async def provision_nodegroup_vms(
                 f"{agent_name}-boot",
                 image_id,
                 boot_volume_size,
+                volume_availability_zone,
             )
             userdata = k3s_cloudinit.generate_agent_userdata(
                 cluster_name=cluster_name,
                 k3s_version=k3s_version,
                 server_ip=server_ip,
                 node_token=node_token or "",
+                primary_network_id=network_id,
                 ssh_public_key=ssh_public_key,
                 extra_agent_args=_agent_args,
                 os_type=os_type,

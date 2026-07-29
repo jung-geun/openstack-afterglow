@@ -18,11 +18,11 @@ from generate_k8s import (  # noqa: E402
 )
 
 
-def test_render_toml_includes_nova_server_image_id():
+def test_render_toml_excludes_removed_nova_image_selector():
     result = _render_toml_for_k8s({"nova": {"server_image_id": "legacy-server-image"}})
 
     assert "[nova]" in result
-    assert 'server_image_id = "legacy-server-image"' in result
+    assert "server_image_id" not in result
 
 
 def test_render_toml_derives_public_api_base_for_k8s_runtime_config():
@@ -60,6 +60,14 @@ def test_render_toml_falls_back_to_backend_port_without_public_origin():
     result = _render_toml_for_k8s({"app": {"backend_port": 8123}})
 
     assert 'public_api_base = "http://localhost:8123"' in result
+
+
+def test_render_toml_includes_explicit_mcp_oauth_callback_url():
+    result = _render_toml_for_k8s(
+        {"chat": {"mcp_oauth_callback_url": "https://oauth.example.test/custom/mcp-callback"}}
+    )
+
+    assert 'mcp_oauth_callback_url = "https://oauth.example.test/custom/mcp-callback"' in result
 
 
 def test_render_toml_includes_login_branding_paths():
@@ -284,6 +292,8 @@ def test_chat_capability_platform_secrets_stay_out_of_configmap():
             "sandbox_api_key": "sandbox-secret",
             "asset_s3_bucket": "chat-assets",
             "semantic_memory_enabled": True,
+            "execution_protocol_version": 2,
+            "sandbox_workspace_url": "https://workspace.example",
         },
     }
 
@@ -299,6 +309,9 @@ def test_chat_capability_platform_secrets_stay_out_of_configmap():
     assert "asset_s3_secret_key" not in configmap
     assert "sandbox_api_key" not in configmap
     assert 'asset_s3_bucket = "chat-assets"' in configmap
+    assert "sandbox_workspace_url" not in secret
+    assert "execution_protocol_version = 2" in configmap
+    assert 'sandbox_workspace_url = "https://workspace.example"' in configmap
 
 
 class TestRenderGrafanaDeployment:

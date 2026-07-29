@@ -8,7 +8,7 @@ nav_order: 61
 
 WireGuard 기반 VPN 게이트웨이를 프로비저닝하고, 서버마다 클라이언트(peer)를 발급합니다. 서버는 OpenStack VM으로 부팅되며, 그 위의 **VPN 에이전트**가 별도 콜백 경로로 서버 상태를 보고하고 desired-state(peer 목록)를 폴링합니다.
 
-> **선택 서비스** — `config.toml [services]` 에서 활성화하고, `afterglow.conf [vpn]` 의 `provider_network_id` 와 `image_id` 를 설정해야 합니다.
+> **선택 서비스** — `afterglow.conf [services]` 에서 활성화하고, `afterglow.conf [vpn]` 의 `provider_network_id` 와 `image_id` 를 설정해야 합니다.
 > 미설정 시 서버 생성 요청은 `503` 을 반환합니다. DB(SQLAlchemy)가 필요하며, DB 미가용 시 `503`.
 
 ---

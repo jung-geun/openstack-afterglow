@@ -16,6 +16,7 @@ export interface PublicSiteConfig {
 		barbican: boolean;
 		waygate: boolean;
 		chat: boolean;
+		mcp: boolean;
 	};
 	runtime: {
 		api_base: string;

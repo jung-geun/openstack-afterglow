@@ -20,6 +20,19 @@ const editorialTokenNames = [
 ];
 
 
+const chatMessageTokenNames = [
+	'--chat-message-gap',
+	'--chat-message-meta-gap',
+	'--chat-message-meta-inset',
+	'--chat-message-meta-size',
+	'--chat-message-radius',
+	'--chat-message-directional-corner',
+	'--chat-message-padding-block',
+	'--chat-message-padding-inline',
+	'--chat-message-assistant-max-inline',
+	'--chat-message-user-max-inline',
+];
+
 const designTokenNames = [
 	'--color-surface-canvas',
 	'--color-surface-base',
@@ -49,6 +62,7 @@ const requiredUiExports = [
 	'Field',
 	'TextInput',
 	'SelectInput',
+	'ChatBubble',
 	'TextareaInput',
 	'TableShell',
 	'ToggleGroup',
@@ -81,6 +95,18 @@ describe('design system source contracts', () => {
 		expect(designSource).toContain('Approved panel composition');
 		expect(designSource).toContain('Card surface="subtle"');
 		expect(designSource).toContain('method matrix is one Card');
+	});
+
+	it('defines the reusable chat message primitive and its shared layout tokens', () => {
+		for (const token of chatMessageTokenNames) {
+			expect(layoutSource).toContain(token);
+			expect(tokenSource).toContain(token);
+			expect(designSource).toContain(token);
+		}
+		expect(tokenSource).toContain('CHAT_MESSAGE_CSS_VAR');
+		expect(designSource).toContain('ChatBubble');
+		expect(designSource).toContain('chat-start');
+		expect(designSource).toContain('chat-end');
 	});
 
 	it('links tracked frontend docs and optional local agent instructions to the canonical design system', () => {

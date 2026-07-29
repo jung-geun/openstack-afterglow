@@ -10,14 +10,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
-from app.models.chat_db import ChatCustomTool, ChatMcpCredential, ChatMcpServer, ChatSkill
+from app.models.chat_db import ChatCustomTool, ChatMcpCredential, ChatMcpOAuthConnection, ChatMcpServer, ChatSkill
 from app.services.k3s_crypto import (
     decrypt_chat_content,
     decrypt_llm_provider_key,
@@ -31,6 +33,20 @@ _MODELS = {"mcp": ChatMcpServer, "tool": ChatCustomTool, "skill": ChatSkill}
 
 # MCP supports only HTTPS streamable HTTP. Local process and legacy SSE transports are rejected.
 _MCP_TRANSPORTS = ("http",)
+
+
+def _is_notion_mcp_url(value: object) -> bool:
+    return isinstance(value, str) and value.strip().rstrip("/").lower() == "https://mcp.notion.com/mcp"
+
+
+def _mcp_auth_mode(row: ChatMcpServer) -> str:
+    """Classify legacy rows safely; hosted Notion is OAuth-only regardless of stale metadata."""
+    if _is_notion_mcp_url(row.url):
+        return "oauth"
+    mode = getattr(row, "auth_mode", None)
+    if mode in {"none", "headers", "oauth"}:
+        return mode
+    return "headers" if _clean_requirements(row.auth_requirements) else "none"
 
 
 class ChatStorageUnavailable(RuntimeError):
@@ -49,6 +65,10 @@ class ExtensionValidationError(ValueError):
     """입력 검증 실패 — 400."""
 
 
+class ExtensionSecretUnavailable(RuntimeError):
+    """An encrypted extension secret cannot be safely used."""
+
+
 def _require_db():
     if not is_db_available():
         raise ChatStorageUnavailable("chat DB 를 사용할 수 없습니다")
@@ -62,18 +82,18 @@ def _iso(dt) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def _decrypt_headers(row: ChatMcpServer) -> dict:
-    """MCP 인증 헤더(Bearer/API key)를 평문 dict 로 복원.
-
-    신규 행은 AES-256-GCM(encrypted_headers)에 저장한다. 구 행(레거시 plaintext
-    headers JSON)은 마이그레이션 없이 그대로 읽어 하위 호환한다.
-    """
+def _decrypt_headers(row: ChatMcpServer, *, fail_closed: bool = False) -> dict:
+    """Restore MCP headers, refusing execution when an encrypted value is invalid."""
     if row.encrypted_headers:
         try:
             data = json.loads(decrypt_llm_provider_key(row.encrypted_headers))
-            return data if isinstance(data, dict) else {}
-        except Exception:  # 복호 실패 시 헤더 없이 진행(요청 자체는 계속)
+            if not isinstance(data, dict):
+                raise ValueError("decrypted MCP headers are not an object")
+            return data
+        except Exception as exc:
             logger.warning("MCP 헤더 복호 실패 id=%s", row.id, exc_info=True)
+            if fail_closed:
+                raise ExtensionSecretUnavailable("MCP 인증 헤더를 복호화할 수 없습니다") from exc
             return {}
     if isinstance(row.headers, dict):  # 레거시 plaintext
         return row.headers
@@ -86,6 +106,8 @@ def _mask_headers(headers: dict) -> dict:
 
 
 def _public_mcp(row: ChatMcpServer) -> dict:
+    # The API reveals header names (never values) so clients can retain masked fields.
+    # A corrupt ciphertext yields no names but remains marked as configured; execution fails closed.
     headers = _decrypt_headers(row)
     return {
         "id": row.id,
@@ -93,12 +115,14 @@ def _public_mcp(row: ChatMcpServer) -> dict:
         "name": row.name,
         "transport": row.transport,
         "url": row.url,
-        # 값은 마스킹(시크릿 누출 방지). 편집 폼은 마스킹 표시 + 저장 시 교체 방식.
         "headers": _mask_headers(headers),
-        "has_headers": bool(headers),
+        "has_headers": bool(row.encrypted_headers) or bool(headers),
         # 사용자별 인증 요구사항(비밀 아님) — 프론트가 어떤 값을 사용자에게 요구할지 표시.
+        "auth_mode": _mcp_auth_mode(row),
         "auth_requirements": _clean_requirements(row.auth_requirements),
         "is_active": row.is_active,
+        "effect_overrides": row.tool_effect_overrides,
+        "config_version": row.config_version,
         "created_at": _iso(row.created_at),
     }
 
@@ -110,9 +134,12 @@ def _reveal_mcp(row: ChatMcpServer) -> dict:
         "name": row.name,
         "transport": row.transport,
         "url": row.url,
-        "headers": _decrypt_headers(row),
+        "headers": _decrypt_headers(row, fail_closed=True),
         "auth_requirements": _clean_requirements(row.auth_requirements),
+        "auth_mode": _mcp_auth_mode(row),
         "is_active": row.is_active,
+        "effect_overrides": row.tool_effect_overrides,
+        "config_version": row.config_version,
     }
 
 
@@ -146,6 +173,8 @@ def _public_tool(row: ChatCustomTool) -> dict:
         "params_schema": row.params_schema,
         "timeout_seconds": row.timeout_seconds,
         "is_active": row.is_active,
+        "effect": row.effect,
+        "config_version": row.config_version,
         "created_at": _iso(row.created_at),
     }
 
@@ -160,6 +189,119 @@ def _public_skill(row: ChatSkill) -> dict:
         "is_active": row.is_active,
         "created_at": _iso(row.created_at),
     }
+
+
+def selection_fingerprint(item: dict) -> str:
+    """Return a secret-free configuration identity suitable for encrypted run payloads."""
+    material = {
+        key: item.get(key)
+        for key in (
+            "id",
+            "name",
+            "url",
+            "method",
+            "transport",
+            "auth_mode",
+            "params_schema",
+            "config_version",
+            "effect",
+        )
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+async def mcp_credential_versions(
+    server_ids: list[int] | tuple[int, ...], *, user_id: str, project_id: str
+) -> dict[int, int | None]:
+    """Return the active credential epoch for manual or OAuth MCP authentication."""
+    ids = [server_id for server_id in server_ids if isinstance(server_id, int)]
+    if not ids:
+        return {}
+    factory = _require_db()
+    try:
+        async with factory() as session:
+            servers = {
+                row.id: row
+                for row in (await session.execute(select(ChatMcpServer).where(ChatMcpServer.id.in_(ids)))).scalars()
+            }
+            manual = {
+                row.mcp_server_id: row
+                for row in (
+                    await session.execute(
+                        select(ChatMcpCredential).where(
+                            (ChatMcpCredential.mcp_server_id.in_(ids))
+                            & (ChatMcpCredential.owner_user_id == user_id)
+                            & (ChatMcpCredential.owner_project_id == project_id)
+                        )
+                    )
+                ).scalars()
+            }
+            oauth = {
+                row.mcp_server_id: row
+                for row in (
+                    await session.execute(
+                        select(ChatMcpOAuthConnection).where(
+                            (ChatMcpOAuthConnection.mcp_server_id.in_(ids))
+                            & (ChatMcpOAuthConnection.owner_user_id == user_id)
+                            & (ChatMcpOAuthConnection.owner_project_id == project_id)
+                        )
+                    )
+                ).scalars()
+            }
+            versions: dict[int, int | None] = {}
+            for server_id, server in servers.items():
+                if _mcp_auth_mode(server) == "oauth":
+                    connection = oauth.get(server_id)
+                    versions[server_id] = (
+                        connection.credential_version if connection and connection.status == "active" else None
+                    )
+                elif credential := manual.get(server_id):
+                    versions[server_id] = None if credential.revoked_at is not None else credential.credential_version
+            return versions
+    except OperationalError as exc:
+        raise ChatStorageUnavailable("chat DB 오류") from exc
+
+
+async def validated_frozen_selection(
+    snapshot: object, *, user_id: str, project_id: str
+) -> tuple[tuple[int, ...], tuple[int, ...], list[str]]:
+    """Re-check a queued run's exact active configuration without widening selection."""
+    if not isinstance(snapshot, dict):
+        return (), (), ["run extension selection is unavailable"]
+    selected_by_kind = {"tool": snapshot.get("tools"), "mcp": snapshot.get("mcp")}
+    selected_mcp = selected_by_kind["mcp"]
+    mcp_ids = (
+        [item["id"] for item in selected_mcp if isinstance(item, dict) and isinstance(item.get("id"), int)]
+        if isinstance(selected_mcp, list)
+        else []
+    )
+    credential_versions = await mcp_credential_versions(mcp_ids, user_id=user_id, project_id=project_id)
+    resolved: dict[str, tuple[int, ...]] = {"tool": (), "mcp": ()}
+    warnings: list[str] = []
+    for kind, selected in selected_by_kind.items():
+        if not isinstance(selected, list):
+            warnings.append(f"run {kind} selection is invalid")
+            continue
+        visible = await list_for_user(kind, user_id=user_id, project_id=project_id, active_only=True)
+        current = {item["id"]: item for item in visible if isinstance(item.get("id"), int)}
+        ids: list[int] = []
+        for item in selected:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+                warnings.append(f"run {kind} selection is invalid")
+                continue
+            now = current.get(item["id"])
+            if now is None or item.get("config_fingerprint") != selection_fingerprint(now):
+                warnings.append(f"selected {kind} changed or was revoked")
+                continue
+            if kind == "mcp":
+                expected_version = item.get("credential_version")
+                current_version = credential_versions.get(item["id"], 0)
+                if not isinstance(expected_version, int) or expected_version != current_version:
+                    warnings.append("selected MCP credential changed or was revoked")
+                    continue
+            ids.append(item["id"])
+        resolved[kind] = tuple(ids)
+    return resolved["tool"], resolved["mcp"], warnings
 
 
 _PUBLIC = {"mcp": _public_mcp, "tool": _public_tool, "skill": _public_skill}
@@ -186,6 +328,8 @@ def _apply_fields(kind: str, row, fields: dict) -> None:
             if url and not url.lower().startswith("https://"):
                 raise ExtensionValidationError("url 은 https:// 로 시작하는 원격 주소여야 합니다")
             row.url = url or None
+            if _is_notion_mcp_url(row.url):
+                row.auth_mode = "oauth"
         if "headers" in fields:
             # 헤더 값은 인증 시크릿(Bearer/API key)일 수 있으므로 AES-256-GCM 으로 암호화 저장.
             headers = fields["headers"]
@@ -200,7 +344,7 @@ def _apply_fields(kind: str, row, fields: dict) -> None:
             else:
                 # 기존 헤더 위에 per-key overlay: 마스킹 sentinel(• 만) 값은 기존 유지, 실제 값은 교체/추가.
                 # (마스킹 값 재전송으로 다른 헤더가 유실되지 않도록.)
-                merged = dict(_decrypt_headers(row))
+                merged = dict(_decrypt_headers(row, fail_closed=True))
                 for k, v in headers.items():
                     if not isinstance(v, str):
                         continue
@@ -219,11 +363,14 @@ def _apply_fields(kind: str, row, fields: dict) -> None:
             req = fields["auth_requirements"]
             if req is None:
                 row.auth_requirements = None
+                cleaned = []
             elif isinstance(req, list):
                 cleaned = _clean_requirements(req)
                 row.auth_requirements = cleaned or None
             else:
                 raise ExtensionValidationError("auth_requirements 는 [{key, label}] 리스트여야 합니다")
+            if _mcp_auth_mode(row) != "oauth":
+                row.auth_mode = "headers" if cleaned else "none"
     elif kind == "skill":
         if "name" in fields and fields["name"]:
             row.name = str(fields["name"]).strip()
@@ -392,6 +539,8 @@ async def update(
                 admin=admin,
             )
             _apply_fields(kind, row, patch)
+            if kind in {"mcp", "tool"}:
+                row.config_version += 1
             await session.flush()
             return _PUBLIC[kind](row)
     except IntegrityError as exc:
@@ -430,9 +579,8 @@ async def set_mcp_credentials(server_id: int, values: dict, *, user_id: str, pro
             if not allowed:
                 raise ExtensionValidationError("이 서버는 사용자 인증 요구사항이 없습니다")
             # 마스킹 sentinel 은 기존 값 유지, 실제 값만 반영. 선언된 key 만.
-            existing = _decrypt_mcp_credential_values(
-                await _get_credential_row(session, server_id, user_id, project_id)
-            )
+            cred = await _get_credential_row(session, server_id, user_id, project_id, lock=True)
+            existing = _decrypt_mcp_credential_values(cred, fail_closed=True)
             merged = dict(existing)
             for k, v in values.items():
                 key = str(k)
@@ -442,7 +590,6 @@ async def set_mcp_credentials(server_id: int, values: dict, *, user_id: str, pro
                     continue
                 if v:
                     merged[key] = v
-            cred = await _get_credential_row(session, server_id, user_id, project_id)
             if merged:
                 blob = encrypt_llm_provider_key(json.dumps(merged, ensure_ascii=False))
                 if cred is None:
@@ -451,12 +598,16 @@ async def set_mcp_credentials(server_id: int, values: dict, *, user_id: str, pro
                         owner_user_id=user_id,
                         owner_project_id=project_id,
                         encrypted_values=blob,
+                        credential_version=1,
                     )
                     session.add(cred)
                 else:
                     cred.encrypted_values = blob
-            elif cred is not None:
-                await session.delete(cred)
+                    cred.credential_version += 1
+                    cred.revoked_at = None
+            elif cred is not None and cred.revoked_at is None:
+                cred.credential_version += 1
+                cred.revoked_at = datetime.now(UTC)
             return _credential_status(server, merged)
     except IntegrityError as exc:
         raise ExtensionValidationError("제약 위반") from exc
@@ -483,9 +634,10 @@ async def delete_mcp_credentials(server_id: int, *, user_id: str, project_id: st
     try:
         async with factory() as session, session.begin():
             await _visible_mcp_server(session, server_id, user_id=user_id, project_id=project_id)
-            cred = await _get_credential_row(session, server_id, user_id, project_id)
-            if cred is not None:
-                await session.delete(cred)
+            cred = await _get_credential_row(session, server_id, user_id, project_id, lock=True)
+            if cred is not None and cred.revoked_at is None:
+                cred.credential_version += 1
+                cred.revoked_at = datetime.now(UTC)
     except OperationalError as exc:
         mark_db_unhealthy()
         raise ChatStorageUnavailable("chat DB 오류") from exc
@@ -508,42 +660,46 @@ async def mcp_all_credentials(*, user_id: str, project_id: str) -> dict[int, dic
                         select(ChatMcpCredential).where(
                             (ChatMcpCredential.owner_user_id == user_id)
                             & (ChatMcpCredential.owner_project_id == project_id)
+                            & (ChatMcpCredential.revoked_at.is_(None))
                         )
                     )
                 )
                 .scalars()
                 .all()
             )
-            return {r.mcp_server_id: _decrypt_mcp_credential_values(r) for r in rows}
+            return {r.mcp_server_id: _decrypt_mcp_credential_values(r, fail_closed=True) for r in rows}
+    except ExtensionSecretUnavailable:
+        raise
     except Exception:
         logger.warning("MCP 사용자 인증 값 로드 실패", exc_info=True)
         return {}
 
 
-async def _get_credential_row(session, server_id: int, user_id: str, project_id: str) -> ChatMcpCredential | None:
-    return (
-        (
-            await session.execute(
-                select(ChatMcpCredential).where(
-                    (ChatMcpCredential.mcp_server_id == server_id)
-                    & (ChatMcpCredential.owner_user_id == user_id)
-                    & (ChatMcpCredential.owner_project_id == project_id)
-                )
-            )
-        )
-        .scalars()
-        .first()
+async def _get_credential_row(
+    session, server_id: int, user_id: str, project_id: str, *, lock: bool = False
+) -> ChatMcpCredential | None:
+    stmt = select(ChatMcpCredential).where(
+        (ChatMcpCredential.mcp_server_id == server_id)
+        & (ChatMcpCredential.owner_user_id == user_id)
+        & (ChatMcpCredential.owner_project_id == project_id)
     )
+    if lock:
+        stmt = stmt.with_for_update()
+    return (await session.execute(stmt)).scalars().first()
 
 
-def _decrypt_mcp_credential_values(row: ChatMcpCredential | None) -> dict:
-    if row is None or not row.encrypted_values:
+def _decrypt_mcp_credential_values(row: ChatMcpCredential | None, *, fail_closed: bool = False) -> dict:
+    if row is None or row.revoked_at is not None or not row.encrypted_values:
         return {}
     try:
         data = json.loads(decrypt_llm_provider_key(row.encrypted_values))
-        return data if isinstance(data, dict) else {}
-    except Exception:
+        if not isinstance(data, dict):
+            raise ValueError("decrypted MCP credentials are not an object")
+        return data
+    except Exception as exc:
         logger.warning("MCP 인증 값 복호 실패 id=%s", getattr(row, "id", "?"), exc_info=True)
+        if fail_closed:
+            raise ExtensionSecretUnavailable("MCP 사용자 인증 값을 복호화할 수 없습니다") from exc
         return {}
 
 

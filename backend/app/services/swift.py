@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 
 def _get_swift_endpoint(conn) -> str | None:
-    """config.toml swift_endpoint 오버라이드가 있으면 반환, 없으면 None."""
+    """afterglow.conf swift_endpoint 오버라이드가 있으면 반환, 없으면 None."""
     from app.config import get_settings
 
     settings = get_settings()

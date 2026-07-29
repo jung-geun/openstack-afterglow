@@ -151,7 +151,7 @@ async def test_get_dashboard_quotas_success(client):
     # cached_call은 결과를 캐시 key별로 1회씩 호출한다 — _fetch_quotas 내부의
     # asyncio.gather를 진짜로 실행하되, 각 service 함수는 cached_call로 묶여 있음.
     # 가장 단순한 방법: cached_call 전체를 patch해서 results 리스트를 한 번에 반환.
-    # 활성화된 서비스(config.toml): manila/trove/swift → compute/volume/network/manila/trove/swift = 최대 6건
+    # 활성화된 서비스(afterglow.conf): manila/trove/swift → compute/volume/network/manila/trove/swift = 최대 6건
     # 실제 활성 수를 맞추기 위해 넉넉히 6개 제공
     quota_int = 0  # trove count
     swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}

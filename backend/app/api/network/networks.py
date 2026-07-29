@@ -107,11 +107,13 @@ async def ensure_default_network(
     project_id = conn._afterglow_project_id
     try:
         from app.services.default_network import ensure_default_network as _ensure
+        from app.services.resource_policy_store import resolve_policies
 
+        policies = await resolve_policies(conn=conn, keys=("nova.default_external_network",))
         net_info = await _ensure(
             conn,
             project_id,
-            external_network_id=settings.default_network_external_id or None,
+            external_network_id=policies["nova.default_external_network"],
             cidr=settings.default_network_cidr,
         )
         # 네트워크 목록 캐시 무효화

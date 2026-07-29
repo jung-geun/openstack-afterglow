@@ -1,5 +1,5 @@
 import { getBaseUrl } from './client';
-import { parseChatRunEvent, type ChatRunEvent } from './chatContracts';
+import { parseChatRunEvent, type ChatRunEvent, type ChatRunStatus } from './chatContracts';
 
 export class ChatProtocolError extends Error {
 	constructor(message: string) {
@@ -19,7 +19,7 @@ export interface ChatRunDescriptor {
 	run_id: string;
 	conversation_id: string | null;
 	temp_thread_id: string | null;
-	status: 'queued' | 'running' | 'awaiting_approval' | 'finalizing' | 'completed' | 'failed' | 'canceled';
+	status: ChatRunStatus;
 	events_url: string;
 	cancel_url: string;
 }
@@ -39,8 +39,17 @@ export interface FollowChatRunOptions {
 }
 
 type SseFrame = { id?: string; event?: string; data: string };
-const RUN_STATUSES = ['queued', 'running', 'awaiting_approval', 'finalizing', 'completed', 'failed', 'canceled'] as const;
-type ChatRunStatus = (typeof RUN_STATUSES)[number];
+const RUN_STATUSES = [
+	'queued',
+	'running',
+	'awaiting_approval',
+	'awaiting_input',
+	'waiting_children',
+	'finalizing',
+	'completed',
+	'failed',
+	'canceled'
+] as const satisfies readonly ChatRunStatus[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object';

@@ -7,7 +7,9 @@ import base64
 import logging
 import os
 import stat
+import tempfile
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 
 from app.config import get_settings
@@ -90,8 +92,6 @@ async def _wait_for_cloud_init(
 # Ephemeral Builder VM — 빌드마다 새로 생성·삭제
 # ---------------------------------------------------------------------------
 
-_EPHEMERAL_KEYPAIR_NAME = "afterglow-ephemeral-key"
-
 _EPHEMERAL_CLOUD_INIT = """\
 #!/bin/bash
 set -e
@@ -103,62 +103,35 @@ apt-get install -y --no-install-recommends nfs-common ceph-common
 @dataclass
 class EphemeralBuilderVM:
     server_id: str
-    host: str  # FIP 주소 (SSH 접속용)
+    host: str
     username: str
     key_path: str
-    internal_ip: str  # Fixed IP (NFS access rule 등록용)
-    fip_id: str  # FIP ID (삭제용)
+    keypair_name: str
+    internal_ip: str
+    fip_id: str | None
 
 
 def _short_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
-async def _ensure_ephemeral_keypair(svc_conn, key_path: str) -> str:
-    """Ephemeral VM 전용 키페어를 보장한다. 영구 Builder 키페어와 분리된다.
-
-    키페어가 없으면 새로 생성하고 key_path에 저장한다.
-    키페어는 있으나 로컬 파일이 없으면 기존 키페어를 삭제하고 재생성한다.
-    """
-    keypair = None
-    try:
-        keypair = await asyncio.to_thread(svc_conn.compute.get_keypair, _EPHEMERAL_KEYPAIR_NAME)
-    except Exception:
-        pass
-
-    if keypair is not None and os.path.exists(key_path):
-        return _EPHEMERAL_KEYPAIR_NAME
-
-    if keypair is not None and not os.path.exists(key_path):
-        # 키페어는 존재하지만 로컬 파일 없음 → 삭제 후 재생성
-        _logger.warning(
-            "[ephemeral_vm] 키페어 %s가 존재하지만 로컬 파일 없음(%s) — 키페어 재생성",
-            _EPHEMERAL_KEYPAIR_NAME,
-            key_path,
-        )
-        try:
-            await asyncio.to_thread(svc_conn.compute.delete_keypair, _EPHEMERAL_KEYPAIR_NAME)
-        except Exception:
-            pass
-        keypair = None
-
-    # 새 키페어 생성
-    kp = await asyncio.to_thread(
-        svc_conn.compute.create_keypair,
-        name=_EPHEMERAL_KEYPAIR_NAME,
-    )
-    private_key = kp.private_key
+async def _create_one_use_keypair(svc_conn) -> tuple[str, str]:
+    """Create a unique Nova keypair and an owner-only temporary private key."""
+    keypair_name = f"afterglow-palimpsest-{_short_id()}"
+    keypair = await asyncio.to_thread(svc_conn.compute.create_keypair, name=keypair_name)
+    private_key = getattr(keypair, "private_key", None)
     if not private_key:
-        raise RuntimeError("Nova keypair에서 private key를 받지 못했습니다")
+        with suppress(Exception):
+            await asyncio.to_thread(svc_conn.compute.delete_keypair, keypair_name)
+        raise RuntimeError("Nova keypair did not return private key material")
 
-    key_dir = os.path.dirname(key_path)
-    if key_dir:
-        os.makedirs(key_dir, exist_ok=True)
-    with open(key_path, "w") as f:
-        f.write(private_key)
-    os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
-    _logger.info("[ephemeral_vm] SSH 키페어 생성 및 저장: %s → %s", _EPHEMERAL_KEYPAIR_NAME, key_path)
-    return _EPHEMERAL_KEYPAIR_NAME
+    fd, key_path = tempfile.mkstemp(prefix="afterglow-palimpsest-", suffix=".key")
+    try:
+        os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
+        os.write(fd, private_key.encode())
+    finally:
+        os.close(fd)
+    return keypair_name, key_path
 
 
 def _extract_fixed_ip(server) -> str | None:
@@ -190,90 +163,88 @@ async def _allocate_new_fip(svc_conn, server_id: str, floating_network_id: str) 
     return fip.floating_ip_address, fip.id
 
 
-async def create_ephemeral_vm(svc_conn) -> EphemeralBuilderVM:
-    """service 프로젝트에 임시 Builder VM을 생성하고 SSH 도달 상태를 확인해 반환한다.
+async def create_ephemeral_vm(
+    svc_conn,
+    *,
+    image_id: str,
+    flavor_id: str,
+    network_id: str,
+    floating_network_id: str | None = None,
+) -> EphemeralBuilderVM:
+    """Create a one-use Palimpsest utility VM from an immutable job snapshot."""
+    if not all((image_id, flavor_id, network_id)):
+        raise ValueError("image_id, flavor_id, and network_id are required for an ephemeral Builder VM")
 
-    cloud-init으로 nfs-common과 ceph-common을 설치한 뒤 SSH 연결이 확인되면 반환한다.
-    VM은 호출자가 사용 후 delete_ephemeral_vm()으로 정리해야 한다.
-    """
     settings = get_settings()
-
-    from app.services import resource_policy_store
-    from app.services.resource_policies import ResourcePolicyValidationError
-
+    keypair_name = ""
+    key_path = ""
+    server_id: str | None = None
+    fip_id: str | None = None
     try:
-        policies = await resource_policy_store.resolve_policies(
-            conn=svc_conn,
-            keys=("builder.image", "builder.flavor", "builder.network"),
+        keypair_name, key_path = await _create_one_use_keypair(svc_conn)
+        userdata_b64 = base64.b64encode(_EPHEMERAL_CLOUD_INIT.encode()).decode()
+        vm_name = f"afterglow-palimpsest-{_short_id()}"
+        server = await asyncio.to_thread(
+            svc_conn.compute.create_server,
+            name=vm_name,
+            image_id=image_id,
+            flavor_id=flavor_id,
+            networks=[{"uuid": network_id}],
+            user_data=userdata_b64,
+            key_name=keypair_name,
+            metadata={"union_type": "ephemeral-builder", "afterglow_managed": "true"},
         )
-    except (ResourcePolicyValidationError, resource_policy_store.ResourcePolicyStorageUnavailable) as exc:
-        raise RuntimeError("임시 빌더 리소스 정책이 유효하지 않습니다") from exc
-    image_id = policies["builder.image"]
-    flavor_id = policies["builder.flavor"]
-    network_id = policies["builder.network"]
+        server_id = server.id
+        await _wait_for_active(svc_conn, server_id)
+        server = await asyncio.to_thread(svc_conn.compute.get_server, server_id)
+        internal_ip = _extract_fixed_ip(server)
+        if not internal_ip:
+            raise RuntimeError(f"Ephemeral Builder VM {server_id}: internal IP를 찾을 수 없습니다")
 
-    keypair_name = await _ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
-    userdata_b64 = base64.b64encode(_EPHEMERAL_CLOUD_INIT.encode()).decode()
-
-    vm_name = f"afterglow-builder-{_short_id()}"
-    server = await asyncio.to_thread(
-        svc_conn.compute.create_server,
-        name=vm_name,
-        image_id=image_id,
-        flavor_id=flavor_id,
-        networks=[{"uuid": network_id}],
-        user_data=userdata_b64,
-        key_name=keypair_name,
-        metadata={"union_type": "ephemeral-builder", "afterglow_managed": "true"},
-    )
-    server_id = server.id
-    _logger.info("[ephemeral_vm] VM 생성 중: %s (%s)", vm_name, server_id)
-
-    await _wait_for_active(svc_conn, server_id)
-    server = await asyncio.to_thread(svc_conn.compute.get_server, server_id)
-
-    internal_ip = _extract_fixed_ip(server)
-    if not internal_ip:
-        raise RuntimeError(f"Ephemeral Builder VM {server_id}: internal IP를 찾을 수 없습니다")
-
-    # FIP가 설정된 경우만 할당; 없으면 provider 네트워크 fixed IP를 직접 사용
-    if settings.builder_floating_network_id:
-        fip_addr, fip_id = await _allocate_new_fip(svc_conn, server_id, settings.builder_floating_network_id)
-        ssh_host = fip_addr
-    else:
-        fip_addr, fip_id = internal_ip, None
         ssh_host = internal_ip
+        if floating_network_id:
+            ssh_host, fip_id = await _allocate_new_fip(svc_conn, server_id, floating_network_id)
 
-    await _wait_for_ssh(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
-    await _wait_for_cloud_init(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
-
-    _logger.info(
-        "[ephemeral_vm] VM 준비 완료: server_id=%s, host=%s, internal_ip=%s",
-        server_id,
-        ssh_host,
-        internal_ip,
-    )
-    return EphemeralBuilderVM(
-        server_id=server_id,
-        host=ssh_host,
-        username=settings.builder_ssh_user,
-        key_path=settings.builder_ssh_key_path,
-        internal_ip=internal_ip,
-        fip_id=fip_id,
-    )
-
-
-async def delete_ephemeral_vm(svc_conn, server_id: str, fip_id: str | None) -> None:
-    """임시 Builder VM과 FIP를 정리한다. 각 단계는 best-effort로 처리한다."""
-    if fip_id:
-        try:
-            await asyncio.to_thread(svc_conn.network.delete_ip, fip_id)
-            _logger.info("[ephemeral_vm] FIP 반납: %s", fip_id)
-        except Exception:
-            _logger.warning("[ephemeral_vm] FIP 반납 실패: %s", fip_id, exc_info=True)
-
-    try:
-        await asyncio.to_thread(svc_conn.compute.delete_server, server_id)
-        _logger.info("[ephemeral_vm] VM 삭제: %s", server_id)
+        await _wait_for_ssh(ssh_host, key_path, settings.builder_ssh_user)
+        await _wait_for_cloud_init(ssh_host, key_path, settings.builder_ssh_user)
+        return EphemeralBuilderVM(
+            server_id=server_id,
+            host=ssh_host,
+            username=settings.builder_ssh_user,
+            key_path=key_path,
+            keypair_name=keypair_name,
+            internal_ip=internal_ip,
+            fip_id=fip_id,
+        )
     except Exception:
-        _logger.warning("[ephemeral_vm] VM 삭제 실패: %s", server_id, exc_info=True)
+        await delete_ephemeral_vm(
+            svc_conn,
+            server_id=server_id,
+            fip_id=fip_id,
+            keypair_name=keypair_name or None,
+            key_path=key_path or None,
+        )
+        raise
+
+
+async def delete_ephemeral_vm(
+    svc_conn,
+    *,
+    server_id: str | None,
+    fip_id: str | None,
+    keypair_name: str | None,
+    key_path: str | None,
+) -> None:
+    """Best-effort cleanup for every one-use VM resource, including local key material."""
+    if fip_id:
+        with suppress(Exception):
+            await asyncio.to_thread(svc_conn.network.delete_ip, fip_id)
+    if server_id:
+        with suppress(Exception):
+            await asyncio.to_thread(svc_conn.compute.delete_server, server_id)
+    if keypair_name:
+        with suppress(Exception):
+            await asyncio.to_thread(svc_conn.compute.delete_keypair, keypair_name)
+    if key_path:
+        with suppress(FileNotFoundError):
+            os.unlink(key_path)

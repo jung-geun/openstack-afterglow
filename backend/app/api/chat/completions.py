@@ -10,15 +10,18 @@ user 메시지 저장(parent=active_leaf) → engine.stream → parent 체인으
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import select
 
 from app.api.deps import get_token_info
 from app.config import get_settings
@@ -29,10 +32,11 @@ from app.models.chat_contracts import (
     RegenerateRequest,
     UserInputPart,
     text_projection_from_user_input_parts,
+    validate_user_input_parts,
 )
+from app.services.chat import agent_policy, credit, durable_runs, engine, litellm_client
 from app.services.chat import agent_store as ags
 from app.services.chat import conversation_store as cs
-from app.services.chat import credit, durable_runs, engine, litellm_client
 from app.services.chat import extensions_store as es
 from app.services.chat import memory_store as ms
 from app.services.chat import provider_store as ps
@@ -54,7 +58,10 @@ class TempCompletionRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=190)
     features: ChatFeatureOptions = Field(default_factory=ChatFeatureOptions)
     reasoning_effort: ReasoningEffort = "auto"
+    execution_mode: str = Field(default="chat", pattern="^(chat|plan|code)$")
+    code_workspace_id: str | None = Field(default=None, max_length=36)
     skill_ids: list[int] = Field(default_factory=list, max_length=100)
+    temp_thread_id: str | None = Field(default=None, max_length=36)
 
     @field_validator("skill_ids")
     @classmethod
@@ -63,7 +70,39 @@ class TempCompletionRequest(BaseModel):
             raise ValueError("skill_ids must be unique positive ids")
         return value
 
-    temp_thread_id: str | None = Field(default=None, max_length=36)
+    @model_validator(mode="after")
+    def validate_execution_mode(self) -> TempCompletionRequest:
+        if self.execution_mode == "chat" and (
+            self.code_workspace_id is not None or self.features.tool_policy.workspace_write_mode != "ask"
+        ):
+            raise ValueError("chat mode cannot select a code workspace or auto-edit")
+        if self.execution_mode != "code" and self.features.tool_policy.workspace_write_mode == "auto_edit":
+            raise ValueError("auto_edit is only available in code mode")
+        return self
+
+
+class ToolApprovalDecisionRequest(BaseModel):
+    decision: Literal["approve", "deny"]
+
+
+class RunInteractionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    option_ids: list[str] = Field(default_factory=list, max_length=5)
+    text: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("option_ids")
+    @classmethod
+    def validate_option_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value) or any(not option_id for option_id in value):
+            raise ValueError("option_ids must be unique non-empty strings")
+        return value
+
+
+class RunInteractionResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    response: RunInteractionResponse
 
 
 def _capability_gate(feature: str, resolved: dict) -> dict:
@@ -273,19 +312,79 @@ def _model_input(path_messages: list[dict], extra_user: str | None = None) -> li
     return msgs
 
 
-def _tool_selection(agent: dict | None, payload_tool_ids, payload_mcp_ids):
-    """대화별 tool/MCP 선택 계산 — 에이전트 바인딩 시 에이전트가 tool set 소유(빈=제한 없음).
+def _normalized_origin(url: object) -> str | None:
+    if not isinstance(url, str) or not url:
+        return None
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    return f"https://{parsed.hostname.lower()}{f':{parsed.port}' if parsed.port else ''}"
 
-    반환: (selected_tool_ids, selected_mcp_ids) 각각 tuple 또는 None(=활성 전체).
-    """
-    if agent:
-        at = agent.get("tool_ids") or None
-        am = agent.get("mcp_ids") or None
-        return (tuple(at) if at else None, tuple(am) if am else None)
-    return (
-        tuple(payload_tool_ids) if payload_tool_ids is not None else None,
-        tuple(payload_mcp_ids) if payload_mcp_ids is not None else None,
-    )
+
+async def _resolve_extension_selection(
+    agent: dict | None,
+    features: ChatFeatureOptions,
+    *,
+    user_id: str,
+    project_id: str,
+) -> dict[str, list[dict[str, object]]]:
+    """Resolve one owner-scoped, active, frozen extension selection before admission."""
+    if features.tool_policy.mode == "none":
+        return {"tools": [], "mcp": []}
+
+    async def resolve(kind: str, explicit_ids: list[int] | None, agent_key: str) -> list[dict[str, object]]:
+        allowed = [int(item) for item in (agent or {}).get(agent_key, []) if isinstance(item, int)]
+        if agent is None:
+            selected_ids = explicit_ids or []
+        elif explicit_ids is None:
+            selected_ids = allowed
+        else:
+            if not set(explicit_ids) <= set(allowed):
+                raise HTTPException(status_code=422, detail=f"selected {kind} is outside the agent allowlist")
+            selected_ids = explicit_ids
+        if not selected_ids:
+            return []
+        try:
+            visible = await es.list_for_user(kind, user_id=user_id, project_id=project_id, active_only=True)
+            credential_versions = (
+                await es.mcp_credential_versions(selected_ids, user_id=user_id, project_id=project_id)
+                if kind == "mcp"
+                else {}
+            )
+        except es.ChatStorageUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        by_id = {item["id"]: item for item in visible if isinstance(item.get("id"), int)}
+        selected: list[dict[str, object]] = []
+        for item_id in selected_ids:
+            item = by_id.get(item_id)
+            if item is None:
+                raise HTTPException(status_code=404, detail=f"selected {kind} is unavailable")
+            selected_item: dict[str, object] = {
+                "id": item_id,
+                "name": str(item.get("name") or ""),
+                "effect": str(item.get("effect") or "external_mutation"),
+                "origin": _normalized_origin(item.get("url")),
+                "config_fingerprint": es.selection_fingerprint(item),
+            }
+            if kind == "mcp":
+                selected_item["credential_version"] = credential_versions.get(item_id, 0)
+            selected.append(selected_item)
+        return selected
+
+    tools = await resolve("tool", features.tool_policy.enabled_tool_ids, "tool_ids")
+    mcp = await resolve("mcp", features.tool_policy.enabled_mcp_ids, "mcp_ids")
+    return {"tools": tools, "mcp": mcp}
+
+
+def _capability_extension_snapshot(selection: dict[str, list[dict[str, object]]]) -> dict[str, object]:
+    selected = [*selection["tools"], *selection["mcp"]]
+    return {
+        "tool_ids": [item["id"] for item in selection["tools"]],
+        "mcp_ids": [item["id"] for item in selection["mcp"]],
+        "effects": [item["effect"] for item in selected],
+        "origins": [item["origin"] for item in selected if item["origin"]],
+        "config_fingerprints": [item["config_fingerprint"] for item in selected],
+    }
 
 
 async def _load_owned_conv(conversation_id: str, user_id: str, project_id: str) -> dict:
@@ -334,12 +433,27 @@ def _validated_reasoning_effort(value: str, resolved: dict) -> str:
     return effort
 
 
-async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
-    """agent_id 가 주어지면 실행 설정(instructions·model·params) 로드. 접근 불가/미존재 시 404."""
+def _validate_tool_reasoning_compatibility(effort: str, resolved: dict, features: ChatFeatureOptions) -> None:
+    """Reject explicit reasoning levels the OpenAI GPT-5 Chat Completions tools route cannot execute."""
+    if (
+        resolved.get("provider_type") == "openai"
+        and str(resolved.get("model_name") or "").strip().lower().startswith("gpt-5")
+        and features.tool_policy.mode != "none"
+        and effort not in {"auto", "none"}
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="선택한 모델은 도구 사용과 명시적 추론 강도를 함께 지원하지 않습니다. "
+            "도구를 끄거나 추론 강도를 자동 또는 없음으로 선택하세요.",
+        )
+
+
+async def _resolve_agent(agent_id: int | None, user_id: str, project_id: str) -> dict | None:
+    """Resolve only an active caller-owned project agent for an executable run."""
     if agent_id is None:
         return None
     try:
-        agent = await ags.get_agent_for_run(agent_id, user_id=user_id)
+        agent = await ags.get_agent_for_run(agent_id, user_id=user_id, project_id=project_id)
     except ags.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if agent is None:
@@ -350,33 +464,35 @@ async def _resolve_agent(agent_id: int | None, user_id: str) -> dict | None:
 async def _load_skill_snapshot(
     agent: dict | None, payload_skill_ids: list[int], user_id: str, project_id: str
 ) -> tuple[list[str], list[dict[str, int | str]]]:
-    """Load owned active skills once and retain only safe execution provenance."""
-    ids = (agent or {}).get("skill_ids") or payload_skill_ids
-    if not ids:
+    """Resolve each active, authorized skill exactly once and freeze its content provenance."""
+    selected_ids: list[int] = []
+    for item_id in [*(agent or {}).get("skill_ids", []), *payload_skill_ids]:
+        if isinstance(item_id, int) and item_id not in selected_ids:
+            selected_ids.append(item_id)
+    if not selected_ids:
         return [], []
-    want = set(ids)
     try:
         items = await es.list_for_user("skill", user_id=user_id, project_id=project_id, active_only=True)
-    except Exception:
-        logger.warning("스킬 지침 로드 실패", exc_info=True)
-        return [], []
-    selected = [item for item in items if item.get("id") in want]
+    except es.ChatStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    by_id = {item["id"]: item for item in items if isinstance(item.get("id"), int)}
+    selected: list[dict] = []
+    for item_id in selected_ids:
+        item = by_id.get(item_id)
+        if item is None or not isinstance(item.get("instructions"), str):
+            raise HTTPException(status_code=404, detail="selected skill is unavailable")
+        selected.append(item)
     return (
-        [item["instructions"] for item in selected if item.get("instructions")],
+        [item["instructions"] for item in selected],
         [
-            {"id": item["id"], "name": item["name"]}
+            {
+                "id": item["id"],
+                "name": str(item.get("name") or ""),
+                "content_hash": hashlib.sha256(item["instructions"].encode()).hexdigest(),
+            }
             for item in selected
-            if isinstance(item.get("id"), int) and isinstance(item.get("name"), str)
         ],
     )
-
-
-async def _load_skill_instructions(
-    agent: dict | None, payload_skill_ids: list[int], user_id: str, project_id: str
-) -> list[str]:
-    """Compatibility helper for callers that need only the private instructions."""
-    instructions, _ = await _load_skill_snapshot(agent, payload_skill_ids, user_id, project_id)
-    return instructions
 
 
 async def _load_context(
@@ -622,6 +738,16 @@ def _features_payload(features: ChatFeatureOptions) -> dict:
     return features.model_dump(mode="json", by_alias=True)
 
 
+def _admission_execution_protocol_version() -> int:
+    """Admit only workers that this API deployment can execute safely."""
+    version = get_settings().chat_execution_protocol_version
+    try:
+        durable_runs._require_supported_execution_protocol_version(version)
+    except durable_runs.DurableRunInputError as exc:
+        raise HTTPException(status_code=503, detail="configured chat execution protocol is not deployed") from exc
+    return version
+
+
 def _run_error(exc: durable_runs.DurableRunError) -> HTTPException:
     if isinstance(exc, durable_runs.DurableRunConflict):
         return HTTPException(status_code=409, detail=str(exc))
@@ -661,6 +787,8 @@ async def create_completion(
             "parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
             "features": features,
             "agent_id": payload.agent_id,
+            "execution_mode": payload.execution_mode,
+            "code_workspace_id": payload.code_workspace_id,
             "reasoning_effort": payload.reasoning_effort,
             "skill_ids": payload.skill_ids,
         }
@@ -683,19 +811,43 @@ async def create_completion(
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except credit.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    agent = await _resolve_agent(int(payload.agent_id) if payload.agent_id else None, user_id)
+    execution_protocol_version = _admission_execution_protocol_version()
+    agent = await _resolve_agent(int(payload.agent_id) if payload.agent_id else None, user_id, project_id)
+    if payload.execution_mode != "chat":
+        raise HTTPException(status_code=422, detail="requested chat execution mode is not available")
+    try:
+        execution_policy = (
+            agent_policy.resolve_execution_policy(agent, execution_mode=payload.execution_mode)
+            if execution_protocol_version == 2
+            else None
+        )
+        direct_effects = (
+            agent_policy.resolve_direct_effects(agent, execution_mode=payload.execution_mode)
+            if execution_protocol_version == 2
+            else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     resolved = await _resolve_model(payload.model_id)
+    extension_selection = await _resolve_extension_selection(
+        agent, payload.features, user_id=user_id, project_id=project_id
+    )
     feature_routes = await _resolve_feature_routes(payload.features)
     _require_execution_capability(payload.features, resolved, parts=payload.parts, feature_routes=feature_routes)
     reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    _validate_tool_reasoning_compatibility(reasoning_effort, resolved, payload.features)
     skill_instructions, skill_snapshot = await _load_skill_snapshot(agent, payload.skill_ids, user_id, project_id)
     input_messages = _model_input(path["messages"], extra_user=message_text)
     workspace_instr, memories = await _load_context(conv, user_id, project_id, include_memory=payload.features.memory)
-    skill_instructions = await _load_skill_instructions(agent, payload.skill_ids, user_id, project_id)
     input_messages, temperature, max_tokens = _apply_context(
         agent, workspace_instr, memories, input_messages, None, None, skill_instructions=skill_instructions
     )
     capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
+    if execution_policy is not None and direct_effects is not None:
+        capability_snapshot["execution_policy"] = execution_policy.model_dump(mode="json")
+        capability_snapshot["direct_effects"] = sorted(direct_effects)
+    capability_snapshot["extensions"] = _capability_extension_snapshot(extension_selection)
+    capability_snapshot["execution_protocol_version"] = execution_protocol_version
     try:
         return await durable_runs.create_persistent_run(
             project_id=project_id,
@@ -716,9 +868,19 @@ async def create_completion(
                 "temperature": temperature,
                 "reasoning_effort": reasoning_effort,
                 "skill_ids": payload.skill_ids,
+                "extension_snapshot": extension_selection,
+                **(
+                    {
+                        "execution_policy": execution_policy.model_dump(mode="json"),
+                        "allowed_direct_effects": sorted(direct_effects),
+                    }
+                    if execution_policy is not None and direct_effects is not None
+                    else {}
+                ),
             },
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
+            execution_protocol_version=execution_protocol_version,
         )
     except durable_runs.DurableRunError as exc:
         raise _run_error(exc) from exc
@@ -767,10 +929,12 @@ async def regenerate_message(
             return existing
     except durable_runs.DurableRunError as exc:
         raise _run_error(exc) from exc
+    execution_protocol_version = _admission_execution_protocol_version()
     resolved = await _resolve_model(payload.model_id)
     feature_routes = await _resolve_feature_routes(payload.features)
     _require_execution_capability(payload.features, resolved, feature_routes=feature_routes)
     reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    _validate_tool_reasoning_compatibility(reasoning_effort, resolved, payload.features)
     path_messages = await cs.path_ending_at(
         conversation_id, user_id=user_id, project_id=project_id, message_id=turn_user["id"]
     )
@@ -779,6 +943,7 @@ async def regenerate_message(
         None, workspace_instr, memories, _model_input(path_messages), None, None, skill_instructions=[]
     )
     capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
+    capability_snapshot["execution_protocol_version"] = execution_protocol_version
     try:
         return await durable_runs.create_run(
             project_id=project_id,
@@ -799,6 +964,181 @@ async def regenerate_message(
             },
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
+            execution_protocol_version=execution_protocol_version,
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.post(
+    "/conversations/{conversation_id}/runs/{run_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_failed_run(
+    conversation_id: str,
+    run_id: str,
+    idempotency_key: str = Header(...),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = token_info["project_id"]
+    user_id = token_info["user_id"]
+    conv = await _load_owned_conv(conversation_id, user_id, project_id)
+
+    intent = {
+        "endpoint": "retry",
+        "conversation_id": conversation_id,
+        "source_run_id": run_id,
+    }
+    try:
+        existing = await durable_runs.existing_run_for_intent(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
+        )
+        if existing is not None:
+            return existing
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+    try:
+        await credit.precheck(user_id, project_id)
+    except credit.QuotaExceeded as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except credit.ChatStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    factory = durable_runs._factory()
+    async with factory() as session:
+        source_run = (
+            (
+                await session.execute(
+                    select(durable_runs.ChatRun).where(
+                        durable_runs.ChatRun.id == run_id,
+                        durable_runs.ChatRun.conversation_id == conversation_id,
+                        durable_runs.ChatRun.user_id == user_id,
+                        durable_runs.ChatRun.project_id == project_id,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+    if source_run is None:
+        raise HTTPException(status_code=404, detail="재시도할 실행 기록을 찾을 수 없습니다")
+
+    if source_run.status not in {"failed", "canceled"}:
+        raise HTTPException(status_code=400, detail="실패하거나 취소된 실행만 재시도할 수 있습니다")
+
+    if source_run.user_message_id is None:
+        raise HTTPException(status_code=400, detail="재시도할 사용자 메시지를 찾을 수 없습니다")
+
+    message_id = source_run.user_message_id
+
+    try:
+        raw_payload = cs._dec(source_run.request_payload) if source_run.request_payload else "{}"
+        payload_dict = json.loads(raw_payload or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="실행 정보를 복원할 수 없습니다") from exc
+
+    model_name = source_run.model_name
+    agent_id = source_run.agent_id
+    raw_features = payload_dict.get("features")
+    features_obj = (
+        ChatFeatureOptions.model_validate(raw_features) if isinstance(raw_features, dict) else ChatFeatureOptions()
+    )
+    features_dict = _features_payload(features_obj)
+    reasoning_effort = payload_dict.get("reasoning_effort", "auto")
+    skill_ids = payload_dict.get("skill_ids", [])
+    raw_parts = payload_dict.get("input_parts")
+    path_messages = await cs.path_ending_at(
+        conversation_id, user_id=user_id, project_id=project_id, message_id=message_id
+    )
+    if isinstance(raw_parts, list) and raw_parts:
+        typed_parts = validate_user_input_parts(raw_parts)
+    else:
+        target_msg = next((m for m in reversed(path_messages) if m["id"] == message_id), None)
+        if target_msg and target_msg.get("parts"):
+            typed_parts = validate_user_input_parts(target_msg["parts"])
+        elif target_msg and target_msg.get("content"):
+            typed_parts = validate_user_input_parts([{"type": "text", "text": target_msg["content"]}])
+        else:
+            typed_parts = validate_user_input_parts([{"type": "text", "text": ""}])
+    user_parts = [part.model_dump(mode="json", by_alias=True) for part in typed_parts]
+    execution_protocol_version = _admission_execution_protocol_version()
+    agent = await _resolve_agent(agent_id, user_id, project_id)
+    if agent_id and agent is None:
+        raise HTTPException(status_code=404, detail=f"에이전트 {agent_id} 를 찾을 수 없습니다")
+
+    try:
+        execution_policy = (
+            agent_policy.resolve_execution_policy(agent, execution_mode=source_run.execution_mode)
+            if execution_protocol_version == 2
+            else None
+        )
+        direct_effects = (
+            agent_policy.resolve_direct_effects(agent, execution_mode=source_run.execution_mode)
+            if execution_protocol_version == 2
+            else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    resolved = await _resolve_model(model_name)
+    extension_selection = await _resolve_extension_selection(
+        agent, features_obj, user_id=user_id, project_id=project_id
+    )
+    feature_routes = await _resolve_feature_routes(features_obj)
+    _require_execution_capability(features_obj, resolved, parts=typed_parts, feature_routes=feature_routes)
+    reasoning_effort = _validated_reasoning_effort(reasoning_effort, resolved)
+    _validate_tool_reasoning_compatibility(reasoning_effort, resolved, features_obj)
+    skill_instructions, skill_snapshot = await _load_skill_snapshot(agent, skill_ids, user_id, project_id)
+
+    workspace_instr, memories = await _load_context(conv, user_id, project_id, include_memory=features_obj.memory)
+    input_messages, temperature, max_tokens = _apply_context(
+        agent, workspace_instr, memories, _model_input(path_messages), None, None, skill_instructions=skill_instructions
+    )
+    capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features_dict, feature_routes=feature_routes)
+    if execution_policy is not None and direct_effects is not None:
+        capability_snapshot["execution_policy"] = execution_policy.model_dump(mode="json")
+        capability_snapshot["direct_effects"] = sorted(direct_effects)
+    capability_snapshot["extensions"] = _capability_extension_snapshot(extension_selection)
+    capability_snapshot["execution_protocol_version"] = execution_protocol_version
+
+    try:
+        return await durable_runs.create_run(
+            project_id=project_id,
+            user_id=user_id,
+            client_request_id=idempotency_key,
+            intent=intent,
+            conversation_id=conversation_id,
+            temp_thread_id=None,
+            model_name=model_name,
+            agent_id=agent.get("id") if agent else None,
+            user_message_id=message_id,
+            request_payload={
+                "input_messages": input_messages,
+                "input_parts": user_parts,
+                "features": features_dict,
+                "skill_snapshot": skill_snapshot,
+                "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
+                "temperature": temperature,
+                "reasoning_effort": reasoning_effort,
+                "skill_ids": skill_ids,
+                "extension_snapshot": extension_selection,
+                **(
+                    {
+                        "execution_policy": execution_policy.model_dump(mode="json"),
+                        "allowed_direct_effects": sorted(direct_effects),
+                    }
+                    if execution_policy is not None and direct_effects is not None
+                    else {}
+                ),
+            },
+            capability_snapshot=capability_snapshot,
+            pricing_snapshot=pricing_snapshot,
+            execution_protocol_version=execution_protocol_version,
         )
     except durable_runs.DurableRunError as exc:
         raise _run_error(exc) from exc
@@ -825,6 +1165,8 @@ async def temp_completion(
         "features": features,
         "reasoning_effort": payload.reasoning_effort,
         "skill_ids": payload.skill_ids,
+        "execution_mode": payload.execution_mode,
+        "code_workspace_id": payload.code_workspace_id,
     }
     try:
         existing = await durable_runs.existing_run_for_intent(
@@ -843,11 +1185,20 @@ async def temp_completion(
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except credit.ChatStorageUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    execution_protocol_version = _admission_execution_protocol_version()
     resolved = await _resolve_model(payload.model_id)
+    if payload.execution_mode != "chat":
+        raise HTTPException(status_code=422, detail="requested chat execution mode is not available")
     feature_routes = await _resolve_feature_routes(payload.features)
+    extension_selection = await _resolve_extension_selection(
+        None, payload.features, user_id=user_id, project_id=project_id
+    )
     _require_execution_capability(payload.features, resolved, parts=payload.parts, feature_routes=feature_routes)
     reasoning_effort = _validated_reasoning_effort(payload.reasoning_effort, resolved)
+    _validate_tool_reasoning_compatibility(reasoning_effort, resolved, payload.features)
     capability_snapshot, pricing_snapshot = _run_snapshots(resolved, features, feature_routes=feature_routes)
+    capability_snapshot["extensions"] = _capability_extension_snapshot(extension_selection)
+    capability_snapshot["execution_protocol_version"] = execution_protocol_version
     skill_instructions, skill_snapshot = await _load_skill_snapshot(None, payload.skill_ids, user_id, project_id)
     input_messages, temperature, max_tokens = _apply_context(
         None,
@@ -875,9 +1226,11 @@ async def temp_completion(
                 "reasoning_effort": reasoning_effort,
                 "skill_snapshot": skill_snapshot,
                 "skill_ids": payload.skill_ids,
+                "extension_snapshot": extension_selection,
             },
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,
+            execution_protocol_version=execution_protocol_version,
         )
     except durable_runs.DurableRunError as exc:
         raise _run_error(exc) from exc
@@ -995,6 +1348,44 @@ async def get_run(run_id: str, token_info: dict = Depends(get_token_info)):
     try:
         return await durable_runs.owned_run_response(
             run_id=run_id, project_id=token_info["project_id"], user_id=token_info["user_id"]
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.post("/runs/{run_id}/approvals/{call_id}")
+async def resolve_tool_approval(
+    run_id: str,
+    call_id: str,
+    payload: ToolApprovalDecisionRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        return await durable_runs.resolve_tool_approval(
+            run_id=run_id,
+            call_id=call_id,
+            decision=payload.decision,
+            project_id=token_info["project_id"],
+            user_id=token_info["user_id"],
+        )
+    except durable_runs.DurableRunError as exc:
+        raise _run_error(exc) from exc
+
+
+@router.post("/runs/{run_id}/interactions/{interaction_id}")
+async def resolve_run_interaction(
+    run_id: str,
+    interaction_id: str,
+    payload: RunInteractionResponseRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        return await durable_runs.resolve_run_interaction(
+            run_id=run_id,
+            interaction_id=interaction_id,
+            response=payload.response.model_dump(),
+            project_id=token_info["project_id"],
+            user_id=token_info["user_id"],
         )
     except durable_runs.DurableRunError as exc:
         raise _run_error(exc) from exc

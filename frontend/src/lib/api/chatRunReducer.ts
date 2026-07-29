@@ -1,4 +1,4 @@
-import type { ChatPart, ChatRunEvent, RunStage, UsageComponent } from './chatContracts';
+import type { ChatPart, ChatRunEvent, ChatRunStatus, RunStage, UsageComponent } from './chatContracts';
 
 export interface RunToolView {
 	callId: string;
@@ -6,16 +6,49 @@ export interface RunToolView {
 	arguments: Record<string, unknown>;
 	status: 'running' | 'completed' | 'failed';
 	content: ChatPart[];
+	errorCode: string | null;
 }
+
+export type RunActivityItem =
+	| {
+			id: string;
+			kind: 'stage';
+			seq: number;
+			createdAt: string;
+			stage: RunStage;
+			toolName: string | null;
+	  }
+	| {
+			id: string;
+			kind: 'reasoning';
+			seq: number;
+			createdAt: string;
+			text: string;
+			active: boolean;
+	  }
+	| {
+			id: string;
+			kind: 'tool';
+			seq: number;
+			createdAt: string;
+			callId: string;
+			name: string;
+			arguments: Record<string, unknown>;
+			status: 'running' | 'completed' | 'failed';
+			content: ChatPart[];
+			errorCode: string | null;
+	  };
 
 export interface RunViewState {
 	runId: string;
 	lastSeq: number;
-	status: 'queued' | 'running' | 'awaiting_approval' | 'finalizing' | 'completed' | 'failed' | 'canceled';
+	status: ChatRunStatus;
 	messageId: string | null;
 	parts: ChatPart[];
+	partsByMessage: Record<string, ChatPart[]>;
 	tools: Record<string, RunToolView>;
 	usage: { promptTokens: number; completionTokens: number; components: UsageComponent[] } | null;
+	activity: RunActivityItem[];
 	error: string | null;
 	stage: RunStage | null;
 	stageStartedAt: string | null;
@@ -29,8 +62,10 @@ export function createRunViewState(runId: string): RunViewState {
 		status: 'queued',
 		messageId: null,
 		parts: [],
+		partsByMessage: {},
 		tools: {},
 		usage: null,
+		activity: [],
 		error: null,
 		stage: null,
 		stageStartedAt: null,
@@ -53,6 +88,14 @@ function applyDelta(parts: ChatPart[], index: number, type: 'text' | 'reasoning'
 	return replacePart(parts, index, part);
 }
 
+function replaceActivity(activity: RunActivityItem[], item: RunActivityItem): RunActivityItem[] {
+	const index = activity.findIndex((current) => current.id === item.id);
+	if (index < 0) return [...activity, item];
+	const next = activity.slice();
+	next[index] = item;
+	return next;
+}
+
 /** Applies a strictly contiguous event; duplicates are harmless and gaps are rejected. */
 export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunViewState {
 	if (event.run_id !== state.runId) throw new Error('chat event run mismatch');
@@ -68,16 +111,74 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 			next.stage = event.payload.stage;
 			next.stageStartedAt = event.created_at;
 			next.stageToolName = event.payload.tool_name;
+			next.activity = [
+				...next.activity,
+				{
+					id: `stage:${event.seq}`,
+					kind: 'stage',
+					seq: event.seq,
+					createdAt: event.created_at,
+					stage: event.payload.stage,
+					toolName: event.payload.tool_name
+				}
+			];
 			break;
-		case 'message.created':
+		case 'message.created': {
+			const parts = next.partsByMessage[event.payload.message_id] ?? [];
 			next.messageId = event.payload.message_id;
+			next.partsByMessage = { ...next.partsByMessage, [event.payload.message_id]: parts };
+			next.parts = parts;
 			break;
-		case 'part.delta':
-			next.parts = applyDelta(next.parts, event.payload.part_index, event.payload.part_type, event.payload.delta);
+		}
+		case 'part.delta': {
+			const parts = applyDelta(
+				next.partsByMessage[event.payload.message_id] ?? [],
+				event.payload.part_index,
+				event.payload.part_type,
+				event.payload.delta
+			);
+			next.partsByMessage = { ...next.partsByMessage, [event.payload.message_id]: parts };
+			if (event.payload.message_id === next.messageId) next.parts = parts;
+			if (event.payload.part_type === 'reasoning') {
+				const id = `reasoning:${event.payload.message_id}:${event.payload.part_index}`;
+				const existing = next.activity.find(
+					(item): item is Extract<RunActivityItem, { kind: 'reasoning' }> => item.id === id && item.kind === 'reasoning'
+				);
+				next.activity = replaceActivity(next.activity, {
+					id,
+					kind: 'reasoning',
+					seq: existing?.seq ?? event.seq,
+					createdAt: existing?.createdAt ?? event.created_at,
+					text: (parts[event.payload.part_index] as Extract<ChatPart, { type: 'reasoning' }>).text,
+					active: true
+				});
+			}
 			break;
-		case 'part.completed':
-			next.parts = replacePart(next.parts, event.payload.part_index, event.payload.part);
+		}
+		case 'part.completed': {
+			const parts = replacePart(
+				next.partsByMessage[event.payload.message_id] ?? [],
+				event.payload.part_index,
+				event.payload.part
+			);
+			next.partsByMessage = { ...next.partsByMessage, [event.payload.message_id]: parts };
+			if (event.payload.message_id === next.messageId) next.parts = parts;
+			if (event.payload.part.type === 'reasoning') {
+				const id = `reasoning:${event.payload.message_id}:${event.payload.part_index}`;
+				const existing = next.activity.find(
+					(item): item is Extract<RunActivityItem, { kind: 'reasoning' }> => item.id === id && item.kind === 'reasoning'
+				);
+				next.activity = replaceActivity(next.activity, {
+					id,
+					kind: 'reasoning',
+					seq: existing?.seq ?? event.seq,
+					createdAt: existing?.createdAt ?? event.created_at,
+					text: event.payload.part.text,
+					active: false
+				});
+			}
 			break;
+		}
 		case 'tool.call.started':
 			next.tools = {
 				...next.tools,
@@ -86,9 +187,22 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 					name: event.payload.name,
 					arguments: event.payload.arguments,
 					status: 'running',
-					content: []
+					content: [],
+					errorCode: null
 				}
 			};
+			next.activity = replaceActivity(next.activity, {
+				id: `tool:${event.payload.call_id}`,
+				kind: 'tool',
+				seq: event.seq,
+				createdAt: event.created_at,
+				callId: event.payload.call_id,
+				name: event.payload.name,
+				arguments: event.payload.arguments,
+				status: 'running',
+				content: [],
+				errorCode: null
+			});
 			break;
 		case 'tool.call.completed': {
 			const existing = next.tools[event.payload.call_id];
@@ -99,9 +213,26 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 					name: event.payload.name,
 					arguments: existing?.arguments ?? {},
 					status: event.payload.status,
-					content: event.payload.content
+					content: event.payload.content,
+					errorCode: event.payload.error_code
 				}
 			};
+			const existingActivity = next.activity.find(
+				(item): item is Extract<RunActivityItem, { kind: 'tool' }> =>
+					item.id === `tool:${event.payload.call_id}` && item.kind === 'tool'
+			);
+			next.activity = replaceActivity(next.activity, {
+				id: `tool:${event.payload.call_id}`,
+				kind: 'tool',
+				seq: existingActivity?.seq ?? event.seq,
+				createdAt: existingActivity?.createdAt ?? event.created_at,
+				callId: event.payload.call_id,
+				name: event.payload.name,
+				arguments: existing?.arguments ?? {},
+				status: event.payload.status,
+				content: event.payload.content,
+				errorCode: event.payload.error_code
+			});
 			break;
 		}
 		case 'usage.updated':

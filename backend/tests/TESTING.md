@@ -74,9 +74,9 @@ export AFTERGLOW_TEST_USER_DOMAIN=Default
 
 ### 우선순위
 
-환경변수 > `credentials.toml` > `config.toml [openstack]`
+환경변수 > `credentials.toml` > `afterglow.conf [openstack]`
 
-admin 계정은 `config.toml [openstack]` 으로 폴백되므로 로컬에서 별도 설정 없이도 admin 테스트는 동작한다.
+admin 계정은 `afterglow.conf [openstack]`으로 폴백되므로 로컬에서 별도 설정 없이도 admin 테스트는 동작한다.
 일반 유저 계정이 없으면 `user_client` 픽스처가 필요한 테스트는 자동으로 **skip** 된다.
 
 ---
@@ -107,7 +107,7 @@ admin 계정은 `config.toml [openstack]` 으로 폴백되므로 로컬에서 �
 
 ## 선택적 서비스 테스트
 
-Manila, Magnum, Zun, k3s 는 `config.toml [services]` 에서 활성화되어야 라우터가 등록된다.
+Manila, Magnum, Zun, k3s 는 `afterglow.conf [services]` 에서 활성화되어야 라우터가 등록된다.
 비활성화 상태에서 해당 테스트를 실행하면 **skip** 된다.
 
 ```bash
