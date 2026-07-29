@@ -59,6 +59,30 @@ async def test_upload_image_success(client, mock_conn):
     body = resp.json()
     assert body["id"] == "img-001"
     assert body["disk_format"] == "raw"
+    assert body["name"] == "test-image:latest"
+    mock_conn.image.create_image.assert_called_once()
+    assert mock_conn.image.create_image.call_args.kwargs["name"] == "my-image:latest"
+
+
+@pytest.mark.asyncio
+async def test_upload_image_explicit_tag_is_preserved(client, mock_conn):
+    fake_img = _make_fake_image(name="ubuntu:24.04")
+    mock_conn.image.create_image = MagicMock(return_value=fake_img)
+
+    with patch("app.api.common.activity_recorder.rec"):
+        resp = await client.post("/api/v1/images", files=_upload_form(name="ubuntu:24.04"))
+
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "ubuntu:24.04"
+    assert mock_conn.image.create_image.call_args.kwargs["name"] == "ubuntu:24.04"
+
+
+@pytest.mark.asyncio
+async def test_upload_image_invalid_reference_returns_400(client, mock_conn):
+    with patch("app.api.common.activity_recorder.rec"):
+        resp = await client.post("/api/v1/images", files=_upload_form(name="Ubuntu 24.04"))
+
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

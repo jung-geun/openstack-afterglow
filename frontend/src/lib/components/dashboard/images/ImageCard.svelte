@@ -68,6 +68,7 @@
 			onclick={() => onSelect(img.id)}
 		>
 			<div class="text-white text-[13px] font-medium truncate font-mono">{img.name}</div>
+			<div class="text-[10px] text-gray-500 mt-0.5 font-mono">tag: {img.tag ?? 'latest'}</div>
 			<div class="text-[11px] text-gray-500 mt-0.5">{img.os_distro ? osLabel(img.os_distro) : 'Unknown'}</div>
 		</button>
 	</div>

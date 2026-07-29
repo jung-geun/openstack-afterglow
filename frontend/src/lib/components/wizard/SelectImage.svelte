@@ -54,6 +54,8 @@
 		searchTerm.trim()
 			? distroFiltered.filter(i =>
 				i.name.toLowerCase().includes(searchTerm.trim().toLowerCase()) ||
+				(i.repository ?? '').toLowerCase().includes(searchTerm.trim().toLowerCase()) ||
+				(i.tag ?? 'latest').toLowerCase().includes(searchTerm.trim().toLowerCase()) ||
 				(i.os_distro ?? '').toLowerCase().includes(searchTerm.trim().toLowerCase())
 			)
 			: distroFiltered
@@ -163,6 +165,7 @@
 
 			<!-- 메타 -->
 			<div class="flex items-center gap-2 text-[11px] text-gray-500 font-mono pt-2 mt-2 border-t border-gray-800">
+				<span class="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-400 text-[10px]">tag:{img.tag ?? 'latest'}</span>
 				{#if img.disk_format}
 					<span class="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-400 text-[10px] lowercase">{img.disk_format}</span>
 				{/if}

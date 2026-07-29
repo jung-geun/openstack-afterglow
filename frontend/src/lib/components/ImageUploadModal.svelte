@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { uploadQueue } from '$lib/stores/uploadQueue';
+	import { parseImageReference, sanitizeImageFilename } from '$lib/utils/imageReference';
 
 	interface Props {
 		open: boolean;
@@ -25,7 +26,7 @@
 	$effect(() => {
 		if (initialFile) {
 			file = initialFile;
-			if (!name) name = initialFile.name.replace(/\.[^.]+$/, '');
+			if (!name) name = sanitizeImageFilename(initialFile.name);
 		}
 	});
 
@@ -51,7 +52,7 @@
 		const f = input.files?.[0];
 		if (f) {
 			file = f;
-			if (!name) name = f.name.replace(/\.[^.]+$/, '');
+			if (!name) name = sanitizeImageFilename(f.name);
 		}
 	}
 
@@ -74,7 +75,7 @@
 		const f = e.dataTransfer?.files?.[0];
 		if (f) {
 			file = f;
-			if (!name) name = f.name.replace(/\.[^.]+$/, '');
+			if (!name) name = sanitizeImageFilename(f.name);
 		}
 	}
 
@@ -89,9 +90,16 @@
 		formError = '';
 		if (!name.trim()) { formError = '이미지 이름을 입력하세요.'; return; }
 		if (!file) { formError = '업로드할 파일을 선택하세요.'; return; }
+		let normalizedName: string;
+		try {
+			normalizedName = parseImageReference(name).name;
+		} catch (error) {
+			formError = error instanceof Error ? error.message : '이미지 이름 형식이 올바르지 않습니다.';
+			return;
+		}
 
 		const extraFields: Record<string, string> = {
-			name: name.trim(),
+			name: normalizedName,
 			disk_format: diskFormat,
 			visibility,
 		};
@@ -172,9 +180,10 @@
 						id="img-name"
 						bind:value={name}
 						type="text"
-						placeholder="my-custom-image"
+						placeholder="ubuntu:latest"
 						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
 					/>
+					<div class="text-[11px] text-gray-500 mt-1">repository:tag 형식이며 tag를 생략하면 latest가 사용됩니다. 예: ubuntu:24.04</div>
 				</div>
 
 				<div class="grid grid-cols-2 gap-3">

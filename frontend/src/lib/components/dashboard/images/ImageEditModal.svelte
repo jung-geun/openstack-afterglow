@@ -69,6 +69,7 @@
 				<div>
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름
 						<input bind:value={form.name} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+						<span class="block text-[11px] text-gray-500 mt-1">repository:tag 형식이며 tag를 생략하면 latest가 사용됩니다.</span>
 					</label>
 				</div>
 				<div>

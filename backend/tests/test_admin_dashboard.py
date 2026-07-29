@@ -202,6 +202,20 @@ async def test_bulk_action_stop_records_activity(admin_client, mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_bulk_snapshot_defaults_latest_tag(admin_client, mock_conn):
+    mock_conn.compute.get_server.return_value = MagicMock(id="s1")
+
+    with patch("app.api.identity.admin_dashboard.rec", new_callable=AsyncMock):
+        resp = await admin_client.post(
+            "/api/v1/admin/instances/bulk-action",
+            json={"instance_ids": ["s1"], "action": "snapshot"},
+        )
+
+    assert resp.status_code == 200
+    assert mock_conn.compute.create_server_image.call_args.kwargs["name"] == "snapshot-s1:latest"
+
+
+@pytest.mark.asyncio
 async def test_bulk_action_empty_ids_returns_400(admin_client, mock_conn):
     resp = await admin_client.post(
         "/api/v1/admin/instances/bulk-action",

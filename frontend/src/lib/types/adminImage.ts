@@ -2,6 +2,8 @@ export interface AdminImage {
 	id: string;
 	name: string;
 	status: string;
+	repository?: string;
+	tag?: string;
 	size: number;
 	min_disk: number;
 	min_ram: number;

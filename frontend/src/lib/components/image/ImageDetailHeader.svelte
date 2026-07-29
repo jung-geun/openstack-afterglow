@@ -14,6 +14,7 @@
 	<div class="min-w-0 pr-4">
 		{#if s.image}
 			<h2 class="text-lg font-bold text-white truncate">{s.image.name}</h2>
+			<div class="text-xs text-gray-500 font-mono mt-1">repository: {s.image.repository ?? s.image.name} · tag: {s.image.tag ?? 'latest'}</div>
 			<div class="flex items-center gap-2 mt-1.5 flex-wrap">
 				<span class="px-2 py-0.5 rounded text-xs font-medium {s.image.status === 'active' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">
 					{s.image.status}

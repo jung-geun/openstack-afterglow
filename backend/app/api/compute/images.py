@@ -16,6 +16,7 @@ from app.models.compute import ImageDetail, ImageInfo
 from app.rate_limit import limiter
 from app.services import glance
 from app.services.cache import cached_call, invalidate, ttl_static
+from app.services.image_refs import ImageReferenceError, image_reference_fields, normalize_image_reference
 
 router = APIRouter()
 
@@ -77,6 +78,10 @@ async def upload_image(
         raise HTTPException(status_code=403, detail="public/community 가시성은 시스템 관리자만 설정할 수 있습니다")
     if not (name or "").strip():
         raise HTTPException(status_code=400, detail="이미지 이름이 비어 있습니다")
+    try:
+        normalized_name = normalize_image_reference(name)
+    except ImageReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     settings = get_settings()
     max_bytes = settings.app_max_upload_gb * 1024**3
@@ -95,7 +100,7 @@ async def upload_image(
         img = await asyncio.to_thread(
             glance.create_image,
             conn,
-            name=name.strip(),
+            name=normalized_name,
             disk_format=disk_format,
             visibility=visibility,
             data=file.file,
@@ -103,7 +108,15 @@ async def upload_image(
         )
         await invalidate(f"afterglow:glance:{pid}:images")
         await rec(token_info, conn, resource_type="image", action="create", resource_id=getattr(img, "id", None))
-        return {"id": img.id, "name": img.name, "status": img.status, "disk_format": img.disk_format}
+        display_name, repository, tag = image_reference_fields(getattr(img, "name", None))
+        return {
+            "id": img.id,
+            "name": display_name,
+            "repository": repository,
+            "tag": tag,
+            "status": img.status,
+            "disk_format": img.disk_format,
+        }
     except Exception as e:
         await rec(token_info, conn, resource_type="image", action="create", status="failed", error_message=str(e)[:500])
         raise HTTPException(status_code=500, detail=f"이미지 업로드 실패: {e}")
@@ -127,6 +140,7 @@ async def delete_image(
 ):
     try:
         await asyncio.to_thread(glance.delete_image, conn, image_id)
+        await invalidate(f"afterglow:glance:{getattr(conn, '_afterglow_project_id', None)}:images")
     except Exception:
         raise HTTPException(status_code=500, detail="이미지 삭제 실패")
 
@@ -137,18 +151,25 @@ async def update_image(
     req: UpdateImageRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    normalized_name = None
+    if req.name is not None:
+        try:
+            normalized_name = normalize_image_reference(req.name)
+        except ImageReferenceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         result = await asyncio.to_thread(
             glance.update_image_metadata,
             conn,
             image_id,
-            req.name,
+            normalized_name,
             req.os_distro,
             req.os_type,
             req.min_disk,
             req.min_ram,
             req.visibility,
         )
+        await invalidate(f"afterglow:glance:{getattr(conn, '_afterglow_project_id', None)}:images")
         return result
     except Exception:
         raise HTTPException(status_code=500, detail="이미지 메타데이터 수정 실패")

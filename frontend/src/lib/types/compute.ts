@@ -44,6 +44,8 @@ export interface ImageInfo {
   name: string;
   status: string;
   visibility?: string;
+  repository?: string;
+  tag?: string;
   size?: number;
   min_disk?: number;
   min_ram?: number;

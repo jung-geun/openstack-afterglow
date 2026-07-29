@@ -14,6 +14,8 @@ class ImageInfo(BaseModel):
     id: str
     name: str
     status: str
+    repository: str = ""
+    tag: str = "latest"
     size: int | None = None
     min_disk: int = 0
     min_ram: int = 0

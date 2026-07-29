@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     import openstack
 
 from app.models.compute import ImageDetail, ImageInfo
+from app.services.image_refs import image_reference_fields, normalize_image_reference
 
 
 def list_images(conn: openstack.connection.Connection, project_id: str | None = None) -> list[ImageInfo]:
@@ -16,13 +17,16 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
         if img.id in seen:
             return
         seen.add(img.id)
+        display_name, repository, tag = image_reference_fields(getattr(img, "name", None))
         props = img.properties or {}
-        os_distro = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
+        os_distro = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(display_name)
         images.append(
             ImageInfo(
                 id=img.id,
-                name=img.name,
+                name=display_name,
                 status=img.status,
+                repository=repository,
+                tag=tag,
                 size=img.size,
                 min_disk=img.min_disk or 0,
                 min_ram=img.min_ram or 0,
@@ -59,8 +63,9 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
 
 def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDetail:
     img = conn.image.get_image(image_id)
+    display_name, repository, tag = image_reference_fields(getattr(img, "name", None))
     raw_props = dict(img.properties or {})
-    os_distro = getattr(img, "os_distro", None) or raw_props.get("os_distro") or _guess_distro(img.name)
+    os_distro = getattr(img, "os_distro", None) or raw_props.get("os_distro") or _guess_distro(display_name)
 
     # SDK 가 Image 본문 필드로 따로 노출하는 키들을 properties 에 병합 (OpenStack CLI 와 동일한 뷰)
     _sdk_fields: dict = {
@@ -78,8 +83,10 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
 
     return ImageDetail(
         id=img.id,
-        name=img.name,
+        name=display_name,
         status=img.status,
+        repository=repository,
+        tag=tag,
         size=img.size,
         min_disk=img.min_disk or 0,
         min_ram=img.min_ram or 0,
@@ -125,11 +132,12 @@ def create_image(
 
     data는 파일 유사 객체(UploadFile.file)를 그대로 전달.
     """
+    normalized_name = normalize_image_reference(name)
     safe_props: dict = {}
     if properties:
         safe_props = {k: str(v) for k, v in properties.items() if k in _UPLOAD_PROPERTY_WHITELIST}
     return conn.image.create_image(
-        name=name,
+        name=normalized_name,
         disk_format=disk_format,
         container_format=container_format,
         visibility=visibility,
@@ -164,7 +172,7 @@ def update_image_metadata(
     """이미지 메타데이터 업데이트 (소유한 이미지만 가능)."""
     kwargs: dict = {}
     if name is not None:
-        kwargs["name"] = name
+        kwargs["name"] = normalize_image_reference(name)
     if os_distro is not None:
         kwargs["os_distro"] = os_distro
     if os_type is not None:
@@ -177,11 +185,14 @@ def update_image_metadata(
         kwargs["visibility"] = visibility
     img = conn.image.update_image(image_id, **kwargs)
     props = img.properties or {}
-    od = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
+    display_name, repository, tag = image_reference_fields(getattr(img, "name", None))
+    od = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(display_name)
     return ImageInfo(
         id=img.id,
-        name=img.name,
+        name=display_name,
         status=img.status,
+        repository=repository,
+        tag=tag,
         size=img.size,
         min_disk=img.min_disk or 0,
         min_ram=img.min_ram or 0,

@@ -70,6 +70,9 @@ def test_separate_fields_still_populated():
     assert result.os_hash_algo == "sha512"
     assert result.os_hash_value == "abc123"
     assert result.direct_url == "rbd://pool/vol"
+    assert result.name == "test-image:latest"
+    assert result.repository == "test-image"
+    assert result.tag == "latest"
 
 
 def test_os_hidden_is_string_false():

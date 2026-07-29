@@ -48,4 +48,9 @@ describe('ImageCard selection', () => {
 		renderCard({ selectable: false });
 		expect((screen.getByRole('checkbox', { name: 'ubuntu-image 선택' }) as HTMLInputElement).disabled).toBe(true);
 	});
+
+	it('shows the implicit latest tag when the API omits legacy tag fields', () => {
+		renderCard();
+		expect(screen.getByText('tag: latest')).toBeTruthy();
+	});
 });

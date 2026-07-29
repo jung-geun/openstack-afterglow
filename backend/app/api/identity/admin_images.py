@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.api.deps import get_os_conn, require_admin
 from app.models.compute import ImageDetail
 from app.services import glance
+from app.services.image_refs import ImageReferenceError, image_reference_fields, normalize_image_reference
 
 _logger = logging.getLogger(__name__)
 
@@ -38,15 +39,18 @@ class AdminUpdatePropertiesRequest(BaseModel):
 
 
 def _serialize_image(img) -> dict:
+    display_name, repository, tag = image_reference_fields(getattr(img, "name", None))
     return {
         "id": img.id,
-        "name": img.name or "",
+        "name": display_name,
+        "repository": repository,
+        "tag": tag,
         "status": img.status or "",
         "size": img.size or 0,
         "min_disk": img.min_disk or 0,
         "min_ram": img.min_ram or 0,
         "disk_format": img.disk_format or "",
-        "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(img.name or ""),
+        "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(display_name),
         "visibility": img.visibility or "private",
         "owner": img.owner or "",
         "created_at": str(img.created_at) if img.created_at else None,
@@ -91,10 +95,11 @@ async def list_admin_images(
             if visibility:
                 glance_kwargs["visibility"] = visibility
             for img in conn.image.images(**glance_kwargs):
-                name = (img.name or "").lower()
+                item = _serialize_image(img)
+                name = item["name"].lower()
                 if needle and needle not in name:
                     continue
-                matched.append(_serialize_image(img))
+                matched.append(item)
             # marker 기반 슬라이싱 (marker = 직전 페이지 마지막 항목 id)
             start = 0
             if marker:
@@ -134,12 +139,18 @@ async def update_admin_image(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """이미지 메타데이터 수정."""
+    normalized_name = None
+    if req.name is not None:
+        try:
+            normalized_name = normalize_image_reference(req.name)
+        except ImageReferenceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         result = await asyncio.to_thread(
             glance.update_image_metadata,
             conn,
             image_id,
-            req.name,
+            normalized_name,
             req.os_distro,
             req.os_type,
             req.min_disk,
