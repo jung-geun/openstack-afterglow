@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import BIGINT, CHAR, INT, JSON, VARCHAR, DateTime, ForeignKey, Index, Numeric
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -121,10 +122,19 @@ class ChatToolApproval(Base):
     expected_state_revision: Mapped[int | None] = mapped_column(BIGINT)
     writer_fence: Mapped[int | None] = mapped_column(BIGINT)
     status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="pending")
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(MYSQL_DATETIME(fsp=6), "mysql"),
+        nullable=False,
+        default=_now,
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(MYSQL_DATETIME(fsp=6), "mysql")
+    )
     decided_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(MYSQL_DATETIME(fsp=6), "mysql"),
+        nullable=False,
+    )
 
     __table_args__ = (Index("idx_chat_tool_approvals_pending_expiry", "status", "expires_at"),)
 

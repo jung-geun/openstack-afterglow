@@ -189,6 +189,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  postgres:
+    image: postgres:16
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_DB: afterglow_checkpoints
+      POSTGRES_USER: afterglow
+      POSTGRES_PASSWORD: dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afterglow -d afterglow_checkpoints"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ── 채팅 의미 메모리 테스트 프로필 (pgvector) ────────────────────────────
   pgvector:
     image: pgvector/pgvector:pg16

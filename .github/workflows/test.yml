@@ -82,6 +82,19 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: afterglow_checkpoints
+          POSTGRES_USER: afterglow
+          POSTGRES_PASSWORD: dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U afterglow -d afterglow_checkpoints"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
       redis:
         image: redis:7-alpine
         ports:
@@ -114,6 +127,7 @@ jobs:
           AFTERGLOW_ALLOW_INSECURE: "1"
           AFTERGLOW_REDIS_URL: redis://localhost:6379/0
           AFTERGLOW_TEST_DATABASE_URL: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test
+          AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL: postgresql://afterglow:dev@127.0.0.1:5432/afterglow_checkpoints
         run: npm run test:target -- db
 
   # ─── secret 존재 여부 + Keystone 인증 probe를 job output으로 노출 ──────────

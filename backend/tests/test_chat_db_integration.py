@@ -2,6 +2,7 @@
 
 로컬에서 AFTERGLOW_TEST_DATABASE_URL 미설정 시 자동 skip, CI 의 test-backend-db 잡에서 실행된다.
 실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test \
+     AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL=postgresql://afterglow:dev@127.0.0.1:5433/afterglow_checkpoints \
      pytest tests/test_chat_db_integration.py -v -m db
 
 단위 테스트(mock)가 커버하지 못하는 실 DB 경로를 한 번에 검증:
@@ -139,6 +140,23 @@ def db_url():
     if not url:
         pytest.skip(f"{_DB_URL_ENV} 미설정 — MariaDB 통합 테스트 건너뜀")
     return url
+
+
+@pytest_asyncio.fixture
+async def chat_checkpointer_db(chat_db):
+    """Start the real PostgreSQL checkpointer for v2 durable-run tests."""
+    url = os.environ.get("AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL")
+    if not url:
+        pytest.skip("AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL 미설정 — v2 checkpointer 테스트 건너뜀")
+
+    from app.services.chat.checkpointer import chat_checkpointer
+
+    if not await chat_checkpointer.start(url):
+        pytest.fail("PostgreSQL checkpointer could not be initialized")
+    try:
+        yield chat_checkpointer
+    finally:
+        await chat_checkpointer.close()
 
 
 @pytest_asyncio.fixture
@@ -1227,7 +1245,9 @@ async def test_first_temp_run_idempotency_reuses_thread(chat_db, execution_snaps
     assert second.temp_thread_id == first.temp_thread_id
 
 
-async def test_v2_temp_run_freezes_execution_policy_before_encryption(chat_db, execution_snapshots, monkeypatch):
+async def test_v2_temp_run_freezes_execution_policy_before_encryption(
+    chat_db, execution_snapshots, chat_checkpointer_db, monkeypatch
+):
     from app.models.chat_runs import ChatRun
     from app.services.chat import durable_runs
     from app.services.k3s_crypto import decrypt_chat_content
@@ -2458,7 +2478,9 @@ async def test_v2_queued_cancellation_releases_matching_temp_thread(chat_db):
     assert thread.active_run_id is None
 
 
-async def test_v2_graph_interrupt_persists_hmac_bound_approval_before_resume(chat_db, execution_snapshots, monkeypatch):
+async def test_v2_graph_interrupt_persists_hmac_bound_approval_before_resume(
+    chat_db, execution_snapshots, chat_checkpointer_db, monkeypatch
+):
     from app.models.chat_runs import ChatRun, ChatToolApproval
     from app.services.chat import conversation_store as cs
     from app.services.chat import durable_runs
@@ -2555,7 +2577,9 @@ async def test_v2_graph_interrupt_persists_hmac_bound_approval_before_resume(cha
     ]
 
 
-async def test_v2_duplicate_approval_interrupt_rolls_back_all_calls(chat_db, execution_snapshots, monkeypatch):
+async def test_v2_duplicate_approval_interrupt_rolls_back_all_calls(
+    chat_db, execution_snapshots, chat_checkpointer_db, monkeypatch
+):
     from app.models.chat_runs import ChatToolApproval
     from app.services.chat import conversation_store as cs
     from app.services.chat import durable_runs
