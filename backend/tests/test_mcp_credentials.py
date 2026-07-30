@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -342,3 +343,41 @@ async def test_lumen_ledger_requires_the_frozen_selection_generation():
     owner_lock.lumen_selection_generation = 8
     with pytest.raises(ledger.McpInvocationError, match="selection changed"):
         await ledger._validate_lumen_selection(Session(selection), principal, owner_lock=owner_lock, source="lumen")
+
+
+@pytest.mark.asyncio
+async def test_mounted_mcp_token_endpoint_returns_the_one_time_plaintext_token(client, monkeypatch):
+    expires_at = datetime.now(UTC) + timedelta(days=30)
+    settings = SimpleNamespace(
+        service_mcp_enabled=True,
+        frontend_base_url="https://app.example.test",
+        public_api_base="https://api.example.test",
+        cors_origin_list=("https://app.example.test",),
+    )
+    issued = SimpleNamespace(
+        token_id="token-id",
+        grant_id="grant-id",
+        access_level="read",
+        token="mcp-afgl-one-time-secret",
+        expires_at=expires_at,
+    )
+    captured = {}
+
+    async def issue(*args, **kwargs):
+        captured.update(kwargs)
+        return issued
+
+    monkeypatch.setattr(mcp_access, "get_settings", lambda: settings)
+    monkeypatch.setattr(mcp_access, "_session_factory", lambda: object())
+    monkeypatch.setattr(mcp_access, "issue_personal_token", issue)
+
+    response = await client.post(
+        "/api/v1/auth/mcp-tokens",
+        json={"name": "Desktop client", "access_level": "read"},
+        headers={"Origin": "https://app.example.test", "Sec-Fetch-Site": "same-site"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["token"] == "mcp-afgl-one-time-secret"
+    assert captured["display_name"] == "Desktop client"
+    assert captured["access_level"] == "read"

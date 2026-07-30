@@ -51,7 +51,7 @@ async def test_grant_call_slot_applies_per_grant_rate_and_releases_concurrency(m
         lambda: type(
             "Settings",
             (),
-            {"mcp_read_rate_per_minute": 1, "mcp_mutation_rate_per_minute": 1, "mcp_concurrent_calls": 1},
+            {"mcp_read_rate_per_minute": 1, "mcp_mutation_rate_per_minute": 1, "mcp_concurrent_calls_per_grant": 1},
         )(),
     )
 

@@ -606,6 +606,9 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     lines.append("")
     if mcp:
         lines.append("[mcp]")
+        for key in ("public_url", "oauth_consent_url"):
+            if key in mcp:
+                lines.append(f"{key} = {_toml_str(mcp[key])}")
         for key in (
             "authorization_ticket_ttl_seconds",
             "access_token_ttl_seconds",

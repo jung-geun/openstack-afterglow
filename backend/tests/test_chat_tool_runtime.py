@@ -339,9 +339,6 @@ class TestMcpTools:
         async def fake_list_for_user(*_args, **_kwargs):
             return [{"id": 7, "transport": "http", "url": "https://mcp.example", "headers": {}}]
 
-        async def no_creds(**_kwargs):
-            return {}
-
         async def rotated_version(*_args, **_kwargs):
             return {7: 2}
 
@@ -349,7 +346,6 @@ class TestMcpTools:
             raise AssertionError("MCP network I/O must not occur")
 
         monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
-        monkeypatch.setattr(es, "mcp_all_credentials", no_creds)
         monkeypatch.setattr(es, "mcp_credential_versions", rotated_version)
         monkeypatch.setattr(tool_runtime.mcp_client, "call_tool", unexpected_network_io)
 
@@ -366,8 +362,7 @@ class TestMcpTools:
 
         assert output == "선택되지 않았거나 접근 불가한 MCP 서버입니다."
 
-    async def test_unsatisfied_requirement_server_skipped(self, monkeypatch):
-        """사용자 인증 요구사항 미충족 서버는 노출되지 않고(스킵), 값 채우면 병합되어 노출된다."""
+    async def test_admin_approved_static_headers_reach_only_that_server(self, monkeypatch):
         import app.services.chat.extensions_store as es
 
         async def fake_list_for_user(kind, *, user_id, project_id, active_only=False, reveal_secrets=False):
@@ -375,31 +370,29 @@ class TestMcpTools:
                 return [
                     {
                         "id": 7,
-                        "name": "notion",
+                        "name": "admin-approved",
                         "transport": "http",
                         "url": "https://mcp.example",
-                        "headers": {},
-                        "auth_requirements": [{"key": "Authorization"}],
+                        "headers": {"X-Api-Key": "administrator-secret"},
+                        "auth_mode": "admin",
                     }
                 ]
             return []
 
-        # 값 없음 → 스킵.
-        async def no_creds(*, user_id, project_id):
-            return {}
-
         monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
-        monkeypatch.setattr(es, "mcp_all_credentials", no_creds)
-        assert await tool_runtime._load_mcp(_CTX) == []
 
-        # 사용자 값 채움 → 병합되어 노출 + 헤더에 반영.
-        async def with_creds(*, user_id, project_id):
-            return {7: {"Authorization": "Bearer mine"}}
-
-        monkeypatch.setattr(es, "mcp_all_credentials", with_creds)
         servers = await tool_runtime._load_mcp(_CTX)
-        assert len(servers) == 1
-        assert servers[0]["headers"]["Authorization"] == "Bearer mine"
+
+        assert servers == [
+            {
+                "id": 7,
+                "name": "admin-approved",
+                "transport": "http",
+                "url": "https://mcp.example",
+                "headers": {"X-Api-Key": "administrator-secret"},
+                "auth_mode": "admin",
+            }
+        ]
 
     async def test_disconnected_oauth_server_is_not_exposed(self, monkeypatch):
         import app.services.chat.extensions_store as es
@@ -414,7 +407,6 @@ class TestMcpTools:
                     "url": "https://mcp.notion.com/mcp",
                     "headers": {},
                     "auth_mode": "oauth",
-                    "auth_requirements": [],
                 }
             ]
 
@@ -425,7 +417,6 @@ class TestMcpTools:
             return {7: {"Authorization": "Bearer user-oauth-token"}}
 
         monkeypatch.setattr(es, "list_for_user", fake_list_for_user)
-        monkeypatch.setattr(es, "mcp_all_credentials", no_headers)
         monkeypatch.setattr(oauth, "headers_for_user", no_headers)
         assert await tool_runtime._load_mcp(_CTX) == []
 

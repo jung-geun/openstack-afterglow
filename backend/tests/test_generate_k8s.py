@@ -70,6 +70,20 @@ def test_render_toml_includes_explicit_mcp_oauth_callback_url():
     assert 'mcp_oauth_callback_url = "https://oauth.example.test/custom/mcp-callback"' in result
 
 
+def test_render_toml_includes_public_mcp_urls():
+    result = _render_toml_for_k8s(
+        {
+            "mcp": {
+                "public_url": "https://mcp.example.test/control-plane/mcp",
+                "oauth_consent_url": "https://app.example.test/oauth/mcp/authorize",
+            }
+        }
+    )
+
+    assert 'public_url = "https://mcp.example.test/control-plane/mcp"' in result
+    assert 'oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"' in result
+
+
 def test_render_toml_includes_login_branding_paths():
     result = _render_toml_for_k8s({"app": {"logo_dark_path": "/brand-dark.png", "logo_light_path": "/brand-light.png"}})
 

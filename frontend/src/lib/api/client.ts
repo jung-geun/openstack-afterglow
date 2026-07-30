@@ -261,6 +261,7 @@ async function request<T>(
 	const res = await fetch(`${requestBaseUrl}${path}`, {
 		...options,
 		headers,
+		credentials: options.credentials ?? 'include',
 		signal: options.signal ?? AbortSignal.timeout(30_000),
 	});
 
@@ -273,6 +274,7 @@ async function request<T>(
 			const retry = await fetch(`${requestBaseUrl}${path}`, {
 				...options,
 				headers: retryHeaders,
+				credentials: options.credentials ?? 'include',
 				signal: options.signal ?? AbortSignal.timeout(30_000),
 			});
 			if (retry.ok) {

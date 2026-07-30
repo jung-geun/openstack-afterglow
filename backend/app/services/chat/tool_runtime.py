@@ -518,10 +518,13 @@ async def _load_mcp(ctx: ToolContext) -> list[dict]:
         items = await es.list_for_user(
             "mcp", user_id=ctx.user_id, project_id=ctx.project_id, active_only=True, reveal_secrets=True
         )
-        # 사용자별 인증 값(Notion/Gmail 등)을 서버 기본 헤더 위에 병합. 요구사항 미충족 서버는 노출 스킵
-        # (인증 없이 호출하면 어차피 실패 → LLM 이 깨진 툴을 시도하지 않도록 미리 제외).
-        creds_by_server = await es.mcp_all_credentials(user_id=ctx.user_id, project_id=ctx.project_id)
-        oauth_headers_by_server = await mcp_oauth.headers_for_user(user_id=ctx.user_id, project_id=ctx.project_id)
+        # OAuth access tokens are per user/project. Public and administrator-approved
+        # sources never accept user-provided secret variables.
+        oauth_headers_by_server = (
+            await mcp_oauth.headers_for_user(user_id=ctx.user_id, project_id=ctx.project_id)
+            if any(server.get("auth_mode") == "oauth" for server in items)
+            else {}
+        )
         expected_credential_versions = dict(ctx.expected_mcp_credential_versions or ())
         credential_versions = (
             await es.mcp_credential_versions(
@@ -531,32 +534,23 @@ async def _load_mcp(ctx: ToolContext) -> list[dict]:
             else {}
         )
     except es.ExtensionSecretUnavailable:
-        logger.warning("MCP 비밀값을 복호화할 수 없어 MCP 도구를 비활성화합니다", exc_info=True)
+        logger.warning("MCP secrets cannot be decrypted; disabling MCP tools", exc_info=True)
         return []
     except Exception:
-        logger.warning("MCP 서버 로드 실패", exc_info=True)
+        logger.warning("MCP server load failed", exc_info=True)
         return []
     usable: list[dict] = []
     for server in items:
         if server.get("transport") != "http" or not str(server.get("url") or "").lower().startswith("https://"):
-            logger.warning("MCP 서버 %s: 지원되지 않는 transport 또는 URL — 노출 스킵", server.get("id"))
+            logger.warning("MCP server %s uses an unsupported transport or URL", server.get("id"))
             continue
         server_id = server.get("id")
         if server.get("auth_mode") == "oauth":
             oauth_headers = oauth_headers_by_server.get(server_id)
             if not oauth_headers:
-                logger.info("MCP 서버 %s: 사용자 OAuth 연결 미완료 — 노출 스킵", server_id)
+                logger.info("MCP server %s has no active OAuth connection", server_id)
                 continue
             server["headers"] = {**(server.get("headers") or {}), **oauth_headers}
-        else:
-            user_creds = creds_by_server.get(server_id) or {}
-            if user_creds:
-                server["headers"] = {**(server.get("headers") or {}), **user_creds}
-            reqs = server.get("auth_requirements") or []
-            headers = server.get("headers") or {}
-            if reqs and not all(r.get("key") in headers for r in reqs):
-                logger.info("MCP 서버 %s: 사용자 인증 요구사항 미충족 — 노출 스킵", server_id)
-                continue
         server_id = server.get("id")
         if expected_credential_versions and (
             not isinstance(server_id, int)

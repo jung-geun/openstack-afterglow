@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import get_token_info, require_admin
 from app.services.chat import extensions_store as es
@@ -24,23 +25,28 @@ user_router = APIRouter()
 
 # --- 요청 모델 ---
 class McpServerBody(BaseModel):
-    """Remote streamable-HTTP MCP server.
+    """A user-owned public remote MCP source.
 
-    Only HTTPS streamable HTTP is supported. Stdio and legacy SSE are rejected
-    because the runtime uses a DNS-pinned, redirect-free client.
-
-    인증정보는 headers 로 전달한다(예: {"Authorization": "Bearer <token>"} 또는 API key 헤더).
-    headers 값은 시크릿으로 취급되어 AES-256-GCM 으로 암호화 저장되고, 조회 시 마스킹된다.
+    User sources are HTTPS Streamable HTTP only. OAuth is detected after
+    registration; arbitrary headers, commands, and secret variables are rejected.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, max_length=100)
-    transport: str | None = Field(default=None, max_length=20)  # http | streamable_http
-    url: str | None = Field(default=None, max_length=500)  # HTTPS remote endpoint
-    headers: dict | None = None  # 공용 인증/커스텀 헤더 (값은 암호화 저장)
-    # 사용자별 인증 요구사항 — 공용 시크릿 대신 각 사용자가 자신의 값을 채우도록 선언(비밀 아님).
-    # 예: [{"key": "Authorization", "label": "Notion Integration Token"}]
-    auth_requirements: list[dict] | None = None
+    transport: str | None = Field(default=None, max_length=20)
+    url: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
+
+
+class AdminMcpServerBody(McpServerBody):
+    """Administrator-approved OAuth or static-header MCP source."""
+
+    headers: dict | None = None
+    auth_mode: Literal["none", "oauth", "admin"] | None = None
+    oauth_scopes: list[str] | None = None
+    oauth_client_id: str | None = Field(default=None, max_length=512)
+    oauth_client_secret: str | None = Field(default=None, max_length=4096)
 
 
 class CustomToolBody(BaseModel):
@@ -53,12 +59,6 @@ class CustomToolBody(BaseModel):
     is_active: bool | None = None
 
     model_config = {"protected_namespaces": ()}
-
-
-class McpCredentialBody(BaseModel):
-    """사용자가 특정 MCP 서버에 채우는 자신의 인증 값 {header_key: value}. 서버 요구사항의 key 만 반영."""
-
-    values: dict = Field(default_factory=dict)
 
 
 class SkillBody(BaseModel):
@@ -106,7 +106,7 @@ async def admin_list_mcp():
 
 
 @admin_router.post("/admin/mcp-servers", status_code=201)
-async def admin_create_mcp(body: McpServerBody):
+async def admin_create_mcp(body: AdminMcpServerBody):
     try:
         return await es.create("mcp", body.model_dump(exclude_unset=True), scope="global")
     except _EXC as exc:
@@ -114,7 +114,7 @@ async def admin_create_mcp(body: McpServerBody):
 
 
 @admin_router.patch("/admin/mcp-servers/{item_id}")
-async def admin_update_mcp(item_id: int, body: McpServerBody):
+async def admin_update_mcp(item_id: int, body: AdminMcpServerBody):
     try:
         return await es.update("mcp", item_id, body.model_dump(exclude_unset=True), admin=True)
     except _EXC as exc:
@@ -216,10 +216,11 @@ async def user_list_mcp(token_info: dict = Depends(get_token_info)):
 async def user_create_mcp(body: McpServerBody, token_info: dict = Depends(get_token_info)):
     uid, pid = _owner(token_info)
     try:
-        return await es.create(
+        source = await es.create(
             "mcp", body.model_dump(exclude_unset=True), scope="user", owner_user_id=uid, owner_project_id=pid
         )
-    except _EXC as exc:
+        return {**source, **(await mcp_oauth.detect(source["id"], user_id=uid, project_id=pid))}
+    except _EXC + (mcp_oauth.McpOAuthError,) as exc:
         raise _http(exc) from exc
 
 
@@ -227,10 +228,13 @@ async def user_create_mcp(body: McpServerBody, token_info: dict = Depends(get_to
 async def user_update_mcp(item_id: int, body: McpServerBody, token_info: dict = Depends(get_token_info)):
     uid, pid = _owner(token_info)
     try:
-        return await es.update(
+        source = await es.update(
             "mcp", item_id, body.model_dump(exclude_unset=True), requester_user_id=uid, requester_project_id=pid
         )
-    except _EXC as exc:
+        if "url" in body.model_fields_set:
+            return {**source, **(await mcp_oauth.detect(source["id"], user_id=uid, project_id=pid))}
+        return source
+    except _EXC + (mcp_oauth.McpOAuthError,) as exc:
         raise _http(exc) from exc
 
 
@@ -239,37 +243,6 @@ async def user_delete_mcp(item_id: int, token_info: dict = Depends(get_token_inf
     uid, pid = _owner(token_info)
     try:
         await es.delete("mcp", item_id, requester_user_id=uid, requester_project_id=pid)
-    except _EXC as exc:
-        raise _http(exc) from exc
-
-
-# --- 사용자별 MCP 인증 값 (서버 auth_requirements 에 대응) ---
-@user_router.get("/mcp-servers/{item_id}/credentials")
-async def user_get_mcp_credentials(item_id: int, token_info: dict = Depends(get_token_info)):
-    uid, pid = _owner(token_info)
-    try:
-        return await es.get_mcp_credentials_status(item_id, user_id=uid, project_id=pid)
-    except es.ChatStorageUnavailable:
-        # 선택적 상태 조회 — 저장소 미가용 시 빈 상태로 degrade.
-        return {"mcp_server_id": item_id, "auth_requirements": [], "filled_keys": [], "satisfied": True}
-    except _EXC as exc:
-        raise _http(exc) from exc
-
-
-@user_router.put("/mcp-servers/{item_id}/credentials")
-async def user_set_mcp_credentials(item_id: int, body: McpCredentialBody, token_info: dict = Depends(get_token_info)):
-    uid, pid = _owner(token_info)
-    try:
-        return await es.set_mcp_credentials(item_id, body.values, user_id=uid, project_id=pid)
-    except _EXC as exc:
-        raise _http(exc) from exc
-
-
-@user_router.delete("/mcp-servers/{item_id}/credentials", status_code=204)
-async def user_delete_mcp_credentials(item_id: int, token_info: dict = Depends(get_token_info)):
-    uid, pid = _owner(token_info)
-    try:
-        await es.delete_mcp_credentials(item_id, user_id=uid, project_id=pid)
     except _EXC as exc:
         raise _http(exc) from exc
 

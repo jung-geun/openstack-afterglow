@@ -70,40 +70,20 @@ async def test_frozen_mcp_selection_blocks_rotated_or_revoked_credential(monkeyp
 def test_revealing_corrupt_mcp_headers_fails_closed(monkeypatch):
     server = SimpleNamespace(
         id=7,
+        scope="global",
         encrypted_headers="invalid-ciphertext",
         headers=None,
         name="mcp",
         transport="http",
         url="https://mcp.example",
-        auth_requirements=None,
         is_active=True,
-        effect_overrides=None,
+        tool_effect_overrides=None,
         config_version=1,
     )
     monkeypatch.setattr(es, "decrypt_llm_provider_key", lambda _value: "not-json")
 
     with pytest.raises(es.ExtensionSecretUnavailable):
         es._reveal_mcp(server)
-
-
-async def test_credential_mutation_lookup_requests_row_lock():
-    captured = {}
-
-    class Scalars:
-        def first(self):
-            return None
-
-    class Result:
-        def scalars(self):
-            return Scalars()
-
-    class Session:
-        async def execute(self, statement):
-            captured["statement"] = statement
-            return Result()
-
-    assert await es._get_credential_row(Session(), 7, "u1", "p1", lock=True) is None
-    assert captured["statement"]._for_update_arg is not None
 
 
 async def _return(value):

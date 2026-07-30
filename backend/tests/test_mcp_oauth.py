@@ -29,6 +29,33 @@ def test_oauth_urls_require_https_production_public_base():
         oauth_urls("http://api.example.test", production=True)
 
 
+def test_oauth_urls_support_deployment_owned_public_mcp_url():
+    urls = oauth_urls(
+        "",
+        public_mcp_url="https://mcp.example.test/control-plane/mcp",
+        production=True,
+    )
+
+    assert urls.resource == "https://mcp.example.test/control-plane/mcp"
+    assert urls.public_api_base == "https://mcp.example.test"
+    assert urls.issuer == "https://mcp.example.test/control-plane/mcp/oauth"
+    assert urls.protected_resource_metadata == (
+        "https://mcp.example.test/.well-known/oauth-protected-resource/control-plane/mcp"
+    )
+    assert urls.authorization_server_metadata == (
+        "https://mcp.example.test/.well-known/oauth-authorization-server/control-plane/mcp/oauth"
+    )
+
+
+def test_bare_public_mcp_origin_uses_the_standard_streamable_http_path():
+    urls = oauth_urls("", public_mcp_url="https://mcp.example.test", production=True)
+
+    assert urls.resource == "https://mcp.example.test/api/v1/mcp"
+    assert urls.protected_resource_metadata == (
+        "https://mcp.example.test/.well-known/oauth-protected-resource/api/v1/mcp"
+    )
+
+
 def test_resource_scope_and_pkce_are_exact_and_fail_closed():
     urls = oauth_urls("https://api.example.test", production=True)
     assert require_exact_resource(urls.resource, urls) == urls.resource

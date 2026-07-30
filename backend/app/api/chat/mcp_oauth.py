@@ -25,7 +25,15 @@ def _return_url(*, connected: bool, server_id: int | None = None) -> str | None:
         parsed = urlsplit(raw)
     except ValueError:
         return None
-    if parsed.scheme not in {"https", "http"} or not parsed.netloc or parsed.username or parsed.password:
+    if (
+        (
+            parsed.scheme != "https"
+            and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"})
+        )
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+    ):
         return None
     query = {"mcp_oauth": "connected" if connected else "failed"}
     if server_id is not None:
@@ -38,10 +46,13 @@ async def callback(
     state: str = Query(min_length=1, max_length=512),
     code: str | None = Query(default=None, max_length=4096),
     error: str | None = Query(default=None, max_length=128),
+    iss: str | None = Query(default=None, max_length=2048),
     initiator_nonce: str | None = Cookie(default=None, alias=mcp_oauth.INITIATOR_COOKIE),
 ):
     try:
-        server_id = await mcp_oauth.complete(state=state, code=code, error=error, initiator_nonce=initiator_nonce)
+        server_id = await mcp_oauth.complete(
+            state=state, code=code, error=error, iss=iss, initiator_nonce=initiator_nonce
+        )
     except mcp_oauth.McpOAuthError:
         target = _return_url(connected=False)
         if target:

@@ -138,9 +138,13 @@ data:
     # GPU 디바이스 맵은 config.gpu.toml에서 관리됩니다
 
     [services]
-    {{- range $svc := list "magnum" "manila" "zun" "k3s" "swift" "trove" "barbican" }}
+    {{- range $svc := list "magnum" "manila" "zun" "k3s" "swift" "trove" "barbican" "mcp" }}
     {{ $svc }} = {{ index $.Values.services $svc }}
     {{- end }}
+
+    [mcp]
+    public_url = {{ .Values.mcp.publicUrl | quote }}
+    oauth_consent_url = {{ .Values.mcp.oauthConsentUrl | quote }}
 
     [k3s]
     {{- if .Values.k3s.version }}

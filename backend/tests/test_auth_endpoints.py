@@ -415,6 +415,7 @@ async def test_gitlab_callback_stores_federated_auth_method():
         from app.main import app
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            ac.cookies.set("afterglow_gitlab_oidc_state", "state-value")
             resp = await ac.post(
                 "/api/v1/auth/gitlab/callback",
                 json={"code": "auth-code", "state": "state-value"},
@@ -426,6 +427,25 @@ async def test_gitlab_callback_stores_federated_auth_method():
             f"gitlab_callback은 auth_method='federated'를 store_session에 전달해야 합니다. "
             f"실제 값: {captured.get('auth_method')!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_gitlab_callback_rejects_state_without_issuing_browser_cookie():
+    exchange_code = AsyncMock()
+    with (
+        patch("app.api.identity.auth.get_settings", return_value=SimpleNamespace(gitlab_oidc_enabled=True)),
+        patch("app.services.gitlab_oidc.exchange_code", exchange_code),
+    ):
+        from httpx import ASGITransport, AsyncClient
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.post(
+                "/api/v1/auth/gitlab/callback",
+                json={"code": "attacker-code", "state": "attacker-state"},
+            )
+
+    assert response.status_code == 401
+    exchange_code.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -460,6 +480,7 @@ async def test_gitlab_callback_returns_default_project_id():
         from app.main import app
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            ac.cookies.set("afterglow_gitlab_oidc_state", "state-value")
             resp = await ac.post(
                 "/api/v1/auth/gitlab/callback",
                 json={"code": "auth-code", "state": "state-value"},

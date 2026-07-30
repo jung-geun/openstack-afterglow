@@ -64,7 +64,7 @@ async def grant_call_slot(
     key = f"{_base(principal)}:concurrency"
     try:
         redis = await _get_redis()
-        acquired = await redis.eval(_SLOT_ACQUIRE, 1, key, settings.mcp_concurrent_calls, _SLOT_TTL_SECONDS)
+        acquired = await redis.eval(_SLOT_ACQUIRE, 1, key, settings.mcp_concurrent_calls_per_grant, _SLOT_TTL_SECONDS)
     except Exception as exc:
         raise McpRateLimitUnavailable("MCP concurrency limiting is unavailable") from exc
     if int(acquired) != 1:

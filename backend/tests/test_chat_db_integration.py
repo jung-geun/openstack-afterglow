@@ -25,12 +25,12 @@ from sqlalchemy import select, text
 
 import app.models.db  # noqa: F401 — side-effect: Base 에 ORM 모델 등록
 from app.models.chat_db import (
-    ChatMcpCredential,
     ChatMcpOAuthRequest,
     ChatMcpServer,
     ChatUsageLog,
     LlmProvider,
     McpDelegatedGrant,
+    McpOAuthAuthorizationRequest,
     McpOAuthClient,
     McpOAuthCode,
     McpOAuthToken,
@@ -39,6 +39,7 @@ from app.models.chat_db import (
 )
 from app.models.chat_runs import ChatRun
 from app.services.chat.litellm_client import UsageCost
+from app.services.mcp_control_plane.cleanup import sweep_delegated_authority
 
 pytestmark = [pytest.mark.db, pytest.mark.asyncio]
 
@@ -76,7 +77,6 @@ _CHAT_TABLES = (
     "chat_workspaces",
     "chat_mcp_oauth_connections",
     "chat_mcp_oauth_requests",
-    "chat_mcp_credentials",
     "chat_mcp_servers",
     "chat_memories",
     "user_wallets",
@@ -2647,71 +2647,6 @@ async def test_v2_duplicate_approval_interrupt_rolls_back_all_calls(
     assert approvals == []
 
 
-async def test_mcp_credential_mutations_serialize_version_updates(chat_db, monkeypatch):
-    """A locked credential row prevents concurrent rotations from reusing a version."""
-    from app.services.chat import extensions_store as es
-
-    factory = chat_db.get_session_factory()
-    async with factory() as session, session.begin():
-        server = ChatMcpServer(
-            scope="user",
-            owner_user_id="u-mcp",
-            owner_project_id="p-mcp",
-            project_id="p-mcp",
-            name="locked-mcp",
-            transport="http",
-            url="https://mcp.example",
-            auth_requirements=[{"key": "Authorization"}],
-            is_active=True,
-        )
-        session.add(server)
-        await session.flush()
-        server_id = server.id
-        session.add(
-            ChatMcpCredential(
-                mcp_server_id=server_id,
-                owner_user_id="u-mcp",
-                owner_project_id="p-mcp",
-                encrypted_values=es.encrypt_llm_provider_key('{"Authorization":"first"}'),
-                credential_version=1,
-            )
-        )
-
-    original = es._get_credential_row
-    first_locked = asyncio.Event()
-    release_first = asyncio.Event()
-    calls = 0
-
-    async def interleaved_get(session, *args, **kwargs):
-        nonlocal calls
-        row = await original(session, *args, **kwargs)
-        calls += 1
-        if calls == 1:
-            first_locked.set()
-            await release_first.wait()
-        return row
-
-    monkeypatch.setattr(es, "_get_credential_row", interleaved_get)
-    first = asyncio.create_task(
-        es.set_mcp_credentials(server_id, {"Authorization": "second"}, user_id="u-mcp", project_id="p-mcp")
-    )
-    await first_locked.wait()
-    second = asyncio.create_task(
-        es.set_mcp_credentials(server_id, {"Authorization": "third"}, user_id="u-mcp", project_id="p-mcp")
-    )
-    await asyncio.sleep(0.05)
-    assert not second.done()
-    release_first.set()
-    await asyncio.gather(first, second)
-
-    async with factory() as session:
-        credential = (
-            await session.execute(select(ChatMcpCredential).where(ChatMcpCredential.mcp_server_id == server_id))
-        ).scalar_one()
-    assert credential.credential_version == 3
-    assert es._decrypt_mcp_credential_values(credential, fail_closed=True) == {"Authorization": "third"}
-
-
 async def test_mcp_oauth_refresh_replay_revokes_the_durable_family_and_grant(chat_db, monkeypatch):
     """A second refresh of the same token is a committed security transition, not a rollback."""
     from app.services.mcp_control_plane.oauth import hash_oauth_value, oauth_urls, pkce_s256
@@ -2861,11 +2796,12 @@ async def test_mcp_oauth_nonce_mismatch_commits_failure_and_blocks_replay(chat_d
             ]
         )
 
-    with pytest.raises(remote_oauth.McpOAuthError, match="not initiated by this browser"):
+    with pytest.raises(remote_oauth.McpOAuthError, match="OAuth callback validation failed"):
         await remote_oauth.complete(
             state=state,
             code="victim-authorization-code",
             error=None,
+            iss=None,
             initiator_nonce="victim-browser-nonce",
         )
 
@@ -2879,6 +2815,7 @@ async def test_mcp_oauth_nonce_mismatch_commits_failure_and_blocks_replay(chat_d
             state=state,
             code="replayed-authorization-code",
             error=None,
+            iss=None,
             initiator_nonce=initiator_nonce,
         )
     assert token_exchange_attempts == 0
@@ -2935,3 +2872,73 @@ async def test_message_tree_marks_failed_user_run_retryable(chat_db):
         "status": "failed",
         "retryable": True,
     }
+
+
+async def test_mcp_oauth_cleanup_expires_and_reclaims_public_authority_rows(chat_db):
+    factory = chat_db.get_session_factory()
+    now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+    stale_client_id = "00000000-0000-0000-0000-000000000951"
+    revoked_client_id = "00000000-0000-0000-0000-000000000952"
+    terminal_request_id = "00000000-0000-0000-0000-000000000953"
+    pending_request_id = "00000000-0000-0000-0000-000000000954"
+
+    async with factory() as session, session.begin():
+        session.add_all(
+            [
+                McpOAuthClient(
+                    id=stale_client_id,
+                    client_id="stale-public-client",
+                    metadata_json={"client_name": "stale"},
+                    redirect_uris=["http://127.0.0.1/callback"],
+                    last_used_at=now - timedelta(days=91),
+                ),
+                McpOAuthClient(
+                    id=revoked_client_id,
+                    client_id="expired-revoked-client",
+                    metadata_json={"client_name": "expired"},
+                    redirect_uris=["http://127.0.0.1/callback"],
+                    revoked_at=now - timedelta(days=91),
+                ),
+                McpOAuthAuthorizationRequest(
+                    id=terminal_request_id,
+                    ticket_hash="a" * 64,
+                    client_id="terminal-client",
+                    client_fingerprint="b" * 64,
+                    redirect_uri="http://127.0.0.1/callback",
+                    resource="https://mcp.example.test/api/v1/mcp",
+                    scopes=["mcp:read"],
+                    code_challenge="A" * 43,
+                    status="approved",
+                    expires_at=now - timedelta(days=2),
+                ),
+                McpOAuthAuthorizationRequest(
+                    id=pending_request_id,
+                    ticket_hash="c" * 64,
+                    client_id="pending-client",
+                    client_fingerprint="d" * 64,
+                    redirect_uri="http://127.0.0.1/callback",
+                    resource="https://mcp.example.test/api/v1/mcp",
+                    scopes=["mcp:read"],
+                    code_challenge="B" * 43,
+                    status="pending",
+                    expires_at=now - timedelta(hours=2),
+                ),
+            ]
+        )
+
+    counts = await sweep_delegated_authority(factory, now=now)
+
+    assert counts.revoked_clients == 1
+    assert counts.deleted_clients == 1
+    assert counts.expired_tickets == 1
+    assert counts.deleted_authorization_requests == 1
+    async with factory() as session:
+        stale_client = await session.get(McpOAuthClient, stale_client_id)
+        deleted_client = await session.get(McpOAuthClient, revoked_client_id)
+        deleted_request = await session.get(McpOAuthAuthorizationRequest, terminal_request_id)
+        expired_request = await session.get(McpOAuthAuthorizationRequest, pending_request_id)
+
+    assert stale_client is not None and stale_client.revoked_at is not None
+    assert deleted_client is None
+    assert deleted_request is None
+    assert expired_request is not None and expired_request.status == "expired"

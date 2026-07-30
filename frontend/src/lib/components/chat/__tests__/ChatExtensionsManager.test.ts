@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { auth } from '$lib/stores/auth';
 
@@ -62,5 +62,43 @@ describe('ChatExtensionsManager MCP OAuth', () => {
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Notion OAuth 연결' })).toBeTruthy());
 		expect(screen.queryByText('Notion Integration Token')).toBeNull();
 		expect(mocks.get).toHaveBeenCalledWith('/api/v1/chat/mcp-servers/7/oauth', 'token', 'project-1');
+	});
+
+	it('does not request user-scoped OAuth status from the admin route', async () => {
+		render(ChatExtensionsManager, { base: '/api/v1/chat/admin', only: 'mcp' });
+
+		await waitFor(() => expect(screen.getByText('Notion')).toBeTruthy());
+		expect(mocks.get).not.toHaveBeenCalledWith('/api/v1/chat/admin/mcp-servers/7/oauth', 'token', 'project-1');
+	});
+
+	it('submits the write-only static OAuth client only from the administrator form', async () => {
+		render(ChatExtensionsManager, { base: '/api/v1/chat/admin', only: 'mcp' });
+
+		await fireEvent.input(screen.getByPlaceholderText('이름'), { target: { value: 'GitHub' } });
+		await fireEvent.input(screen.getByPlaceholderText('URL (예: https://mcp.example/mcp)'), {
+			target: { value: 'https://mcp.github.example/mcp' }
+		});
+		await fireEvent.change(screen.getByLabelText('인증 정책'), { target: { value: 'oauth' } });
+		await fireEvent.input(screen.getByLabelText('OAuth client ID (DCR 미지원 서버만)'), {
+			target: { value: 'github-client' }
+		});
+		await fireEvent.input(screen.getByLabelText('OAuth client secret (저장 후 표시되지 않음)'), {
+			target: { value: 'github-secret' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: '+ MCP 서버 추가' }));
+
+		await waitFor(() =>
+			expect(mocks.post).toHaveBeenCalledWith(
+				'/api/v1/chat/admin/mcp-servers',
+				expect.objectContaining({
+					name: 'GitHub',
+					auth_mode: 'oauth',
+					oauth_client_id: 'github-client',
+					oauth_client_secret: 'github-secret'
+				}),
+				'token',
+				'project-1'
+			)
+		);
 	});
 });

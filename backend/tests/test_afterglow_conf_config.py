@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,7 +16,107 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import config2helm  # noqa: E402
 import generate_k8s  # noqa: E402
+
+
+def test_config_to_helm_preserves_public_mcp_configuration():
+    converted = config2helm.convert(
+        {
+            "services": {"mcp": True},
+            "mcp": {
+                "public_url": "https://mcp.example.test/control-plane/mcp",
+                "oauth_consent_url": "https://app.example.test/oauth/mcp/authorize",
+            },
+        },
+        include_secrets=False,
+    )
+
+    assert converted["services"]["mcp"] is True
+    assert converted["mcp"] == {
+        "publicUrl": "https://mcp.example.test/control-plane/mcp",
+        "oauthConsentUrl": "https://app.example.test/oauth/mcp/authorize",
+    }
+
+    configmap = (ROOT / "helm/afterglow/templates/configmap.yaml").read_text(encoding="utf-8")
+    values = (ROOT / "helm/afterglow/values.yaml").read_text(encoding="utf-8")
+    assert '"mcp"' in configmap
+    assert "[mcp]" in configmap
+    assert "public_url = {{ .Values.mcp.publicUrl | quote }}" in configmap
+    assert "oauth_consent_url = {{ .Values.mcp.oauthConsentUrl | quote }}" in configmap
+    assert "mcp: false" in values
+    ingress = (ROOT / "helm/afterglow/templates/ingress.yaml").read_text(encoding="utf-8")
+    assert "urlParse $mcpPublicURL" in ingress
+    assert "Public Streamable HTTP MCP resource and OAuth discovery endpoints." in ingress
+    assert "- path: /.well-known" in ingress
+
+
+@pytest.mark.parametrize(
+    ("public_api_base", "expected_resource_path"),
+    [
+        ("https://mcp.example.test", "/api/v1/mcp"),
+        ("https://mcp.example.test/gateway/", "/gateway/api/v1/mcp"),
+    ],
+)
+def test_helm_mcp_ingress_falls_back_to_public_api_base(public_api_base, expected_resource_path):
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("Helm is required to render the ingress contract")
+
+    rendered = subprocess.run(
+        [
+            helm,
+            "template",
+            "afterglow",
+            "helm/afterglow",
+            "--show-only",
+            "templates/ingress.yaml",
+            "--set",
+            "services.mcp=true",
+            "--set",
+            f"app.publicApiBase={public_api_base}",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ingress = next(document for document in yaml.safe_load_all(rendered.stdout) if document["kind"] == "Ingress")
+    mcp_rule = next(rule for rule in ingress["spec"]["rules"] if rule["host"] == "mcp.example.test")
+    paths = {entry["path"] for entry in mcp_rule["http"]["paths"]}
+
+    assert "mcp.example.test" in ingress["spec"]["tls"][0]["hosts"]
+    assert paths == {expected_resource_path, "/.well-known"}
+
+
+def test_helm_mcp_ingress_normalizes_an_explicit_origin_trailing_slash():
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("Helm is required to render the ingress contract")
+
+    rendered = subprocess.run(
+        [
+            helm,
+            "template",
+            "afterglow",
+            "helm/afterglow",
+            "--show-only",
+            "templates/ingress.yaml",
+            "--set",
+            "services.mcp=true",
+            "--set",
+            "mcp.publicUrl=https://mcp.example.test/",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ingress = next(document for document in yaml.safe_load_all(rendered.stdout) if document["kind"] == "Ingress")
+    mcp_rule = next(rule for rule in ingress["spec"]["rules"] if rule["host"] == "mcp.example.test")
+    paths = {entry["path"] for entry in mcp_rule["http"]["paths"]}
+
+    assert paths == {"/api/v1/mcp", "/.well-known"}
 
 
 @pytest.fixture
@@ -66,6 +168,23 @@ logo_light_path = "/brand-light.png"
     assert flat["logo_light_path"] == "/brand-light.png"
     assert settings.logo_dark_path == "/brand-dark.png"
     assert settings.logo_light_path == "/brand-light.png"
+
+
+def test_app_config_loads_inbound_mcp_public_urls(isolated_config_dir):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[mcp]
+public_url = "https://mcp.example.test/control-plane/mcp"
+oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    flat = app_config._load_toml()
+    settings = app_config.Settings(**flat)
+
+    assert settings.mcp_public_url == "https://mcp.example.test/control-plane/mcp"
+    assert settings.mcp_oauth_consent_url == "https://app.example.test/oauth/mcp/authorize"
 
 
 def test_app_config_applies_matching_afterglow_conf_overrides(isolated_config_dir):

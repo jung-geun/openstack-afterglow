@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -18,6 +18,7 @@ from app.api.deps import get_os_conn, get_token_info
 from app.api.identity.mcp_access import _mark_transactional_audit, _require_browser_mutation
 from app.config import get_settings
 from app.database import get_session_factory
+from app.rate_limit import limiter
 from app.services.mcp_control_plane.oauth import McpOAuthError, oauth_urls
 from app.services.mcp_control_plane.oauth_authority import (
     McpOAuthAuthorityError,
@@ -43,8 +44,30 @@ def _require_enabled() -> None:
 
 
 def _urls():
+    settings = get_settings()
     production = os.environ.get("AFTERGLOW_ENV", "development").strip().lower() == "production"
-    return oauth_urls(get_settings().public_api_base, production=production)
+    return oauth_urls(
+        settings.public_api_base,
+        public_mcp_url=getattr(settings, "mcp_public_url", ""),
+        production=production,
+    )
+
+
+def _oauth_consent_url() -> str:
+    settings = get_settings()
+    return (
+        getattr(settings, "mcp_oauth_consent_url", "")
+        or f"{settings.frontend_base_url.rstrip('/')}/oauth/mcp/authorize"
+    )
+
+
+def _matches_metadata_path(path: str, url: str) -> bool:
+    return path == urlsplit(url).path.lstrip("/")
+
+
+def _require_public_mcp_path(path: str) -> None:
+    if not _matches_metadata_path(path, _urls().resource):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
 
 def _oauth_error(detail: str, *, error: str = "invalid_request", status_code: int = 400) -> JSONResponse:
@@ -112,10 +135,12 @@ def _redirect_with_code(result) -> str:
     return f"{result.redirect_uri}{separator}{urlencode(pairs)}"
 
 
-@router.get("/.well-known/oauth-protected-resource/api/v1/mcp")
-async def oauth_protected_resource_metadata():
+@router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
+async def oauth_protected_resource_metadata(resource_path: str):
     _require_enabled()
     urls = _urls()
+    if not _matches_metadata_path(resource_path, urls.resource):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     return JSONResponse(
         {
             "resource": urls.resource,
@@ -126,10 +151,12 @@ async def oauth_protected_resource_metadata():
     )
 
 
-@router.get("/.well-known/oauth-authorization-server/api/v1/mcp/oauth")
-async def oauth_authorization_server_metadata():
+@router.get("/.well-known/oauth-authorization-server/{issuer_path:path}")
+async def oauth_authorization_server_metadata(issuer_path: str):
     _require_enabled()
     urls = _urls()
+    if not _matches_metadata_path(issuer_path, urls.issuer):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     return JSONResponse(
         {
             "issuer": urls.issuer,
@@ -148,6 +175,7 @@ async def oauth_authorization_server_metadata():
 
 
 @router.post("/api/v1/mcp/oauth/register")
+@limiter.limit("10/minute")
 async def oauth_register(request: Request):
     _require_enabled()
     try:
@@ -160,6 +188,7 @@ async def oauth_register(request: Request):
         {
             "client_id": client.client_id,
             "client_id_issued_at": int(client.client_id_issued_at.timestamp()),
+            "client_id_expires_at": int(client.expires_at.timestamp()) if client.expires_at is not None else 0,
             "redirect_uris": client.redirect_uris,
             "grant_types": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_method": "none",
@@ -169,7 +198,14 @@ async def oauth_register(request: Request):
     )
 
 
+@router.post("/{mcp_path:path}/oauth/register")
+async def oauth_register_alias(mcp_path: str, request: Request):
+    _require_public_mcp_path(mcp_path)
+    return await oauth_register(request)
+
+
 @router.get("/api/v1/mcp/oauth/authorize")
+@limiter.limit("10/minute")
 async def oauth_authorize(request: Request):
     _require_enabled()
     if request.headers.get("origin"):
@@ -190,13 +226,18 @@ async def oauth_authorize(request: Request):
         )
     except (McpOAuthAuthorityError, McpOAuthError) as exc:
         return _oauth_error(str(exc))
-    location = (
-        f"{get_settings().frontend_base_url.rstrip('/')}/oauth/mcp/authorize?{urlencode({'ticket': ticket.ticket})}"
-    )
+    location = f"{_oauth_consent_url()}?{urlencode({'ticket': ticket.ticket})}"
     return RedirectResponse(location, status_code=status.HTTP_303_SEE_OTHER, headers=_OAUTH_NO_STORE)
 
 
+@router.get("/{mcp_path:path}/oauth/authorize")
+async def oauth_authorize_alias(mcp_path: str, request: Request):
+    _require_public_mcp_path(mcp_path)
+    return await oauth_authorize(request)
+
+
 @router.post("/api/v1/mcp/oauth/token")
+@limiter.limit("30/minute")
 async def oauth_token(request: Request):
     _require_enabled()
     try:
@@ -240,7 +281,14 @@ async def oauth_token(request: Request):
     )
 
 
+@router.post("/{mcp_path:path}/oauth/token")
+async def oauth_token_alias(mcp_path: str, request: Request):
+    _require_public_mcp_path(mcp_path)
+    return await oauth_token(request)
+
+
 @router.post("/api/v1/mcp/oauth/revoke", status_code=status.HTTP_200_OK)
+@limiter.limit("30/minute")
 async def oauth_revoke(request: Request):
     _require_enabled()
     try:
@@ -253,6 +301,12 @@ async def oauth_revoke(request: Request):
     except McpOAuthAuthorityError as exc:
         return _oauth_error(str(exc))
     return Response(status_code=status.HTTP_200_OK, headers=_OAUTH_NO_STORE)
+
+
+@router.post("/{mcp_path:path}/oauth/revoke", status_code=status.HTTP_200_OK)
+async def oauth_revoke_alias(mcp_path: str, request: Request):
+    _require_public_mcp_path(mcp_path)
+    return await oauth_revoke(request)
 
 
 @router.get("/api/v1/auth/mcp-oauth/consents/{ticket}")

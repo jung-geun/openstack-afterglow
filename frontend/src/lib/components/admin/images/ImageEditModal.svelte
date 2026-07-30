@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { AdminImage } from '$lib/types/adminImage';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	let {
 		target = $bindable(),
@@ -25,37 +26,37 @@
 		tabindex="-1"
 	>
 		<div
-			class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
+			class="bg-[var(--color-surface-raised)] border border-[var(--color-line)] rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<h2 class="text-lg font-semibold text-white mb-5">이미지 수정</h2>
+			<h2 class="text-lg font-semibold text-[var(--color-ink-0)] mb-5">이미지 수정</h2>
 			{#if editError}
-				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{editError}</div>
+				<div class="bg-[var(--color-state-danger)]/20 border border-[var(--color-state-danger)] text-[var(--color-state-danger)] rounded-lg px-4 py-3 text-sm mb-4">{editError}</div>
 			{/if}
 			<div class="space-y-4">
 				<div>
-					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
+					<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">이름</label>
 					<input
 						bind:value={form.name}
 						type="text"
-						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+						class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)]"
 					/>
-					<span class="block text-[11px] text-gray-500 mt-1">repository:tag 형식이며 tag를 생략하면 latest가 사용됩니다.</span>
+					<span class="block text-[11px] text-[var(--color-ink-3)] mt-1">repository:tag 형식이며 tag를 생략하면 latest가 사용됩니다.</span>
 				</div>
 				<div>
-					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS 배포판</label>
+					<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">OS 배포판</label>
 					<input
 						bind:value={form.os_distro}
 						type="text"
 						placeholder="ubuntu, centos, rocky ..."
-						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+						class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)]"
 					/>
 				</div>
 				<div>
-					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">공개 범위</label>
+					<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">공개 범위</label>
 					<select
 						bind:value={form.visibility}
-						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+						class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)]"
 					>
 						<option value="public">public</option>
 						<option value="community">community</option>
@@ -65,14 +66,10 @@
 				</div>
 			</div>
 			<div class="flex justify-end gap-3 mt-6">
-				<button onclick={() => { target = null; }} class="px-4 py-2 text-sm text-gray-400 hover:text-white">취소</button>
-				<button
-					onclick={onSave}
-					disabled={editing}
-					class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg disabled:opacity-30"
-				>
+				<Button variant="ghost" size="md" onclick={() => { target = null; }}>취소</Button>
+				<Button variant="accent" size="md" onclick={onSave} disabled={editing}>
 					{editing ? '저장 중...' : '저장'}
-				</button>
+				</Button>
 			</div>
 		</div>
 	</div>

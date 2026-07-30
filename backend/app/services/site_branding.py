@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import Settings, get_settings
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.models.db import SiteBrandingAsset
+from app.services.mcp_control_plane.oauth import McpOAuthError, canonical_mcp_resource_url
 
 MAX_BRANDING_UPLOAD_BYTES = 1_048_576
 
@@ -104,6 +105,15 @@ def _asset_url(slot: str, asset: SiteBrandingAsset, settings: Settings) -> str:
     return f"{origin}{path}" if origin else path
 
 
+def _mcp_url(settings: Settings) -> str:
+    if settings.mcp_public_url:
+        try:
+            return canonical_mcp_resource_url(settings.mcp_public_url, production=False)
+        except McpOAuthError:
+            return ""
+    return f"{settings.public_api_base.rstrip('/')}/api/v1/mcp" if settings.public_api_base else ""
+
+
 def configured_public_site_config(settings: Settings | None = None) -> dict[str, Any]:
     s = settings or get_settings()
     return {
@@ -113,6 +123,7 @@ def configured_public_site_config(settings: Settings | None = None) -> dict[str,
         "logo_dark_path": s.logo_dark_path,
         "logo_light_path": s.logo_light_path,
         "favicon_path": s.favicon_path,
+        "mcp_url": _mcp_url(s),
         "services": {
             "magnum": s.service_magnum_enabled,
             "manila": s.service_manila_enabled,

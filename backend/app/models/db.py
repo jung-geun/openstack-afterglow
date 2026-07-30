@@ -926,7 +926,6 @@ from app.models.chat_db import (  # noqa: E402,F401
     ChatApiKey,
     ChatConversation,
     ChatCustomTool,
-    ChatMcpCredential,
     ChatMcpOAuthConnection,
     ChatMcpOAuthRequest,
     ChatMcpServer,

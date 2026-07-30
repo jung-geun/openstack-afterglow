@@ -49,16 +49,38 @@ def canonical_public_api_base(value: str, *, production: bool) -> str:
     return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, "", ""))
 
 
-def oauth_urls(public_api_base: str, *, production: bool) -> McpOAuthUrls:
-    base = canonical_public_api_base(public_api_base, production=production)
-    resource = f"{base}/api/v1/mcp"
+def canonical_mcp_resource_url(value: str, *, production: bool) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise McpOAuthError("MCP public URL must be an absolute URL") from exc
+    if not parsed.scheme or not parsed.netloc or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        raise McpOAuthError("MCP public URL must be an absolute URL without credentials, query, or fragment")
+    if production and parsed.scheme != "https":
+        raise McpOAuthError("MCP requires an HTTPS public URL in production")
+    if parsed.scheme not in {"https", "http"}:
+        raise McpOAuthError("MCP public URL must use HTTP or HTTPS")
+    path = parsed.path.rstrip("/") or "/api/v1/mcp"
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, "", ""))
+
+
+def oauth_urls(public_api_base: str, *, public_mcp_url: str = "", production: bool) -> McpOAuthUrls:
+    if public_mcp_url:
+        resource = canonical_mcp_resource_url(public_mcp_url, production=production)
+        resource_parts = urlsplit(resource)
+        base = urlunsplit((resource_parts.scheme, resource_parts.netloc, "", "", ""))
+    else:
+        base = canonical_public_api_base(public_api_base, production=production)
+        resource = f"{base}/api/v1/mcp"
+        resource_parts = urlsplit(resource)
+    resource_origin = urlunsplit((resource_parts.scheme, resource_parts.netloc, "", "", ""))
     issuer = f"{resource}/oauth"
     return McpOAuthUrls(
         public_api_base=base,
         resource=resource,
         issuer=issuer,
-        protected_resource_metadata=f"{base}/.well-known/oauth-protected-resource/api/v1/mcp",
-        authorization_server_metadata=f"{base}/.well-known/oauth-authorization-server/api/v1/mcp/oauth",
+        protected_resource_metadata=f"{resource_origin}/.well-known/oauth-protected-resource{resource_parts.path}",
+        authorization_server_metadata=f"{resource_origin}/.well-known/oauth-authorization-server{resource_parts.path}/oauth",
     )
 
 

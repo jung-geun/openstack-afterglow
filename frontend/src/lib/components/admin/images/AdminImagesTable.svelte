@@ -44,7 +44,7 @@
 <div class="overflow-x-auto">
 	<table class="w-full text-sm">
 		<thead>
-			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+			<tr class="border-b border-[var(--color-line)] text-[var(--color-ink-2)] text-xs uppercase tracking-wide">
 				<th class="text-left py-2 pr-4">이름</th>
 				<th class="text-left py-2 pr-4">상태</th>
 				<th class="text-left py-2 pr-4">공개 범위</th>
@@ -58,16 +58,16 @@
 		<tbody>
 			{#each images as img (img.id)}
 				<tr
-					class="border-b border-gray-800/50 text-xs transition-colors {selectedImageId === img.id ? 'bg-gray-800/50' : ''}"
+					class="border-b border-[var(--color-line)]/50 text-xs transition-colors {selectedImageId === img.id ? 'bg-[var(--color-surface-sunken)]/50' : ''}"
 				>
 					<td class="p-0">
-						<button type="button" onclick={() => onOpenDetail(img)} class="block w-full py-2 pr-4 text-white hover:text-blue-400 transition-colors text-left" title={img.name || img.id}>
+						<button type="button" onclick={() => onOpenDetail(img)} class="block w-full py-2 pr-4 text-white hover:text-[var(--color-accent)] transition-colors text-left" title={img.name || img.id}>
 							<span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{img.name || img.id.slice(0, 12)}</span>
 							{#if img.repository || img.tag}
-								<div class="text-gray-500 text-[11px] mt-0.5 font-mono">repository: {img.repository ?? img.name} · tag: {img.tag ?? 'latest'}</div>
+								<div class="text-[var(--color-ink-3)] text-[11px] mt-0.5 font-mono">repository: {img.repository ?? img.name} · tag: {img.tag ?? 'latest'}</div>
 							{/if}
 							{#if img.os_distro}
-								<div class="text-gray-500 text-xs mt-0.5">{img.os_distro}</div>
+								<div class="text-[var(--color-ink-3)] text-xs mt-0.5">{img.os_distro}</div>
 							{/if}
 						</button>
 					</td>
@@ -75,28 +75,28 @@
 						<StatusChip status={img.status} />
 					</td>
 					<td class="py-2 pr-4">
-						<span class="px-1.5 py-0.5 rounded text-xs {visibilityColor[img.visibility] ?? 'text-gray-400 bg-gray-800'}">{img.visibility}</span>
+						<span class="px-1.5 py-0.5 rounded text-xs {visibilityColor[img.visibility] ?? 'text-[var(--color-ink-2)] bg-[var(--color-surface-sunken)]'}">{img.visibility}</span>
 					</td>
-					<td class="py-2 pr-4 text-gray-400">{formatSize(img.size)}</td>
-					<td class="py-2 pr-4 text-gray-400">{img.disk_format || '-'}</td>
-					<td class="py-2 pr-4 text-gray-400">
+					<td class="py-2 pr-4 text-[var(--color-ink-2)]">{formatSize(img.size)}</td>
+					<td class="py-2 pr-4 text-[var(--color-ink-2)]">{img.disk_format || '-'}</td>
+					<td class="py-2 pr-4 text-[var(--color-ink-2)]">
 						{img.owner ? ($projectNames.get(img.owner) ?? img.owner.slice(0, 8)) : '-'}
 					</td>
-					<td class="py-2 pr-4 text-gray-500">{img.created_at ? img.created_at.slice(0, 10) : '-'}</td>
+					<td class="py-2 pr-4 text-[var(--color-ink-3)]">{img.created_at ? img.created_at.slice(0, 10) : '-'}</td>
 					<td class="py-2 text-right" onclick={(e) => e.stopPropagation()}>
 						<div class="flex items-center justify-end gap-2">
 							{#if img.status === 'active' || img.status === 'deactivated'}
 								<button
 									onclick={() => onToggleActivation(img)}
 									disabled={togglingId === img.id}
-									class="text-xs {img.status === 'active' ? 'text-orange-400 hover:text-orange-300' : 'text-green-400 hover:text-green-300'} disabled:opacity-40"
+									class="text-xs {img.status === 'active' ? 'text-[var(--color-state-warning)] hover:text-[var(--color-warm-2)]' : 'text-[var(--color-state-success)] hover:text-[var(--color-state-success)]'} disabled:opacity-40"
 								>
 									{togglingId === img.id ? '...' : img.status === 'active' ? '비활성화' : '활성화'}
 								</button>
 							{/if}
-							<button onclick={() => onEdit(img)} class="text-blue-400 hover:text-blue-300 text-xs">수정</button>
+							<button onclick={() => onEdit(img)} class="text-[var(--color-accent)] hover:text-[var(--color-accent-2)] text-xs">수정</button>
 							{#if !img.protected}
-								<button onclick={() => onDelete(img)} class="text-red-400 hover:text-red-300 text-xs">삭제</button>
+								<button onclick={() => onDelete(img)} class="text-[var(--color-state-danger)] hover:text-[var(--color-state-danger)] text-xs">삭제</button>
 							{/if}
 						</div>
 					</td>

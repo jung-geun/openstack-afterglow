@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseImageReference, sanitizeImageFilename } from './imageReference';
+import {
+	imageReferenceMatchScore,
+	imageReferenceMatchesQuery,
+	parseImageReference,
+	sanitizeImageFilename,
+} from './imageReference';
 
 describe('image references', () => {
 	it('defaults an omitted tag to latest', () => {
@@ -20,5 +25,12 @@ describe('image references', () => {
 
 	it('sanitizes common upload filenames into tagged references', () => {
 		expect(sanitizeImageFilename('Ubuntu 24.04.qcow2')).toBe('ubuntu-24.04:latest');
+	});
+
+	it('searches repository and tag as separate Docker-style fields', () => {
+		const image = { name: 'ubuntu:24.04', repository: 'ubuntu', tag: '24.04', os_distro: 'ubuntu' };
+		expect(imageReferenceMatchesQuery(image, 'ubuntu 24.04')).toBe(true);
+		expect(imageReferenceMatchesQuery(image, 'debian')).toBe(false);
+		expect(imageReferenceMatchScore(image, 'ubuntu:24.04')).toBe(100);
 	});
 });

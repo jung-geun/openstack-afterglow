@@ -139,6 +139,7 @@ async def create_mcp_token(
     except McpAuthorityError as exc:
         _raise_authority_error(exc)
     response = CreateMcpTokenResponse(
+        token=issued.token,
         id=issued.token_id,
         grant_id=issued.grant_id,
         name=body.name.strip(),

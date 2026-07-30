@@ -42,6 +42,7 @@ dependencies = [
     "langchain-core==1.4.9",
     "langgraph-checkpoint-postgres==3.1.0",
     "psycopg[binary]==3.3.4",  # AsyncPostgresSaver 용 — [binary]로 libpq 번들(시스템 의존 불요)
+    "langchain-mcp-adapters==0.3.1",
 ]
 
 [build-system]
@@ -118,6 +119,7 @@ worker = [
     "prometheus-client>=0.20.0",
     "pyyaml>=6.0",
     "idna>=3.15",
+    "langchain-mcp-adapters==0.3.1",
     "apscheduler>=3.10",
 ]
 

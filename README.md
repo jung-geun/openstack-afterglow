@@ -44,6 +44,11 @@ docker compose up -d                 # http://localhost:3000
 
 `afterglow.conf`가 유일한 애플리케이션 설정 파일입니다. `.env.example`의 `AFTERGLOW_ALLOW_INSECURE=1`은 Docker Compose 로컬 개발 전용이며 Kubernetes/production에는 넣지 않습니다.
 
+### 공개 MCP/OAuth
+
+MCP 공개는 기본적으로 비활성입니다. 활성화하려면 `SERVICE_MCP_ENABLED=true`와 함께 `MCP_PUBLIC_URL`(MCP resource URL) 및 `MCP_OAUTH_CONSENT_URL`(Afterglow 동의 화면 URL)을 설정합니다. `MCP_PUBLIC_URL`에 origin만 지정하면 `/api/v1/mcp`를 사용합니다. 외부 OIDC 로그인 콜백은 `GITLAB_OIDC_REDIRECT_URI`로, MCP 클라이언트의 OAuth `redirect_uri`는 DCR/CIMD 등록으로 각각 관리합니다.
+Helm 차트는 별도 MCP host에도 resource와 `/.well-known` discovery 경로를 backend로 라우팅하고 TLS host에 포함합니다. raw Kubernetes manifest를 쓰면 같은 host·resource·`/.well-known` 라우팅을 ingress에 직접 추가해야 합니다.
+
 Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서를 참고하세요.
 
 ## 문서

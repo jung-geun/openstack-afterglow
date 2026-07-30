@@ -8,6 +8,7 @@ import contextvars
 import hashlib
 import hmac
 import json
+import os
 from contextlib import AbstractAsyncContextManager
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -256,15 +257,33 @@ def _replay_receive(messages: list[Message]) -> Receive:
     return receive
 
 
+def _urls():
+    settings = get_settings()
+    production = os.environ.get("AFTERGLOW_ENV", "development").strip().lower() == "production"
+    return oauth_urls(
+        settings.public_api_base,
+        public_mcp_url=getattr(settings, "mcp_public_url", ""),
+        production=production,
+    )
+
+
+def _mcp_paths() -> frozenset[str]:
+    try:
+        configured_path = urlsplit(_urls().resource).path or "/"
+    except McpOAuthError:
+        # The feature is disabled by default, so an unset public API URL must not
+        # prevent application import before the rollout gate is enabled.
+        return frozenset((MCP_PATH,))
+    return frozenset((MCP_PATH, configured_path))
+
+
 def _canonical_origin() -> tuple[str, str]:
-    urls = oauth_urls(get_settings().public_api_base, production=False)
-    parsed = urlsplit(urls.public_api_base)
+    parsed = urlsplit(_urls().resource)
     return f"{parsed.scheme}://{parsed.netloc}", parsed.netloc.lower()
 
 
 async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
-    """Authenticate one exact POST before the SDK sees any request bytes."""
-    if scope["type"] != "http" or scope["path"] != MCP_PATH:
+    if scope["type"] != "http" or scope["path"] not in _mcp_paths():
         await _reject(scope, receive, send, status_code=404, detail="Not Found")
         return
     if not get_settings().service_mcp_enabled:
@@ -309,7 +328,7 @@ async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
         return
     authorization = headers.get("authorization", "")
     if not authorization.startswith("Bearer ") or not authorization.removeprefix("Bearer "):
-        metadata = oauth_urls(get_settings().public_api_base, production=False).protected_resource_metadata
+        metadata = _urls().protected_resource_metadata
         await _reject(
             scope,
             receive,
@@ -324,11 +343,9 @@ async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
         await _reject(scope, receive, send, status_code=413, detail="MCP request is too large")
         return
     try:
-        principal = await verify_mcp_bearer(
-            authorization.removeprefix("Bearer "), urls=oauth_urls(get_settings().public_api_base, production=False)
-        )
+        principal = await verify_mcp_bearer(authorization.removeprefix("Bearer "), urls=_urls())
     except McpAuthenticationError:
-        metadata = oauth_urls(get_settings().public_api_base, production=False).protected_resource_metadata
+        metadata = _urls().protected_resource_metadata
         await _reject(
             scope,
             receive,
@@ -357,10 +374,11 @@ async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
 class ExactMcpRoute(BaseRoute):
     """An ASGI route that never redirects to or accepts a trailing slash."""
 
-    path = MCP_PATH
+    def __init__(self, path: str):
+        self.path = path
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        if scope["type"] == "http" and scope["path"] in {MCP_PATH, f"{MCP_PATH}/"}:
+        if scope["type"] == "http" and scope["path"] in {self.path, f"{self.path}/"}:
             return Match.FULL, {}
         return Match.NONE, {}
 
@@ -385,5 +403,6 @@ async def stop_mcp_transport() -> None:
 
 
 def install_mcp_route(app: Any) -> None:
-    if not any(isinstance(route, ExactMcpRoute) for route in app.router.routes):
-        app.router.routes.insert(0, ExactMcpRoute())
+    existing_paths = {route.path for route in app.router.routes if isinstance(route, ExactMcpRoute)}
+    for path in _mcp_paths() - existing_paths:
+        app.router.routes.insert(0, ExactMcpRoute(path))

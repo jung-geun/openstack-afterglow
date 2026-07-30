@@ -59,6 +59,8 @@ describe('McpAccessSection', () => {
 
 		await waitFor(() => expect(screen.getByText('Lumen 기본 토큰')).toBeTruthy());
 		expect(screen.queryByText('mcp-afgl-secret-value')).toBeNull();
+		expect(api.get).toHaveBeenCalledWith('/api/v1/auth/mcp-tokens', 'token', 'project');
+		expect(api.get).toHaveBeenCalledWith('/api/v1/auth/mcp-oauth/grants', 'token', 'project');
 		expect(screen.getByRole('button', { name: 'Lumen 해제' })).toBeTruthy();
 	});
 
@@ -72,7 +74,7 @@ describe('McpAccessSection', () => {
 		await waitFor(() => expect(screen.getByText('새 MCP 토큰')).toBeTruthy());
 		expect(screen.getByText('mcp-afgl-secret-value')).toBeTruthy();
 		expect(api.post).toHaveBeenCalledWith(
-			'/api/v1/mcp-tokens',
+			'/api/v1/auth/mcp-tokens',
 			expect.objectContaining({ name: 'Desktop client', access_level: 'read' }),
 			'token',
 			'project',

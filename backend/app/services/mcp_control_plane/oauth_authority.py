@@ -53,6 +53,7 @@ from app.services.mcp_control_plane.oauth import (
 )
 
 _CODE_LIFETIME = timedelta(minutes=5)
+_DYNAMIC_CLIENT_LIFETIME = timedelta(days=30)
 _CIMD_CACHE_LIFETIME = timedelta(hours=1)
 
 
@@ -156,18 +157,23 @@ async def register_public_client(
             metadata_json=normalized,
             redirect_uris=normalized["redirect_uris"],
             client_id_issued_at=now,
+            expires_at=now + _DYNAMIC_CLIENT_LIFETIME,
         )
         session.add(client)
     return client
 
 
 async def _find_client(session_factory: async_sessionmaker[AsyncSession], *, client_id: str) -> McpOAuthClient | None:
-    async with session_factory() as session:
-        client = await session.scalar(select(McpOAuthClient).where(McpOAuthClient.client_id == client_id))
+    now = _now()
+    async with session_factory() as session, session.begin():
+        client = await session.scalar(
+            select(McpOAuthClient).where(McpOAuthClient.client_id == client_id).with_for_update()
+        )
         if client is None or client.revoked_at is not None:
             return None
-        if client.expires_at is not None and _as_utc(client.expires_at) <= _now():
+        if client.expires_at is not None and _as_utc(client.expires_at) <= now:
             return None
+        client.last_used_at = now
         return client
 
 
@@ -196,6 +202,7 @@ async def resolve_public_client(session_factory: async_sessionmaker[AsyncSession
                 metadata_json=metadata,
                 redirect_uris=metadata["redirect_uris"],
                 client_id_issued_at=now,
+                expires_at=now + _DYNAMIC_CLIENT_LIFETIME,
             )
             session.add(existing)
         else:
@@ -203,6 +210,7 @@ async def resolve_public_client(session_factory: async_sessionmaker[AsyncSession
             existing.redirect_uris = metadata["redirect_uris"]
             existing.client_id_issued_at = now
             existing.revoked_at = None
+            existing.last_used_at = now
         return existing
 
 

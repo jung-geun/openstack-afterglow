@@ -49,6 +49,101 @@ async def test_oauth_metadata_publishes_exact_resource_and_issuer(client, monkey
 
 
 @pytest.mark.asyncio
+async def test_oauth_metadata_uses_deployment_owned_public_mcp_url(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import mcp
+
+    monkeypatch.setattr(
+        mcp,
+        "get_settings",
+        lambda: SimpleNamespace(
+            service_mcp_enabled=True,
+            public_api_base="https://api.example.test",
+            mcp_public_url="https://mcp.example.test/control-plane/mcp",
+        ),
+    )
+
+    protected = await client.get("/.well-known/oauth-protected-resource/control-plane/mcp")
+    authorization = await client.get("/.well-known/oauth-authorization-server/control-plane/mcp/oauth")
+
+    assert protected.json()["resource"] == "https://mcp.example.test/control-plane/mcp"
+    assert (
+        authorization.json()["authorization_endpoint"] == "https://mcp.example.test/control-plane/mcp/oauth/authorize"
+    )
+
+
+@pytest.mark.asyncio
+async def test_configured_mcp_path_accepts_streamable_http_bearers(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from app.services.mcp_control_plane import transport
+
+    settings = SimpleNamespace(
+        service_mcp_enabled=True,
+        public_api_base="",
+        mcp_public_url="https://mcp.example.test/control-plane/mcp",
+        mcp_request_max_bytes=1024 * 1024,
+        secret_key="a" * 64,
+    )
+    monkeypatch.setattr(transport, "get_settings", lambda: settings)
+    app = FastAPI()
+    transport.install_mcp_route(app)
+    await transport.start_mcp_transport()
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="https://mcp.example.test") as ac:
+            response = await ac.post(
+                "/control-plane/mcp",
+                headers={
+                    "Host": "mcp.example.test",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+    finally:
+        await transport.stop_mcp_transport()
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"].endswith(
+        'resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource/control-plane/mcp"'
+    )
+
+
+@pytest.mark.asyncio
+async def test_configured_mcp_oauth_alias_dispatches_only_configured_path(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from starlette.responses import JSONResponse
+
+    from app.api import mcp
+
+    monkeypatch.setattr(
+        mcp,
+        "get_settings",
+        lambda: SimpleNamespace(
+            service_mcp_enabled=True,
+            public_api_base="",
+            mcp_public_url="https://mcp.example.test/control-plane/mcp",
+        ),
+    )
+
+    async def register(_: object):
+        return JSONResponse({"registered": True})
+
+    monkeypatch.setattr(mcp, "oauth_register", register)
+    accepted = await client.post("/control-plane/mcp/oauth/register")
+    rejected = await client.post("/wrong-path/oauth/register")
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {"registered": True}
+    assert rejected.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_enabled_mcp_transport_requires_bearer_and_never_emits_cors(client, monkeypatch):
     from types import SimpleNamespace
 

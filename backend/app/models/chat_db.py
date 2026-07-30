@@ -216,7 +216,7 @@ class UserWallet(Base):
 
 
 class ChatMcpServer(Base):
-    """MCP 서버 (등록·관리 전용 — 실행은 langchain-mcp-adapters 핀 이동 후). scope: global|user."""
+    """Remote MCP data source. User sources are public or OAuth; admin sources may use static headers."""
 
     __tablename__ = "chat_mcp_servers"
 
@@ -229,14 +229,16 @@ class ChatMcpServer(Base):
     transport: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="http")  # HTTPS streamable HTTP only
     url: Mapped[str | None] = mapped_column(VARCHAR(500))
     command: Mapped[str | None] = mapped_column(VARCHAR(500))  # deprecated(stdio 제거) — 컬럼만 유지
-    headers: Mapped[dict | None] = mapped_column(JSON)  # deprecated: 레거시 plaintext. 신규는 encrypted_headers.
-    # 인증 헤더(Bearer/API key) — AES-256-GCM(llm_provider_key 도메인) 암호화 문자열.
+    headers: Mapped[dict | None] = mapped_column(
+        JSON
+    )  # deprecated plaintext column; new admin headers use encrypted_headers.
+    # Administrator-managed static headers for explicitly approved nonstandard authentication.
     encrypted_headers: Mapped[str | None] = mapped_column(TEXT)
-    # 사용자별 인증 요구사항(비밀 아님) — [{"key","label","description"}]. 공용 시크릿 대신
-    # 사용자가 자신의 값(chat_mcp_credentials)을 채우도록 어떤 헤더가 필요한지 선언.
-    auth_requirements: Mapped[list | None] = mapped_column(JSON)
-    # none|headers|oauth. Hosted Notion MCP is always oauth; OAuth tokens are per user/project.
+    # none|oauth|admin. User sources can only be none or OAuth.
     auth_mode: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="none")
+    oauth_scopes: Mapped[list | None] = mapped_column(JSON)
+    oauth_client_id: Mapped[str | None] = mapped_column(VARCHAR(512))
+    encrypted_oauth_client_secret: Mapped[str | None] = mapped_column(TEXT)
     tool_effect_overrides: Mapped[dict | None] = mapped_column(JSON)
     config_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
     source_package_id: Mapped[str | None] = mapped_column(CHAR(36))
@@ -254,32 +256,6 @@ class ChatMcpServer(Base):
     )
 
 
-class ChatMcpCredential(Base):
-    """MCP 서버의 사용자별 인증 값 — 서버 auth_requirements 에 대응하는 개별 사용자 시크릿.
-
-    (mcp_server_id, owner_user_id, owner_project_id) 유일. values 는 AES-256-GCM(llm_provider_key
-    도메인)으로 암호화한 JSON({header_key: value}). 실행 시 서버 기본 헤더 위에 병합된다.
-    """
-
-    __tablename__ = "chat_mcp_credentials"
-
-    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
-    mcp_server_id: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    encrypted_values: Mapped[str] = mapped_column(TEXT, nullable=False)
-    credential_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    __table_args__ = (
-        UniqueConstraint("mcp_server_id", "owner_user_id", "owner_project_id", name="uq_chat_mcp_cred"),
-        Index("idx_chat_mcp_cred_owner", "owner_user_id", "owner_project_id"),
-    )
-
-
 class ChatMcpOAuthConnection(Base):
     """Per-user/project OAuth token bundle for a remote MCP server."""
 
@@ -293,6 +269,7 @@ class ChatMcpOAuthConnection(Base):
     credential_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
     status: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="active")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    server_config_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
@@ -313,6 +290,7 @@ class ChatMcpOAuthRequest(Base):
     owner_user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     owner_project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     encrypted_payload: Mapped[str] = mapped_column(TEXT, nullable=False)
+    server_config_version: Mapped[int] = mapped_column(BIGINT, nullable=False, default=1)
     status: Mapped[str] = mapped_column(VARCHAR(12), nullable=False, default="pending")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

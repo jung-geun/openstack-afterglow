@@ -9,6 +9,9 @@
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ImageDistroFilter from '$lib/components/dashboard/images/ImageDistroFilter.svelte';
+  import ImageCatalogToolbar, { type CatalogViewMode } from '$lib/components/dashboard/images/ImageCatalogToolbar.svelte';
+  import ImageRepositoryCard from '$lib/components/dashboard/images/ImageRepositoryCard.svelte';
+  import ImageRepositoryDetail from '$lib/components/dashboard/images/ImageRepositoryDetail.svelte';
   import ImageCard from '$lib/components/dashboard/images/ImageCard.svelte';
   import ImageEditModal from '$lib/components/dashboard/images/ImageEditModal.svelte';
   import ImageDropOverlay from '$lib/components/dashboard/images/ImageDropOverlay.svelte';
@@ -20,6 +23,30 @@
   const ctrl = createImagesController({
     token: () => $auth.token ?? undefined,
     projectId: () => $auth.projectId ?? undefined,
+  });
+  let viewMode = $state<CatalogViewMode>('repositories');
+  let selectedRepository = $state<string | null>(null);
+  const selectedRepositoryGroup = $derived(
+    ctrl.allRepositoryGroups.find((group) => group.repository === selectedRepository) ?? null
+  );
+
+  function changeViewMode(mode: CatalogViewMode) {
+    viewMode = mode;
+    selectedRepository = null;
+    ctrl.selection.clear();
+  }
+
+  function openRepository(repository: string) {
+    selectedRepository = repository;
+    ctrl.selection.clear();
+  }
+
+  function openRepositoryTag(imageId: string) {
+    ctrl.openImagePanel(imageId);
+  }
+
+  $effect(() => {
+    if (selectedRepository && !selectedRepositoryGroup) selectedRepository = null;
   });
 
   const ar = createAutoRefresh(() => ctrl.fetchImages(), {
@@ -140,17 +167,50 @@
       {/each}
     </div>
   {:else}
+    <ImageCatalogToolbar
+      bind:searchQuery={ctrl.searchQuery}
+      bind:repositoryFilter={ctrl.repositoryFilter}
+      bind:tagFilter={ctrl.tagFilter}
+      bind:sortMode={ctrl.sortMode}
+      {viewMode}
+      repositoryOptions={ctrl.repositoryOptions}
+      tagOptions={ctrl.tagOptions}
+      resultCount={ctrl.filteredImages.length}
+      totalCount={ctrl.images.length}
+      repositoryCount={ctrl.visibleRepositoryCount}
+      onClear={ctrl.clearFilters}
+      onViewModeChange={changeViewMode}
+    />
     <ImageDistroFilter bind:distroFilter={ctrl.distroFilter} counts={ctrl.distroGroups} />
 
     {#if ctrl.filteredImages.length === 0}
       <div class="text-center py-20 text-gray-600">
-        <p class="text-lg">이미지가 없습니다</p>
+        <p class="text-lg">{ctrl.images.length === 0 ? '이미지가 없습니다' : '검색 결과가 없습니다'}</p>
+        {#if ctrl.images.length > 0}
+          <p class="text-sm mt-2">repository, tag, OS 필터를 바꿔보세요.</p>
+        {/if}
+      </div>
+    {:else if selectedRepositoryGroup}
+      <ImageRepositoryDetail
+        group={selectedRepositoryGroup}
+        onBack={() => selectedRepository = null}
+        onOpenTag={openRepositoryTag}
+      />
+    {:else if viewMode === 'repositories'}
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+        {#each ctrl.repositoryGroups as group (group.repository)}
+          <ImageRepositoryCard
+            {group}
+            onOpen={() => openRepository(group.repository)}
+            onOpenTag={openRepositoryTag}
+          />
+        {/each}
       </div>
     {:else}
       <div class="mb-3">
         <SelectionToolbar
-          label="이미지"
-          ariaLabel="이미지 전체 선택"
+          label="이미지 tag"
+          ariaLabel="이미지 tag 전체 선택"
           checked={allOwnedSelected}
           indeterminate={selectedImageIds.length > 0 && !allOwnedSelected}
           selectedCount={ctrl.selection.count}
@@ -178,6 +238,7 @@
       </div>
     {/if}
   {/if}
+  {#if viewMode === 'tags' && !selectedRepositoryGroup}
   <BulkSelectionOverlay
     count={ctrl.selection.count}
     ariaLabel="선택한 이미지 일괄 작업"
@@ -207,6 +268,7 @@
     busy={ctrl.bulkActioning}
     onClear={() => ctrl.selection.clear()}
   />
+  {/if}
 </div>
 
 <ImageUploadModal

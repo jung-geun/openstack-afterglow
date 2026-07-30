@@ -28,3 +28,41 @@ export function sanitizeImageFilename(filename: string): string {
 	const repository = basename.replace(/[^a-z0-9._/-]+/g, '-').replace(/-+/g, '-').replace(/^[-./]+|[-./]+$/g, '') || 'image';
 	return `${repository}:latest`;
 }
+export interface SearchableImageReference {
+	name: string;
+	repository?: string | null;
+	tag?: string | null;
+	os_distro?: string | null;
+	os_type?: string | null;
+}
+
+export function imageReferenceSearchText(image: SearchableImageReference): string {
+	return [
+		image.name,
+		image.repository ?? '',
+		image.tag ?? 'latest',
+		image.os_distro ?? '',
+		image.os_type ?? '',
+	].join(' ').toLocaleLowerCase();
+}
+
+export function imageReferenceMatchesQuery(image: SearchableImageReference, query: string): boolean {
+	const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+	if (terms.length === 0) return true;
+	const haystack = imageReferenceSearchText(image);
+	return terms.every((term) => haystack.includes(term));
+}
+
+export function imageReferenceMatchScore(image: SearchableImageReference, query: string): number {
+	const normalizedQuery = query.trim().toLocaleLowerCase();
+	if (!normalizedQuery) return 0;
+	const name = image.name.toLocaleLowerCase();
+	const repository = (image.repository ?? '').toLocaleLowerCase();
+	const tag = (image.tag ?? 'latest').toLocaleLowerCase();
+	if (name === normalizedQuery) return 100;
+	if (repository === normalizedQuery) return 80;
+	if (tag === normalizedQuery) return 60;
+	if (name.startsWith(normalizedQuery)) return 40;
+	if (repository.startsWith(normalizedQuery)) return 30;
+	return imageReferenceMatchesQuery(image, normalizedQuery) ? 10 : -1;
+}

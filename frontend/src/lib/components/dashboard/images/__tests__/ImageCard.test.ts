@@ -4,10 +4,11 @@ import type { ImageInfo } from '$lib/types/compute';
 import ImageCard from '../ImageCard.svelte';
 
 const image: ImageInfo = {
-	id: 'image-1', name: 'ubuntu-image', status: 'active', owner: 'project-1', size: 1024,
+	id: 'image-1', name: 'ubuntu-image:latest', repository: 'ubuntu-image', tag: 'latest',
+	status: 'active', owner: 'project-1', size: 1024,
 };
-
 function renderCard(overrides: Partial<{
+	img: ImageInfo;
 	selectable: boolean;
 	selected: boolean;
 	onSelect: (id: string) => void;
@@ -35,7 +36,7 @@ describe('ImageCard selection', () => {
 		const onSelect = vi.fn();
 		const onToggleSelect = vi.fn();
 		renderCard({ onSelect, onToggleSelect });
-		const checkbox = screen.getByRole('checkbox', { name: 'ubuntu-image 선택' });
+		const checkbox = screen.getByRole('checkbox', { name: 'ubuntu-image:latest 선택' });
 
 		await fireEvent.click(checkbox.closest('label')!);
 		checkbox.focus();
@@ -46,11 +47,10 @@ describe('ImageCard selection', () => {
 
 	it('shows a disabled checkbox for an image outside the current project', () => {
 		renderCard({ selectable: false });
-		expect((screen.getByRole('checkbox', { name: 'ubuntu-image 선택' }) as HTMLInputElement).disabled).toBe(true);
+		expect((screen.getByRole('checkbox', { name: 'ubuntu-image:latest 선택' }) as HTMLInputElement).disabled).toBe(true);
 	});
-
 	it('shows the implicit latest tag when the API omits legacy tag fields', () => {
-		renderCard();
-		expect(screen.getByText('tag: latest')).toBeTruthy();
+		renderCard({ img: { ...image, tag: undefined } });
+		expect(screen.getByText('latest')).toBeTruthy();
 	});
 });

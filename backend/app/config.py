@@ -131,6 +131,8 @@ def _load_toml() -> dict:
     flat["service_chat_enabled"] = svc.get("chat", False)
     flat["service_mcp_enabled"] = svc.get("mcp", False)
     mcp = data.get("mcp", {})
+    flat["mcp_public_url"] = mcp.get("public_url", "")
+    flat["mcp_oauth_consent_url"] = mcp.get("oauth_consent_url", "")
     flat["mcp_authorization_ticket_ttl_seconds"] = mcp.get("authorization_ticket_ttl_seconds", 600)
     flat["mcp_access_token_ttl_seconds"] = mcp.get("access_token_ttl_seconds", 900)
     flat["mcp_default_grant_ttl_days"] = mcp.get("default_grant_ttl_days", 30)
@@ -477,6 +479,10 @@ class Settings(BaseSettings):
     cache_ttl_catalog_slow: int = 900  # flavors, image 메타, 데이터스토어
     cache_ttl_project_meta: int = 300  # keypair, SG 정의, 네트워크 메타
     mcp_authorization_ticket_ttl_seconds: int = 600
+    # Public resource URL and browser consent page for the inbound MCP OAuth server.
+    # Client callback URLs remain client-owned DCR inputs and are never configured here.
+    mcp_public_url: str = ""
+    mcp_oauth_consent_url: str = ""
     mcp_access_token_ttl_seconds: int = 900
     mcp_default_grant_ttl_days: int = 30
     mcp_max_grant_ttl_days: int = 90
@@ -872,20 +878,27 @@ class Settings(BaseSettings):
             )
 
         if self.service_mcp_enabled:
-            public_api = urlsplit(self.public_api_base)
-            if (
-                public_api.scheme not in {"http", "https"}
-                or (is_production and public_api.scheme != "https")
-                or not public_api.netloc
-                or public_api.username
-                or public_api.password
-                or public_api.query
-                or public_api.fragment
-            ):
-                scheme_requirement = "HTTPS" if is_production else "HTTP or HTTPS"
-                raise ValueError(
-                    f"services.mcp requires an absolute {scheme_requirement} public_api_base without credentials, query, or fragment"
-                )
+
+            def valid_mcp_url(value: str, *, name: str) -> None:
+                parsed = urlsplit(value)
+                if (
+                    parsed.scheme not in {"http", "https"}
+                    or (is_production and parsed.scheme != "https")
+                    or not parsed.netloc
+                    or parsed.username
+                    or parsed.password
+                    or parsed.query
+                    or parsed.fragment
+                ):
+                    scheme_requirement = "HTTPS" if is_production else "HTTP or HTTPS"
+                    raise ValueError(
+                        f"{name} requires an absolute {scheme_requirement} URL without credentials, query, or fragment"
+                    )
+
+            public_mcp_url = self.mcp_public_url or f"{self.public_api_base.rstrip('/')}/api/v1/mcp"
+            consent_url = self.mcp_oauth_consent_url or f"{self.frontend_base_url.rstrip('/')}/oauth/mcp/authorize"
+            valid_mcp_url(public_mcp_url, name="services.mcp")
+            valid_mcp_url(consent_url, name="services.mcp OAuth consent")
 
         if self.secret_key == "change-me-in-production":
             if is_production:

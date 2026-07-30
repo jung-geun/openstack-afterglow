@@ -9,21 +9,17 @@
 	// only: 특정 섹션만 렌더('mcp' | 'tools' | 'skills'). 미지정 시 전부.
 	let { base, only }: { base: string; only?: 'mcp' | 'tools' | 'skills' } = $props();
 
-	interface AuthRequirement {
-		key: string;
-		label: string;
-		description?: string;
-	}
 	interface McpServer {
 		id: number;
 		scope: string;
 		name: string;
 		transport: string;
 		url: string | null;
-		headers?: Record<string, string> | null; // 값은 서버에서 마스킹됨
 		has_headers?: boolean;
-		auth_requirements?: AuthRequirement[];
-		auth_mode?: 'none' | 'headers' | 'oauth';
+		auth_mode?: 'none' | 'oauth' | 'admin';
+		oauth_scopes?: string[];
+		has_oauth_client?: boolean;
+		has_oauth_client_secret?: boolean;
 		is_active: boolean;
 	}
 	interface McpOAuthStatus {
@@ -62,15 +58,13 @@
 	let mName = $state('');
 	let mTransport = $state('http');
 	let mUrl = $state('');
-	let mHeaders = $state(''); // 'Header-Name: value' 줄 단위 입력 → dict 파싱
-	let mAuthReq = $state(''); // 'Authorization: Notion Token' 줄 단위 → 사용자 인증 요구사항
+	let mHeaders = $state(''); // admin-only `Header-Name: value` lines → dict
+	let mAuthMode = $state<'none' | 'oauth' | 'admin'>('none');
+	let mOAuthScopes = $state('');
+	let mOAuthClientId = $state('');
+	let mOAuthClientSecret = $state('');
 	let addingMcp = $state(false);
 
-	// 사용자별 인증 값 입력 상태(사용자 뷰): 서버 id별 펼침 + 입력 값 + 충족 여부.
-	let credOpenId = $state<number | null>(null);
-	let credValues = $state<Record<string, string>>({});
-	let credFilled = $state<string[]>([]);
-	let savingCred = $state(false);
 	let oauthStatus = $state<Record<number, McpOAuthStatus>>({});
 	let connectingOAuthId = $state<number | null>(null);
 
@@ -87,60 +81,6 @@
 		return out;
 	}
 
-	/** 'Authorization: Notion Token' 줄들을 [{key,label}] 요구사항으로 파싱. */
-	function parseRequirements(text: string): AuthRequirement[] {
-		const out: AuthRequirement[] = [];
-		for (const line of text.split('\n')) {
-			const idx = line.indexOf(':');
-			const key = (idx > 0 ? line.slice(0, idx) : line).trim();
-			if (!key) continue;
-			const label = idx > 0 ? line.slice(idx + 1).trim() || key : key;
-			out.push({ key, label });
-		}
-		return out;
-	}
-
-	async function openCred(m: McpServer) {
-		if (credOpenId === m.id) {
-			credOpenId = null;
-			return;
-		}
-		credOpenId = m.id;
-		credValues = {};
-		credFilled = [];
-		for (const r of m.auth_requirements ?? []) credValues[r.key] = '';
-		try {
-			const st = await api.get<{ filled_keys: string[] }>(
-				`${base}/mcp-servers/${m.id}/credentials`,
-				token,
-				projectId
-			);
-			credFilled = st.filled_keys ?? [];
-			// 이미 채운 값은 마스킹 표시(재전송 시 유지).
-			for (const k of credFilled) credValues[k] = '••••••';
-		} catch {
-			/* 상태 조회 실패는 무시 — 빈 폼으로 입력 */
-		}
-	}
-
-	async function saveCred(m: McpServer) {
-		savingCred = true;
-		try {
-			const st = await api.put<{ filled_keys: string[] }>(
-				`${base}/mcp-servers/${m.id}/credentials`,
-				{ values: credValues },
-				token,
-				projectId
-			);
-			credFilled = st.filled_keys ?? [];
-			toast.success('인증 정보가 저장되었습니다');
-			credOpenId = null;
-		} catch (e) {
-			toast.error(e instanceof ApiError ? e.message : '저장 실패');
-		} finally {
-			savingCred = false;
-		}
-	}
 
 
 	async function connectOAuth(m: McpServer) {
@@ -194,16 +134,18 @@
 			mcps = ms;
 			tools = ts;
 			skills = ss;
-			oauthStatus = Object.fromEntries(
-				await Promise.all(
-					ms
-						.filter((mcp) => mcp.auth_mode === 'oauth')
-						.map(async (mcp) => [
-							mcp.id,
-							await api.get<McpOAuthStatus>(`${base}/mcp-servers/${mcp.id}/oauth`, token, projectId)
-						] as const)
-				)
-			);
+			oauthStatus = isAdmin
+				? {}
+				: Object.fromEntries(
+						await Promise.all(
+							ms
+								.filter((mcp) => mcp.auth_mode === 'oauth')
+								.map(async (mcp) => [
+									mcp.id,
+									await api.get<McpOAuthStatus>(`${base}/mcp-servers/${mcp.id}/oauth`, token, projectId)
+								] as const)
+						)
+					);
 		} catch {
 			toast.error('목록을 불러오지 못했습니다');
 		} finally {
@@ -248,15 +190,22 @@
 		addingMcp = true;
 		try {
 			const headers = parseHeaders(mHeaders);
-			const requirements = parseRequirements(mAuthReq);
+			const oauthScopes = mOAuthScopes.split(/[\s,]+/).filter(Boolean);
 			await api.post(
 				`${base}/mcp-servers`,
 				{
 					name: mName.trim(),
 					transport: mTransport,
 					url: mUrl.trim(),
-					...(Object.keys(headers).length ? { headers } : {}),
-					...(requirements.length ? { auth_requirements: requirements } : {})
+					...(isAdmin
+						? {
+								auth_mode: mAuthMode,
+								...(Object.keys(headers).length ? { headers } : {}),
+								...(oauthScopes.length ? { oauth_scopes: oauthScopes } : {}),
+								...(mOAuthClientId.trim() ? { oauth_client_id: mOAuthClientId.trim() } : {}),
+								...(mOAuthClientSecret ? { oauth_client_secret: mOAuthClientSecret } : {})
+							}
+						: {})
 				},
 				token,
 				projectId
@@ -264,7 +213,10 @@
 			mName = '';
 			mUrl = '';
 			mHeaders = '';
-			mAuthReq = '';
+			mAuthMode = 'none';
+			mOAuthScopes = '';
+			mOAuthClientId = '';
+			mOAuthClientSecret = '';
 			await load();
 			toast.success('MCP 서버가 추가되었습니다');
 		} catch (e) {
@@ -333,40 +285,48 @@
 {#if !only || only === 'mcp'}
 <section class="mb-8">
 	<h3 class="mb-1 text-sm font-semibold text-[var(--color-ink-1)]">원격 MCP 서버</h3>
-	<p class="mb-3 text-xs text-[var(--color-ink-3)]">원격(http streamable / sse) MCP 서버를 연결해 도구를 사용합니다. 스코프: {base.includes('/admin') ? '전체 공용' : '내 전용'}</p>
+	<p class="mb-3 text-xs text-[var(--color-ink-3)]">HTTPS streamable HTTP MCP 서버를 연결합니다. 스코프: {isAdmin ? '전체 공용' : '내 전용'}</p>
 	<div class="{cardCls} mb-4 p-5">
 		<div class="grid grid-cols-1 gap-3 md:grid-cols-3">
 			<input class={inputCls} placeholder="이름" bind:value={mName} />
 			<select class={inputCls} bind:value={mTransport}>
 				<option value="http">http (streamable)</option>
-				<option value="sse">sse</option>
 			</select>
 			<input class={inputCls} placeholder="URL (예: https://mcp.example/mcp)" bind:value={mUrl} />
 		</div>
-		<div class="mt-3">
-			<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-headers">
-				인증 헤더 (선택) — 한 줄에 하나, <code>이름: 값</code> 형식. 값은 암호화 저장됩니다.
-			</label>
-			<textarea
-				id="mcp-headers"
-				class="{inputCls} font-mono"
-				rows="2"
-				placeholder={'Authorization: Bearer <token>\nX-Api-Key: <key>'}
-				bind:value={mHeaders}
-			></textarea>
-		</div>
-		<div class="mt-3">
-			<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-authreq">
-				사용자 인증 요구사항 (선택) — 한 줄에 하나, <code>헤더키: 라벨</code>. Notion MCP URL은 자동으로 사용자별 OAuth 연결을 요구합니다. 다른 정적 헤더 인증만 여기에서 선언하세요.
-			</label>
-			<textarea
-				id="mcp-authreq"
-				class="{inputCls} font-mono"
-				rows="2"
-				placeholder={'Authorization: Service access token\nX-Api-Key: External service key'}
-				bind:value={mAuthReq}
-			></textarea>
-		</div>
+		{#if isAdmin}
+			<div class="mt-3">
+				<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-auth-mode">인증 정책</label>
+				<select id="mcp-auth-mode" class={inputCls} bind:value={mAuthMode}>
+					<option value="none">공개</option>
+					<option value="oauth">OAuth</option>
+					<option value="admin">관리자 승인 정적 인증</option>
+				</select>
+			</div>
+			{#if mAuthMode === 'oauth'}
+				<div class="mt-3">
+					<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-oauth-scopes">OAuth scopes (선택, 공백 또는 쉼표로 구분)</label>
+					<input id="mcp-oauth-scopes" class={inputCls} placeholder="read write" bind:value={mOAuthScopes} />
+				</div>
+				<div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+					<div>
+						<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-oauth-client-id">OAuth client ID (DCR 미지원 서버만)</label>
+						<input id="mcp-oauth-client-id" class={inputCls} autocomplete="off" bind:value={mOAuthClientId} />
+					</div>
+					<div>
+						<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-oauth-client-secret">OAuth client secret (저장 후 표시되지 않음)</label>
+						<input id="mcp-oauth-client-secret" class={inputCls} type="password" autocomplete="new-password" bind:value={mOAuthClientSecret} />
+					</div>
+				</div>
+			{:else if mAuthMode === 'admin'}
+				<div class="mt-3">
+					<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-headers">승인된 정적 인증 헤더 — 한 줄에 하나, <code>이름: 값</code></label>
+					<textarea id="mcp-headers" class="{inputCls} font-mono" rows="2" placeholder={'Authorization: Bearer <token>\nX-Api-Key: <key>'} bind:value={mHeaders}></textarea>
+				</div>
+			{/if}
+		{:else}
+			<p class="mt-3 text-xs text-[var(--color-ink-3)]">공개 MCP는 바로 연결됩니다. OAuth가 감지되면 로그인 연결을 안내합니다. API key·특수 인증 서버는 관리자 승인이 필요합니다.</p>
+		{/if}
 		<div class="mt-3 flex justify-end">
 			<Button onclick={addMcp} disabled={addingMcp}>{addingMcp ? '추가 중…' : '+ MCP 서버 추가'}</Button>
 		</div>
@@ -386,7 +346,6 @@
 								<span class={badge(m.is_active)}>{m.is_active ? '활성' : '비활성'}</span>
 								<span class="text-xs text-[var(--color-ink-3)]">{m.transport}</span>
 								{#if m.has_headers}<span class="text-xs text-[var(--color-ink-3)]" title="공용 인증 헤더 설정됨">🔒</span>{/if}
-								{#if m.auth_requirements?.length}<span class="text-xs text-[var(--color-ink-3)]" title="사용자별 인증 필요">👤🔑</span>{/if}
 								{#if m.auth_mode === 'oauth'}
 									<span class="text-xs text-[var(--color-state-info)]" title="사용자별 OAuth 연결 필요">OAuth</span>
 								{/if}
@@ -394,9 +353,6 @@
 							{#if m.url}<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{m.url}</div>{/if}
 						</div>
 						<div class="flex shrink-0 items-center gap-3 text-xs">
-							{#if !isAdmin && m.auth_requirements?.length}
-								<button class="text-[var(--color-accent)] hover:opacity-80" onclick={() => openCred(m)}>인증 정보</button>
-							{/if}
 							{#if !isAdmin && m.auth_mode === 'oauth'}
 								{#if oauthStatus[m.id]?.connected}
 									<button class="text-[var(--color-state-success)] hover:opacity-80" onclick={() => disconnectOAuth(m)}>OAuth 연결됨</button>
@@ -410,33 +366,6 @@
 							<button class="text-[var(--color-state-danger)] hover:opacity-80" onclick={() => removeItem('mcp-servers', m.id)}>삭제</button>
 						</div>
 					</div>
-					{#if credOpenId === m.id && m.auth_requirements?.length}
-						<div class="border-t border-[var(--color-line)] px-4 py-3">
-							<p class="mb-2 text-xs text-[var(--color-ink-3)]">이 서버에 사용할 <b>내 인증 정보</b>를 입력하세요. 값은 암호화 저장되며 나에게만 적용됩니다.</p>
-							<div class="space-y-2">
-								{#each m.auth_requirements as r (r.key)}
-									<div>
-										<label class="mb-0.5 block text-xs text-[var(--color-ink-2)]" for="cred-{m.id}-{r.key}">
-											{r.label}
-											{#if credFilled.includes(r.key)}<span class="ml-1 text-[var(--color-state-success)]">✓ 저장됨</span>{/if}
-											<span class="text-[var(--color-ink-3)]">({r.key})</span>
-										</label>
-										<input
-											id="cred-{m.id}-{r.key}"
-											class={inputCls}
-											type="password"
-											placeholder={credFilled.includes(r.key) ? '저장됨 — 변경하려면 새 값 입력' : '값 입력'}
-											bind:value={credValues[r.key]}
-										/>
-									</div>
-								{/each}
-							</div>
-							<div class="mt-3 flex justify-end gap-2">
-								<Button variant="ghost" onclick={() => (credOpenId = null)}>닫기</Button>
-								<Button onclick={() => saveCred(m)} disabled={savingCred}>{savingCred ? '저장 중…' : '저장'}</Button>
-							</div>
-						</div>
-					{/if}
 				</div>
 			{/each}
 		</div>

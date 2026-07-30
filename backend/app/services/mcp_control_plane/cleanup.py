@@ -41,6 +41,8 @@ class CleanupCounts:
     expired_access_tokens: int = 0
     deleted_refresh_tombstones: int = 0
     revoked_clients: int = 0
+    deleted_clients: int = 0
+    deleted_authorization_requests: int = 0
     deleted_read_invocations: int = 0
 
 
@@ -93,6 +95,32 @@ async def sweep_delegated_authority(
         for client in stale_clients:
             client.revoked_at = now
 
+        expired_request_retention = now - timedelta(days=1)
+        stale_requests = (
+            await session.scalars(
+                select(McpOAuthAuthorizationRequest)
+                .where(
+                    McpOAuthAuthorizationRequest.status != "pending",
+                    McpOAuthAuthorizationRequest.expires_at <= _db_time(expired_request_retention),
+                )
+                .with_for_update()
+            )
+        ).all()
+        for request in stale_requests:
+            await session.delete(request)
+
+        deleted_clients = (
+            await session.scalars(
+                select(McpOAuthClient)
+                .where(
+                    McpOAuthClient.revoked_at.is_not(None),
+                    McpOAuthClient.revoked_at <= _db_time(cutoff),
+                )
+                .with_for_update()
+            )
+        ).all()
+        for client in deleted_clients:
+            await session.delete(client)
     expired_codes = 0
     expired_access_tokens = 0
     deleted_refresh_tombstones = 0
@@ -232,4 +260,6 @@ async def sweep_delegated_authority(
         deleted_refresh_tombstones=deleted_refresh_tombstones,
         revoked_clients=len(stale_clients),
         deleted_read_invocations=deleted_read_invocations,
+        deleted_clients=len(deleted_clients),
+        deleted_authorization_requests=len(stale_requests),
     )

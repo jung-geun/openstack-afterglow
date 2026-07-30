@@ -33,7 +33,7 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 	const mcpEnabled = $derived($siteConfig.services.mcp);
-	const mcpUrl = $derived(`${getBaseUrl().replace(/\/+$/, '')}/api/v1/mcp`);
+	const mcpUrl = $derived($siteConfig.mcp_url || `${getBaseUrl().replace(/\/+$/, '')}/api/v1/mcp`);
 
 	let tokens = $state<McpAccessRecord[]>([]);
 	let oauthGrants = $state<McpAccessRecord[]>([]);
@@ -65,8 +65,8 @@
 		loading = true;
 		try {
 			const [personalTokens, grants] = await Promise.all([
-				api.get<McpAccessRecord[]>('/api/v1/mcp-tokens', token, projectId),
-				api.get<McpAccessRecord[]>('/api/v1/mcp-oauth/grants', token, projectId),
+				api.get<McpAccessRecord[]>('/api/v1/auth/mcp-tokens', token, projectId),
+				api.get<McpAccessRecord[]>('/api/v1/auth/mcp-oauth/grants', token, projectId),
 			]);
 			tokens = personalTokens;
 			oauthGrants = grants;
@@ -84,7 +84,7 @@
 		actionError = '';
 		try {
 			const issued = await api.post<IssuedToken>(
-				'/api/v1/mcp-tokens',
+				'/api/v1/auth/mcp-tokens',
 				{
 					name: tokenName.trim(),
 					access_level: accessLevel,
@@ -126,7 +126,7 @@
 		mutatingId = record.id;
 		actionError = '';
 		try {
-			await api.put(`/api/v1/mcp-tokens/${encodeURIComponent(record.id)}/lumen-default`, {}, token, projectId);
+			await api.put(`/api/v1/auth/mcp-tokens/${encodeURIComponent(record.id)}/lumen-default`, {}, token, projectId);
 			await loadAccess();
 		} catch (error) {
 			actionError = errorMessage(error, 'Lumen 기본 토큰을 변경하지 못했습니다.');
@@ -140,7 +140,7 @@
 		mutatingId = 'lumen-default';
 		actionError = '';
 		try {
-			await api.delete('/api/v1/mcp-tokens/lumen-default', token, projectId);
+			await api.delete('/api/v1/auth/mcp-tokens/lumen-default', token, projectId);
 			await loadAccess();
 		} catch (error) {
 			actionError = errorMessage(error, 'Lumen 기본 토큰을 해제하지 못했습니다.');
@@ -155,7 +155,7 @@
 		mutatingId = record.id;
 		actionError = '';
 		try {
-			await api.delete(`/api/v1/mcp-tokens/${encodeURIComponent(record.id)}`, token, projectId);
+			await api.delete(`/api/v1/auth/mcp-tokens/${encodeURIComponent(record.id)}`, token, projectId);
 			await loadAccess();
 		} catch (error) {
 			actionError = errorMessage(error, 'MCP 토큰을 폐기하지 못했습니다.');
@@ -170,7 +170,7 @@
 		mutatingId = record.id;
 		actionError = '';
 		try {
-			await api.delete(`/api/v1/mcp-oauth/grants/${encodeURIComponent(record.grant_id)}`, token, projectId);
+			await api.delete(`/api/v1/auth/mcp-oauth/grants/${encodeURIComponent(record.grant_id)}`, token, projectId);
 			await loadAccess();
 		} catch (error) {
 			actionError = errorMessage(error, 'OAuth 권한을 철회하지 못했습니다.');

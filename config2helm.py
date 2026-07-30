@@ -122,6 +122,7 @@ def convert(cfg: dict, include_secrets: bool) -> dict:
     union   = cfg.get("union", {})
     gpu     = cfg.get("gpu", {})
     svc     = cfg.get("services", {})
+    mcp     = cfg.get("mcp", {})
     k3s     = cfg.get("k3s", {})
     db      = cfg.get("database", {})
     cors    = cfg.get("cors", {})
@@ -239,11 +240,19 @@ def convert(cfg: dict, include_secrets: bool) -> dict:
 
     # ── services ───────────────────────────────────────────────────────────
     svc_out: dict = {}
-    for k in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican"):
+    for k in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "mcp"):
         if k in svc:
             svc_out[k] = svc[k]
     if svc_out:
         out["services"] = svc_out
+
+    # ── MCP ────────────────────────────────────────────────────────────────
+    mcp_out: dict = {}
+    for k in ("public_url", "oauth_consent_url"):
+        if k in mcp:
+            mcp_out[_s(k)] = mcp[k]
+    if mcp_out:
+        out["mcp"] = mcp_out
 
     # ── k3s ────────────────────────────────────────────────────────────────
     k3s_out: dict = {}

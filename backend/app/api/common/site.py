@@ -40,6 +40,7 @@ class PublicSiteConfigResponse(BaseModel):
     logo_light_path: str
     favicon_path: str
     services: SiteServicesResponse
+    mcp_url: str = ""
 
 
 class BrandingSlotResponse(BaseModel):

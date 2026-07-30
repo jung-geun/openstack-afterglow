@@ -1,8 +1,11 @@
 import asyncio
+import hmac
 import logging
+import os
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import (
@@ -21,6 +24,17 @@ from app.services.recent_projects import get_recent_project_ids, record_project_
 
 _logger = logging.getLogger(__name__)
 _PROJECTS_TTL = 120  # 프로젝트 목록 캐시 2분
+
+_GITLAB_OIDC_STATE_COOKIE = "afterglow_gitlab_oidc_state"
+_GITLAB_OIDC_STATE_COOKIE_PATH = "/api/v1/auth/gitlab/callback"
+_GITLAB_OIDC_STATE_TTL_SECONDS = 600
+
+
+def _gitlab_oidc_cookie_secure(settings) -> bool:
+    return (
+        os.environ.get("AFTERGLOW_ENV", "development").strip().lower() == "production"
+        or urlsplit(getattr(settings, "public_api_base", "")).scheme == "https"
+    )
 
 
 class GroupInfo(BaseModel):
@@ -451,27 +465,41 @@ async def gitlab_enabled():
 
 
 @gitlab_router.get("/gitlab/authorize")
-async def gitlab_authorize():
-    """GitLab OAuth2 인증 URL 반환."""
+async def gitlab_authorize(response: Response):
+    """GitLab OAuth2 authorization URL and browser-bound state cookie."""
     settings = get_settings()
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
-    from app.services.gitlab_oidc import get_authorize_url
+    from app.services.gitlab_oidc import create_authorization_request
 
     try:
-        url = await get_authorize_url()
+        authorization = await create_authorization_request()
     except Exception:
         raise HTTPException(status_code=500, detail="GitLab 인증 URL 생성 실패")
-    return {"authorize_url": url}
+    response.set_cookie(
+        key=_GITLAB_OIDC_STATE_COOKIE,
+        value=authorization.state,
+        max_age=_GITLAB_OIDC_STATE_TTL_SECONDS,
+        httponly=True,
+        secure=_gitlab_oidc_cookie_secure(settings),
+        samesite="lax",
+        path=_GITLAB_OIDC_STATE_COOKIE_PATH,
+    )
+    return {"authorize_url": authorization.url}
 
 
 @gitlab_router.post("/gitlab/callback", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def gitlab_callback(request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
-    """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""
+async def gitlab_callback(
+    request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks, response: Response
+):
+    """GitLab OAuth2 콜백: browser-bound authorization code로 Keystone 토큰 발급."""
     settings = get_settings()
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
+    browser_state = request.cookies.get(_GITLAB_OIDC_STATE_COOKIE, "")
+    if not browser_state or not hmac.compare_digest(browser_state, req.state):
+        raise HTTPException(status_code=401, detail="GitLab 인증 상태가 현재 브라우저와 일치하지 않습니다")
     from app.services.gitlab_oidc import exchange_code
 
     try:
@@ -484,7 +512,7 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
     background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
-    return await _build_token_response(
+    token_response = await _build_token_response(
         keystone_token=data["token"],
         project_id=data["project_id"],
         project_name=data["project_name"],
@@ -495,3 +523,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         auth_method="federated",
         default_project_id=data.get("default_project_id", "") or "",
     )
+    response.delete_cookie(key=_GITLAB_OIDC_STATE_COOKIE, path=_GITLAB_OIDC_STATE_COOKIE_PATH)
+    return token_response

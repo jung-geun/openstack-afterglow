@@ -44,6 +44,11 @@ docker compose up -d                 # http://localhost:3000
 
 `afterglow.conf` is the only application configuration file. The `AFTERGLOW_ALLOW_INSECURE=1` flag in `.env.example` is only for local Docker Compose development; never set it in Kubernetes or production.
 
+### Public MCP/OAuth
+
+Public MCP is disabled by default. Enable it with `SERVICE_MCP_ENABLED=true`, `MCP_PUBLIC_URL` (the MCP resource URL), and `MCP_OAUTH_CONSENT_URL` (the Afterglow consent UI). A bare origin in `MCP_PUBLIC_URL` resolves to `/api/v1/mcp`. Configure the external OIDC login callback separately with `GITLAB_OIDC_REDIRECT_URI`; MCP client OAuth `redirect_uri` values are managed per client through DCR/CIMD.
+For a separate MCP host, the Helm chart routes the resource and `/.well-known` discovery paths to the backend and includes that host in TLS. With raw Kubernetes manifests, add equivalent host, resource, and `/.well-known` ingress routes yourself.
+
 See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment and full configuration.
 
 ## Documentation
