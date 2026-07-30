@@ -16,4 +16,4 @@
 
 - The public deployment/configuration slice is implemented but does **not** complete tasks 2–13: runtime and Helm now share the same effective MCP resource URL, including an explicit `mcp.public_url` or `app.public_api_base + "/api/v1/mcp"` fallback; Helm routes that resource and `/.well-known` discovery to the backend.
 - Focused coverage passes for configured Streamable HTTP transport, OAuth URL derivation, grant limits, mounted account token issuance, configuration, and rendered Helm fallback paths. The MariaDB authority-cleanup target also passes.
-- The OpenSpec remains active. `npm run test:all` and `npm run test:frontend` are currently blocked by failures in unrelated-but-MCP-adjacent chat MCP modules and other baseline areas; no live smoke, production enablement, archive, or unchecked Stage 1/2 registry work is claimed complete.
+- The OpenSpec remains active. Local `npm run test:all` and `npm run lint:backend` now pass; the first GitHub CI run exposed config-test environment leakage, which is corrected and awaiting rerun. No live smoke, production enablement, archive, or unchecked Stage 1/2 registry work is claimed complete.
