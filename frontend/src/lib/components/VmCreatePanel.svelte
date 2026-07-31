@@ -29,66 +29,70 @@
 </script>
 
 <SlidePanel onClose={closeWizard} dataTour="wizard-panel" width="w-full md:w-[75vw] max-w-4xl">
-	<div class="p-4 md:p-8">
-		{#if s.needsProjectSelect}
-			<AdminProjectSelector />
-		{:else if s.loading}
-			<div class="flex items-center justify-center py-16">
-				<LoadingSpinner size="lg" color="blue">데이터 로드 중...</LoadingSpinner>
-			</div>
-		{:else if s.deploying}
-			<VmDeployProgress />
-		{:else}
-			<WizardHeader
-				step={s.visibleStepIndex}
-				totalSteps={s.visibleTotalSteps}
-				stepName={s.visibleStepLabels[s.visibleStepIndex - 1]}
-				{adminMode}
-				adminProjectName={s.adminSelectedProjectName}
-				onReset={s.handleReset}
-				onClose={closeWizard}
-			/>
+	<div class="min-h-full flex flex-col">
+		<div class="flex-1 p-4 md:p-8">
+			{#if s.needsProjectSelect}
+				<AdminProjectSelector />
+			{:else if s.loading}
+				<div class="flex items-center justify-center py-16">
+					<LoadingSpinner size="lg" color="blue">데이터 로드 중...</LoadingSpinner>
+				</div>
+			{:else if s.deploying}
+				<VmDeployProgress />
+			{:else}
+				<WizardHeader
+					step={s.visibleStepIndex}
+					totalSteps={s.visibleTotalSteps}
+					stepName={s.visibleStepLabels[s.visibleStepIndex - 1]}
+					{adminMode}
+					adminProjectName={s.adminSelectedProjectName}
+					onReset={s.handleReset}
+					onClose={closeWizard}
+				/>
 
-			{#if s.hasCurrentStepError}
-				<Alert tone="danger" class="mb-6">
-					현재 단계의 일부 데이터를 불러오지 못했습니다.
-					{#snippet actions()}
-						<Button variant="danger-outline" size="sm" onclick={s.retryCurrentStep}>다시 시도</Button>
-					{/snippet}
-				</Alert>
-			{/if}
-
-			<div data-tour="wizard-stepper">
-				<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
-			</div>
-
-			<div class="mb-8" data-tour="wizard-body">
-				{#if $wizard.step === 1}
-					<WizardStep1Boot />
-				{:else if $wizard.step === 2}
-					<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
-					<SelectFlavor flavors={s.flavors} selectedId={$wizard.flavorId} onSelect={s.selectFlavor} quota={s.flavorQuota} />
-				{:else if $wizard.step === 3}
-					<WizardStep3Library />
-				{:else if $wizard.step === 4}
-					<h2 class="text-lg font-semibold text-white mb-4">배포 전략 <span class="text-gray-500 text-sm font-normal">스케줄링 / 레이어 마운트</span></h2>
-					<SelectStrategy
-						scheduling={$wizard.scheduling}
-						onSchedulingChange={s.selectScheduling}
-						strategy={$wizard.strategy}
-						hasLibraries={$wizard.libraries.length > 0}
-						hasPrebuilt={s.hasPrebuilt}
-						onStrategyChange={s.selectStrategy}
-						mountProtocol={$wizard.mountProtocol}
-						onProtocolChange={s.selectMountProtocol}
-					/>
-				{:else if $wizard.step === 5}
-					<WizardStep5Config />
-				{:else if $wizard.step === 6}
-					<WizardStep6Review />
+				{#if s.hasCurrentStepError}
+					<Alert tone="danger" class="mb-6">
+						현재 단계의 일부 데이터를 불러오지 못했습니다.
+						{#snippet actions()}
+							<Button variant="danger-outline" size="sm" onclick={s.retryCurrentStep}>다시 시도</Button>
+						{/snippet}
+					</Alert>
 				{/if}
-			</div>
 
+				<div data-tour="wizard-stepper">
+					<WizardStepper cur={s.visibleStepIndex} totalSteps={s.visibleTotalSteps} stepLabels={s.visibleStepLabels} goTo={s.goToVisible} />
+				</div>
+
+				<div class="mb-8" data-tour="wizard-body">
+					{#if $wizard.step === 1}
+						<WizardStep1Boot />
+					{:else if $wizard.step === 2}
+						<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
+						<SelectFlavor flavors={s.flavors} selectedId={$wizard.flavorId} onSelect={s.selectFlavor} quota={s.flavorQuota} />
+					{:else if $wizard.step === 3}
+						<WizardStep3Library />
+					{:else if $wizard.step === 4}
+						<h2 class="text-lg font-semibold text-white mb-4">배포 전략 <span class="text-gray-500 text-sm font-normal">스케줄링 / 레이어 마운트</span></h2>
+						<SelectStrategy
+							scheduling={$wizard.scheduling}
+							onSchedulingChange={s.selectScheduling}
+							strategy={$wizard.strategy}
+							hasLibraries={$wizard.libraries.length > 0}
+							hasPrebuilt={s.hasPrebuilt}
+							onStrategyChange={s.selectStrategy}
+							mountProtocol={$wizard.mountProtocol}
+							onProtocolChange={s.selectMountProtocol}
+						/>
+					{:else if $wizard.step === 5}
+						<WizardStep5Config />
+					{:else if $wizard.step === 6}
+						<WizardStep6Review />
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		{#if !s.needsProjectSelect && !s.loading && !s.deploying}
 			<WizardFooter
 				imageDisplay={$wizard.imageName ?? ($wizard.bootSource === 'volume' ? ($wizard.bootVolumeName ?? null) : null)}
 				flavorDisplay={$wizard.flavorName}
