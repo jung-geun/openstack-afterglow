@@ -327,6 +327,9 @@ def test_env_example_allows_local_default_secret_for_compose_workers():
 
     assert "SECRET_KEY=change-me-in-production" in env_example
     assert "AFTERGLOW_ALLOW_INSECURE=1" in env_example
+    assert "AFTERGLOW_ENV=development" in env_example
+    assert "PUBLIC_API_BASE=http://localhost:8000" in env_example
+    assert "FRONTEND_BASE_URL=http://localhost:3080" in env_example
 
 
 def test_k8s_python_manifests_use_production_secret_contract():
