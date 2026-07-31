@@ -21,7 +21,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from app.config import get_settings
+from app.config import get_settings, is_development_loopback_http_url
 from app.database import get_session_factory, mark_db_unhealthy
 from app.models.chat_db import ChatMcpOAuthConnection, ChatMcpOAuthRequest, ChatMcpServer
 from app.services.chat import ssrf
@@ -149,18 +149,40 @@ def _http_client() -> httpx.AsyncClient:
     )
 
 
+def _configured_callback_url(value: str) -> str:
+    """Validate the configured redirect target without accepting request input."""
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as exc:
+        raise McpOAuthError("OAuth callback URL is invalid") from exc
+
+    if parsed.scheme.lower() == "https":
+        return _https_url(value, field="callback URL")
+
+    if is_development_loopback_http_url(value):
+        return urlunsplit(("http", parsed.netloc, parsed.path or "/", "", ""))
+
+    raise McpOAuthError("OAuth callback URL must use public HTTPS or development HTTP loopback")
+
+
 def _callback_url() -> str:
     """Resolve the single public OAuth callback URL without accepting request input."""
     settings = get_settings()
     configured = str(getattr(settings, "chat_mcp_oauth_callback_url", "") or "").strip()
     if configured:
-        return _https_url(configured, field="callback URL")
+        return _configured_callback_url(configured)
     public_base = str(getattr(settings, "public_api_base", "") or "").strip().rstrip("/")
     frontend_base = str(getattr(settings, "frontend_base_url", "") or "").strip().rstrip("/")
     base = public_base or frontend_base
     if not base:
         raise McpOAuthError("OAuth callback URL is not configured")
-    return _https_url(f"{base}/api/v1/chat/mcp-oauth/callback", field="callback URL")
+    return _configured_callback_url(f"{base}/api/v1/chat/mcp-oauth/callback")
+
+
+def callback_cookie_secure() -> bool:
+    """Match the initiation cookie's Secure attribute to the configured callback."""
+    return urlsplit(_callback_url()).scheme.lower() == "https"
 
 
 async def _json_response(response: httpx.Response, *, operation: str) -> dict[str, Any]:

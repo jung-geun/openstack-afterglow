@@ -60,6 +60,22 @@ class TestMcpOAuthCallbackUrl:
 
         assert mcp_oauth._callback_url() == "https://console.example/api/v1/chat/mcp-oauth/callback"
 
+    def test_uses_derived_loopback_http_callback_url_in_development(self, monkeypatch):
+        callback_url = "http://127.0.0.1:8000/api/v1/chat/mcp-oauth/callback"
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(
+                chat_mcp_oauth_callback_url="",
+                public_api_base="http://127.0.0.1:8000",
+                frontend_base_url="https://console.example",
+            ),
+        )
+
+        assert mcp_oauth._callback_url() == callback_url
+        assert mcp_oauth.callback_cookie_secure() is False
+
     def test_uses_explicit_configured_callback_url(self, monkeypatch):
         callback_url = "https://oauth.example.test/custom/mcp-callback"
         monkeypatch.setattr(
@@ -73,6 +89,40 @@ class TestMcpOAuthCallbackUrl:
         )
 
         assert mcp_oauth._callback_url() == callback_url
+
+    def test_uses_explicit_loopback_http_callback_url_in_development(self, monkeypatch):
+        callback_url = "http://localhost:8000/api/v1/chat/mcp-oauth/callback"
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(chat_mcp_oauth_callback_url=callback_url),
+        )
+
+        assert mcp_oauth._callback_url() == callback_url
+        assert mcp_oauth.callback_cookie_secure() is False
+
+    def test_rejects_loopback_http_callback_url_in_production(self, monkeypatch):
+        monkeypatch.setenv("AFTERGLOW_ENV", "production")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(chat_mcp_oauth_callback_url="http://localhost:8000/callback"),
+        )
+
+        with pytest.raises(mcp_oauth.McpOAuthError, match="public HTTPS"):
+            mcp_oauth._callback_url()
+
+    def test_rejects_malformed_loopback_callback_port(self, monkeypatch):
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(chat_mcp_oauth_callback_url="http://localhost:not-a-port/callback"),
+        )
+
+        with pytest.raises(mcp_oauth.McpOAuthError, match="URL is invalid"):
+            mcp_oauth._callback_url()
 
     def test_rejects_victim_browser_nonce_for_attacker_request(self):
         attacker_nonce = "a" * 43
@@ -305,6 +355,7 @@ class TestMcpOAuthRoutes:
             return {"authorization_url": "https://auth.example/authorize?state=opaque"}
 
         monkeypatch.setattr(extensions.mcp_oauth, "begin", fake_begin)
+        monkeypatch.setattr(extensions.mcp_oauth, "callback_cookie_secure", lambda: True)
 
         response = await client.post("/api/v1/chat/mcp-servers/7/oauth/start")
 
@@ -313,6 +364,18 @@ class TestMcpOAuthRoutes:
         assert "httponly" in response.headers["set-cookie"].lower()
         assert "samesite=lax" in response.headers["set-cookie"].lower()
         assert "secure" in response.headers["set-cookie"].lower()
+
+    async def test_local_callback_uses_non_secure_initiator_cookie(self, client, monkeypatch):
+        async def fake_begin(*_args, **_kwargs):
+            return {"authorization_url": "https://auth.example/authorize?state=opaque"}
+
+        monkeypatch.setattr(extensions.mcp_oauth, "begin", fake_begin)
+        monkeypatch.setattr(extensions.mcp_oauth, "callback_cookie_secure", lambda: False)
+
+        response = await client.post("/api/v1/chat/mcp-servers/7/oauth/start")
+
+        assert response.status_code == 200
+        assert "secure" not in response.headers["set-cookie"].lower()
 
     async def test_callback_passes_only_the_initiating_browser_cookie(self, client, monkeypatch):
         received: list[str | None] = []

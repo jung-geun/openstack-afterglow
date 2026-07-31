@@ -13,6 +13,27 @@ from urllib.parse import urlsplit
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def is_development_loopback_http_url(value: str) -> bool:
+    """Return whether a URL is a valid development-only HTTP loopback endpoint."""
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return (
+        os.environ.get("AFTERGLOW_ENV", "development").strip().lower() == "development"
+        and parsed.scheme.lower() == "http"
+        and bool(parsed.netloc)
+        and (parsed.hostname or "").lower() in _LOOPBACK_HOSTS
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    )
+
 
 def _config_candidates() -> list[Path]:
     """지원하는 기본 설정 파일 경로 목록."""
@@ -725,9 +746,14 @@ class Settings(BaseSettings):
         value = value.strip()
         if not value:
             return ""
-        parsed = urlsplit(value)
+        try:
+            parsed = urlsplit(value)
+            _ = parsed.port
+        except ValueError:
+            parsed = None
         if (
-            parsed.scheme != "https"
+            parsed is None
+            or (parsed.scheme.lower() != "https" and not is_development_loopback_http_url(value))
             or not parsed.netloc
             or parsed.username
             or parsed.password
@@ -735,7 +761,8 @@ class Settings(BaseSettings):
             or parsed.fragment
         ):
             raise ValueError(
-                "chat.mcp_oauth_callback_url must be an absolute HTTPS URL without credentials, query, or fragment"
+                "chat.mcp_oauth_callback_url must be an absolute HTTPS URL without credentials, query, or fragment; "
+                "development additionally permits an HTTP loopback URL"
             )
         return value
 

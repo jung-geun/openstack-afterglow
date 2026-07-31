@@ -184,20 +184,51 @@ def test_development_mcp_allows_absolute_http_public_api_base():
     assert settings.service_mcp_enabled is True
 
 
-def test_mcp_oauth_callback_url_requires_absolute_https_without_query_or_fragment():
-    from app.config import Settings
-
-    settings = Settings(
-        secret_key="a" * 64,
-        chat_mcp_oauth_callback_url="https://oauth.example.test/custom/mcp-callback",
+def test_mcp_oauth_callback_url_allows_development_loopback_http_only():
+    callback_url = "http://localhost:8000/api/v1/chat/mcp-oauth/callback"
+    settings = _build_settings_with_env(
+        {
+            "AFTERGLOW_ENV": "development",
+            "SECRET_KEY": "a" * 64,
+            "CHAT_MCP_OAUTH_CALLBACK_URL": callback_url,
+        }
     )
-    assert settings.chat_mcp_oauth_callback_url == "https://oauth.example.test/custom/mcp-callback"
+    assert settings.chat_mcp_oauth_callback_url == callback_url
 
     for invalid in (
         "http://oauth.example.test/callback",
+        "http://localhost:not-a-port/callback",
         "https://user:pass@oauth.example.test/callback",
         "https://oauth.example.test/callback?target=attacker",
         "https://oauth.example.test/callback#fragment",
     ):
         with pytest.raises(ValueError, match="chat.mcp_oauth_callback_url"):
-            Settings(secret_key="a" * 64, chat_mcp_oauth_callback_url=invalid)
+            _build_settings_with_env(
+                {
+                    "AFTERGLOW_ENV": "development",
+                    "SECRET_KEY": "a" * 64,
+                    "CHAT_MCP_OAUTH_CALLBACK_URL": invalid,
+                }
+            )
+
+
+def test_mcp_oauth_callback_url_rejects_loopback_http_in_production():
+    with pytest.raises(ValueError, match="chat.mcp_oauth_callback_url"):
+        _build_settings_with_env(
+            {
+                "AFTERGLOW_ENV": "production",
+                "SECRET_KEY": "a" * 64,
+                "CHAT_MCP_OAUTH_CALLBACK_URL": "http://127.0.0.1:8000/api/v1/chat/mcp-oauth/callback",
+            }
+        )
+
+
+def test_mcp_oauth_callback_url_rejects_loopback_http_outside_development():
+    with pytest.raises(ValueError, match="chat.mcp_oauth_callback_url"):
+        _build_settings_with_env(
+            {
+                "AFTERGLOW_ENV": "staging",
+                "SECRET_KEY": "a" * 64,
+                "CHAT_MCP_OAUTH_CALLBACK_URL": "http://localhost:8000/api/v1/chat/mcp-oauth/callback",
+            }
+        )

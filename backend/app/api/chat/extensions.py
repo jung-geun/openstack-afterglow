@@ -269,7 +269,7 @@ async def user_start_mcp_oauth(item_id: int, response: Response, token_info: dic
         initiator_nonce,
         max_age=600,
         path="/api/v1/chat/mcp-oauth/callback",
-        secure=True,
+        secure=mcp_oauth.callback_cookie_secure(),
         httponly=True,
         samesite="lax",
     )
