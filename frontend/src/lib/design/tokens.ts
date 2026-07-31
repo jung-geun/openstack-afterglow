@@ -12,6 +12,45 @@ export const TONE_CSS_VAR: Record<DesignTone, string> = {
 	'admin-tone': 'var(--admin-tone)',
 };
 
+export const SURFACE_CSS_VAR = {
+	canvas: 'var(--color-surface-canvas)',
+	base: 'var(--color-surface-base)',
+	raised: 'var(--color-surface-raised)',
+	sunken: 'var(--color-surface-sunken)',
+	scrim: 'var(--color-surface-scrim)',
+	scrimSoft: 'var(--color-surface-scrim-soft)',
+} as const;
+
+export const LAYER_CSS_VAR = {
+	sidebar: 'var(--z-sidebar)',
+	panel: 'var(--z-panel)',
+	modal: 'var(--z-modal)',
+	toast: 'var(--z-toast)',
+	command: 'var(--z-command)',
+	popover: 'var(--z-popover)',
+} as const;
+
+export const MOTION_CSS_VAR = {
+	durationFast: 'var(--motion-duration-fast)',
+	durationBase: 'var(--motion-duration-base)',
+	durationPanel: 'var(--motion-duration-panel)',
+	durationData: 'var(--motion-duration-data)',
+	durationStatusPulse: 'var(--motion-duration-status-pulse)',
+	easeStandard: 'var(--motion-ease-standard)',
+	easeOut: 'var(--motion-ease-out)',
+	easeInOut: 'var(--motion-ease-in-out)',
+} as const;
+
+export const MOTION_DURATION_MS = {
+	fast: 150,
+	base: 200,
+	panel: 300,
+	data: 500,
+	statusPulse: 1400,
+} as const;
+
+export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)' as const;
+
 export const EDITORIAL_CSS_VAR = {
 	canvas: 'var(--gradient-editorial-canvas)',
 	grid: 'var(--pattern-editorial-grid)',

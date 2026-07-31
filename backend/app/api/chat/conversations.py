@@ -116,6 +116,8 @@ class MessageResponse(BaseModel):
     token_completion: int
     model_name: str | None = None
     created_at: str | None
+    created_at_local: str | None = None
+    created_timezone: str | None = None
 
     model_config = {"protected_namespaces": ()}
 

@@ -182,13 +182,13 @@
 <!-- 오버레이 배경 (모바일만) -->
 {#if $sidebarOpen}
 	<button
-		class="fixed inset-0 z-30 bg-black/50 md:hidden"
+		class="fixed inset-0 z-[var(--z-sidebar)] bg-surface-scrim-soft md:hidden"
 		onclick={() => sidebarOpen.close()}
 		aria-label="메뉴 닫기"
 	></button>
 {/if}
 
-<aside class="fixed top-0 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-0 left-0 bottom-0 z-[var(--z-sidebar)] w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- 로고 헤더 with Admin badge -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
 		<RingMark size={26} />

@@ -10,6 +10,8 @@
     export PALIMPSEST_URL=https://cloud.example.com
     export PALIMPSEST_TOKEN=<access token>
 
+    palimpsest image list                              # Glance cloud image 목록
+    palimpsest image pull <image-id> --format qcow2 -o base.qcow2
     palimpsest images                                  # 베이스 cloud image 목록
     palimpsest pull sha256:<image-digest> -o base.qcow2
 
@@ -27,10 +29,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import shutil
 import subprocess
+import time
 import sys
 import urllib.error
 import urllib.parse
@@ -65,7 +69,10 @@ def _token() -> str:
 
 
 def _request(method: str, path: str, *, body: bytes | None = None, content_type: str | None = None):
-    url = f"{_base_url()}/api/v1/palimpsest/hub{path}"
+    if path.startswith("/api/"):
+        url = f"{_base_url()}{path}"
+    else:
+        url = f"{_base_url()}/api/v1/palimpsest/hub{path}"
     headers = {"Authorization": f"Bearer {_token()}"}
     if content_type:
         headers["Content-Type"] = content_type
@@ -256,6 +263,86 @@ def cmd_bundle(args) -> int:
     return 0
 
 
+def cmd_image_list(args) -> int:
+    rows = _json_request("GET", "/api/v1/images")
+    if not isinstance(rows, list) or not rows:
+        print("베이스 이미지가 없습니다.")
+        return 0
+    for row in rows:
+        img_id = row.get("id", "-")
+        name = row.get("name", "-")
+        fmt = row.get("disk_format") or "-"
+        status = row.get("status") or "-"
+        size = format_size(row["size"]) if row.get("size") is not None else "-"
+        print(f"{img_id}  {name:<24} {fmt:<8} {status:<10} {size}")
+    return 0
+
+
+def cmd_image_pull(args) -> int:
+    output_path = Path(args.output)
+    part_path = Path(f"{args.output}.part")
+
+    if output_path.exists():
+        raise PalimpsestCliError(f"출력 파일이 이미 존재합니다: {output_path}")
+    if part_path.exists():
+        raise PalimpsestCliError(f"임시 파일이 이미 존재합니다: {part_path}")
+    part_created = False
+
+    try:
+        payload = {"image_id": args.image_id, "disk_format": args.format}
+        export_job = _json_request("POST", "/api/v1/palimpsest/hub/image-exports", payload)
+        export_id = export_job.get("id")
+        if not export_id:
+            raise PalimpsestCliError("내보내기 작업 생성 실패: 작업 ID가 없습니다")
+
+        last_state: tuple[str | None, int | None] | None = None
+        while True:
+            detail = _json_request("GET", f"/api/v1/palimpsest/hub/image-exports/{export_id}")
+            status = detail.get("status")
+            progress_pct = detail.get("progress_pct", 0)
+
+            state = (status, progress_pct)
+            if state != last_state:
+                print(f"상태: {status} ({progress_pct}%)", file=sys.stderr)
+                last_state = state
+
+            if status == "complete":
+                break
+            if status == "error":
+                err_msg = detail.get("error_message") or detail.get("error_code") or "알 수 없는 오류"
+                raise PalimpsestCliError(f"내보내기 작업 실패: {err_msg}")
+
+            time.sleep(2)
+
+        download_path = detail.get("download_path") or f"/api/v1/palimpsest/hub/image-exports/{export_id}/blob"
+        expected_digest = detail.get("blob_digest")
+        if not isinstance(expected_digest, str) or not expected_digest.startswith("sha256:"):
+            raise PalimpsestCliError("완료된 작업에 검증할 blob digest가 없습니다")
+
+        with _request("GET", download_path) as resp, part_path.open("xb") as out:
+            part_created = True
+            shutil.copyfileobj(resp, out, _CHUNK)
+
+        actual_digest, size = digest_file(part_path)
+        if not hmac.compare_digest(actual_digest, expected_digest):
+            raise PalimpsestCliError(f"digest 불일치 — 예상={expected_digest} 실제={actual_digest}")
+
+        if output_path.exists():
+            raise PalimpsestCliError(f"다운로드 중 출력 파일이 생성되었습니다: {output_path}")
+        part_path.replace(output_path)
+        part_created = False
+        print(f"{output_path} ({format_size(size)})\n{actual_digest}")
+        return 0
+    except KeyboardInterrupt as exc:
+        if part_created:
+            part_path.unlink(missing_ok=True)
+        raise PalimpsestCliError("작업이 중단되었습니다") from exc
+    except Exception:
+        if part_created:
+            part_path.unlink(missing_ok=True)
+        raise
+
+
 # ---------------------------------------------------------------------------
 # 엔트리포인트
 # ---------------------------------------------------------------------------
@@ -265,11 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="palimpsest", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
+    format_choices = ["raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx"]
+
     images = sub.add_parser("images", help="베이스 cloud image 목록")
     images.add_argument("--ubuntu-base", dest="ubuntu_base")
     images.add_argument("--arch")
     images.add_argument("--os-variant", dest="os_variant")
-    images.add_argument("--disk-format", dest="disk_format", choices=["qcow2", "raw"])
+    images.add_argument("--disk-format", dest="disk_format", choices=format_choices)
     images.set_defaults(func=cmd_images)
 
     layers = sub.add_parser("layers", help="레이어 목록")
@@ -294,7 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument("--parent", help="부모 레이어 digest")
     push.add_argument("--base-image", dest="base_image", help="이 레이어가 올라간 베이스 이미지 digest")
     push.add_argument("--ubuntu-base", dest="ubuntu_base")
-    push.add_argument("--disk-format", dest="disk_format", default="qcow2", choices=["qcow2", "raw"])
+    push.add_argument("--disk-format", dest="disk_format", default="qcow2", choices=format_choices)
     push.add_argument("--arch", default="x86_64", choices=["x86_64", "aarch64"])
     push.add_argument("--os-variant", dest="os_variant")
     push.add_argument("--publish", action="store_true", help="사이트에 공개")
@@ -307,6 +396,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-base-image", dest="include_base_image", action="store_true", help="베이스 이미지까지 포함"
     )
     bundle.set_defaults(func=cmd_bundle)
+
+    image_parser = sub.add_parser("image", help="베이스 cloud image 관리 및 추출")
+    image_sub = image_parser.add_subparsers(dest="subcommand", required=True)
+
+    image_list = image_sub.add_parser("list", help="베이스 cloud image 목록")
+    image_list.set_defaults(func=cmd_image_list)
+
+    image_pull = image_sub.add_parser("pull", help="cloud image 내보내기 및 다운로드")
+    image_pull.add_argument("image_id", help="Glance 이미지 ID")
+    image_pull.add_argument("--format", required=True, choices=format_choices, help="타겟 디스크 포맷")
+    image_pull.add_argument("-o", "--output", required=True, help="출력 파일 경로")
+    image_pull.set_defaults(func=cmd_image_pull)
 
     return parser
 

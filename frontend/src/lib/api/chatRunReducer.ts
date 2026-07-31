@@ -3,10 +3,13 @@ import type { ChatPart, ChatRunEvent, ChatRunStatus, RunStage, UsageComponent } 
 export interface RunToolView {
 	callId: string;
 	name: string;
+	source: 'builtin' | 'managed' | 'custom_http' | 'mcp' | 'workspace' | 'agent';
+	category: string;
 	arguments: Record<string, unknown>;
 	status: 'running' | 'completed' | 'failed';
 	content: ChatPart[];
 	errorCode: string | null;
+	durationMs: number | null;
 }
 
 export type RunActivityItem =
@@ -33,10 +36,13 @@ export type RunActivityItem =
 			createdAt: string;
 			callId: string;
 			name: string;
+			source: 'builtin' | 'managed' | 'custom_http' | 'mcp' | 'workspace' | 'agent';
+			category: string;
 			arguments: Record<string, unknown>;
 			status: 'running' | 'completed' | 'failed';
 			content: ChatPart[];
 			errorCode: string | null;
+			durationMs: number | null;
 	  };
 
 export interface RunViewState {
@@ -185,10 +191,13 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 				[event.payload.call_id]: {
 					callId: event.payload.call_id,
 					name: event.payload.name,
+					source: event.payload.source,
+					category: event.payload.category,
 					arguments: event.payload.arguments,
 					status: 'running',
 					content: [],
-					errorCode: null
+					errorCode: null,
+					durationMs: null
 				}
 			};
 			next.activity = replaceActivity(next.activity, {
@@ -198,29 +207,40 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 				createdAt: event.created_at,
 				callId: event.payload.call_id,
 				name: event.payload.name,
+				source: event.payload.source,
+				category: event.payload.category,
 				arguments: event.payload.arguments,
 				status: 'running',
 				content: [],
-				errorCode: null
+				errorCode: null,
+				durationMs: null
 			});
 			break;
 		case 'tool.call.completed': {
 			const existing = next.tools[event.payload.call_id];
+			const existingActivity = next.activity.find(
+				(item): item is Extract<RunActivityItem, { kind: 'tool' }> =>
+					item.id === `tool:${event.payload.call_id}` && item.kind === 'tool'
+			);
+			const started = existingActivity ? Date.parse(existingActivity.createdAt) : NaN;
+			const completed = Date.parse(event.created_at);
+			const durationMs =
+				existing?.durationMs ??
+				(Number.isNaN(started) || Number.isNaN(completed) ? null : Math.max(0, completed - started));
 			next.tools = {
 				...next.tools,
 				[event.payload.call_id]: {
 					callId: event.payload.call_id,
 					name: event.payload.name,
+					source: event.payload.source,
+					category: event.payload.category,
 					arguments: existing?.arguments ?? {},
 					status: event.payload.status,
 					content: event.payload.content,
-					errorCode: event.payload.error_code
+					errorCode: event.payload.error_code,
+					durationMs
 				}
 			};
-			const existingActivity = next.activity.find(
-				(item): item is Extract<RunActivityItem, { kind: 'tool' }> =>
-					item.id === `tool:${event.payload.call_id}` && item.kind === 'tool'
-			);
 			next.activity = replaceActivity(next.activity, {
 				id: `tool:${event.payload.call_id}`,
 				kind: 'tool',
@@ -228,10 +248,13 @@ export function reduceRunEvent(state: RunViewState, event: ChatRunEvent): RunVie
 				createdAt: existingActivity?.createdAt ?? event.created_at,
 				callId: event.payload.call_id,
 				name: event.payload.name,
-				arguments: existing?.arguments ?? {},
+				source: existingActivity?.source ?? event.payload.source,
+				category: existingActivity?.category ?? event.payload.category,
+				arguments: existingActivity?.arguments ?? {},
 				status: event.payload.status,
 				content: event.payload.content,
-				errorCode: event.payload.error_code
+				errorCode: event.payload.error_code,
+				durationMs
 			});
 			break;
 		}

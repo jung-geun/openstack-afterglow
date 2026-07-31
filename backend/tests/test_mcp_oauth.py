@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.api import mcp as mcp_api
 from app.services.mcp_control_plane.oauth import (
@@ -121,3 +122,137 @@ async def test_authenticated_consent_details_are_never_cacheable(monkeypatch):
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert b"client-id" in response.body
+
+
+def test_public_client_metadata_is_closed_to_public_oauth_contract():
+    from app.services.mcp_control_plane.oauth_authority import (
+        McpOAuthAuthorityError,
+        _validate_public_client_metadata,
+    )
+
+    metadata = {
+        "client_name": "Desktop MCP",
+        "redirect_uris": ["https://client.example.test/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": "none",
+        "client_secret": "ignored-by-callers-but-never-stored",
+    }
+    assert _validate_public_client_metadata(metadata) == {
+        "client_id": None,
+        "client_name": "Desktop MCP",
+        "redirect_uris": ["https://client.example.test/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": "none",
+    }
+    with pytest.raises(McpOAuthAuthorityError, match="public"):
+        _validate_public_client_metadata({**metadata, "token_endpoint_auth_method": "client_secret_post"})
+    with pytest.raises(McpOAuthAuthorityError, match="authorization_code"):
+        _validate_public_client_metadata({**metadata, "grant_types": ["authorization_code"]})
+
+
+@pytest.mark.asyncio
+async def test_dynamic_registration_uses_public_transport_and_never_stores_secrets(monkeypatch):
+    from app.main import app
+
+    added_clients = []
+
+    class CapturingSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def begin(self):
+            return self
+
+        def add(self, client):
+            added_clients.append(client)
+
+    monkeypatch.setattr(mcp_api, "_require_enabled", lambda: None)
+    monkeypatch.setattr(mcp_api, "_session_factory", lambda: CapturingSession)
+    registration = {
+        "client_name": "Desktop MCP",
+        "redirect_uris": ["https://client.example.test/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": "none",
+        "client_secret": "never-store-this",
+    }
+    issued_before = int(datetime.now(UTC).timestamp())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/mcp/oauth/register", json=registration)
+        rejected = await client.post("/api/v1/mcp/oauth/register", json={**registration, "client_id": "attacker-id"})
+    issued_after = int(datetime.now(UTC).timestamp())
+
+    assert response.status_code == 201
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    payload = response.json()
+    assert payload["client_id"].startswith("afterglow-dcr-")
+    assert issued_before <= payload["client_id_issued_at"] <= issued_after
+    assert payload["client_id_expires_at"] > payload["client_id_issued_at"]
+    assert payload["redirect_uris"] == registration["redirect_uris"]
+    assert payload["grant_types"] == registration["grant_types"]
+    assert payload["token_endpoint_auth_method"] == "none"
+    assert "client_secret" not in payload
+    assert len(added_clients) == 1
+    assert added_clients[0].metadata_json == {
+        "client_id": payload["client_id"],
+        "client_name": "Desktop MCP",
+        "redirect_uris": ["https://client.example.test/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": "none",
+    }
+    assert rejected.status_code == 400
+    assert rejected.json()["error"] == "invalid_request"
+    assert "client_id" in rejected.json()["error_description"]
+
+
+@pytest.mark.asyncio
+async def test_token_and_revoke_reject_public_client_secrets_at_transport_boundary(monkeypatch):
+    from app.main import app
+
+    monkeypatch.setattr(mcp_api, "_require_enabled", lambda: None)
+    exchange = AsyncMock()
+    revoke = AsyncMock()
+    monkeypatch.setattr(mcp_api, "exchange_authorization_code", exchange)
+    monkeypatch.setattr(mcp_api, "revoke_oauth_token", revoke)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        token_secret = await client.post(
+            "/api/v1/mcp/oauth/token",
+            data={"grant_type": "authorization_code", "client_secret": "secret"},
+        )
+        revoke_secret = await client.post(
+            "/api/v1/mcp/oauth/revoke", data={"token": "token", "client_secret": "secret"}
+        )
+        token_basic = await client.post(
+            "/api/v1/mcp/oauth/token",
+            data={"grant_type": "authorization_code"},
+            headers={"Authorization": "Basic Y2xpZW50OnNlY3JldA=="},
+        )
+        revoke_basic = await client.post(
+            "/api/v1/mcp/oauth/revoke",
+            data={"token": "token"},
+            headers={"Authorization": "Basic Y2xpZW50OnNlY3JldA=="},
+        )
+        cross_origin = await client.post(
+            "/api/v1/mcp/oauth/token",
+            data={"grant_type": "authorization_code"},
+            headers={"Origin": "https://attacker.example"},
+        )
+
+    for response in (token_secret, revoke_secret):
+        assert response.status_code == 400
+        assert response.json()["error"] == "invalid_client"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
+    for response in (token_basic, revoke_basic):
+        assert response.status_code == 401
+        assert response.json()["error"] == "invalid_client"
+        assert response.headers["www-authenticate"] == 'Basic realm="MCP OAuth"'
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
+    assert cross_origin.status_code == 403
+    exchange.assert_not_awaited()
+    revoke.assert_not_awaited()

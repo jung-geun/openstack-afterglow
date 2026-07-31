@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -28,6 +29,8 @@ class _StrictModel(BaseModel):
 
 
 class TextPart(_StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False, protected_namespaces=())
+
     type: Literal["text"]
     text: str = Field(min_length=1, max_length=MAX_TEXT_PART_CHARS)
 
@@ -139,6 +142,8 @@ class StructuredPart(_StrictModel):
 
 
 class ReasoningPart(_StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False, protected_namespaces=())
+
     type: Literal["reasoning"]
     text: str = Field(min_length=1, max_length=MAX_TEXT_PART_CHARS)
     visibility: Literal["user"]
@@ -479,6 +484,18 @@ ReasoningEffort = Literal["auto", "none", "minimal", "low", "medium", "high", "x
 
 class _ReasoningEffortRequest(_StrictModel):
     reasoning_effort: ReasoningEffort = "auto"
+    client_timezone: str | None = Field(default=None, max_length=64)
+
+    @field_validator("client_timezone")
+    @classmethod
+    def validate_client_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("client_timezone must be a valid IANA timezone") from exc
+        return value
 
 
 class CompletionRequest(_ReasoningEffortRequest):
@@ -677,6 +694,8 @@ class MessageCreatedPayload(_StrictModel):
 
 
 class PartDeltaPayload(_StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False, protected_namespaces=())
+
     message_id: str = Field(min_length=1, max_length=190)
     part_index: int = Field(ge=0)
     part_type: Literal["text", "reasoning"]
@@ -693,6 +712,8 @@ class ToolCallStartedPayload(_StrictModel):
     call_id: str = Field(min_length=1, max_length=190)
     name: str = Field(min_length=1, max_length=190)
     arguments: dict[str, Any]
+    source: Literal["builtin", "managed", "custom_http", "mcp", "workspace", "agent"] = "builtin"
+    category: str = Field(default="기본 도구", min_length=1, max_length=100)
 
 
 class ToolCallCompletedPayload(_StrictModel):
@@ -701,6 +722,8 @@ class ToolCallCompletedPayload(_StrictModel):
     content: ChatParts = Field(min_length=1, max_length=MAX_PARTS_PER_MESSAGE)
     status: Literal["completed", "failed"]
     error_code: str | None = Field(default=None, max_length=100)
+    source: Literal["builtin", "managed", "custom_http", "mcp", "workspace", "agent"] = "builtin"
+    category: str = Field(default="기본 도구", min_length=1, max_length=100)
 
 
 class ToolApprovalRequiredPayload(_StrictModel):

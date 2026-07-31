@@ -1,72 +1,105 @@
 # Afterglow Design System
 
-Afterglow는 dark-first cloud operations UI다. 기본 감성은 고밀도 운영 콘솔, navy/ink surface, warm orange brand accent, cool blue/purple data accent다. Light mode는 별도 브랜드가 아니라 동일 정보 위계를 밝은 surface로 재매핑한 운영 모드다.
+## Product character & authority
 
-## Color tokens
+Afterglow is a dark-first cloud operations console: navy/ink surfaces support dense operational work, warm orange identifies the single highest-priority brand action, and blue/purple carry data and everyday operational intent. Light mode remaps the same semantic hierarchy; it is not a separate brand.
 
-| Token | Dark | Light | Usage |
+New UI follows this authority order: `frontend/src/routes/layout.css` owns theme and runtime CSS values; `frontend/src/lib/design/tokens.ts` exposes TypeScript metadata; `frontend/src/lib/components/ui` owns reusable behavior and markup; feature routes and components compose those primitives. `:root.light` legacy palette overrides are a compatibility boundary for existing visual debt, never a new API.
+
+## Foundations
+
+### Theme and color
+
+| Token | Dark | Light | Meaning |
 | --- | --- | --- | --- |
-| `--color-surface-canvas` | `#06080d` | `#fafbff` | app/page background |
-| `--color-surface-base` | `#0b0f17` | `#ffffff` | sidebar/base panels |
-| `--color-surface-raised` | `#10141d` | `#ffffff` | cards, modals, popovers |
-| `--color-surface-sunken` | `#161b27` | `#f4f6fb` | inputs, inset rows, hover fills |
-| `--color-ink-0` | `#f4f6fb` | `#0f172a` | primary text |
-| `--color-ink-1` | `#c8cfdc` | `#1e293b` | secondary text |
-| `--color-ink-2` | `#8a93a4` | `#475569` | muted text/icons |
-| `--color-ink-3` | `#5b6275` | `#94a3b8` | disabled/subtle text |
-| `--color-line` | `#1e2533` | `#e2e8f0` | default border |
-| `--color-line-2` | `#262e3f` | `#cbd5e1` | strong/focus-adjacent border |
-| `--color-accent` | `#7da3ff` | `#2563eb` | primary data/action blue |
-| `--color-accent-2` | `#9f7df0` | `#6d28d9` | secondary data/purple |
-| `--color-warm` | `#f4976c` | `#ea580c` | brand warm/orange |
-| `--color-warm-2` | `#e8c19a` | `#c2410c` | warm contrast/hover |
-| `--color-state-success` | `#5ddca0` | `#16a34a` | healthy/active/success |
-| `--color-state-warning` | `#f4b85a` | `#b45309` | pending/warning |
-| `--color-state-danger` | `#f06b6b` | `#dc2626` | error/destructive |
-| `--color-state-info` | `#5ed4e4` | `#2563eb` | info/in-progress stable |
-| `--color-state-neutral` | `#8a93a4` | `#64748b` | neutral/unknown |
+| `--color-surface-canvas` | `#06080d` | `#fafbff` | page canvas |
+| `--color-surface-base` | `#0b0f17` | `#ffffff` | base panels/sidebar |
+| `--color-surface-raised` | `#10141d` | `#ffffff` | cards, modal panels, popovers |
+| `--color-surface-sunken` | `#161b27` | `#f4f6fb` | controls, inset rows, hover fills |
+| `--color-surface-scrim` | `rgb(0 0 0 / 60%)` | `rgb(0 0 0 / 25%)` | modal/dialog scrim |
+| `--color-surface-scrim-soft` | `rgb(0 0 0 / 50%)` | `rgb(0 0 0 / 20%)` | drawer/sidebar scrim |
+| `--color-ink-0` / `--color-ink-1` / `--color-ink-2` / `--color-ink-3` | `#f4f6fb` / `#c8cfdc` / `#8a93a4` / `#5b6275` | `#0f172a` / `#1e293b` / `#475569` / `#94a3b8` | primary through disabled text |
+| `--color-line` / `--color-line-2` | `#1e2533` / `#262e3f` | `#e2e8f0` / `#cbd5e1` | ordinary/control borders |
+| `--color-accent` / `--color-accent-2` | `#7da3ff` / `#9f7df0` | `#2563eb` / `#6d28d9` | blue action/data and purple secondary data |
+| `--color-warm` / `--color-warm-2` | `#f4976c` / `#e8c19a` | `#ea580c` / `#c2410c` | brand CTA and warm contrast |
+| `--color-state-success` / `--color-state-warning` / `--color-state-danger` / `--color-state-info` / `--color-state-neutral` | `#5ddca0` / `#f4b85a` / `#f06b6b` / `#5ed4e4` / `#8a93a4` | `#16a34a` / `#b45309` / `#dc2626` / `#2563eb` / `#64748b` | operational state tones |
 
-## Typography tokens
+Use `SURFACE_CSS_VAR` rather than spelling surface variables in TypeScript-driven styles. Modal/dialog shells use `bg-surface-scrim`; drawers and sidebars use `bg-surface-scrim-soft`. `ConfirmDialog` intentionally keeps its canvas wash (`color-mix(in oklab, var(--color-surface-canvas) 72%, transparent)`) because it is not a black scrim.
 
-- `--font-sans`는 `MaruBuri`, `Geist`, `Inter`, `system-ui`, `sans-serif` 순서다. 한국어 본문과 제목은 사용자가 제공한 MaruBuri TTF를 `frontend/static/fonts/maruburi/` 경로로 서비스해 200/300/400/600/700 weight를 우선 사용하고, 라틴/미지원 글리프는 Geist/Inter로 fallback한다.
-- 전역 `html, body`는 `font-family: var(--font-sans)`를 사용한다. 새 화면에서 한국어 전용 폰트를 다시 선언하지 말고 토큰을 재사용한다.
+Map legacy colors by role: gray/slate becomes surface, ink, or line; blue → accent; green → success; red → danger; yellow/amber → warning; orange → warm; purple/violet → accent-2. Do not collapse rose, indigo, cyan, sky, or teal into a generic tone: introduce a semantic token and primitive first when required. `CHART_COLORS`, topology external/shared/internal/router/link colors, and GitLab `#FC6D26`/`#E24329` are domain or third-party-brand exceptions only.
 
-## Gradient rules
+### Type, spacing, geometry, and elevation
 
-- `--gradient-brand: linear-gradient(135deg, var(--color-warm), var(--color-accent-2))`는 logo/brand text/highlight only.
-- `--gradient-warm: linear-gradient(135deg, var(--color-warm), var(--color-warm-2))`는 `Button variant="primary"`와 one-primary-CTA-per-surface only.
-- `--gradient-usage`, `--gradient-usage-warning`, `--gradient-usage-danger`는 quantitative usage bars only. Progress/usage 임계값 기본값은 warning `>=80`, danger `>=95`; 기존 특정 리소스가 다른 임계값을 쓰면 `UsageBar` props로 명시한다.
+`--font-sans` is `MaruBuri`, `Geist`, `Inter`, `system-ui`, `sans-serif`; do not redeclare Korean-only fonts in features. The exact scale is page title `1.375rem`/700; emphasis count `0.9375rem`/700; form controls, `Button lg`, and PageHeader body `0.875rem`; `Button md`, `Button icon`, and PageHeader subtitle `0.8125rem`; Field label/help/error, Pagination, UsageBar meta, `Button sm`, and Toggle sm `0.75rem`; breadcrumbs, uppercase section labels, `Button xs`, Toggle xs, and Pill sm `0.6875rem` (500 with tracking for labels); Pill xs `0.625rem`. Update this document before adding another type size.
 
-## Scrollbars
+`PageShell` defaults to `80rem`; route padding is `1rem` mobile and `2rem` desktop (`0.75rem`/`1rem` dense). Button and controls use `0.5rem` radius, Card `1rem`, TableShell `0.875rem`, and chips/pills `999px`. Card padding is `none/sm/md/lg = 0/0.75/1/1.5rem`. Ordinary surfaces use `1px solid var(--color-line)` with no shadow; controls use `--color-line-2`; only `Card surface="modal"` may elevate, while primary/accent actions may glow. Focus is `--focus-ring = 0 0 0 3px var(--accent-ring)`; removing an outline is allowed only when the same visible focus ring replaces it. Use Tailwind spacing/type values before creating new CSS variables.
 
-- Scrollbars are global, token-backed UI chrome: `--scrollbar-size`, `--scrollbar-track`, `--scrollbar-thumb`, and `--scrollbar-thumb-hover`.
-- Use the global treatment rather than component-scoped scrollbar declarations. Tracks recede into their owning surface; thumbs remain visible enough for pointer use and lighten only on hover.
+### Layering and focus
 
-### Editorial public surfaces
+`LAYER_CSS_VAR` exposes the runtime order: `--z-sidebar: 30`, `--z-panel: 40`, `--z-modal: 50`, `--z-toast: 60`, `--z-command: 200`, `--z-popover: 210`. Sidebar/AdminSidebar use sidebar; SlidePanel uses panel; ProjectQuotaPanel uses panel for scrim and modal for content; Modal uses modal; Toast and BulkSelectionOverlay use toast; CmdPalette uses command with its panel at `calc(var(--z-command) + 1)`; ConfirmDialog uses command; ActionMenu uses popover. In a shared stacking context, backdrop precedes panel in DOM order.
 
-- `--gradient-editorial-canvas`, `--pattern-editorial-grid`, and `--gradient-editorial-grid-mask` are public/editorial surfaces. They are dark-first but resolve through the standard color-token mapping under `html.light`.
-- `--color-surface-editorial-media` is the theme-invariant dark canvas behind static editorial SVG plates. It keeps `contain` media complete without exposing light letterbox bands.
-- `--gradient-editorial-cta` is limited to the single closing editorial panel; it never replaces `Button variant="primary"`.
-- Approved external SVG plates may retain their equivalent embedded palette only when loaded through `<img>`.
-- Approved panel composition: `Card surface="subtle"` is the visual surface around semantic outer capability/workflow articles; the method matrix is one Card around direct semantic step articles.
+### Gradients and chrome
+
+`--gradient-brand` is logo, brand text, and highlight only. `--gradient-warm` is `Button variant="primary"` and the one highest-priority CTA per surface. `--gradient-usage`, `--gradient-usage-warning`, and `--gradient-usage-danger` are quantitative bars only. `--warm-soft`/ring and `--accent-soft`/ring are their semantic tint, focus, and selection; `--admin-tone*` belongs only to admin context. Reuse global `--scrollbar-size`, `--scrollbar-track`, `--scrollbar-thumb`, and `--scrollbar-thumb-hover`; do not add component-scoped scrollbar styling.
+
+## Layout & responsive hierarchy
+
+Use the existing Tailwind breakpoints only: mobile is `<768px`; tablet is `md` (`768–1023px`); desktop is `lg` (`≥1024px`). `sm` (`≥640px`) is a compact mobile refinement, not a separate layout tier; use `xl` only to increase density after the desktop hierarchy already works. Do not introduce a component-specific breakpoint without updating this section and its test.
+
+**Mobile (<768px).** `PageShell` route/dense padding is `1rem`/`0.75rem`. Navigation opens as the hamburger-controlled, dismissible sidebar drawer; PageHeader keeps its compact breadcrumb. Start resource and form layouts as one column; a two-column compact statistic group is allowed when each value remains readable. Header actions wrap or stack rather than clip, and the highest-priority action remains visible without hover. `TableShell` stays horizontally scrollable with headers intact; do not silently transform a table into cards unless the route provides and tests an equivalent semantic card view. SlidePanel and other task panels use the available viewport width with a visible close path.
+
+**Tablet (768–1023px).** `PageShell` route/dense padding becomes `2rem`/`1rem`. The 15rem sidebar is sticky, PageHeader restores its full breadcrumb, and header actions retain the mobile wrap/stack composition; its sidebar search remains the compact search entry point. Use two columns for comparable cards/forms where each control has usable inline space; keep summary data legible instead of forcing desktop-density grids. Detail panels may adopt their component’s `md:` constrained width, but must retain panel-above-backdrop contrast and the existing dismissal contract.
+
+**Desktop (≥1024px).** Keep the same PageShell padding and persistent sidebar. The header exposes its desktop search and project/context controls. Three-or-more columns are allowed only when the minimum card/control width and scanning order remain clear; use PageShell max widths instead of stretching sparse content. Inline action groups are appropriate when they do not truncate labels; preserve the mobile action order and accessible names.
+
+Test every new or materially changed visual flow at mobile, tablet, and desktop widths. Confirm navigation, action placement, overlay sizing/dismissal, readable resource selection, and table overflow/card fallback at each relevant tier. Preserve information and interaction parity across widths; a smaller viewport may change composition, never silently remove required state or a reachable action.
+
+## Actions
+
+Use `Button`: `primary`, `accent`, `secondary`, `subtle`, `ghost`, `outline`, `danger`, `danger-outline`, or `link`; and sizes `xs`, `sm`, `md`, `lg`, or `icon`. Warm `primary` is one highest-priority CTA per surface. Blue `accent` is create/save/run and other routine operational work. `secondary`/`outline` are neutral actions; `subtle` compact chrome; `ghost`/`icon` utility actions; `danger`/`danger-outline` destructive entry or confirmation; `link` inline navigation. `href` renders an anchor; a missing/falsy href renders a native button. Icon-only `Button size="icon"` requires `ariaLabel`.
+
+The current disabled anchor guards its primary click handler and intent callback, but keeps `href` and does not set `tabindex="-1"`; do not claim that middle-click, context menus, or keyboard navigation are fully blocked. Button has no loading prop: callers compose `disabled` with an accurate label.
+
+## Forms
+
+Compose forms with `Field` plus `TextInput`, `SelectInput`, or `TextareaInput`; use `FormModal` and `ConfirmDialog` for submit/cancel flows. `ToggleGroup` owns compact mutually exclusive filter/view choices: callers supply `value`, `options`, and `onchange` rather than recreating segmented controls. Field owns visible label/help/error copy and `for`/`id`; input primitives own placeholder, disabled, and focus appearance. Field help/error currently does not wire `aria-describedby` or `aria-invalid` to inputs: this is known accessibility debt, not implemented error announcement. Do not document imaginary error or loading props.
+
+## Feedback/overlays/tables
+
+Use `Alert`, `Toast`, and `EmptyState` for feedback; `StatusChip` + `getStatusStyle` and `Pill` for status; `TableShell` for tabular data. Modal is the scrim/dismissal shell and `Card surface="modal"` is the panel surface. Table density is normal `0.75rem × 1rem` or compact `0.5rem × 0.75rem`. UsageBar default thresholds are warning 80 and danger 95; it accepts `percent` or `value`/`max`, clamps invalid or out-of-range percentages to `0–100`, and for `max={-1}` labels the quota `무제한` without a percentage or fill. Use `UsageBar`, `QuotaBar`, or `CapacityBar` instead of route-specific bars.
+
+## Status & data visualization
+
+Operational status uses exact, case-sensitive `getStatusStyle(status: string | null | undefined)` and its five tones; unknown or falsy status is neutral. Status conveys label plus tone and, where applicable, transition dot; color alone is never state. Charts use the six ordinal `CHART_COLORS`; topology preserves its domain colors.
+
+## Motion
+
+`MOTION_CSS_VAR`, `MOTION_DURATION_MS`, and `REDUCED_MOTION_QUERY` are the shared vocabulary. Fast `--motion-duration-fast: 150ms` + `--motion-ease-standard: ease` is hover/focus/color feedback. Base `--motion-duration-base: 200ms` is control movement, compact fills, and fades. Panel `--motion-duration-panel: 300ms` + `--motion-ease-out: ease-out` is drawer/fly/pop. Data `--motion-duration-data: 500ms` is long-form resource/build progress. Status pulse `--motion-duration-status-pulse: 1400ms` + `--motion-ease-in-out: ease-in-out` is status dots.
+
+Animate opacity, translate, or scale only; never animate layout dimensions. Hover is decoration, never the only status signal. Repeating animation is limited to loading, progress, and status. `prefersReducedMotion()` and `motionDuration()` make JavaScript transitions immediate. The global reduced-motion contract sets all five duration variables plus Tailwind `--default-transition-duration` and `--default-animation-duration` to `0.01ms`, scroll to `auto`, and universally overrides animation/transition duration and delay.
+
+Named motion exceptions: `--landing-ease`; ChatPanel composer `cubic-bezier(0.22, 1, 0.36, 1)`; QuotaDonut `duration-700`; 600ms landing reveal; 7-second tutorial hint; and `0.8–1.2s` linear loading loops. Do not copy exceptions into ordinary components.
+
+## Editorial surfaces
+
+`--gradient-editorial-canvas`, `--pattern-editorial-grid`, `--gradient-editorial-grid-mask`, `--gradient-editorial-cta`, and `--color-surface-editorial-media` belong to public/editorial surfaces. Approved external SVG plates may retain their embedded palette only when loaded through `<img>`. Approved panel composition: `Card surface="subtle"` is the surface around semantic outer capability/workflow articles; the method matrix is one Card around direct semantic step articles.
 
 ## Chat messages
 
-- `ChatBubble` is the chat-message primitive. It provides the semantic `chat-start`/`chat-end`, header, bubble, and optional action footer structure; feature components supply only message content and actions.
-- Direction is expressed with the compact directional corner token (`--chat-message-directional-corner`), not a pseudo-element tail. Start uses `--color-surface-raised` with `--color-line`; end uses `--color-accent` with `--color-action-on-accent`.
-- The message primitive owns `--chat-message-*` spacing, radius, padding, and width tokens. Do not create per-route bubble sizes, colors, or duplicate chat structures.
-- Shared values are `--chat-message-gap`, `--chat-message-meta-gap`, `--chat-message-meta-inset`, `--chat-message-meta-size`, `--chat-message-radius`, `--chat-message-directional-corner`, `--chat-message-padding-block`, `--chat-message-padding-inline`, `--chat-message-assistant-max-inline`, and `--chat-message-user-max-inline`.
+`ChatBubble` is the chat-message primitive. It supplies `chat-start`, `chat-end`, header, bubble, and optional action footer; features provide only content and actions. It owns `--chat-message-gap`, `--chat-message-meta-gap`, `--chat-message-meta-inset`, `--chat-message-meta-size`, `--chat-message-radius`, `--chat-message-directional-corner`, `--chat-message-padding-block`, `--chat-message-padding-inline`, `--chat-message-assistant-max-inline`, and `--chat-message-user-max-inline`. Do not recreate route-specific bubbles, sizes, or colors.
 
 ## Resource selection
 
-- 선택 가능한 행과 카드는 체크박스를 데스크톱·터치 환경 모두에서 항상 보이게 하며, hover로만 노출하지 않는다.
-- 선택 불가 리소스는 같은 위치에 비활성화 원형 X 마크를 표시하고 이유를 `title`로 설명한다. square checkbox를 흐리게 재사용하지 않으며, select-all은 선택 가능한 ID만 포함한다.
-- 한 화면에서 동시에 보이는 여러 리소스 도메인은 하나만 선택 상태를 소유한다. 탭·필터·프로젝트·도메인 전환은 현재 조회 결과에 없는 선택을 정리한다.
-- 선택 작업은 `BulkSelectionOverlay` 하나로 고정한다. 페이지는 `bulk-selection-page` bottom clearance를 적용하고, 선택 surface는 `resource-selection-surface` 및 `data-selected`로 `--accent-soft`를 사용한다.
+Show a checkbox on both desktop and touch for selectable rows/cards. `SelectionCheckbox` owns checked, indeterminate, disabled, and unavailable-X semantics; `SelectionToolbar` owns the select-all control, selected count, and `onToggle`; `BulkSelectionOverlay` owns the selected-count, busy, and bulk-action presentation. `ActionMenu` owns the overflow trigger, fixed popover placement, outside-click/Escape dismissal; callers own its `open`, `onopen`, and `onclose` state. Unavailable resources show a disabled circular X in the same position and provide the reason. A screen owns one visible resource-domain selection state; tab/filter/project/domain changes clear selections outside the result. Use `BulkSelectionOverlay`, `bulk-selection-page`, `resource-selection-surface`, and `data-selected`; select-all includes only selectable IDs.
 
-## New UI entity rules
+## Accessibility
+
+Never communicate status, selection, loading, or disabled state through color or animation alone: pair visible text and the relevant attribute/reason. Maintain visible keyboard focus with `--focus-ring`. Do not state that Modal/Dialog focus trapping exists beyond the current shell; add it only by extending Modal with tests.
+
+## New UI entity workflow & legacy debt
 
 1. 새 색상·gradient·badge tone·table density·form control·card treatment가 필요하면 feature file 작성 전에 `layout.css`, `frontend/src/lib/design/tokens.ts`, `frontend/src/lib/components/ui/*`, tests, `DESIGN.md`를 먼저 갱신한다.
-2. 새 route/component file은 raw hex, `bg-[#...]`, raw palette classes(`bg-blue-600`, `text-gray-400`, `border-red-700` 등)를 직접 추가하지 않는다. 기존 legacy file은 baseline guardrail에 남아도 되지만 새 file은 실패한다.
-3. Operational status는 `StatusChip` + `frontend/src/lib/config/statusColors.ts`를 확장한다. Inline ternary status color는 새로 만들지 않는다.
-4. Button, modal, table, form, card, alert는 `frontend/src/lib/components/ui` primitive를 먼저 사용한다. primitive가 맞지 않으면 primitive를 확장하고 문서·테스트를 같이 갱신한다.
+2. Primitive token/test work precedes feature composition; then run the visual-debt guardrail.
+3. 새 route/component file은 raw hex, `bg-[#...]`, raw palette classes(`bg-blue-600`, `text-gray-400`, `border-red-700` 등)를 직접 추가하지 않는다. Existing debt is bounded by `frontend/src/lib/design/legacyVisualDebt.ts`; reduce it in separate visual-regression work rather than extending it.
+4. Use `StatusChip` + `frontend/src/lib/config/statusColors.ts` for operational status. New inline ternary status colors are prohibited.
+5. Use `frontend/src/lib/components/ui` for action, modal, table, form, card, and alert. If a primitive is insufficient, extend that primitive and update its tests and this document first.

@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/svelte';
+import { render } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import WizardStepper from '../WizardStepper.svelte';
 
 describe('WizardStepper', () => {
-	it('exposes a compact progress bar alongside the full stepper', () => {
+	it('hides the desktop stepper on mobile because the header already names the current step', () => {
 		const { container } = render(WizardStepper, {
 			cur: 2,
 			totalSteps: 4,
@@ -11,14 +11,11 @@ describe('WizardStepper', () => {
 			goTo: vi.fn(),
 		});
 
-		const full = container.querySelector('.full-stepper');
-		expect(full?.className).toContain('max-[479px]:hidden');
-		expect(full).toBeTruthy();
-		const compact = screen.getByRole('progressbar', { name: 'VM 생성 진행률' });
-		expect(compact.className).toContain('hidden');
-		expect(compact.className).toContain('max-[479px]:block');
-		expect(compact.getAttribute('aria-valuenow')).toBe('2');
-		expect(compact.getAttribute('aria-valuemax')).toBe('4');
-		expect(compact.querySelector('.compact-progress-fill')?.getAttribute('style')).toContain('50%');
+		const stepper = container.querySelector('.stepper-container');
+		expect(stepper?.className).toContain('hidden');
+		expect(stepper?.className).toContain('md:block');
+		expect(container.querySelector('[role="progressbar"]')).toBeNull();
+		expect(container.querySelector('.full-stepper')?.className).toContain('py-2.5');
+		expect(container.querySelector('.step-dot-current')?.className).toContain('w-7');
 	});
 });

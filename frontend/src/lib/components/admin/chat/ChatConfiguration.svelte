@@ -9,6 +9,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Pill from '$lib/components/ui/Pill.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
+	import TextInput from '$lib/components/ui/TextInput.svelte';
 
 	let { section = 'providers' }: { section?: 'providers' | 'models' | 'tools' } = $props();
 
@@ -93,11 +94,21 @@
 	let modelsDevProvider = $state<Provider | null>(null);
 	let modelsDevProviders = $state<ModelsDevProvider[]>([]);
 	let selectedModelsDevProviderId = $state('');
+	let modelsDevProviderSearch = $state('');
 	let modelsDevModels = $state<ModelsDevModel[]>([]);
 	let modelsDevSelections = $state<Record<number, string>>({});
 	let modelsDevLoading = $state(false);
 	let modelsDevError = $state('');
 	let modelsDevImporting = $state(false);
+	function filterModelsDevProviders(query: string): ModelsDevProvider[] {
+		const normalizedQuery = query.trim().toLocaleLowerCase();
+		if (!normalizedQuery) return modelsDevProviders;
+		return modelsDevProviders.filter((provider) =>
+			`${provider.name} ${provider.id}`.toLocaleLowerCase().includes(normalizedQuery)
+		);
+	}
+
+	const filteredModelsDevProviders = $derived.by(() => filterModelsDevProviders(modelsDevProviderSearch));
 
 	// 등록된 모델 일괄 선택/삭제
 	let selectedModelIds = $state<Record<number, boolean>>({});
@@ -269,6 +280,24 @@
 		}
 	}
 
+	async function fetchModelsDevProviders(provider: Provider) {
+		const query = new URLSearchParams({
+			local_provider_id: String(provider.id)
+		});
+		const result = await api.get<{ providers: ModelsDevProvider[]; preferred_provider_ids?: string[] }>(
+			`/api/v1/chat/admin/models/pricing/models-dev/providers?${query}`,
+			token,
+			projectId
+		);
+		modelsDevProviders = result.providers;
+		modelsDevProviderSearch = '';
+		selectedModelsDevProviderId = result.providers.some(
+			(candidate) => candidate.id === provider.models_dev_provider_id
+		)
+			? provider.models_dev_provider_id!
+			: result.preferred_provider_ids?.[0] ?? '';
+	}
+
 	async function openModelsDev(provider: Provider) {
 		modelsDevOpen = true;
 		modelsDevProvider = provider;
@@ -277,9 +306,7 @@
 		modelsDevSelections = {};
 		modelsDevLoading = true;
 		try {
-			const result = await api.get<{ providers: ModelsDevProvider[] }>('/api/v1/chat/admin/models/pricing/models-dev/providers', token, projectId);
-			modelsDevProviders = result.providers;
-			selectedModelsDevProviderId = provider.models_dev_provider_id || result.providers[0]?.id || '';
+			await fetchModelsDevProviders(provider);
 			await loadModelsDevProvider();
 		} catch (e) {
 			modelsDevError = e instanceof ApiError ? e.message : 'models.dev 가격표를 불러오지 못했습니다';
@@ -288,15 +315,37 @@
 		}
 	}
 
+
+	function updateModelsDevProviderSearch(event: Event) {
+		modelsDevProviderSearch = (event.currentTarget as HTMLInputElement).value;
+		const candidates = filterModelsDevProviders(modelsDevProviderSearch);
+		if (candidates.some((candidate) => candidate.id === selectedModelsDevProviderId)) return;
+		selectedModelsDevProviderId = candidates[0]?.id ?? '';
+		modelsDevModels = [];
+		modelsDevSelections = {};
+		if (selectedModelsDevProviderId) {
+			void loadModelsDevProvider();
+		} else {
+			modelsDevLoading = false;
+		}
+	}
+
 	async function loadModelsDevProvider() {
-		if (!selectedModelsDevProviderId) return;
+		const providerId = selectedModelsDevProviderId;
+		if (!providerId) {
+			modelsDevLoading = false;
+			modelsDevModels = [];
+			modelsDevSelections = {};
+			return;
+		}
 		modelsDevLoading = true;
 		try {
 			const result = await api.get<{ models: ModelsDevModel[] }>(
-				`/api/v1/chat/admin/models/pricing/models-dev/providers/${encodeURIComponent(selectedModelsDevProviderId)}`,
+				`/api/v1/chat/admin/models/pricing/models-dev/providers/${encodeURIComponent(providerId)}`,
 				token,
 				projectId
 			);
+			if (providerId !== selectedModelsDevProviderId) return;
 			modelsDevModels = result.models;
 			modelsDevSelections = Object.fromEntries(
 				models
@@ -307,9 +356,11 @@
 					})
 			);
 		} catch (e) {
-			modelsDevError = e instanceof ApiError ? e.message : 'models.dev 모델 목록을 불러오지 못했습니다';
+			if (providerId === selectedModelsDevProviderId) {
+				modelsDevError = e instanceof ApiError ? e.message : 'models.dev 모델 목록을 불러오지 못했습니다';
+			}
 		} finally {
-			modelsDevLoading = false;
+			if (providerId === selectedModelsDevProviderId) modelsDevLoading = false;
 		}
 	}
 
@@ -758,11 +809,31 @@
 				<a class="underline" href="https://models.dev" target="_blank" rel="noreferrer">models.dev</a>의 기본 input/output 단가만 적용합니다. 수동 확정 가격은 덮어쓰지 않습니다.
 			</p>
 			{#if modelsDevError}<Alert tone="warning" class="mt-3">{modelsDevError}</Alert>{/if}
-			<div class="mt-4">
-				<label class="mb-1 block text-sm text-[var(--color-ink-2)]" for="models-dev-provider">가격표 프로바이더</label>
-				<select id="models-dev-provider" class={inputCls} bind:value={selectedModelsDevProviderId} onchange={loadModelsDevProvider}>
-					{#each modelsDevProviders as provider (provider.id)}<option value={provider.id}>{provider.name} ({provider.model_count})</option>{/each}
-				</select>
+			<div class="mt-4 space-y-3">
+				<div>
+					<label class="mb-1 block text-sm text-[var(--color-ink-2)]" for="models-dev-provider-search">가격표 프로바이더 검색</label>
+					<TextInput
+						id="models-dev-provider-search"
+						type="search"
+						placeholder="이름 또는 ID로 검색"
+						value={modelsDevProviderSearch}
+						oninput={updateModelsDevProviderSearch}
+					/>
+				</div>
+				<div aria-live="polite">
+					<label class="mb-1 block text-sm text-[var(--color-ink-2)]" for="models-dev-provider">가격표 프로바이더</label>
+					{#if filteredModelsDevProviders.length > 0}
+						<select id="models-dev-provider" class={inputCls} bind:value={selectedModelsDevProviderId} onchange={loadModelsDevProvider}>
+							<option value="" disabled>가격표 프로바이더 선택</option>
+							{#each filteredModelsDevProviders as provider (provider.id)}<option value={provider.id}>{provider.name} ({provider.model_count})</option>{/each}
+						</select>
+					{:else if modelsDevProviders.length > 0}
+						<p class="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm text-[var(--color-ink-3)]">검색 조건에 맞는 가격표 프로바이더가 없습니다.</p>
+					{:else}
+						<p class="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm text-[var(--color-ink-3)]">등록된 프로바이더와 일치하는 models.dev 가격표가 없습니다.</p>
+					{/if}
+				</div>
+				<p class="text-xs text-[var(--color-ink-3)]">등록된 프로바이더와 일치하는 가격표만 표시합니다.</p>
 			</div>
 			{#if modelsDevLoading}
 				<p class="mt-4 text-sm text-[var(--color-ink-3)]">가격표를 불러오는 중…</p>
@@ -806,7 +877,7 @@
 			{/if}
 			<div class="mt-5 flex justify-end gap-2">
 				<Button variant="secondary" onclick={() => (modelsDevOpen = false)}>취소</Button>
-				<Button onclick={importModelsDevPrices} disabled={modelsDevImporting || modelsDevLoading}>
+				<Button onclick={importModelsDevPrices} disabled={modelsDevImporting || modelsDevLoading || !selectedModelsDevProviderId}>
 					{modelsDevImporting ? '적용 중…' : '선택 가격 적용'}
 				</Button>
 			</div>

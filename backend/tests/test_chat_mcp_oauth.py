@@ -102,6 +102,23 @@ class TestMcpOAuthCallbackUrl:
         assert mcp_oauth._callback_url() == callback_url
         assert mcp_oauth.callback_cookie_secure() is False
 
+    def test_approves_only_allowlisted_browser_origin(self, monkeypatch):
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(
+                cors_origin_list=("http://localhost:3080", "https://cloud.dmslab.re.kr"),
+                frontend_base_url="https://cloud.dmslab.re.kr",
+                public_api_base="http://localhost:8000",
+            ),
+        )
+
+        assert mcp_oauth.approved_return_origin("http://localhost:3080") == "http://localhost:3080"
+        assert mcp_oauth.approved_return_origin("https://cloud.dmslab.re.kr") == "https://cloud.dmslab.re.kr"
+        assert mcp_oauth.approved_return_origin("https://attacker.example") is None
+        assert mcp_oauth.approved_return_origin("https://cloud.dmslab.re.kr/redirect") is None
+
     def test_rejects_loopback_http_callback_url_in_production(self, monkeypatch):
         monkeypatch.setenv("AFTERGLOW_ENV", "production")
         monkeypatch.setattr(
@@ -329,9 +346,23 @@ class TestMcpOAuthAuthorizationOwnership:
         monkeypatch.setattr(mcp_oauth, "decrypt_llm_provider_key", lambda _blob: "static-secret")
         monkeypatch.setattr(mcp_oauth, "_callback_url", lambda: "https://console.example/oauth/callback")
         monkeypatch.setattr(mcp_oauth, "_encrypt", lambda payload: encrypted_payloads.append(payload) or "encrypted")
+        monkeypatch.setattr(
+            mcp_oauth,
+            "get_settings",
+            lambda: SimpleNamespace(
+                cors_origin_list=("https://console.example",),
+                frontend_base_url="https://console.example",
+                public_api_base="https://api.example",
+            ),
+        )
 
-        result = await mcp_oauth.begin(7, user_id="user-1", project_id="project-1", initiator_nonce="n" * 43)
-
+        result = await mcp_oauth.begin(
+            7,
+            user_id="user-1",
+            project_id="project-1",
+            initiator_nonce="n" * 43,
+            return_origin="https://console.example",
+        )
         assert "client_id=static-client" in result["authorization_url"]
         assert "scope=read+write" in result["authorization_url"]
         assert encrypted_payloads == [
@@ -343,27 +374,59 @@ class TestMcpOAuthAuthorizationOwnership:
                 "callback_url": "https://console.example/oauth/callback",
                 "initiator_nonce_hash": mcp_oauth._hash("n" * 43),
                 "scopes": ["read", "write"],
+                "return_origin": "https://console.example",
             }
         ]
 
+    def test_local_callback_returns_to_local_chat(self, monkeypatch):
+        monkeypatch.setattr(
+            mcp_oauth_callback,
+            "get_settings",
+            lambda: SimpleNamespace(frontend_base_url="http://localhost:3080"),
+        )
+
+        assert mcp_oauth_callback._return_url(connected=True, server_id=7) == (
+            "http://localhost:3080/dashboard/chat?mcp_oauth=connected&mcp_server_id=7"
+        )
+
 
 class TestMcpOAuthRoutes:
+    def test_callback_returns_to_approved_initiator_origin(self, monkeypatch):
+        settings = SimpleNamespace(
+            cors_origin_list=("http://localhost:3080", "https://cloud.dmslab.re.kr"),
+            frontend_base_url="https://cloud.dmslab.re.kr",
+            public_api_base="http://localhost:8000",
+        )
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(mcp_oauth, "get_settings", lambda: settings)
+        monkeypatch.setattr(mcp_oauth_callback, "get_settings", lambda: settings)
+
+        assert (
+            mcp_oauth_callback._return_url(connected=True, server_id=7, return_origin="http://localhost:3080")
+            == "http://localhost:3080/dashboard/chat?mcp_oauth=connected&mcp_server_id=7"
+        )
+
     async def test_owner_can_start_oauth(self, client, monkeypatch):
-        async def fake_begin(server_id, *, user_id, project_id, initiator_nonce):
+        received_origins: list[str | None] = []
+
+        async def fake_begin(server_id, *, user_id, project_id, initiator_nonce, return_origin):
             assert (server_id, user_id, project_id) == (7, "test-user-123", "test-project-123")
             assert len(initiator_nonce) >= 32
+            received_origins.append(return_origin)
             return {"authorization_url": "https://auth.example/authorize?state=opaque"}
 
         monkeypatch.setattr(extensions.mcp_oauth, "begin", fake_begin)
         monkeypatch.setattr(extensions.mcp_oauth, "callback_cookie_secure", lambda: True)
 
-        response = await client.post("/api/v1/chat/mcp-servers/7/oauth/start")
-
-        assert response.status_code == 200
-        assert response.json() == {"authorization_url": "https://auth.example/authorize?state=opaque"}
+        response = await client.post(
+            "/api/v1/chat/mcp-servers/7/oauth/start", headers={"Origin": "http://localhost:3080"}
+        )
         assert "httponly" in response.headers["set-cookie"].lower()
         assert "samesite=lax" in response.headers["set-cookie"].lower()
         assert "secure" in response.headers["set-cookie"].lower()
+        assert response.status_code == 200
+        assert response.json() == {"authorization_url": "https://auth.example/authorize?state=opaque"}
+        assert received_origins == ["http://localhost:3080"]
 
     async def test_local_callback_uses_non_secure_initiator_cookie(self, client, monkeypatch):
         async def fake_begin(*_args, **_kwargs):
@@ -383,7 +446,7 @@ class TestMcpOAuthRoutes:
         async def fake_complete(*, state, code, error, iss, initiator_nonce):
             assert (state, code, error, iss) == ("opaque-state", "oauth-code", None, None)
             received.append(initiator_nonce)
-            return 7
+            return 7, None
 
         monkeypatch.setattr(mcp_oauth_callback.mcp_oauth, "complete", fake_complete)
         client.cookies.set(mcp_oauth.INITIATOR_COOKIE, "initiator-browser-nonce")
@@ -396,6 +459,28 @@ class TestMcpOAuthRoutes:
         assert response.status_code in {200, 303}
         assert received == ["initiator-browser-nonce"]
         assert "max-age=0" in response.headers["set-cookie"].lower()
+
+    async def test_callback_failure_returns_to_the_initiating_origin(self, client, monkeypatch):
+        settings = SimpleNamespace(
+            cors_origin_list=("http://localhost:3080",),
+            frontend_base_url="https://cloud.dmslab.re.kr",
+            public_api_base="http://localhost:8000",
+        )
+
+        async def fake_complete(**_kwargs):
+            error = mcp_oauth.McpOAuthError("OAuth exchange failed")
+            error.return_origin = "http://localhost:3080"
+            raise error
+
+        monkeypatch.setenv("AFTERGLOW_ENV", "development")
+        monkeypatch.setattr(mcp_oauth, "get_settings", lambda: settings)
+        monkeypatch.setattr(mcp_oauth_callback, "get_settings", lambda: settings)
+        monkeypatch.setattr(mcp_oauth_callback.mcp_oauth, "complete", fake_complete)
+
+        response = await client.get("/api/v1/chat/mcp-oauth/callback?state=opaque-state", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "http://localhost:3080/dashboard/chat?mcp_oauth=failed"
 
     async def test_owner_can_read_and_disconnect_oauth(self, client, monkeypatch):
         async def fake_status(server_id, *, user_id, project_id):

@@ -34,6 +34,7 @@ class ToolContext:
     selected_tool_ids: tuple[int, ...] | None = None
     selected_mcp_ids: tuple[int, ...] | None = None
     expected_mcp_credential_versions: tuple[tuple[int, int], ...] | None = None
+    expected_extension_fingerprints: tuple[tuple[str, int, str], ...] | None = None
     run_id: str | None = None
     tool_call_id: str | None = None
     lumen_snapshot: dict[str, object] | None = None
@@ -44,6 +45,7 @@ class ToolContext:
     managed_fetch: dict[str, Any] | None = None
     managed_advisor: dict[str, Any] | None = None
     advisor_visible_messages: tuple[dict[str, Any], ...] = ()
+    binding_session: object | None = None
 
 
 @dataclass(frozen=True)

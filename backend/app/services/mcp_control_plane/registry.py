@@ -51,6 +51,19 @@ from app.services.mcp_control_plane.database import (
     request_project_database_instance_delete,
     request_project_database_instance_restart,
 )
+from app.services.mcp_control_plane.file_storage import (
+    McpFileStorageError,
+    get_project_share_quota,
+)
+from app.services.mcp_control_plane.k3s import (
+    McpK3sError,
+    get_project_k3s_cluster,
+    list_project_k3s_clusters,
+)
+from app.services.mcp_control_plane.key_manager import (
+    McpKeyManagerError,
+    list_project_secret_metadata,
+)
 from app.services.mcp_control_plane.network import (
     McpNetworkError,
     get_project_network,
@@ -61,6 +74,10 @@ from app.services.mcp_control_plane.network import (
     preview_project_subnet_delete,
     request_project_network_delete,
     request_project_subnet_delete,
+)
+from app.services.mcp_control_plane.object_storage import (
+    McpObjectStorageError,
+    get_project_swift_account,
 )
 from app.services.mcp_control_plane.operations import McpOperationError, get_operation
 from app.services.mcp_control_plane.storage import (
@@ -79,8 +96,13 @@ from app.services.mcp_control_plane.storage import (
     request_project_snapshot_delete,
     request_project_volume_delete,
 )
+from app.services.mcp_control_plane.waygate import (
+    McpWaygateError,
+    get_project_waygate_server,
+    list_project_waygate_servers,
+)
 
-REGISTRY_VERSION = "2026-07-27.23"
+REGISTRY_VERSION = "2026-07-31.1"
 
 
 class McpDomainArguments(BaseModel):
@@ -165,7 +187,7 @@ class RegistryEntry:
         return schema
 
     def enabled(self) -> bool:
-        return self.service_flag is None or bool(getattr(get_settings(), self.service_flag))
+        return self.service_flag is None or bool(getattr(get_settings(), self.service_flag, False))
 
     def allowed_for(self, principal: McpPrincipal) -> bool:
         return self.enabled() and self.minimum_scope in principal.scopes
@@ -190,14 +212,58 @@ _TOOL_DOMAIN_PREFIXES: tuple[tuple[str, str], ...] = (
     ("afterglow_vm_", "compute"),
     ("afterglow_volume_", "storage"),
     ("afterglow_network_", "network"),
+    ("afterglow_subnet_", "network"),
     ("afterglow_database_", "database"),
     ("afterglow_container_", "containers"),
-    ("afterglow_share_", "shared_file_storage"),
-    ("afterglow_k3s_", "kubernetes"),
-    ("afterglow_swift_", "object_storage"),
-    ("afterglow_secret_", "key_manager"),
+    ("afterglow_file_storage_", "file_storage"),
+    ("afterglow_k3s_", "k3s"),
+    ("afterglow_object_storage_", "object_storage"),
+    ("afterglow_key_manager_", "key_manager"),
     ("afterglow_waygate_", "waygate"),
 )
+
+_INVENTORY_DOMAIN_PREFIXES: tuple[tuple[str, str], ...] = (
+    *_TOOL_DOMAIN_PREFIXES,
+    ("afterglow_capabilities_", "platform"),
+    ("afterglow_cloud_", "platform"),
+    ("afterglow_quota_", "platform"),
+    ("afterglow_operation_", "operations"),
+)
+_INVENTORY_SERVICE_FLAGS = {
+    "compute": None,
+    "storage": None,
+    "network": None,
+    "database": "service_trove_enabled",
+    "containers": "service_zun_enabled",
+    "platform": None,
+    "operations": None,
+    "file_storage": "service_manila_enabled",
+    "k3s": "service_k3s_enabled",
+    "object_storage": "service_swift_enabled",
+    "key_manager": "service_barbican_enabled",
+    "waygate": "service_waygate_enabled",
+}
+
+
+def validate_registry_inventory(entries: tuple[RegistryEntry, ...]) -> None:
+    """Fail closed when a cloud tool lacks an explicit safe-domain classification."""
+
+    names: set[str] = set()
+    domains: set[str] = set()
+    for entry in entries:
+        if entry.name in names:
+            raise ValueError(f"MCP registry inventory contains duplicate tool {entry.name!r}")
+        names.add(entry.name)
+        domain = next((domain for prefix, domain in _INVENTORY_DOMAIN_PREFIXES if entry.name.startswith(prefix)), None)
+        if domain is None:
+            raise ValueError(f"MCP registry inventory leaves tool {entry.name!r} unclassified")
+        if entry.service_flag != _INVENTORY_SERVICE_FLAGS[domain]:
+            raise ValueError(f"MCP registry inventory assigns tool {entry.name!r} to an invalid service gate")
+        domains.add(domain)
+
+    missing_domains = sorted(set(_INVENTORY_SERVICE_FLAGS) - domains)
+    if missing_domains:
+        raise ValueError(f"MCP registry inventory has no registered tool for domains: {', '.join(missing_domains)}")
 
 
 def _registered_enabled_domains() -> list[str]:
@@ -1269,6 +1335,160 @@ async def _operation_get(context: ConsumerCloudContext, arguments: OperationGetA
     )
 
 
+class FileStorageQuotaGetArguments(McpDomainArguments):
+    pass
+
+
+class FileStorageQuotaGetOutput(McpDomainOutput):
+    shares: QuotaValueOutput
+    gigabytes: QuotaValueOutput
+
+
+async def _file_storage_quota_get(
+    context: ConsumerCloudContext, _: FileStorageQuotaGetArguments
+) -> FileStorageQuotaGetOutput:
+    try:
+        async with context.openstack_connection() as conn:
+            quota = await get_project_share_quota(conn)
+    except (McpFileStorageError, McpConsumerConnectionError) as exc:
+        raise ValueError("MCP file storage quota data is unavailable") from exc
+    return FileStorageQuotaGetOutput.model_validate(quota)
+
+
+class K3sClusterListArguments(McpDomainArguments):
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class K3sClusterGetArguments(McpDomainArguments):
+    cluster_id: UUID = Field(strict=False)
+
+
+class K3sClusterSummaryOutput(McpDomainOutput):
+    id: str
+    name: str
+    status: str
+    agent_count: int
+    k3s_version: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    master_count: int = 1
+    stampede_enabled: bool = False
+    occm_enabled: bool = False
+
+
+class K3sClusterListOutput(McpDomainOutput):
+    clusters: list[K3sClusterSummaryOutput]
+
+
+async def _k3s_cluster_list(context: ConsumerCloudContext, arguments: K3sClusterListArguments) -> K3sClusterListOutput:
+    try:
+        clusters = await list_project_k3s_clusters(project_id=context.project_id, limit=arguments.limit)
+    except McpK3sError as exc:
+        raise ValueError("MCP K3s cluster data is unavailable") from exc
+    return K3sClusterListOutput.model_validate({"clusters": clusters})
+
+
+async def _k3s_cluster_get(context: ConsumerCloudContext, arguments: K3sClusterGetArguments) -> K3sClusterSummaryOutput:
+    try:
+        cluster = await get_project_k3s_cluster(project_id=context.project_id, cluster_id=str(arguments.cluster_id))
+    except McpK3sError as exc:
+        raise ValueError("MCP K3s cluster data is unavailable") from exc
+    return K3sClusterSummaryOutput.model_validate(cluster)
+
+
+class ObjectStorageAccountGetArguments(McpDomainArguments):
+    pass
+
+
+class ObjectStorageAccountSummaryOutput(McpDomainOutput):
+    container_count: int
+    object_count: int
+    bytes_used: int
+
+
+async def _object_storage_account_get(
+    context: ConsumerCloudContext, _: ObjectStorageAccountGetArguments
+) -> ObjectStorageAccountSummaryOutput:
+    try:
+        async with context.openstack_connection() as conn:
+            account = await get_project_swift_account(conn)
+    except (McpObjectStorageError, McpConsumerConnectionError) as exc:
+        raise ValueError("MCP object storage account data is unavailable") from exc
+    return ObjectStorageAccountSummaryOutput.model_validate(account)
+
+
+class KeyManagerSecretListArguments(McpDomainArguments):
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class KeyManagerSecretMetadataOutput(McpDomainOutput):
+    id: str
+    name: str
+    secret_type: str
+    status: str
+    algorithm: str | None = None
+    bit_length: int | None = None
+    mode: str | None = None
+    created: str | None = None
+    expires: str | None = None
+    system_managed: bool
+
+
+class KeyManagerSecretListOutput(McpDomainOutput):
+    secrets: list[KeyManagerSecretMetadataOutput]
+
+
+async def _key_manager_secret_list(
+    context: ConsumerCloudContext, arguments: KeyManagerSecretListArguments
+) -> KeyManagerSecretListOutput:
+    try:
+        async with context.openstack_connection() as conn:
+            secrets = await list_project_secret_metadata(conn, limit=arguments.limit)
+    except (McpKeyManagerError, McpConsumerConnectionError) as exc:
+        raise ValueError("MCP key manager metadata is unavailable") from exc
+    return KeyManagerSecretListOutput.model_validate({"secrets": secrets})
+
+
+class WaygateServerListArguments(McpDomainArguments):
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class WaygateServerGetArguments(McpDomainArguments):
+    server_id: UUID = Field(strict=False)
+
+
+class WaygateServerSummaryOutput(McpDomainOutput):
+    id: str
+    name: str
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class WaygateServerListOutput(McpDomainOutput):
+    servers: list[WaygateServerSummaryOutput]
+
+
+async def _waygate_server_list(
+    context: ConsumerCloudContext, arguments: WaygateServerListArguments
+) -> WaygateServerListOutput:
+    try:
+        servers = await list_project_waygate_servers(context.project_id, limit=arguments.limit)
+    except McpWaygateError as exc:
+        raise ValueError("MCP Waygate server data is unavailable") from exc
+    return WaygateServerListOutput.model_validate({"servers": servers})
+
+
+async def _waygate_server_get(
+    context: ConsumerCloudContext, arguments: WaygateServerGetArguments
+) -> WaygateServerSummaryOutput:
+    try:
+        server = await get_project_waygate_server(context.project_id, str(arguments.server_id))
+    except McpWaygateError as exc:
+        raise ValueError("MCP Waygate server data is unavailable") from exc
+    return WaygateServerSummaryOutput.model_validate(server)
+
+
 _ENTRIES: tuple[RegistryEntry, ...] = (
     RegistryEntry(
         name="afterglow_capabilities_get",
@@ -1677,14 +1897,100 @@ _ENTRIES: tuple[RegistryEntry, ...] = (
         result_max_bytes=16 * 1024,
         handler=_operation_get,
     ),
+    RegistryEntry(
+        name="afterglow_file_storage_quota_get",
+        description="Return Manila file storage quota limits and usage for the current project.",
+        arguments=FileStorageQuotaGetArguments,
+        output=FileStorageQuotaGetOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_manila_enabled",
+        timeout_seconds=10,
+        result_max_bytes=16 * 1024,
+        handler=_file_storage_quota_get,
+    ),
+    RegistryEntry(
+        name="afterglow_k3s_cluster_list",
+        description="List bounded non-sensitive metadata for K3s clusters owned by the current project.",
+        arguments=K3sClusterListArguments,
+        output=K3sClusterListOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_k3s_enabled",
+        timeout_seconds=10,
+        result_max_bytes=64 * 1024,
+        handler=_k3s_cluster_list,
+    ),
+    RegistryEntry(
+        name="afterglow_k3s_cluster_get",
+        description="Return bounded non-sensitive metadata for one K3s cluster owned by the current project.",
+        arguments=K3sClusterGetArguments,
+        output=K3sClusterSummaryOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_k3s_enabled",
+        timeout_seconds=10,
+        result_max_bytes=16 * 1024,
+        handler=_k3s_cluster_get,
+    ),
+    RegistryEntry(
+        name="afterglow_object_storage_account_get",
+        description="Return project-scoped Swift object storage account aggregate metrics.",
+        arguments=ObjectStorageAccountGetArguments,
+        output=ObjectStorageAccountSummaryOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_swift_enabled",
+        timeout_seconds=10,
+        result_max_bytes=16 * 1024,
+        handler=_object_storage_account_get,
+    ),
+    RegistryEntry(
+        name="afterglow_key_manager_secret_list",
+        description="List bounded non-sensitive Barbican secret metadata for the current project.",
+        arguments=KeyManagerSecretListArguments,
+        output=KeyManagerSecretListOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_barbican_enabled",
+        timeout_seconds=10,
+        result_max_bytes=64 * 1024,
+        handler=_key_manager_secret_list,
+    ),
+    RegistryEntry(
+        name="afterglow_waygate_server_list",
+        description="List bounded non-sensitive Waygate servers owned by the current project.",
+        arguments=WaygateServerListArguments,
+        output=WaygateServerListOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_waygate_enabled",
+        timeout_seconds=10,
+        result_max_bytes=64 * 1024,
+        handler=_waygate_server_list,
+    ),
+    RegistryEntry(
+        name="afterglow_waygate_server_get",
+        description="Return bounded non-sensitive metadata for one current-project Waygate server.",
+        arguments=WaygateServerGetArguments,
+        output=WaygateServerSummaryOutput,
+        minimum_scope="mcp:read",
+        effect="read",
+        service_flag="service_waygate_enabled",
+        timeout_seconds=10,
+        result_max_bytes=16 * 1024,
+        handler=_waygate_server_get,
+    ),
 )
 
 
 def registry_entries() -> tuple[RegistryEntry, ...]:
+    validate_registry_inventory(_ENTRIES)
     return _ENTRIES
 
 
 def enabled_entries(principal: McpPrincipal) -> tuple[RegistryEntry, ...]:
+    validate_registry_inventory(_ENTRIES)
     return tuple(entry for entry in _ENTRIES if entry.allowed_for(principal))
 
 

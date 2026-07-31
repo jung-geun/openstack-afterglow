@@ -16,4 +16,25 @@ describe('chat run status style', () => {
 		expect(getStatusStyle('revoked')).toEqual({ tone: 'neutral', label: '폐기됨' });
 		expect(getStatusStyle('expired')).toEqual({ tone: 'neutral', label: '만료됨' });
 	});
+
+	it('maps every Palimpsest export state to an explicit semantic style', () => {
+		expect(getStatusStyle('queued')).toEqual({ tone: 'neutral', label: '대기 중' });
+		expect(getStatusStyle('downloading')).toEqual({
+			tone: 'info',
+			pulse: true,
+			label: '다운로드 중'
+		});
+		expect(getStatusStyle('converting')).toEqual({
+			tone: 'info',
+			pulse: true,
+			label: '변환 중'
+		});
+		expect(getStatusStyle('finalizing')).toEqual({
+			tone: 'info',
+			pulse: true,
+			label: '마무리 중'
+		});
+		expect(getStatusStyle('complete')).toEqual({ tone: 'success', label: '완료' });
+		expect(getStatusStyle('error')).toEqual({ tone: 'danger', label: '오류' });
+	});
 });

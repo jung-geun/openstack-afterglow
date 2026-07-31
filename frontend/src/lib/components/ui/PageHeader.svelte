@@ -33,9 +33,9 @@
 <style>
   .page-header {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
     margin-bottom: 1.5rem;
   }
   .page-header-breadcrumb {
@@ -60,10 +60,24 @@
   }
   .page-header-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.625rem;
-    flex-shrink: 0;
-    margin-left: 1rem;
-    margin-top: 0.125rem;
+    width: 100%;
+  }
+  @media (min-width: 1024px) {
+    .page-header {
+      flex-direction: row;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .page-header-actions {
+      flex-wrap: nowrap;
+      width: auto;
+      flex-shrink: 0;
+      margin-left: 1rem;
+      margin-top: 0.125rem;
+    }
   }
 </style>

@@ -48,7 +48,7 @@
 		position: fixed;
 		left: 50%;
 		bottom: max(1.25rem, env(safe-area-inset-bottom));
-		z-index: 60;
+		z-index: var(--z-toast);
 		width: min(760px, calc(100vw - 2rem));
 		transform: translateX(-50%);
 		pointer-events: none;
@@ -70,7 +70,7 @@
 			0 0 0 1px color-mix(in oklab, white 7%, transparent) inset;
 		backdrop-filter: blur(14px) saturate(1.15);
 		pointer-events: auto;
-		animation: bulk-rise 0.18s ease;
+		animation: bulk-rise var(--motion-duration-panel) var(--motion-ease-out);
 	}
 
 	.bulk-count {
@@ -104,9 +104,9 @@
 		box-shadow: 0 8px 22px color-mix(in oklab, black 22%, transparent);
 		cursor: pointer;
 		transition:
-			transform 0.14s ease,
-			filter 0.14s ease,
-			opacity 0.14s ease;
+			transform var(--motion-duration-fast) var(--motion-ease-standard),
+			filter var(--motion-duration-fast) var(--motion-ease-standard),
+			opacity var(--motion-duration-fast) var(--motion-ease-standard);
 	}
 
 	.bulk-btn:hover:not(:disabled) {

@@ -8,6 +8,7 @@
 		type ChatMessage as ChatMsg,
 		type ChatTreeNode
 	} from '$lib/api/chatTree';
+	import { projectMessagesForDisplay } from '$lib/api/chatTree';
 	import type { StreamMetrics } from '$lib/api/chatMetrics';
 	import { toolActivityFromCanonicalParts, type ToolActivityItem } from '$lib/api/chatToolActivity';
 	import type { RunActivityItem } from '$lib/api/chatRunReducer';
@@ -99,9 +100,11 @@
 	}
 
 	function restoredToolItems(message: DisplayMessage): ToolActivityItem[] {
-		const toolItems = message.toolItems?.length
-			? message.toolItems
-			: toolActivityFromCanonicalParts(message.parts);
+		const toolItems = message.tool_items?.length
+			? message.tool_items
+			: message.toolItems?.length
+				? message.toolItems
+				: toolActivityFromCanonicalParts(message.parts);
 		const skills =
 			message.execution?.skills ??
 			(message.execution?.skill_ids ?? []).map((id) => ({ id, name: `skill #${id}` }));
@@ -131,6 +134,7 @@
 		const info = getSiblingInfo(treeNodes, msg);
 		return { index: info.index, total: info.total };
 	}
+	const displayedPath = $derived<DisplayMessage[]>(projectMessagesForDisplay(activePath) as DisplayMessage[]);
 
 	function scrollToLatest() {
 		const el = scrollEl;
@@ -169,9 +173,12 @@
 
 	// Incoming stream deltas must not steal the reader's position after they scroll away.
 	$effect(() => {
-		void activePath.length;
-		const last = activePath[activePath.length - 1];
-		if (last) void last.content;
+		void displayedPath.length;
+		const last = displayedPath[displayedPath.length - 1];
+		if (last) {
+			void last.content;
+			void last.toolItems;
+		}
 		if (followingLatest) untrack(scrollToLatest);
 	});
 </script>
@@ -203,7 +210,7 @@
 				{#if loadingOlder}
 					<div class="older-loading" role="status">이전 메시지를 불러오는 중…</div>
 				{/if}
-				{#each activePath as msg (msg.id)}
+				{#each displayedPath as msg (msg.id)}
 					{@const info = siblingInfo(msg)}
 					<ChatMessage
 						message={msg}
@@ -213,7 +220,7 @@
 						metrics={msg.metrics ?? metricsById.get(msg.id) ?? null}
 						toolItems={restoredToolItems(msg)}
 						reasoning={msg.reasoning ?? ''}
-						activityItems={msg.activityItems ?? []}
+						activityItems={msg.activityItems ?? msg.execution?.activity ?? []}
 						siblingIndex={info.index}
 						siblingTotal={info.total}
 						modelDisplayName={modelDisplay(msg.model_name)}

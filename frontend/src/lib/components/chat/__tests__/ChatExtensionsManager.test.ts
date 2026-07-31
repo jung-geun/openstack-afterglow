@@ -79,6 +79,7 @@ describe('ChatExtensionsManager MCP OAuth', () => {
 			target: { value: 'https://mcp.github.example/mcp' }
 		});
 		await fireEvent.change(screen.getByLabelText('인증 정책'), { target: { value: 'oauth' } });
+		await fireEvent.change(screen.getByLabelText('초기 로딩 정책'), { target: { value: 'preloaded' } });
 		await fireEvent.input(screen.getByLabelText('OAuth client ID (DCR 미지원 서버만)'), {
 			target: { value: 'github-client' }
 		});
@@ -94,11 +95,20 @@ describe('ChatExtensionsManager MCP OAuth', () => {
 					name: 'GitHub',
 					auth_mode: 'oauth',
 					oauth_client_id: 'github-client',
-					oauth_client_secret: 'github-secret'
+					oauth_client_secret: 'github-secret',
+					load_policy: 'preloaded',
 				}),
 				'token',
 				'project-1'
 			)
 		);
+	});
+
+	it('keeps loading policy controls out of the user-scoped route', async () => {
+		render(ChatExtensionsManager, { base: '/api/v1/chat', only: 'mcp' });
+
+		await waitFor(() => expect(screen.getByText('Notion')).toBeTruthy());
+		expect(screen.queryByLabelText('초기 로딩 정책')).toBeNull();
+		expect(screen.queryByLabelText('Notion 로딩 정책')).toBeNull();
 	});
 });

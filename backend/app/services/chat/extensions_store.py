@@ -35,6 +35,7 @@ _MODELS = {"mcp": ChatMcpServer, "tool": ChatCustomTool, "skill": ChatSkill}
 _MCP_TRANSPORTS = ("http",)
 
 _AUTH_MODES = ("none", "oauth", "admin")
+_LOAD_POLICIES = ("preloaded", "on_demand")
 _USER_MCP_FORBIDDEN_FIELDS = frozenset(
     {"headers", "auth_mode", "oauth_scopes", "oauth_client_id", "oauth_client_secret"}
 )
@@ -109,6 +110,11 @@ def _mask_headers(headers: dict) -> dict:
     return {k: "••••••" for k in headers}
 
 
+def _load_policy(row: ChatMcpServer | ChatCustomTool) -> str:
+    policy = getattr(row, "load_policy", None)
+    return policy if policy in _LOAD_POLICIES else "on_demand"
+
+
 def _public_mcp(row: ChatMcpServer) -> dict:
     # Header values remain write-only and are exposed only as administrator configuration state.
     headers = _decrypt_headers(row)
@@ -124,6 +130,7 @@ def _public_mcp(row: ChatMcpServer) -> dict:
         "has_oauth_client": bool(getattr(row, "oauth_client_id", None)),
         "has_oauth_client_secret": bool(getattr(row, "encrypted_oauth_client_secret", None)),
         "is_active": row.is_active,
+        "load_policy": _load_policy(row),
         "effect_overrides": row.tool_effect_overrides,
         "config_version": row.config_version,
         "created_at": _iso(row.created_at),
@@ -146,6 +153,7 @@ def _reveal_mcp(row: ChatMcpServer) -> dict:
         "is_active": row.is_active,
         "effect_overrides": row.tool_effect_overrides,
         "config_version": row.config_version,
+        "load_policy": _load_policy(row),
     }
 
 
@@ -174,6 +182,7 @@ def _public_tool(row: ChatCustomTool) -> dict:
         "is_active": row.is_active,
         "effect": row.effect,
         "config_version": row.config_version,
+        "load_policy": _load_policy(row),
         "created_at": _iso(row.created_at),
     }
 
@@ -204,6 +213,7 @@ def selection_fingerprint(item: dict) -> str:
             "params_schema",
             "config_version",
             "effect",
+            "load_policy",
         )
     }
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -294,6 +304,30 @@ async def validated_frozen_selection(
             ids.append(item["id"])
         resolved[kind] = tuple(ids)
     return resolved["tool"], resolved["mcp"], warnings
+
+
+def frozen_selection_fingerprints(
+    snapshot: object,
+    selected_tool_ids: tuple[int, ...],
+    selected_mcp_ids: tuple[int, ...],
+) -> tuple[tuple[str, int, str], ...]:
+    """Return the exact validated configuration identities for a durable run."""
+    if not isinstance(snapshot, dict):
+        return ()
+    selected = {"tool": set(selected_tool_ids), "mcp": set(selected_mcp_ids)}
+    fingerprints: list[tuple[str, int, str]] = []
+    for kind, ids in selected.items():
+        entries = snapshot.get(f"{kind}s" if kind == "tool" else kind)
+        if not isinstance(entries, list):
+            continue
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            identifier = item.get("id")
+            fingerprint = item.get("config_fingerprint")
+            if identifier in ids and isinstance(identifier, int) and isinstance(fingerprint, str):
+                fingerprints.append((kind, identifier, fingerprint))
+    return tuple(fingerprints)
 
 
 _PUBLIC = {"mcp": _public_mcp, "tool": _public_tool, "skill": _public_skill}
@@ -432,6 +466,13 @@ def _apply_fields(kind: str, row, fields: dict) -> None:
             row.params_schema = fields["params_schema"] or None
         if "timeout_seconds" in fields and fields["timeout_seconds"] is not None:
             row.timeout_seconds = max(1, min(int(fields["timeout_seconds"]), 60))
+    if "load_policy" in fields:
+        if getattr(row, "scope", None) != "global":
+            raise ExtensionValidationError("도구 로딩 정책은 관리자 전역 확장에만 설정할 수 있습니다")
+        policy = str(fields["load_policy"] or "").strip().lower()
+        if policy not in _LOAD_POLICIES:
+            raise ExtensionValidationError("load_policy 는 preloaded|on_demand 만 지원합니다")
+        row.load_policy = policy
     if "is_active" in fields and fields["is_active"] is not None:
         row.is_active = bool(fields["is_active"])
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -216,11 +217,74 @@ async def get_catalog(*, refresh: bool = False) -> ModelsDevCatalog:
     return parse_catalog(cached["body"], cached["fetched_at"])
 
 
-def provider_list(catalog: ModelsDevCatalog) -> list[dict[str, object]]:
+def _normalized_provider_identifier(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def matching_provider_ids(catalog: ModelsDevCatalog, registered_provider: dict[str, object]) -> set[str]:
+    """Return catalog IDs that safely describe one registered local provider."""
+    matched_ids: set[str] = set()
+    mapped_id = registered_provider.get("models_dev_provider_id")
+    if isinstance(mapped_id, str) and mapped_id in catalog.providers:
+        matched_ids.add(mapped_id)
+
+    local_identifiers = {
+        _normalized_provider_identifier(registered_provider.get(field)) for field in ("provider_type", "name")
+    }
+    local_identifiers.discard("")
+    if not local_identifiers:
+        return matched_ids
+
+    for provider in catalog.providers.values():
+        catalog_identifiers = {
+            _normalized_provider_identifier(provider.id),
+            _normalized_provider_identifier(provider.name),
+        }
+        if local_identifiers & catalog_identifiers:
+            matched_ids.add(provider.id)
+    return matched_ids
+
+
+def provider_list(
+    catalog: ModelsDevCatalog,
+    provider_ids: set[str] | None = None,
+    preferred_provider_ids: set[str] | None = None,
+) -> list[dict[str, object]]:
+    """Return a deterministic catalog-provider listing, optionally narrowed by ID."""
+    preferred_provider_ids = preferred_provider_ids or set()
+    providers = (
+        provider for provider in catalog.providers.values() if provider_ids is None or provider.id in provider_ids
+    )
     return [
         {"id": provider.id, "name": provider.name, "model_count": len(provider.models)}
-        for provider in catalog.providers.values()
+        for provider in sorted(
+            providers,
+            key=lambda provider: (
+                provider.id not in preferred_provider_ids,
+                provider.name.casefold(),
+                provider.id,
+            ),
+        )
     ]
+
+
+def registered_provider_list(
+    catalog: ModelsDevCatalog,
+    registered_providers: list[dict[str, object]],
+    current_provider_id: int,
+) -> list[dict[str, object]]:
+    """List catalog providers matched to registered services, current service first."""
+    matched_ids: set[str] = set()
+    preferred_ids: set[str] = set()
+    for provider in registered_providers:
+        provider_matches = matching_provider_ids(catalog, provider)
+        matched_ids.update(provider_matches)
+        if provider.get("id") == current_provider_id:
+            preferred_ids.update(provider_matches)
+    return provider_list(catalog, matched_ids, preferred_ids)
 
 
 def provider_detail(catalog: ModelsDevCatalog, provider_id: str) -> dict[str, object] | None:

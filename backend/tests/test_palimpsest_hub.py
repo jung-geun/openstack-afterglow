@@ -455,6 +455,11 @@ async def test_hub_routes_are_mounted_under_v1_only():
         "/api/v1/palimpsest/hub/layers/{digest}/ancestors",
         "/api/v1/palimpsest/hub/layers/{digest}/blob",
         "/api/v1/palimpsest/hub/images",
+        "/api/v1/palimpsest/hub/image-exports",
+        "/api/v1/palimpsest/hub/image-exports/{export_id}",
+        "/api/v1/palimpsest/hub/image-exports/{export_id}/blob",
+        "/api/v1/palimpsest/hub/image-exports/{export_id}/download-token",
+        "/api/v1/palimpsest/hub/image-exports/{export_id}/download",
         "/api/v1/palimpsest/hub/uploads",
         "/api/v1/palimpsest/hub/uploads/{session_id}",
         "/api/v1/palimpsest/hub/bundles",
@@ -599,7 +604,7 @@ def test_layer_cannot_declare_disk_format():
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("disk_format", "vmdk"), ("arch", "riscv"), ("os_variant", "Bad Variant")],
+    [("disk_format", "iso"), ("arch", "riscv"), ("os_variant", "Bad Variant")],
 )
 def test_cloud_image_rejects_unsupported_values(field, value):
     from app.api.palimpsest.hub import HubLayerMeta
@@ -608,7 +613,7 @@ def test_cloud_image_rejects_unsupported_values(field, value):
         HubLayerMeta(**_image_meta(**{field: value}))
 
 
-@pytest.mark.parametrize(("param", "value"), [("arch", "riscv"), ("disk_format", "vmdk"), ("ubuntu_base", "Bad Base")])
+@pytest.mark.parametrize(("param", "value"), [("arch", "riscv"), ("disk_format", "iso"), ("ubuntu_base", "Bad Base")])
 async def test_hub_images_rejects_malformed_filters(client, param, value):
     resp = await client.get("/api/v1/palimpsest/hub/images", params={param: value})
 
@@ -664,3 +669,158 @@ def test_bundle_layer_defaults_to_squashfs_media_type():
     layer = BundleLayer(blob_digest="sha256:" + "a" * 64, size_bytes=1, name="x", config={})
 
     assert layer.media_type == MEDIA_TYPE_LAYER_SQUASHFS
+
+
+def test_cloud_image_formats_media_types_and_extensions():
+    from app.api.palimpsest.hub import HubLayerMeta
+    from app.services.palimpsest_hub_store import DISK_FORMAT_MEDIA_TYPES, IMAGE_FORMAT_SPECS
+
+    expected_formats = {"raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx"}
+    assert set(IMAGE_FORMAT_SPECS.keys()) == expected_formats
+    assert set(DISK_FORMAT_MEDIA_TYPES.keys()) == expected_formats
+
+    for fmt in expected_formats:
+        meta = HubLayerMeta(**_image_meta(disk_format=fmt))
+        expected_media_type = f"application/vnd.afterglow.palimpsest.image.{fmt}.v1"
+        assert meta.resolved_media_type() == expected_media_type
+        assert DISK_FORMAT_MEDIA_TYPES[fmt] == expected_media_type
+        spec = IMAGE_FORMAT_SPECS[fmt]
+        assert spec.extension == fmt
+
+    assert IMAGE_FORMAT_SPECS["vhd"].qemu_driver == "vpc"
+
+
+def test_promote_file_safe_atomic_promotion_and_bounds(store, tmp_path):
+    scratch_dir = store.exports_dir / "job-scratch"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    scratch_file = scratch_dir / "output.raw"
+    payload = b"promoted image content bytes"
+    scratch_file.write_bytes(payload)
+
+    finalized = store.promote_file(scratch_file, max_bytes=1024)
+    assert finalized.blob_digest == _sha256(payload)
+    assert finalized.size_bytes == len(payload)
+    assert not scratch_file.exists()
+    assert (store.blobs_dir / finalized.blob_digest[len("sha256:") :]).is_file()
+
+    # Symlink rejection
+    target_file = tmp_path / "real.txt"
+    target_file.write_bytes(b"target")
+    symlink_file = scratch_dir / "symlink.raw"
+    symlink_file.symlink_to(target_file)
+    with pytest.raises(HubStoreError, match="허브 루트 안의 일반 파일"):
+        store.promote_file(symlink_file, max_bytes=1024)
+
+    # Path outside hub root rejection
+    outside_file = tmp_path / "outside.raw"
+    outside_file.write_bytes(b"outside")
+    with pytest.raises(HubStoreError, match="허브 루트 안의 일반 파일"):
+        store.promote_file(outside_file, max_bytes=1024)
+
+    # Exceeding size bound rejection
+    big_file = scratch_dir / "big.raw"
+    big_file.write_bytes(b"x" * 100)
+    with pytest.raises(HubStoreError, match="허용 크기를 초과"):
+        store.promote_file(big_file, max_bytes=50)
+
+
+def test_blob_response_headers_and_range_behavior(store):
+    from fastapi import HTTPException
+
+    from app.api.palimpsest.hub import _blob_response
+
+    payload = bytes(range(64))
+    digest = _put_blob(store, payload)
+
+    # Full response
+    resp = _blob_response(
+        store=store,
+        digest=digest,
+        total=len(payload),
+        media_type="application/vnd.afterglow.palimpsest.image.qcow2.v1",
+        filename="ubuntu.qcow2",
+        range_header=None,
+    )
+    assert resp.headers["Content-Disposition"] == 'attachment; filename="ubuntu.qcow2"'
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["Cache-Control"] == "no-store"
+    assert resp.headers["Accept-Ranges"] == "bytes"
+    assert resp.status_code == 200
+
+    # Range response
+    range_resp = _blob_response(
+        store=store,
+        digest=digest,
+        total=len(payload),
+        media_type="application/vnd.afterglow.palimpsest.image.qcow2.v1",
+        filename="ubuntu.qcow2",
+        range_header="bytes=0-15",
+    )
+    assert range_resp.status_code == 206
+    assert range_resp.headers["Content-Range"] == "bytes 0-15/64"
+    assert range_resp.headers["Content-Disposition"] == 'attachment; filename="ubuntu.qcow2"'
+    assert range_resp.headers["X-Content-Type-Options"] == "nosniff"
+
+    # Out of range request
+    with pytest.raises(HTTPException) as exc_info:
+        _blob_response(
+            store=store,
+            digest=digest,
+            total=len(payload),
+            media_type="application/vnd.afterglow.palimpsest.image.qcow2.v1",
+            filename="ubuntu.qcow2",
+            range_header="bytes=100-200",
+        )
+    assert exc_info.value.status_code == 416
+
+
+async def test_deferred_layer_deletion_and_reverse_export_reference_gc(store):
+    from app.services.palimpsest_image_exports import run_export_maintenance
+
+    payload = b"shared blob bytes"
+    digest = _put_blob(store, payload)
+    blob_file = store.blob_path(digest)
+    assert blob_file.is_file()
+
+    # Deleting a layer row retains the blob on disk synchronously
+    assert blob_file.is_file()
+
+    class _MockExportSession:
+        async def execute(self, stmt):
+            sql = str(stmt)
+            if "palimpsest_image_exports" in sql:
+
+                class _Res:
+                    def scalars(self):
+                        class _Sub:
+                            def all(self):
+                                return [digest]
+
+                        return _Sub()
+
+                return _Res()
+
+            class _EmptyRes:
+                def scalars(self):
+                    class _Sub:
+                        def all(self):
+                            return []
+
+                    return _Sub()
+
+            return _EmptyRes()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    with (
+        patch("app.services.palimpsest_image_exports.get_blob_store", return_value=store),
+        patch("app.services.palimpsest_image_exports.get_session_factory", return_value=lambda: _MockExportSession()),
+    ):
+        await run_export_maintenance(max_age_seconds=0)
+
+    # Blob referenced by export job is preserved by GC
+    assert blob_file.is_file()

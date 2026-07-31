@@ -179,10 +179,11 @@ def count_containers_all_projects(admin_token: str) -> int:
     return total
 
 
-def get_account_metadata(conn) -> dict:
-    """현재 계정의 오브젝트 스토리지 사용량 메타데이터 반환.
+def get_account_metadata(conn, *, strict: bool = False) -> dict:
+    """Return current-account usage metadata.
 
-    반환: {container_count, object_count, bytes_used}
+    A missing account is represented as empty usage. With ``strict=True``, all
+    other provider failures are propagated so callers can fail closed.
     """
     _apply_endpoint_override(conn)
     try:
@@ -202,8 +203,10 @@ def get_account_metadata(conn) -> dict:
     except Exception as exc:
         if _is_account_not_found(exc):
             _logger.info("Swift 계정 미초기화 (404) — 기본값 반환")
-        else:
-            _logger.warning("Swift 계정 메타데이터 조회 실패", exc_info=True)
+            return {"container_count": 0, "object_count": 0, "bytes_used": 0}
+        if strict:
+            raise
+        _logger.warning("Swift 계정 메타데이터 조회 실패", exc_info=True)
         return {"container_count": 0, "object_count": 0, "bytes_used": 0}
 
 

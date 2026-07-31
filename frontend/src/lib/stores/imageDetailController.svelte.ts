@@ -74,9 +74,11 @@ export function createImageDetailController(opts: ImageDetailControllerOpts) {
 		error = '';
 		image = null;
 		try {
-			image = await api.get<ImageDetail>(`/api/v1/images/${id}`, tok, proj);
-			visibilityValue = image.visibility ?? '';
-			if (image.visibility === 'shared') loadMembers();
+			const loadedImage = await api.get<ImageDetail>(`/api/v1/images/${id}`, tok, proj);
+			visibilityValue = loadedImage.visibility ?? '';
+			loading = false;
+			image = loadedImage;
+			if (loadedImage.visibility === 'shared') loadMembers();
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {

@@ -28,6 +28,8 @@
 		return sourceName && sourceName !== reference.repository ? sourceName : reference.name;
 	}
 	let searchTerm = $state('');
+	let filtersOpen = $state(false);
+	const activeFilterCount = $derived((searchTerm.trim() ? 1 : 0) + (activeDistro === null ? 0 : 1));
 
 	const distroLabels: Record<string, string> = {
 		ubuntu: 'Ubuntu', centos: 'CentOS', rocky: 'Rocky Linux',
@@ -104,42 +106,65 @@
 	}
 </script>
 
-<!-- 검색바 -->
-<div class="relative mb-4">
-	<span class="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-3)] pointer-events-none">
-		<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-			<circle cx="11" cy="11" r="7"/>
-			<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.3-4.3"/>
+<div class="mb-4 flex items-center justify-between">
+	<button
+		type="button"
+		aria-controls="vm-image-filters"
+		aria-expanded={filtersOpen}
+		onclick={() => filtersOpen = !filtersOpen}
+		class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-raised)] px-3 py-2 text-sm font-medium text-[var(--color-ink-1)] transition-colors hover:border-[var(--color-line-2)] hover:bg-[var(--color-surface-sunken)]"
+	>
+		<svg class="h-4 w-4 text-[var(--color-ink-2)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3 5h18M6 12h12m-9 7h6"/>
 		</svg>
-	</span>
-	<label for="vm-image-search" class="sr-only">이미지 이름, tag, OS 검색</label>
-	<input
-		id="vm-image-search"
-		type="search"
-		bind:value={searchTerm}
-		placeholder="이미지명, repository, tag, OS, 버전으로 검색…"
-		class="w-full bg-[var(--color-surface-raised)] border border-[var(--color-line)] text-[var(--color-ink-1)] rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-[var(--color-line-2)] placeholder:text-[var(--color-ink-3)]"
-	/>
+		필터
+		{#if activeFilterCount > 0}
+			<span class="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-action-on-accent)]">{activeFilterCount}</span>
+		{/if}
+	</button>
 </div>
 
-<!-- OS family 칩 -->
-<div class="flex flex-wrap gap-2 mb-5">
-	<button
-		onclick={() => activeDistro = null}
-		class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-all {activeDistro === null
-			? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]'
-			: 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
-	>전체 <span class="opacity-70 font-mono text-[10.5px]">{images.length}</span></button>
-	{#each distros as d}
-		{@const count = images.filter(i => (i.os_distro ?? '기타') === d).length}
-		<button
-			onclick={() => activeDistro = d}
-			class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-all {activeDistro === d
-				? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]'
-				: 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
-		>{distroLabel(d)} <span class="opacity-70 font-mono text-[10.5px]">{count}</span></button>
-	{/each}
-</div>
+{#if filtersOpen}
+	<div id="vm-image-filters" class="mb-5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-sunken)] p-3">
+		<div class="relative mb-3">
+			<span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-3)]">
+				<svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<circle cx="11" cy="11" r="7"/>
+					<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.3-4.3"/>
+				</svg>
+			</span>
+			<label for="vm-image-search" class="sr-only">이미지 이름, tag, OS 검색</label>
+			<input
+				id="vm-image-search"
+				type="search"
+				bind:value={searchTerm}
+				placeholder="이미지명, repository, tag, OS, 버전으로 검색…"
+				class="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-raised)] py-2 pl-9 pr-3 text-sm text-[var(--color-ink-1)] outline-none placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-line-2)]"
+			/>
+		</div>
+
+		<div>
+			<p class="mb-2 text-xs font-medium text-[var(--color-ink-2)]">OS 종류</p>
+			<div class="flex flex-wrap gap-2">
+				<button
+					onclick={() => activeDistro = null}
+					class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-all {activeDistro === null
+						? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]'
+						: 'bg-[var(--color-surface-raised)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-base)]'}"
+				>전체 <span class="font-mono text-[10.5px] opacity-70">{images.length}</span></button>
+				{#each distros as d}
+					{@const count = images.filter(i => (i.os_distro ?? '기타') === d).length}
+					<button
+						onclick={() => activeDistro = d}
+						class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-all {activeDistro === d
+							? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]'
+							: 'bg-[var(--color-surface-raised)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-base)]'}"
+					>{distroLabel(d)} <span class="font-mono text-[10.5px] opacity-70">{count}</span></button>
+				{/each}
+			</div>
+		</div>
+	</div>
+{/if}
 
 <!-- 이미지 카드 그리드 -->
 <div class="grid grid-cols-1 @lg/panel:grid-cols-2 @3xl/panel:grid-cols-3 gap-3">
@@ -162,15 +187,15 @@
 			{/if}
 
 			<!-- 아바타 + 이름 -->
-			<div class="flex items-start gap-3 mb-2">
+			<div class="mb-2 flex items-center gap-3">
 				{#if logoPath(img.os_distro ?? null)}
 					<img
 						src={logoPath(img.os_distro ?? null)}
 						alt={img.os_distro ?? ''}
-						class="w-9 h-9 rounded-lg object-contain bg-[var(--color-surface-sunken)] border border-[var(--color-line)] p-0.5 flex-shrink-0"
+						class="h-16 w-16 flex-shrink-0 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-sunken)] p-1 object-contain"
 					/>
 				{:else}
-					<div class="w-9 h-9 rounded-lg {avatarColor(img.os_distro ?? null)} flex items-center justify-center text-[var(--color-action-on-accent)] text-sm font-bold flex-shrink-0 border border-[var(--color-ink-0)]/10">
+					<div class="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-xl border border-[var(--color-ink-0)]/10 {avatarColor(img.os_distro ?? null)} text-sm font-bold text-[var(--color-action-on-accent)]">
 						{avatarLetter(img.name)}
 					</div>
 				{/if}

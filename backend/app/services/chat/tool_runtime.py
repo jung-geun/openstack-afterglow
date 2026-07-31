@@ -16,11 +16,12 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from uuid import NAMESPACE_URL, uuid5
 
 from app.models.chat_contracts import TextPart
 from app.services.chat import advisor, mcp_client, ssrf, tools, web_fetch, web_search
-from app.services.chat.agent_protocol import ToolBinding, ToolDefinition
+from app.services.chat.agent_protocol import ToolBinding, ToolDefinition, validate_tool_arguments
 from app.services.chat.agent_protocol import ToolExecutionResult as V2ToolExecutionResult
 from app.services.chat.tools import ToolContext
 from app.services.mcp_control_plane import ledger as mcp_ledger
@@ -35,6 +36,16 @@ _MCP_PREFIX = "mcp__"  # litellm 툴 이름: mcp__{server_id}__{tool_name}
 _MANAGED_SEARCH_TOOL = "managed_web_search"
 _MANAGED_FETCH_TOOL = "managed_web_fetch"
 _MAX_MANAGED_RESULT_BYTES = 48 * 1024
+
+
+@dataclass
+class ToolBindingSession:
+    """Mutable per-run schemas loaded by the model from the bounded catalog."""
+
+    deferred_bindings: dict[str, ToolBinding] = field(default_factory=dict)
+    loaded_names: set[str] = field(default_factory=set)
+    legacy_bindings: dict[str, ToolBinding] = field(default_factory=dict)
+    legacy_preloaded: bool = False
 
 
 class ToolExecutionResult:
@@ -91,6 +102,7 @@ def v2_builtin_tool_bindings() -> dict[str, ToolBinding]:
             effect="read",
             parallel_safe=True,
             source="builtin",
+            activity_category="기본 도구",
         )
         bindings[definition.name] = ToolBinding(definition=definition, execute=execute)
     return bindings
@@ -164,6 +176,7 @@ async def _lumen_registry_bindings(ctx: ToolContext) -> tuple[ToolBinding, ...]:
             effect=entry.effect,
             parallel_safe=entry.effect == "read",
             source="managed",
+            activity_category="Lumen",
         )
         config_fingerprint = _v2_config_fingerprint(
             {
@@ -340,25 +353,194 @@ async def _lumen_registry_bindings(ctx: ToolContext) -> tuple[ToolBinding, ...]:
     return tuple(bindings)
 
 
-async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
-    """Resolve frozen-schema bindings without allowing dynamic names to collide.
+def _binding_schema(binding: ToolBinding) -> dict:
+    definition = binding.definition
+    return {
+        "type": "function",
+        "function": {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": definition.input_schema,
+        },
+    }
 
-    Custom tools and MCP methods receive provider-safe, numeric namespaces. Their
-    original names and transport records stay captured only in the server-side
-    binding closure.
-    """
 
-    bindings = v2_builtin_tool_bindings()
+def _closed_mcp_input_schema(raw_schema: object) -> dict:
+    """Close explicitly enumerated MCP object schemas without permitting dynamic maps."""
+    source = raw_schema if isinstance(raw_schema, dict) else {"type": "object", "properties": {}}
+
+    def normalize(value: object) -> object:
+        if isinstance(value, dict):
+            normalized = {key: normalize(child) for key, child in value.items()}
+            if normalized.get("type") == "object" and isinstance(normalized.get("properties"), dict):
+                normalized["additionalProperties"] = False
+            return normalized
+        if isinstance(value, list):
+            return [normalize(child) for child in value]
+        return value
+
+    normalized = normalize(source)
+    return normalized if isinstance(normalized, dict) else {"type": "object", "properties": {}}
+
+
+_CATALOG_TERM_RE = re.compile(r"[a-z0-9_]{2,}|[가-힣]{2,}", re.IGNORECASE)
+
+
+def _catalog_matches(binding: ToolBinding, query: str) -> bool:
+    searchable = " ".join(
+        (
+            binding.definition.name,
+            binding.definition.description,
+            binding.definition.source,
+            binding.definition.activity_category,
+        )
+    ).casefold()
+    query = query.casefold()
+    if query in searchable:
+        return True
+    query_terms = set(_CATALOG_TERM_RE.findall(query))
+    searchable_terms = set(_CATALOG_TERM_RE.findall(searchable))
+    return bool(query_terms & searchable_terms)
+
+
+async def _search_and_load_bindings(
+    arguments: dict[str, object],
+    context: ToolContext,
+    target_bindings: dict[str, ToolBinding],
+    *,
+    include_managed: bool,
+) -> V2ToolExecutionResult:
+    session = context.binding_session
+    if not isinstance(session, ToolBindingSession):
+        return V2ToolExecutionResult(
+            status="failed",
+            model_content="Tool execution context is invalid.",
+            error_code="invalid_tool_context",
+        )
+    query = arguments.get("query")
+    category = arguments.get("category")
+    maximum = arguments.get("max_results", 5)
+    if not isinstance(query, str) or not (query := query.strip()) or len(query) > 160:
+        return V2ToolExecutionResult(
+            status="failed",
+            model_content="Provide a concise tool capability query.",
+            error_code="invalid_tool_catalog_query",
+        )
+    if category is not None and (not isinstance(category, str) or len(category.strip()) > 100):
+        return V2ToolExecutionResult(
+            status="failed",
+            model_content="category must be a concise category filter.",
+            error_code="invalid_tool_catalog_category",
+        )
+    if not isinstance(maximum, int) or not 1 <= maximum <= 8:
+        return V2ToolExecutionResult(
+            status="failed",
+            model_content="max_results must be between 1 and 8.",
+            error_code="invalid_tool_catalog_limit",
+        )
+    deferred = await v2_tool_bindings(
+        context,
+        extension_load_policy="on_demand",
+        include_platform=False,
+        include_managed=include_managed,
+    )
+    session.deferred_bindings = deferred
+    category_needle = category.strip().casefold() if isinstance(category, str) and category.strip() else None
+    selected = [
+        binding
+        for binding in deferred.values()
+        if _catalog_matches(binding, query)
+        and (
+            category_needle is None
+            or category_needle in binding.definition.activity_category.casefold()
+            or category_needle in binding.definition.source.casefold()
+        )
+    ][:maximum]
+    for binding in selected:
+        target_bindings[binding.definition.name] = binding
+        session.loaded_names.add(binding.definition.name)
+    catalog = [
+        {
+            "name": binding.definition.name,
+            "description": binding.definition.description[:280],
+            "source": binding.definition.source,
+            "category": binding.definition.activity_category,
+        }
+        for binding in selected
+    ]
+    return V2ToolExecutionResult(
+        status="completed",
+        model_content=json.dumps(
+            {"loaded_tools": [item["name"] for item in catalog], "tools": catalog},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        display=[TextPart(type="text", text=f"도구 후보 {len(catalog)}개를 확인하고 기술을 로드했습니다.")],
+    )
+
+
+def _catalog_binding(target_bindings: dict[str, ToolBinding], *, include_managed: bool) -> ToolBinding:
+    async def list_available_tools(arguments: dict[str, object], context: object) -> V2ToolExecutionResult:
+        if not isinstance(context, ToolContext):
+            return V2ToolExecutionResult(
+                status="failed",
+                model_content="Tool execution context is invalid.",
+                error_code="invalid_tool_context",
+            )
+        return await _search_and_load_bindings(
+            arguments,
+            context,
+            target_bindings,
+            include_managed=include_managed,
+        )
+
+    return ToolBinding(
+        definition=ToolDefinition(
+            name="list_available_tools",
+            description="Search eligible on-demand tools by capability and load at most eight schemas for this run.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "category": {"type": "string", "minLength": 1, "maxLength": 100},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 8},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            effect="read",
+            parallel_safe=False,
+            source="builtin",
+            activity_category="도구 준비",
+        ),
+        execute=list_available_tools,
+    )
+
+
+async def v2_tool_bindings(
+    ctx: ToolContext,
+    *,
+    extension_load_policy: str | None = None,
+    include_platform: bool = True,
+    include_managed: bool = False,
+) -> dict[str, ToolBinding]:
+    """Resolve tenant-scoped bindings, optionally restricted to one extension load policy."""
+    if not ctx.tools_enabled:
+        return {}
+    bindings = v2_builtin_tool_bindings() if include_platform else {}
 
     def add(binding: ToolBinding) -> None:
         if binding.definition.name in bindings:
             raise ValueError(f"duplicate v2 tool name: {binding.definition.name}")
         bindings[binding.definition.name] = binding
 
-    for binding in await _lumen_registry_bindings(ctx):
-        add(binding)
+    if include_managed:
+        for binding in await _lumen_registry_bindings(ctx):
+            add(binding)
 
     for custom in await _load_custom(ctx):
+        if extension_load_policy is not None and custom.get("load_policy") != extension_load_policy:
+            continue
         identifier = custom.get("id")
         if not isinstance(identifier, int):
             continue
@@ -376,19 +558,29 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                 },
                 effect=_v2_effect(custom.get("effect")),
                 source="custom_http",
+                activity_category="커스텀 도구",
             )
         except (TypeError, ValueError):
             logger.warning("invalid custom tool excluded from v2 bindings id=%s", identifier)
             continue
 
-        async def execute(arguments: dict[str, object], context: object, *, tool_def=custom) -> V2ToolExecutionResult:
+        async def execute(
+            arguments: dict[str, object], context: object, *, tool_id=identifier
+        ) -> V2ToolExecutionResult:
             if not isinstance(context, ToolContext):
                 return V2ToolExecutionResult(
                     status="failed",
                     model_content="Tool execution context is invalid.",
                     error_code="invalid_tool_context",
                 )
-            return _v2_result(await _execute_custom_http_tool(tool_def, arguments, context))
+            current = next((item for item in await _load_custom(context) if item.get("id") == tool_id), None)
+            if current is None:
+                return V2ToolExecutionResult(
+                    status="failed",
+                    model_content="The selected custom tool is no longer available.",
+                    error_code="extension_unavailable",
+                )
+            return _v2_result(await _execute_custom_http_tool(current, arguments, context))
 
         add(
             ToolBinding(
@@ -406,10 +598,15 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                     }
                 ),
                 destination_origin=destination_origin,
+                load_policy=custom.get("load_policy")
+                if custom.get("load_policy") in {"preloaded", "on_demand"}
+                else None,
             )
         )
 
     for server in await _load_mcp(ctx):
+        if extension_load_policy is not None and server.get("load_policy") != extension_load_policy:
+            continue
         identifier = server.get("id")
         if not isinstance(identifier, int):
             continue
@@ -429,16 +626,17 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                 definition = ToolDefinition(
                     name=_v2_provider_name("mcp", identifier, method["name"]),
                     description=str(method.get("description") or method["name"]),
-                    input_schema={
-                        **(method.get("input_schema") or {"type": "object", "properties": {}}),
-                        "additionalProperties": False,
-                    },
+                    input_schema=_closed_mcp_input_schema(method.get("input_schema")),
                     effect=_v2_effect((server.get("effect_overrides") or {}).get(method["name"])),
                     source="mcp",
+                    activity_category=f"MCP · {str(server.get('name') or '서버')[:80]}",
                 )
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
                 logger.warning(
-                    "invalid MCP tool excluded from v2 bindings server=%s name=%r", identifier, method.get("name")
+                    "invalid MCP tool excluded from v2 bindings server=%s name=%r reason=%s",
+                    identifier,
+                    method.get("name"),
+                    exc,
                 )
                 continue
 
@@ -446,7 +644,7 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                 arguments: dict[str, object],
                 context: object,
                 *,
-                mcp_server=server,
+                server_id=identifier,
                 method_name=method["name"],
             ) -> V2ToolExecutionResult:
                 if not isinstance(context, ToolContext):
@@ -455,7 +653,14 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                         model_content="Tool execution context is invalid.",
                         error_code="invalid_tool_context",
                     )
-                return _v2_result(await mcp_client.call_tool(mcp_server, method_name, arguments))
+                current = next((item for item in await _load_mcp(context) if item.get("id") == server_id), None)
+                if current is None:
+                    return V2ToolExecutionResult(
+                        status="failed",
+                        model_content="The selected MCP server is no longer available.",
+                        error_code="extension_unavailable",
+                    )
+                return _v2_result(await mcp_client.call_tool(current, method_name, arguments))
 
             add(
                 ToolBinding(
@@ -470,10 +675,62 @@ async def v2_tool_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
                         }
                     ),
                     destination_origin=destination_origin,
+                    load_policy=server.get("load_policy")
+                    if server.get("load_policy") in {"preloaded", "on_demand"}
+                    else None,
                 )
             )
 
+    if (
+        include_platform
+        and extension_load_policy in {None, "preloaded"}
+        and isinstance(ctx.binding_session, ToolBindingSession)
+    ):
+        add(_catalog_binding(bindings, include_managed=True))
     return bindings
+
+
+async def _legacy_dynamic_bindings(ctx: ToolContext) -> dict[str, ToolBinding]:
+    session = ctx.binding_session
+    if not isinstance(session, ToolBindingSession):
+        return {}
+    if not session.legacy_preloaded:
+        session.legacy_bindings.update(
+            await v2_tool_bindings(
+                ctx,
+                extension_load_policy="preloaded",
+                include_platform=False,
+            )
+        )
+        session.legacy_preloaded = True
+    bindings = dict(session.legacy_bindings)
+    bindings["list_available_tools"] = _catalog_binding(session.legacy_bindings, include_managed=False)
+    return bindings
+
+
+async def restore_v2_deferred_bindings(
+    ctx: ToolContext,
+    bindings: dict[str, ToolBinding],
+    names: list[str],
+    *,
+    include_managed: bool,
+) -> None:
+    """Rebuild previously loaded bindings after durable graph replay."""
+    if not isinstance(ctx.binding_session, ToolBindingSession) or not names:
+        return
+    deferred = await v2_tool_bindings(
+        ctx,
+        extension_load_policy="on_demand",
+        include_platform=False,
+        include_managed=include_managed,
+    )
+    ctx.binding_session.deferred_bindings = deferred
+    unavailable = [name for name in names if name not in deferred]
+    if unavailable:
+        raise RuntimeError("a previously loaded tool is no longer eligible for this run")
+    for name in names:
+        bindings[name] = deferred[name]
+        ctx.binding_session.loaded_names.add(name)
 
 
 async def _read_bounded_response(response) -> str:
@@ -496,6 +753,22 @@ def _selected(items: list[dict], selected_ids: tuple[int, ...] | None) -> list[d
     return [it for it in items if it.get("id") in allow]
 
 
+def _frozen_selection(items: list[dict], ctx: ToolContext, kind: str) -> list[dict]:
+    expected = dict(
+        ((entry_kind, identifier), fingerprint)
+        for entry_kind, identifier, fingerprint in (ctx.expected_extension_fingerprints or ())
+    )
+    if ctx.expected_extension_fingerprints is None:
+        return items
+    from app.services.chat import extensions_store as es
+
+    return [
+        item
+        for item in items
+        if isinstance(item.get("id"), int) and expected.get((kind, item["id"])) == es.selection_fingerprint(item)
+    ]
+
+
 async def _load_custom(ctx: ToolContext) -> list[dict]:
     """호출자에게 노출되는 활성 커스텀 툴(global + 본인) — 선택 필터 적용. 저장소 장애 시 []."""
     from app.services.chat import extensions_store as es
@@ -505,7 +778,7 @@ async def _load_custom(ctx: ToolContext) -> list[dict]:
     except Exception:
         logger.warning("커스텀 툴 로드 실패 — 내장 툴만 사용", exc_info=True)
         return []
-    return _selected(items, ctx.selected_tool_ids)
+    return _frozen_selection(_selected(items, ctx.selected_tool_ids), ctx, "tool")
 
 
 async def _load_mcp(ctx: ToolContext) -> list[dict]:
@@ -559,7 +832,7 @@ async def _load_mcp(ctx: ToolContext) -> list[dict]:
             logger.info("MCP 서버 %s: 실행 중 인증 값이 변경되었거나 폐기됨 — 노출 스킵", server_id)
             continue
         usable.append(server)
-    return _selected(usable, ctx.selected_mcp_ids)
+    return _frozen_selection(_selected(usable, ctx.selected_mcp_ids), ctx, "mcp")
 
 
 def _custom_schema(tool_def: dict) -> dict:
@@ -797,14 +1070,42 @@ async def _execute_managed_advisor(args: dict, ctx: ToolContext) -> ToolExecutio
     )
 
 
+async def context_tool_activity_metadata(name: str, ctx: ToolContext) -> tuple[str, str]:
+    """Return server-derived timeline metadata without trusting the model's tool name."""
+    if isinstance(ctx.binding_session, ToolBindingSession):
+        binding = ctx.binding_session.legacy_bindings.get(name)
+        if binding is not None:
+            return binding.definition.source, binding.definition.activity_category
+        if name == "list_available_tools":
+            return "builtin", "도구 준비"
+    if name.startswith(_MCP_PREFIX):
+        server_part = name[len(_MCP_PREFIX) :].partition("__")[0]
+        try:
+            server_id = int(server_part)
+        except ValueError:
+            return "mcp", "MCP"
+        for server in await _load_mcp(ctx):
+            if server.get("id") == server_id:
+                return "mcp", f"MCP · {str(server.get('name') or '서버')[:80]}"
+        return "mcp", "MCP"
+    if name in {_MANAGED_SEARCH_TOOL, _MANAGED_FETCH_TOOL, _MANAGED_ADVISOR_TOOL}:
+        return "managed", "관리형 도구"
+    if any(item.get("name") == name for item in await _load_custom(ctx)):
+        return "custom_http", "커스텀 도구"
+    return "builtin", "기본 도구"
+
+
 def _visible_result(value: str | ToolExecutionResult) -> ToolExecutionResult:
     return value if isinstance(value, ToolExecutionResult) else ToolExecutionResult(value)
 
 
 async def context_tool_schemas(ctx: ToolContext) -> list[dict]:
-    """litellm 에 전달할 schemas — builtin, managed, selected custom and MCP tools."""
+    """Return bounded legacy schemas; catalog-loaded schemas persist for this run only."""
     if not ctx.tools_enabled:
         return []
+    if isinstance(ctx.binding_session, ToolBindingSession):
+        bindings = await _legacy_dynamic_bindings(ctx)
+        return [*tools.tool_schemas(), *(_binding_schema(binding) for binding in bindings.values())]
     schemas = list(tools.tool_schemas())
     if ctx.managed_search is not None:
         schemas.append(
@@ -874,6 +1175,28 @@ async def context_execute_result(name: str, args: dict, ctx: ToolContext) -> Too
     """Execute a tool and preserve whether its result may become a user-visible part."""
     if not ctx.tools_enabled:
         return ToolExecutionResult("Tool execution is disabled by this run's policy.")
+    if isinstance(ctx.binding_session, ToolBindingSession):
+        binding = (await _legacy_dynamic_bindings(ctx)).get(name)
+        if binding is not None:
+            try:
+                safe_args = validate_tool_arguments(binding.definition.input_schema, args)
+            except ValueError:
+                return ToolExecutionResult(
+                    "Tool arguments do not match the required schema.",
+                    warning_code="invalid_tool_arguments",
+                )
+            try:
+                result = await binding.execute(safe_args, ctx)
+            except Exception:
+                logger.warning("catalog-loaded tool execution failed name=%s", name, exc_info=True)
+                return ToolExecutionResult("Tool execution failed.", warning_code="tool_execution_failed")
+            components = result.usage_components.get("components", [])
+            return ToolExecutionResult(
+                result.model_content,
+                visible=bool(result.display or result.artifacts),
+                usage=tuple(components) if isinstance(components, list) else (),
+                warning_code=result.error_code,
+            )
     if name == _MANAGED_SEARCH_TOOL:
         return _visible_result(await _execute_managed_search(args, ctx))
     if name == _MANAGED_FETCH_TOOL:

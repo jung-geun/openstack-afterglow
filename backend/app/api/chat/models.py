@@ -260,15 +260,36 @@ async def list_models(active_only: bool = False):
 
 
 @router.get("/admin/models/pricing/models-dev/providers")
-async def list_models_dev_providers(refresh: bool = False):
+async def list_models_dev_providers(
+    local_provider_id: int,
+    refresh: bool = False,
+):
     try:
+        registered_providers = await ps.list_providers()
+        current_provider = next(
+            (provider for provider in registered_providers if provider["id"] == local_provider_id),
+            None,
+        )
+        if current_provider is None:
+            raise ps.ProviderNotFoundError(f"프로바이더 {local_provider_id} 를 찾을 수 없습니다")
         catalog = await models_dev.get_catalog(refresh=refresh)
+        current_provider_matches = models_dev.matching_provider_ids(catalog, current_provider)
+        providers = models_dev.registered_provider_list(
+            catalog,
+            registered_providers,
+            current_provider_id=local_provider_id,
+        )
     except models_dev.ModelsDevCatalogError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ps.ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ps.ChatStorageUnavailable as exc:
+        raise _map_storage(exc) from exc
     return {
         "source_url": catalog.source_url,
         "fetched_at": catalog.fetched_at,
-        "providers": models_dev.provider_list(catalog),
+        "preferred_provider_ids": sorted(current_provider_matches),
+        "providers": providers,
     }
 
 

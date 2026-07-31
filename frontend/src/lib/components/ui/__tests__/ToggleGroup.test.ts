@@ -20,6 +20,14 @@ describe('ToggleGroup', () => {
 		expect(screen.getByRole('group', { name: '워크플로우 필터' })).toBeTruthy();
 	});
 
+	it('supports a full-width grid without recreating the primitive', () => {
+		render(ToggleGroup, { value: null, options, onchange: vi.fn(), fullWidth: true });
+		const group = screen.getByRole('group');
+		expect(group.classList.contains('toggle-full-width')).toBe(true);
+		expect(group.getAttribute('style')).toContain('repeat(2, minmax(0, 1fr))');
+		expect(screen.getByRole('button', { name: '10' }).getAttribute('aria-pressed')).toBe('false');
+	});
+
 	it('calls onchange once with the clicked option value', async () => {
 		const onchange = vi.fn();
 		render(ToggleGroup, { value: '10', options, onchange });

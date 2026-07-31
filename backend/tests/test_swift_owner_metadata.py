@@ -7,6 +7,8 @@ metadata 자체로 IDOR 검증을 수행하지 않지만, admin/operator 도구�
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.services import swift
 
 
@@ -55,3 +57,36 @@ def test_create_container_no_metadata_when_no_project_id():
     swift.create_container(conn, "my-bucket")
 
     conn.object_store.set_container_metadata.assert_not_called()
+
+
+def test_get_account_metadata_strict_reraises_provider_failure():
+    conn = _make_conn()
+    conn.object_store.get_account_metadata.side_effect = RuntimeError("swift unavailable")
+
+    with pytest.raises(RuntimeError, match="swift unavailable"):
+        swift.get_account_metadata(conn, strict=True)
+
+
+def test_get_account_metadata_non_strict_preserves_empty_fallback():
+    conn = _make_conn()
+    conn.object_store.get_account_metadata.side_effect = RuntimeError("swift unavailable")
+
+    assert swift.get_account_metadata(conn) == {
+        "container_count": 0,
+        "object_count": 0,
+        "bytes_used": 0,
+    }
+
+
+def test_get_account_metadata_strict_preserves_missing_account_as_empty():
+    class NotFoundError(Exception):
+        status_code = 404
+
+    conn = _make_conn()
+    conn.object_store.get_account_metadata.side_effect = NotFoundError()
+
+    assert swift.get_account_metadata(conn, strict=True) == {
+        "container_count": 0,
+        "object_count": 0,
+        "bytes_used": 0,
+    }

@@ -8,12 +8,13 @@
 
 <script lang="ts">
 	interface Props {
-		value: string;
+		value: string | null;
 		options: ToggleOption[];
 		onchange: (value: string) => void;
 		size?: 'xs' | 'sm';
 		class?: string;
 		ariaLabel?: string;
+		fullWidth?: boolean;
 	}
 
 	let {
@@ -22,11 +23,18 @@
 		onchange,
 		size = 'sm',
 		class: className = '',
-		ariaLabel
+		ariaLabel,
+		fullWidth = false,
 	}: Props = $props();
 </script>
 
-<div class="toggle-group toggle-{size} {className}" role="group" aria-label={ariaLabel}>
+<div
+	class="toggle-group toggle-{size} {className}"
+	class:toggle-full-width={fullWidth}
+	style:grid-template-columns={fullWidth ? `repeat(${options.length}, minmax(0, 1fr))` : undefined}
+	role="group"
+	aria-label={ariaLabel}
+>
 	{#each options as option}
 		<button
 			type="button"
@@ -53,6 +61,11 @@
 		border-radius: 0.625rem;
 		background: var(--color-surface-sunken);
 	}
+	.toggle-full-width {
+		display: grid;
+		width: 100%;
+	}
+	.toggle-full-width .toggle-option { width: 100%; }
 	.toggle-option {
 		border: 0;
 		border-radius: 0.4375rem;
@@ -60,7 +73,7 @@
 		color: var(--color-ink-2);
 		font-weight: 500;
 		cursor: pointer;
-		transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+		transition: background var(--motion-duration-fast) var(--motion-ease-standard), color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 	}
 	.toggle-xs .toggle-option { padding: 0.1875rem 0.5rem; font-size: 0.6875rem; }
 	.toggle-sm .toggle-option { padding: 0.25rem 0.625rem; font-size: 0.75rem; }

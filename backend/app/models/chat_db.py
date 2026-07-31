@@ -159,6 +159,9 @@ class ChatMessage(Base):
     model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    # Browser-local wall-clock representation of the same `created_at` instant. Legacy rows stay NULL.
+    created_at_local: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    created_timezone: Mapped[str | None] = mapped_column(VARCHAR(64))
 
     conversation: Mapped["ChatConversation"] = relationship("ChatConversation", back_populates="messages")
 
@@ -245,6 +248,7 @@ class ChatMcpServer(Base):
     source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
     managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    load_policy: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="on_demand")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -350,6 +354,7 @@ class ChatCustomTool(Base):
     source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
     managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    load_policy: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="on_demand")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

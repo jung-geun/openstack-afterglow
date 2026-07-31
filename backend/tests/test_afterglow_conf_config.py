@@ -307,18 +307,21 @@ secret_key = "0123456789abcdef0123456789abcdef"
 
 
 def test_docker_compose_python_services_share_local_dev_secret_wiring():
-    """Local compose Python services must share the optional .env file."""
+    """Local compose Python services must share .env without overriding SECRET_KEY."""
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     services = compose["services"]
 
     expected_env_file = [{"path": ".env", "required": False}]
-    assert services["backend"]["env_file"] == expected_env_file
-    assert services["drover"]["env_file"] == expected_env_file
-    assert services["notion-worker"]["env_file"] == expected_env_file
-
-    assert "environment" not in services["backend"]
-    assert "environment" not in services["drover"]
-    assert "environment" not in services["notion-worker"]
+    for service_name in ("backend", "drover", "notion-worker", "palimpsest-worker"):
+        service = services[service_name]
+        assert service["env_file"] == expected_env_file
+        environment = service.get("environment", {})
+        names = (
+            set(environment)
+            if isinstance(environment, dict)
+            else {str(entry).partition("=")[0] for entry in environment}
+        )
+        assert "SECRET_KEY" not in names
 
 
 def test_env_example_allows_local_default_secret_for_compose_workers():
@@ -338,6 +341,7 @@ def test_k8s_python_manifests_use_production_secret_contract():
         ROOT / "deploy/k8s-template/base/backend/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/notion-deployment.yaml",
+        ROOT / "deploy/k8s-template/base/backend/palimpsest-worker-deployment.yaml",
     ]
 
     for path in paths:

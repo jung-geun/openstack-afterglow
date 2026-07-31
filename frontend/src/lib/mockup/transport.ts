@@ -3,7 +3,7 @@ import { ApiError } from '$lib/api/errors';
 import { getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 import { siteConfig } from '$lib/config/site';
 import { buildMockAuth } from '$lib/mockup/auth';
-import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
+import { MOCK_MCP_CONSENT_TICKET, MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
 import type { MockupProfileId } from '$lib/mockup/contracts';
 import { cloneMockup, getMockupState } from '$lib/mockup/state';
 import type { K3sSseProgressMessage } from '$lib/api/k3sSseStream';
@@ -13,6 +13,49 @@ export const symbolNoMatch = Symbol('mockup-no-match');
 const UNSUPPORTED = '튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.';
 const MOCK_EXPIRES_AT_ISO = '2026-12-31T23:59:59Z';
 const NOW_ISO = '2026-07-09T00:00:00Z';
+const MOCK_IMAGES = [
+	{
+		id: 'fixture-image-ubuntu',
+		name: 'Ubuntu 24.04 LTS',
+		status: 'active',
+		visibility: 'public',
+		size: 2361393152,
+		virtual_size: 2361393152,
+		min_disk: 10,
+		min_ram: 1024,
+		disk_format: 'qcow2',
+		container_format: 'bare',
+		checksum: '0'.repeat(32),
+		owner: 'mock-project-1',
+		protected: false,
+		tags: ['ubuntu', 'lts'],
+		properties: {},
+		os_distro: 'ubuntu',
+		os_version: '24.04',
+		created_at: NOW_ISO,
+		updated_at: NOW_ISO,
+	},
+	{
+		id: 'fixture-image-rocky',
+		name: 'Rocky Linux 9',
+		status: 'active',
+		visibility: 'public',
+		size: 1932735283,
+		virtual_size: 1932735283,
+		min_disk: 10,
+		min_ram: 1024,
+		disk_format: 'qcow2',
+		container_format: 'bare',
+		checksum: '1'.repeat(32),
+		owner: 'mock-project-1',
+		protected: false,
+		tags: ['rocky', 'linux'],
+		properties: {},
+		os_distro: 'rocky',
+		created_at: NOW_ISO,
+		updated_at: NOW_ISO,
+	},
+] as const;
 
 function nextMockId(existingIds: string[], prefix: string): string {
 	let n = existingIds.length + 1;
@@ -206,6 +249,77 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 		return { tour_id: tourId, status };
 	}
 
+	if (method === 'GET' && pathname === '/api/v1/auth/mcp-tokens') return state.mcpAccess.personalTokens;
+	if (method === 'GET' && pathname === '/api/v1/auth/mcp-oauth/grants') return state.mcpAccess.oauthGrants;
+	if (method === 'POST' && pathname === '/api/v1/auth/mcp-tokens') {
+		const payload = body as { name?: unknown; access_level?: unknown; expires_at?: unknown } | null;
+		const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+		const accessLevel = payload?.access_level;
+		if (!name || (accessLevel !== 'read' && accessLevel !== 'manage')) mockUnsupported();
+		const id = nextMockId(state.mcpAccess.personalTokens.map((record) => record.id), 'mock-mcp-token');
+		const record = {
+			id,
+			grant_id: `mock-mcp-grant-${id}`,
+			name,
+			source: 'personal_token' as const,
+			access_level: accessLevel,
+			status: 'active' as const,
+			visible_prefix: `mcp_mock_${id.slice(-4)}_`,
+			issued_at: NOW_ISO,
+			expires_at: typeof payload?.expires_at === 'string' && !Number.isNaN(Date.parse(payload.expires_at)) ? payload.expires_at : MOCK_EXPIRES_AT_ISO,
+			last_used_at: null,
+			revoked_at: null,
+			is_lumen_default: false,
+		};
+		state.mcpAccess.personalTokens.unshift(record);
+		return { ...record, token: `sk-afgl-mock-${id}` };
+	}
+	if (method === 'DELETE' && pathname === '/api/v1/auth/mcp-tokens/lumen-default') {
+		for (const record of state.mcpAccess.personalTokens) record.is_lumen_default = false;
+		return { lumen_selection_generation: 2 };
+	}
+	const lumenDefaultTokenId = pathname.match(/^\/api\/v1\/auth\/mcp-tokens\/([^/]+)\/lumen-default$/)?.[1];
+	if (method === 'PUT' && lumenDefaultTokenId) {
+		const selected = state.mcpAccess.personalTokens.find((record) => record.id === lumenDefaultTokenId && record.status === 'active');
+		if (!selected) mockUnsupported();
+		for (const record of state.mcpAccess.personalTokens) record.is_lumen_default = record.id === lumenDefaultTokenId;
+		return { lumen_selection_generation: 2 };
+	}
+	const personalTokenId = pathname.match(/^\/api\/v1\/auth\/mcp-tokens\/([^/]+)$/)?.[1];
+	if (method === 'DELETE' && personalTokenId) {
+		const record = state.mcpAccess.personalTokens.find((item) => item.id === personalTokenId);
+		if (!record) mockUnsupported();
+		record.status = 'revoked';
+		record.revoked_at = NOW_ISO;
+		record.is_lumen_default = false;
+		return ok204();
+	}
+	const oauthGrantId = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/grants\/([^/]+)$/)?.[1];
+	if (method === 'DELETE' && oauthGrantId) {
+		const record = state.mcpAccess.oauthGrants.find((item) => item.grant_id === oauthGrantId);
+		if (!record) mockUnsupported();
+		record.status = 'revoked';
+		record.revoked_at = NOW_ISO;
+		return ok204();
+	}
+	const consentTicket = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/consents\/([^/]+)$/)?.[1];
+	if (method === 'GET' && consentTicket) {
+		if (consentTicket !== MOCK_MCP_CONSENT_TICKET) mockUnsupported();
+		return {
+			client_id: 'mock-mcp-desktop-client',
+			client_name: 'Tutorial Desktop MCP',
+			redirect_uri: 'http://mock-client.example.test/oauth/callback',
+			scopes: ['mcp:read'],
+			grant_deadline: MOCK_EXPIRES_AT_ISO,
+		};
+	}
+	const consentDecision = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/consents\/([^/]+)\/(approve|deny)$/);
+	if (method === 'POST' && consentDecision) {
+		if (consentDecision[1] !== MOCK_MCP_CONSENT_TICKET) mockUnsupported();
+		return { redirect_uri: `/dashboard/account?${MOCKUP_QUERY_KEY}=on` };
+	}
+
+
 	if (profile === 'admin' && method !== 'GET') mockUnsupported();
 
 	if (profile === 'admin' && pathname === '/api/v1/admin/projects/names') {
@@ -354,12 +468,45 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && pathname === '/api/v1/volume-snapshots') return [];
 	if (method === 'POST' && pathname === '/api/v1/volumes/backups/auto-backup/configs') return [];
 
-	if (method === 'GET' && pathname === '/api/v1/images') {
-		return [
-			{ id: 'fixture-image-ubuntu', name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 2361393152, min_disk: 10, min_ram: 1024, os_distro: 'ubuntu', os_version: '24.04', created_at: NOW_ISO },
-			{ id: 'fixture-image-rocky', name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1932735283, min_disk: 10, min_ram: 1024, os_distro: 'rocky', created_at: NOW_ISO },
-		];
+	const imageId = pathname.match(/^\/api\/v1\/images\/([^/]+)$/)?.[1];
+	if (method === 'GET' && imageId) {
+		return MOCK_IMAGES.find((image) => image.id === imageId) ?? mockUnsupported();
 	}
+	if (method === 'GET' && pathname === '/api/v1/palimpsest/hub/image-exports') return [];
+	if (method === 'POST' && pathname === '/api/v1/palimpsest/hub/image-exports') {
+		const payload = body as { image_id?: string; disk_format?: string } | null;
+		return {
+			id: 'mock-image-export-1',
+			source_image_id: payload?.image_id ?? 'fixture-image-ubuntu',
+			target_disk_format: payload?.disk_format ?? 'qcow2',
+			status: 'queued',
+			progress_pct: 0,
+			error_code: null,
+			error_message: null,
+			download_path: null,
+		};
+	}
+	const imageExportId = pathname.match(/^\/api\/v1\/palimpsest\/hub\/image-exports\/([^/]+)$/)?.[1];
+	if (method === 'GET' && imageExportId) {
+		return {
+			id: imageExportId,
+			source_image_id: 'fixture-image-ubuntu',
+			target_disk_format: 'qcow2',
+			status: 'complete',
+			progress_pct: 100,
+			error_code: null,
+			error_message: null,
+			download_path: `/api/v1/palimpsest/hub/image-exports/${imageExportId}/blob`,
+		};
+	}
+	const imageExportDownloadId = pathname.match(
+		/^\/api\/v1\/palimpsest\/hub\/image-exports\/([^/]+)\/download-token$/,
+	)?.[1];
+	if (method === 'POST' && imageExportDownloadId) {
+		return { url: 'http://127.0.0.1:3080/robots.txt', expires_in: 60 };
+	}
+
+	if (method === 'GET' && pathname === '/api/v1/images') return MOCK_IMAGES;
 	if (method === 'GET' && pathname === '/api/v1/libraries') return [];
 	if (method === 'GET' && pathname === '/api/v1/security-groups') return [{ id: 'mock-sg-default', name: 'default', description: 'Mock default SG', rules: [] }];
 	if (method === 'GET' && pathname === '/api/v1/networks/default') return { network_id: 'mock-net-private' };

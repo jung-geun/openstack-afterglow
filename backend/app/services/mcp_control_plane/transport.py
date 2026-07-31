@@ -267,7 +267,7 @@ def _urls():
     )
 
 
-def _mcp_paths() -> frozenset[str]:
+def mcp_paths() -> frozenset[str]:
     try:
         configured_path = urlsplit(_urls().resource).path or "/"
     except McpOAuthError:
@@ -283,7 +283,7 @@ def _canonical_origin() -> tuple[str, str]:
 
 
 async def mcp_asgi_app(scope: Scope, receive: Receive, send: Send) -> None:
-    if scope["type"] != "http" or scope["path"] not in _mcp_paths():
+    if scope["type"] != "http" or scope["path"] not in mcp_paths():
         await _reject(scope, receive, send, status_code=404, detail="Not Found")
         return
     if not get_settings().service_mcp_enabled:
@@ -404,5 +404,5 @@ async def stop_mcp_transport() -> None:
 
 def install_mcp_route(app: Any) -> None:
     existing_paths = {route.path for route in app.router.routes if isinstance(route, ExactMcpRoute)}
-    for path in _mcp_paths() - existing_paths:
+    for path in mcp_paths() - existing_paths:
         app.router.routes.insert(0, ExactMcpRoute(path))

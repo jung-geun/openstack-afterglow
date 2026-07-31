@@ -12,7 +12,7 @@ from __future__ import annotations
 import secrets
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import get_token_info, require_admin
@@ -47,6 +47,7 @@ class AdminMcpServerBody(McpServerBody):
     oauth_scopes: list[str] | None = None
     oauth_client_id: str | None = Field(default=None, max_length=512)
     oauth_client_secret: str | None = Field(default=None, max_length=4096)
+    load_policy: Literal["preloaded", "on_demand"] | None = None
 
 
 class CustomToolBody(BaseModel):
@@ -58,7 +59,13 @@ class CustomToolBody(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=60)
     is_active: bool | None = None
 
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+
+class AdminCustomToolBody(CustomToolBody):
+    """Administrator-only global custom tool policy."""
+
+    load_policy: Literal["preloaded", "on_demand"] | None = None
 
 
 class SkillBody(BaseModel):
@@ -138,7 +145,7 @@ async def admin_list_tools():
 
 
 @admin_router.post("/admin/custom-tools", status_code=201)
-async def admin_create_tool(body: CustomToolBody):
+async def admin_create_tool(body: AdminCustomToolBody):
     try:
         return await es.create("tool", body.model_dump(exclude_unset=True), scope="global")
     except _EXC as exc:
@@ -146,7 +153,7 @@ async def admin_create_tool(body: CustomToolBody):
 
 
 @admin_router.patch("/admin/custom-tools/{item_id}")
-async def admin_update_tool(item_id: int, body: CustomToolBody):
+async def admin_update_tool(item_id: int, body: AdminCustomToolBody):
     try:
         return await es.update("tool", item_id, body.model_dump(exclude_unset=True), admin=True)
     except _EXC as exc:
@@ -257,11 +264,19 @@ async def user_get_mcp_oauth_status(item_id: int, token_info: dict = Depends(get
 
 
 @user_router.post("/mcp-servers/{item_id}/oauth/start")
-async def user_start_mcp_oauth(item_id: int, response: Response, token_info: dict = Depends(get_token_info)):
+async def user_start_mcp_oauth(
+    item_id: int, request: Request, response: Response, token_info: dict = Depends(get_token_info)
+):
     uid, pid = _owner(token_info)
     initiator_nonce = secrets.token_urlsafe(32)
     try:
-        result = await mcp_oauth.begin(item_id, user_id=uid, project_id=pid, initiator_nonce=initiator_nonce)
+        result = await mcp_oauth.begin(
+            item_id,
+            user_id=uid,
+            project_id=pid,
+            initiator_nonce=initiator_nonce,
+            return_origin=request.headers.get("origin"),
+        )
     except _EXC + (mcp_oauth.McpOAuthError,) as exc:
         raise _http(exc) from exc
     response.set_cookie(

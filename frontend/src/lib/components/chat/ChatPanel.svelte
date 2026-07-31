@@ -61,6 +61,8 @@
 	import ModelPickerOverlay from './ModelPickerOverlay.svelte';
 	import ConversationWorkspacePicker from './ConversationWorkspacePicker.svelte';
 
+	import { MOTION_DURATION_MS } from '$lib/design/tokens';
+	import { prefersReducedMotion } from '$lib/utils/motion';
 	import ChatToolApproval, { type ChatToolApproval as ChatToolApprovalItem } from './ChatToolApproval.svelte';
 	interface Conversation {
 		id: string;
@@ -102,13 +104,17 @@
 	}
 
 
+	type ChatSettingsSection = 'usage' | 'mcp';
+
 	interface Props {
 		/** Undefined is the normal chat route; null is the project index. */
 		projectRoute?: number | null;
 		/** One-shot workspace assignment for a newly created conversation. */
 		initialWorkspaceId?: number | null;
+		/** Settings section to open when the route is reached from a handled callback. */
+		initialSettingsSection?: ChatSettingsSection;
 	}
-	let { projectRoute = undefined, initialWorkspaceId = null }: Props = $props();
+	let { projectRoute = undefined, initialWorkspaceId = null, initialSettingsSection = 'usage' }: Props = $props();
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
@@ -209,7 +215,14 @@
 	let projectsInitialMode = $state<'grid'>('grid');
 	let projectsInitialWorkspaceId = $state<number | null>(null);
 	let createProjectDialogOpen = $state(false);
+	let settingsSection = $state<ChatSettingsSection>('usage');
 	let settingsOpen = $state(false);
+	$effect(() => {
+		if (initialSettingsSection === 'mcp') {
+			settingsSection = 'mcp';
+			settingsOpen = true;
+		}
+	});
 	let sourcesOpen = $state(false);
 	let modelPickerOpen = $state(false);
 
@@ -367,17 +380,15 @@
 		return activePath;
 	});
 	const isEmpty = $derived(displayPath.length === 0);
+	let previousComposerEmpty: boolean | null = null;
 	$effect.pre(() => {
-		const emptyBefore = isEmpty;
-		const before = composerAnchor?.getBoundingClientRect().top;
+		const wasEmpty = previousComposerEmpty;
+		previousComposerEmpty = isEmpty;
+		if (wasEmpty === null || wasEmpty === isEmpty || composerAnchor === null) return;
+
+		const before = composerAnchor.getBoundingClientRect().top;
 		void tick().then(() => {
-			if (
-				emptyBefore === isEmpty ||
-				before === undefined ||
-				composerAnchor === null ||
-				window.matchMedia('(prefers-reduced-motion: reduce)').matches
-			)
-				return;
+			if (composerAnchor === null || prefersReducedMotion()) return;
 			const delta = before - composerAnchor.getBoundingClientRect().top;
 			if (Math.abs(delta) > 1) {
 				composerAnchor.animate(
@@ -385,7 +396,7 @@
 						{ transform: `translateY(${delta}px)` },
 						{ transform: 'translateY(0)' }
 					],
-					{ duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+					{ duration: MOTION_DURATION_MS.base, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
 				);
 			}
 		});
@@ -790,7 +801,7 @@
 		const controller = new AbortController();
 		if (!streamAttachment.attach(controller, generation)) return;
 		const reveal = createChatRevealBuffer({
-			reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+			reducedMotion: prefersReducedMotion()
 		});
 		let revealFrame: number | null = null;
 		let revealCompletion: (() => void) | null = null;
@@ -892,6 +903,7 @@
 						name: tool.name,
 						args: JSON.stringify(tool.arguments),
 						result: completedToolText(tool.content),
+						durationMs: tool.durationMs,
 						running: tool.status === 'running',
 						status: tool.status === 'running' ? undefined : tool.status,
 						errorCode: tool.errorCode
@@ -1059,6 +1071,14 @@
 		}
 	}
 
+	function browserTimezone(): string | null {
+		try {
+			return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+		} catch {
+			return null;
+		}
+	}
+
 	// --- 전송 ---
 	async function send() {
 		const text = input.trim();
@@ -1075,6 +1095,7 @@
 		}
 		const inputParts: UserInputPart[] = [{ type: 'text', text }, ...toInputParts(attachments)];
 		attachments = [];
+		const clientTimezone = browserTimezone();
 
 		if (tempMode) return sendTemp(text, inputParts);
 
@@ -1105,6 +1126,7 @@
 					reasoning_effort: effort,
 					agent_id: activeAgent?.id,
 					skill_ids: selectedSkillIds,
+					client_timezone: clientTimezone,
 				},
 				idempotencyKey: crypto.randomUUID(),
 				modelName: selectedModel
@@ -1136,6 +1158,7 @@
 			reasoning_effort: effort,
 			agent_id: activeAgent?.id,
 			skill_ids: selectedSkillIds,
+			client_timezone: clientTimezone,
 		};
 		const idempotencyKey = crypto.randomUUID();
 		const started = await runStream(
@@ -1226,6 +1249,7 @@
 				model_id: modelName || selectedModel,
 				features: selectedFeatureOptions(),
 				reasoning_effort: effort,
+				client_timezone: browserTimezone(),
 				skill_ids: selectedSkillIds,
 			},
 			live,
@@ -1450,7 +1474,10 @@
 		onNewInWorkspace={newInProject}
 		onDeleteWorkspace={deleteWorkspace}
 		onSearch={searchConversations}
-		onSettings={() => (settingsOpen = true)}
+		onSettings={() => {
+			settingsSection = 'usage';
+			settingsOpen = true;
+		}}
 	/>
 
 	<nav class="sidebar-rail" aria-label="채팅 탐색">
@@ -1641,7 +1668,12 @@
 	onChanged={loadAgents}
 />
 <AgentHubModal open={agentHubOpen} onClose={() => (agentHubOpen = false)} onCloned={loadAgents} />
-<ChatSettingsOverlay open={settingsOpen} onClose={() => (settingsOpen = false)} {usage} />
+<ChatSettingsOverlay
+	open={settingsOpen}
+	onClose={() => (settingsOpen = false)}
+	{usage}
+	initialSection={settingsSection}
+/>
 <ChatSourcesPanel open={sourcesOpen} citations={allCitations} onClose={() => (sourcesOpen = false)} />
 <ModelPickerOverlay
 	open={modelPickerOpen}

@@ -5,6 +5,19 @@ import pytest
 from app.config import get_settings
 
 
+def test_mcp_routers_keep_paths_relative_to_their_mounts():
+    from app.api.mcp import auth_router, root_router, router
+
+    api_paths = {route.path for route in router.routes}
+    auth_paths = {route.path for route in auth_router.routes}
+    root_paths = {route.path for route in root_router.routes}
+
+    assert {"/oauth/register", "/oauth/authorize", "/oauth/token", "/oauth/revoke"} <= api_paths
+    assert "/mcp-oauth/consents/{ticket}" in auth_paths
+    assert "/.well-known/oauth-protected-resource/{resource_path:path}" in root_paths
+    assert all(not path.startswith("/api/") for path in api_paths | auth_paths | root_paths)
+
+
 @pytest.mark.asyncio
 async def test_public_oauth_routes_never_emit_cors_headers(client, monkeypatch):
     from app.api import mcp
@@ -144,6 +157,66 @@ async def test_configured_mcp_oauth_alias_dispatches_only_configured_path(client
 
 
 @pytest.mark.asyncio
+async def test_configured_mcp_oauth_paths_bypass_cors_for_allowed_origins(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from app import main
+    from app.api import mcp
+    from app.services.mcp_control_plane import transport
+
+    settings = SimpleNamespace(
+        service_mcp_enabled=True,
+        public_api_base="",
+        mcp_public_url="https://mcp.example.test/control-plane/mcp",
+    )
+    monkeypatch.setattr(mcp, "get_settings", lambda: settings)
+    monkeypatch.setattr(transport, "get_settings", lambda: settings)
+    monkeypatch.setattr(main, "_get_allowed_origins", lambda: {"https://frontend.example.test"})
+
+    responses = []
+    for path in ("/api/v1/mcp/oauth/token", "/control-plane/mcp/oauth/token"):
+        responses.extend(
+            (
+                await client.options(
+                    path,
+                    headers={"Origin": "https://frontend.example.test", "Access-Control-Request-Method": "POST"},
+                ),
+                await client.post(
+                    path,
+                    headers={
+                        "Origin": "https://frontend.example.test",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    content="grant_type=refresh_token&refresh_token=not-a-token",
+                ),
+            )
+        )
+
+    assert [response.status_code for response in responses] == [405, 403, 405, 403]
+    for response in responses:
+        assert not any(header.lower().startswith("access-control-allow-") for header in response.headers)
+
+
+def test_mcp_cors_paths_follow_canonical_transport_routes(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import main
+    from app.services.mcp_control_plane import transport
+
+    monkeypatch.setattr(
+        transport,
+        "_urls",
+        lambda: SimpleNamespace(resource="https://mcp.example.test/control-plane/mcp"),
+    )
+
+    assert main._is_mcp_no_cors_path("/api/v1/mcp")
+    assert main._is_mcp_no_cors_path("/api/v1/mcp/oauth/token")
+    assert main._is_mcp_no_cors_path("/control-plane/mcp")
+    assert main._is_mcp_no_cors_path("/control-plane/mcp/oauth/token")
+    assert not main._is_mcp_no_cors_path("/wrong-path/oauth/token")
+
+
+@pytest.mark.asyncio
 async def test_enabled_mcp_transport_requires_bearer_and_never_emits_cors(client, monkeypatch):
     from types import SimpleNamespace
 
@@ -176,7 +249,20 @@ async def test_enabled_mcp_transport_requires_bearer_and_never_emits_cors(client
 
 
 @pytest.mark.asyncio
-async def test_mcp_transport_is_disabled_and_never_redirects_trailing_slashes(client):
+async def test_mcp_transport_is_disabled_and_never_redirects_trailing_slashes(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.mcp_control_plane import transport
+
+    monkeypatch.setattr(
+        transport,
+        "get_settings",
+        lambda: SimpleNamespace(
+            service_mcp_enabled=False,
+            public_api_base="",
+            mcp_public_url="",
+        ),
+    )
     exact = await client.get("/api/v1/mcp")
     trailing = await client.get("/api/v1/mcp/")
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import UTC
 
 from sqlalchemy import literal, select
 from sqlalchemy.exc import OperationalError
@@ -18,8 +19,10 @@ from sqlalchemy.orm import aliased
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.models.chat_db import ChatConversation, ChatMessage, ChatWorkspace
-from app.models.chat_runs import ChatRun, ChatRunTurn
+from app.models.chat_runs import ChatRun, ChatRunSegment, ChatRunTurn
 from app.services.chat.message_parts import deserialize_parts, serialize_parts
+from app.services.chat.message_timestamps import message_timestamps
+from app.services.chat.run_store import replay_events
 from app.services.k3s_crypto import decrypt_chat_content, encrypt_chat_content
 
 logger = logging.getLogger(__name__)
@@ -83,7 +86,14 @@ def _require_db():
 
 
 def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
+    if dt is None:
+        return None
+    utc = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    return utc.isoformat().replace("+00:00", "Z")
+
+
+def _local_iso(dt) -> str | None:
+    return dt.isoformat() if dt is not None else None
 
 
 def _conv_public(row: ChatConversation) -> dict:
@@ -126,6 +136,8 @@ def _msg_public(row: ChatMessage, *, execution: dict | None = None) -> dict:
         "execution": execution,
         "model_name": row.model_name,
         "created_at": _iso(row.created_at),
+        "created_at_local": _local_iso(row.created_at_local),
+        "created_timezone": row.created_timezone,
     }
 
 
@@ -272,6 +284,109 @@ async def set_workspace(conv_id: str, *, user_id: str, project_id: str, workspac
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
+def _activity_category(source: object) -> str:
+    return {
+        "builtin": "기본 도구",
+        "managed": "관리형 도구",
+        "custom_http": "커스텀 도구",
+        "mcp": "MCP",
+        "catalog": "도구 준비",
+        "workspace": "워크스페이스",
+        "agent": "에이전트",
+    }.get(source if isinstance(source, str) else "", "도구")
+
+
+def _project_run_activity(events: list, *, durations_ms: dict[str, int]) -> list[dict]:
+    """Project durable, display-safe reasoning and tool events in journal order."""
+    activity: list[dict] = []
+    by_id: dict[str, dict] = {}
+    for event in events:
+        payload = event.payload.model_dump(mode="json")
+        if event.type == "part.delta" and payload.get("part_type") == "reasoning":
+            key = f"reasoning:{payload['message_id']}:{payload['part_index']}"
+            item = by_id.get(key)
+            if item is None:
+                item = {
+                    "id": key,
+                    "kind": "reasoning",
+                    "seq": event.seq,
+                    "createdAt": _iso(event.created_at),
+                    "text": "",
+                    "active": False,
+                }
+                by_id[key] = item
+                activity.append(item)
+            item["text"] += payload["delta"]
+        elif event.type == "part.completed":
+            part = payload.get("part")
+            if not isinstance(part, dict) or part.get("type") != "reasoning" or part.get("visibility") != "user":
+                continue
+            key = f"reasoning:{payload['message_id']}:{payload['part_index']}"
+            item = by_id.get(key)
+            if item is None:
+                item = {
+                    "id": key,
+                    "kind": "reasoning",
+                    "seq": event.seq,
+                    "createdAt": _iso(event.created_at),
+                    "text": part.get("text", ""),
+                    "active": False,
+                }
+                by_id[key] = item
+                activity.append(item)
+            else:
+                item["text"] = part.get("text", item["text"])
+        elif event.type == "tool.call.started":
+            source = payload.get("source")
+            item = {
+                "id": f"tool:{payload['call_id']}",
+                "kind": "tool",
+                "seq": event.seq,
+                "createdAt": _iso(event.created_at),
+                "callId": payload["call_id"],
+                "name": payload["name"],
+                "source": source if isinstance(source, str) else "builtin",
+                "category": payload["category"]
+                if isinstance(payload.get("category"), str)
+                else _activity_category(source),
+                "arguments": payload["arguments"],
+                "status": "running",
+                "content": [],
+                "errorCode": None,
+                "durationMs": None,
+            }
+            by_id[item["id"]] = item
+            activity.append(item)
+        elif event.type == "tool.call.completed":
+            item = by_id.get(f"tool:{payload['call_id']}")
+            if item is None:
+                source = payload.get("source")
+                item = {
+                    "id": f"tool:{payload['call_id']}",
+                    "kind": "tool",
+                    "seq": event.seq,
+                    "createdAt": _iso(event.created_at),
+                    "callId": payload["call_id"],
+                    "name": payload["name"],
+                    "source": source if isinstance(source, str) else "builtin",
+                    "category": payload["category"]
+                    if isinstance(payload.get("category"), str)
+                    else _activity_category(source),
+                    "arguments": {},
+                    "status": "running",
+                    "content": [],
+                    "errorCode": None,
+                    "durationMs": None,
+                }
+                by_id[item["id"]] = item
+                activity.append(item)
+            item["status"] = payload["status"]
+            item["content"] = payload["content"]
+            item["errorCode"] = payload.get("error_code")
+            item["durationMs"] = durations_ms.get(payload["call_id"])
+    return sorted(activity, key=lambda item: int(item["seq"]))
+
+
 async def list_messages(
     conv_id: str, *, user_id: str, project_id: str, limit: int = 200, offset: int = 0
 ) -> list[dict]:
@@ -297,7 +412,19 @@ async def list_messages(
                         .where(ChatRunTurn.assistant_message_id.in_(message_ids))
                     )
                 ).all()
+                runs_by_id: dict[str, ChatRun] = {}
+                turns_by_run: dict[str, list[ChatRunTurn]] = {}
                 for turn, run in turn_rows:
+                    if turn.assistant_message_id is None:
+                        continue
+                    runs_by_id[run.id] = run
+                    turns_by_run.setdefault(run.id, []).append(turn)
+                final_message_by_run: dict[str, int] = {}
+                for run_id, turns in turns_by_run.items():
+                    final_turn = max(turns, key=lambda turn: turn.ordinal)
+                    final_message_id = int(final_turn.assistant_message_id)
+                    final_message_by_run[run_id] = final_message_id
+                    run = runs_by_id[run_id]
                     try:
                         request = json.loads(_dec(run.request_payload) or "{}")
                         skill_ids = request.get("skill_ids", [])
@@ -312,12 +439,38 @@ async def list_messages(
                         and isinstance(item.get("id"), int)
                         and isinstance(item.get("name"), str)
                     ]
-                    execution_by_message[int(turn.assistant_message_id)] = {
+                    execution_by_message[final_message_id] = {
                         "run_id": run.id,
                         "agent_id": run.agent_id,
                         "skill_ids": skill_ids if isinstance(skill_ids, list) else [],
                         "skills": skills,
                     }
+                if final_message_by_run:
+                    segments = (
+                        await session.execute(
+                            select(ChatRunSegment).where(
+                                ChatRunSegment.run_id.in_(set(final_message_by_run)),
+                                ChatRunSegment.endpoint == "tool",
+                                ChatRunSegment.call_id.is_not(None),
+                            )
+                        )
+                    ).scalars()
+                    durations_by_run: dict[str, dict[str, int]] = {}
+                    for segment in segments:
+                        if segment.call_id is None or segment.completed_at is None or segment.created_at is None:
+                            continue
+                        durations_by_run.setdefault(segment.run_id, {})[segment.call_id] = int(
+                            max(0, (segment.completed_at - segment.created_at).total_seconds() * 1_000)
+                        )
+                    for run_id, final_message_id in final_message_by_run.items():
+                        execution = execution_by_message[final_message_id]
+                        durations = durations_by_run.get(run_id, {})
+                        if durations:
+                            execution["tool_durations_ms"] = durations
+                        execution["activity"] = _project_run_activity(
+                            await replay_events(session, runs_by_id[run_id], after_seq=0),
+                            durations_ms=durations,
+                        )
             return [_msg_public(row, execution=execution_by_message.get(row.id)) for row in rows]
     except OperationalError as exc:
         mark_db_unhealthy()
@@ -386,6 +539,7 @@ async def add_message(
     token_completion: int = 0,
     parent_id: int | None = None,
     model_name: str | None = None,
+    client_timezone: str | None = None,
     set_leaf: bool = False,
 ) -> dict:
     """메시지 추가(소유권은 호출부가 이미 검증했다고 가정 — 완료 경로 내부용).
@@ -394,6 +548,7 @@ async def add_message(
     active_leaf_id 를 이 메시지로 갱신한다(활성 경로의 새 리프). model_name 은 형제 버전 라벨.
     """
     factory = _require_db()
+    created_at, created_at_local, created_timezone = message_timestamps(client_timezone)
     row = ChatMessage(
         conversation_id=conv_id,
         role=role,
@@ -409,6 +564,9 @@ async def add_message(
         token_prompt=int(token_prompt),
         token_completion=int(token_completion),
         model_name=model_name,
+        created_at=created_at,
+        created_at_local=created_at_local,
+        created_timezone=created_timezone,
     )
     try:
         async with factory() as session, session.begin():

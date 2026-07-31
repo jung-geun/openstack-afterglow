@@ -119,10 +119,10 @@
 		background: color-mix(in oklab, var(--color-surface-raised) 82%, transparent);
 		box-shadow: inset 0 0 0 1px color-mix(in oklab, white 4%, transparent);
 		transition:
-			border-color 0.16s ease,
-			background 0.16s ease,
-			box-shadow 0.16s ease,
-			transform 0.16s ease;
+			border-color var(--motion-duration-base) var(--motion-ease-standard),
+			background var(--motion-duration-base) var(--motion-ease-standard),
+			box-shadow var(--motion-duration-base) var(--motion-ease-standard),
+			transform var(--motion-duration-base) var(--motion-ease-standard);
 	}
 
 	.selection-check {
@@ -139,7 +139,7 @@
 		stroke-linejoin: round;
 		stroke-dasharray: 19;
 		stroke-dashoffset: 19;
-		transition: stroke-dashoffset 0.22s ease 0.06s;
+		transition: stroke-dashoffset var(--motion-duration-base) var(--motion-ease-standard);
 	}
 
 	.selection-minus {
@@ -150,8 +150,8 @@
 		opacity: 0;
 		transform: scaleX(0.4);
 		transition:
-			opacity 0.14s ease,
-			transform 0.16s ease;
+			opacity var(--motion-duration-base) var(--motion-ease-standard),
+			transform var(--motion-duration-base) var(--motion-ease-standard);
 	}
 
 	.selection-checkbox:hover .selection-box,
@@ -171,7 +171,7 @@
 		box-shadow:
 			0 0 0 1px color-mix(in oklab, var(--color-accent-2) 20%, transparent),
 			0 6px 18px color-mix(in oklab, var(--color-accent-2) 26%, transparent);
-		animation: selection-pop 0.28s ease;
+		animation: selection-pop var(--motion-duration-panel) var(--motion-ease-out);
 	}
 
 	.selection-checkbox.is-checked .selection-check path {

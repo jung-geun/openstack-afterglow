@@ -7,6 +7,7 @@ export const MOCKUP_COOKIE = 'afterglow_mockup';
 export const MOCKUP_STORAGE_KEY = 'afterglow_mock_auth';
 // sessionStorage keeps the client activation scoped to one browser tab.
 export const MOCKUP_SESSION_KEY = 'afterglow_mockup_profile';
+export const MOCK_MCP_CONSENT_TICKET = 'mock-consent-ticket-0000000000000000000000000';
 
 export interface MockupSession {
 	active: boolean;
@@ -23,6 +24,7 @@ const TUTORIAL_ALLOWED_PATHS = [
 	'/',
 	'/login',
 	'/select-project',
+	'/oauth/mcp/authorize',
 	'/dashboard',
 ] as const;
 
@@ -71,7 +73,7 @@ export const MOCKUP_SERVICE_OVERRIDES = {
 	barbican: true,
 	waygate: false,
 	chat: false,
-	mcp: false,
+	mcp: true,
 } as const;
 
 export function isMockupProfileId(value: unknown): value is MockupProfileId {

@@ -67,6 +67,18 @@ async def test_frozen_mcp_selection_blocks_rotated_or_revoked_credential(monkeyp
     assert warnings == ["selected MCP credential changed or was revoked"]
 
 
+def test_frozen_selection_fingerprints_only_keeps_validated_selected_entries():
+    snapshot = {
+        "tools": [{"id": 2, "config_fingerprint": "tool-fingerprint"}, {"id": 3, "config_fingerprint": "unused"}],
+        "mcp": [{"id": 7, "config_fingerprint": "mcp-fingerprint"}],
+    }
+
+    assert es.frozen_selection_fingerprints(snapshot, (2,), (7,)) == (
+        ("tool", 2, "tool-fingerprint"),
+        ("mcp", 7, "mcp-fingerprint"),
+    )
+
+
 def test_revealing_corrupt_mcp_headers_fails_closed(monkeypatch):
     server = SimpleNamespace(
         id=7,

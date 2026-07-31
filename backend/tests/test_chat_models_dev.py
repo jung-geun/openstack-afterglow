@@ -110,6 +110,31 @@ class TestModelsDevCatalog:
         assert unpriced["input_price_per_million"] is None
         assert unpriced["output_price_per_million"] is None
 
+    def test_registered_provider_list_excludes_unregistered_catalogs_and_prioritizes_current(self):
+        catalog = models_dev.parse_catalog(
+            json.dumps(
+                {
+                    "providers": {
+                        "zeta": {"id": "zeta", "name": "Zeta", "models": {}},
+                        "openai": {"id": "openai", "name": "OpenAI", "models": {}},
+                        "anthropic": {"id": "anthropic", "name": "Anthropic", "models": {}},
+                        "unregistered": {"id": "unregistered", "name": "Unregistered", "models": {}},
+                    }
+                }
+            ),
+            "2026-07-31T00:00:00+00:00",
+        )
+        providers = models_dev.registered_provider_list(
+            catalog,
+            [
+                {"id": 1, "name": "OpenAI gateway", "provider_type": "openai", "models_dev_provider_id": None},
+                {"id": 2, "name": "Claude", "provider_type": "anthropic", "models_dev_provider_id": None},
+                {"id": 3, "name": "Legacy", "provider_type": "custom", "models_dev_provider_id": "zeta"},
+            ],
+            current_provider_id=1,
+        )
+        assert [provider["id"] for provider in providers] == ["openai", "anthropic", "zeta"]
+
     def test_live_top_level_provider_map_is_supported(self):
         catalog = models_dev.parse_catalog(
             json.dumps(
@@ -154,12 +179,25 @@ class TestModelsDevAdminRoutes:
             assert refresh is True
             return _catalog()
 
+        async def fake_list_providers():
+            return [
+                {
+                    "id": 1,
+                    "name": "OpenAI gateway",
+                    "provider_type": "openai",
+                    "models_dev_provider_id": None,
+                }
+            ]
+
+        monkeypatch.setattr(ps, "list_providers", fake_list_providers)
+
         monkeypatch.setattr(models_dev, "get_catalog", fake_catalog)
-        provider_response = await admin_client.get(f"{_BASE}/providers?refresh=true")
+        provider_response = await admin_client.get(f"{_BASE}/providers?local_provider_id=1&refresh=true")
         assert provider_response.status_code == 200
         assert provider_response.json() == {
             "source_url": models_dev.SOURCE_URL,
             "fetched_at": "2026-07-20T00:00:00+00:00",
+            "preferred_provider_ids": ["openai"],
             "providers": [{"id": "openai", "name": "OpenAI", "model_count": 2}],
         }
 
@@ -169,6 +207,58 @@ class TestModelsDevAdminRoutes:
         assert body["provider"] == {"id": "openai", "name": "OpenAI"}
         assert body["models"][0]["input_price_per_million"] == "2"
         assert body["models"][0]["output_price_per_million"] == "8"
+
+    async def test_provider_list_excludes_unregistered_catalog_providers(self, admin_client, monkeypatch):
+        catalog = models_dev.parse_catalog(
+            json.dumps(
+                {
+                    "providers": {
+                        "zeta": {"id": "zeta", "name": "Zeta", "models": {}},
+                        "openai": {"id": "openai", "name": "OpenAI", "models": {}},
+                        "anthropic": {"id": "anthropic", "name": "Anthropic", "models": {}},
+                        "unregistered": {"id": "unregistered", "name": "Unregistered", "models": {}},
+                    }
+                }
+            ),
+            "2026-07-31T00:00:00+00:00",
+        )
+
+        async def fake_catalog(*, refresh=False):
+            return catalog
+
+        async def fake_list_providers():
+            return [
+                {"id": 1, "name": "OpenAI gateway", "provider_type": "openai", "models_dev_provider_id": None},
+                {"id": 2, "name": "Claude", "provider_type": "anthropic", "models_dev_provider_id": None},
+                {"id": 3, "name": "Legacy", "provider_type": "custom", "models_dev_provider_id": "zeta"},
+            ]
+
+        monkeypatch.setattr(models_dev, "get_catalog", fake_catalog)
+        monkeypatch.setattr(ps, "list_providers", fake_list_providers)
+        response = await admin_client.get(f"{_BASE}/providers?local_provider_id=1")
+        assert response.status_code == 200
+        assert [provider["id"] for provider in response.json()["providers"]] == [
+            "openai",
+            "anthropic",
+            "zeta",
+        ]
+
+    async def test_missing_local_provider_is_404_without_fetching_catalog(self, admin_client, monkeypatch):
+        catalog_requested = False
+
+        async def fake_catalog(*, refresh=False):
+            nonlocal catalog_requested
+            catalog_requested = True
+            return _catalog()
+
+        async def fake_list_providers():
+            return [{"id": 1, "name": "OpenAI", "provider_type": "openai", "models_dev_provider_id": None}]
+
+        monkeypatch.setattr(models_dev, "get_catalog", fake_catalog)
+        monkeypatch.setattr(ps, "list_providers", fake_list_providers)
+        response = await admin_client.get(f"{_BASE}/providers?local_provider_id=999")
+        assert response.status_code == 404
+        assert catalog_requested is False
 
     async def test_import_requires_admin(self, non_admin_client):
         response = await non_admin_client.post(

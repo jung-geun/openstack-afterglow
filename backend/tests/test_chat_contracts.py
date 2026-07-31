@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.models.chat_contracts import (
     ChatFeatureOptions,
+    CompletionRequest,
     UsageComponent,
     validate_chat_parts,
     validate_chat_run_event,
@@ -39,6 +40,21 @@ def test_default_feature_options_preserve_manual_memory_without_tools():
         "audio_output": None,
         "video_output": None,
     }
+
+
+def test_completion_request_accepts_only_iana_client_timezones():
+    request = CompletionRequest(
+        parts=[{"type": "text", "text": "hello"}],
+        model_id="model",
+        client_timezone="Asia/Seoul",
+    )
+    assert request.client_timezone == "Asia/Seoul"
+    with pytest.raises(ValidationError, match="client_timezone"):
+        CompletionRequest(
+            parts=[{"type": "text", "text": "hello"}],
+            model_id="model",
+            client_timezone="not-a-timezone",
+        )
 
 
 def test_json_schema_format_allows_bounded_subset_only():
@@ -124,6 +140,49 @@ def test_user_input_accepts_owned_asset_ids_only():
         validate_user_input_parts([{"type": "audio", "asset_id": "asset-1", "transcript": "client supplied"}])
     with pytest.raises(ValidationError):
         validate_user_input_parts([{"type": "image", "url": "https://example.test/a.png"}])
+
+
+@pytest.mark.parametrize("delta", ["\n", "foo "])
+def test_streamed_text_whitespace_round_trips_without_normalization(delta):
+    event = validate_chat_run_event(
+        {
+            "event_id": "run-1:1",
+            "run_id": "run-1",
+            "seq": 1,
+            "type": "part.delta",
+            "created_at": datetime.now(UTC).isoformat(),
+            "payload": {
+                "message_id": "message-1",
+                "part_index": 0,
+                "part_type": "text",
+                "delta": delta,
+            },
+        }
+    )
+    completed = validate_chat_run_event(
+        {
+            "event_id": "run-1:2",
+            "run_id": "run-1",
+            "seq": 2,
+            "type": "part.completed",
+            "created_at": datetime.now(UTC).isoformat(),
+            "payload": {
+                "message_id": "message-1",
+                "part_index": 0,
+                "part": {"type": "text", "text": delta},
+            },
+        }
+    )
+    parts = validate_chat_parts(
+        [
+            {"type": "text", "text": delta},
+            {"type": "reasoning", "text": delta, "visibility": "user"},
+        ]
+    )
+
+    assert event.payload.delta == delta
+    assert completed.payload.part.model_dump()["text"] == delta
+    assert [part.model_dump()["text"] for part in parts] == [delta, delta]
 
 
 def test_parts_reject_hidden_reasoning_and_deep_tool_results():

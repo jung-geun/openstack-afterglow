@@ -35,10 +35,16 @@ function renderSelector(onSelect = vi.fn()) {
 }
 
 describe('SelectImage', () => {
-	it('searches canonical image names and tags', async () => {
+	it('opens filtering on demand and searches canonical image names and tags', async () => {
 		const { onSelect } = renderSelector();
-		const search = screen.getByRole('searchbox', { name: '이미지 이름, tag, OS 검색' });
 
+		const filterButton = screen.getByRole('button', { name: '필터' });
+		expect(filterButton.getAttribute('aria-expanded')).toBe('false');
+		expect(screen.queryByRole('searchbox', { name: '이미지 이름, tag, OS 검색' })).toBeNull();
+
+		await fireEvent.click(filterButton);
+		expect(filterButton.getAttribute('aria-expanded')).toBe('true');
+		const search = screen.getByRole('searchbox', { name: '이미지 이름, tag, OS 검색' });
 		await fireEvent.input(search, { target: { value: '24.04' } });
 
 		expect(screen.getByRole('button', { name: 'ubuntu:24.04 이미지 선택' })).toBeTruthy();
@@ -50,8 +56,8 @@ describe('SelectImage', () => {
 	it('filters the image grid by OS family before selecting a tag', async () => {
 		renderSelector();
 
+		await fireEvent.click(screen.getByRole('button', { name: '필터' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Fedora 1' }));
-
 		expect(screen.getByRole('button', { name: 'fedora:40 이미지 선택' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'ubuntu:22.04 이미지 선택' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'ubuntu:24.04 이미지 선택' })).toBeNull();

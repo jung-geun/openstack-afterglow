@@ -131,7 +131,7 @@ describe('admin chat model pricing', () => {
 
 	it('preselects an exact catalog match but preserves manual prices', async () => {
 		get.mockImplementation((path: string) => {
-			if (path === '/api/v1/chat/admin/models/pricing/models-dev/providers') return Promise.resolve({ providers: [{ id: 'openai', name: 'OpenAI', model_count: 2 }] });
+			if (path.startsWith('/api/v1/chat/admin/models/pricing/models-dev/providers?')) return Promise.resolve({ providers: [{ id: 'openai', name: 'OpenAI', model_count: 2 }] });
 			if (path.includes('/pricing/models-dev/providers/openai')) return Promise.resolve({ models: [
 				{ id: 'openai/gpt-test', name: 'GPT Test', input_price_per_million: '2', output_price_per_million: '8', price_available: true, unsupported_price_fields: ['cost.tiers'] },
 				{ id: 'openai/manual', name: 'Manual', input_price_per_million: '2', output_price_per_million: '8', price_available: true, unsupported_price_fields: [] }
@@ -152,10 +152,65 @@ describe('admin chat model pricing', () => {
 		expect(screen.getByText(/tier\/cache\/reasoning\/audio 단가는 적용하지 않습니다/)).toBeTruthy();
 	});
 
+	it('searches only the registered catalog candidates', async () => {
+		get.mockImplementation((path: string) => {
+			if (path.startsWith('/api/v1/chat/admin/models/pricing/models-dev/providers?')) {
+				return Promise.resolve({
+					preferred_provider_ids: ['openai'],
+					providers: [
+						{ id: 'openai', name: 'OpenAI', model_count: 2 },
+						{ id: 'anthropic', name: 'Anthropic', model_count: 15 }
+					]
+				});
+			}
+			if (path.includes('/pricing/models-dev/providers/openai')) return Promise.resolve({ models: [] });
+			if (path.includes('/pricing/models-dev/providers/anthropic')) return Promise.resolve({ models: [] });
+			if (path === '/api/v1/chat/admin/providers') return Promise.resolve([provider]);
+			if (path === '/api/v1/chat/admin/models') return Promise.resolve(models);
+			if (path === '/api/v1/chat/admin/models/title') return Promise.resolve({ model_id: null });
+			return Promise.resolve([]);
+		});
+		render(ModelPage);
+		await screen.findAllByText('models.dev 가격');
+		await fireEvent.click(screen.getAllByText('models.dev 가격')[0]);
+		const search = await screen.findByRole('searchbox', { name: '가격표 프로바이더 검색' });
+		await fireEvent.input(search, { target: { value: 'anth' } });
+		const providerSelect = screen.getByLabelText('가격표 프로바이더');
+		await waitFor(() => expect(within(providerSelect).getByRole('option', { name: 'Anthropic (15)' })).toBeTruthy());
+		expect(within(providerSelect).queryByRole('option', { name: 'OpenAI (2)' })).toBeNull();
+		await fireEvent.input(search, { target: { value: 'missing' } });
+		await screen.findByText('검색 조건에 맞는 가격표 프로바이더가 없습니다.');
+		expect((screen.getByRole('button', { name: '선택 가격 적용' }) as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.queryByText('가격표를 불러오는 중…')).toBeNull();
+	});
+
+	it('requires an explicit catalog choice when the current provider has no match', async () => {
+		get.mockImplementation((path: string) => {
+			if (path.startsWith('/api/v1/chat/admin/models/pricing/models-dev/providers?')) {
+				return Promise.resolve({
+					preferred_provider_ids: [],
+					providers: [{ id: 'anthropic', name: 'Anthropic', model_count: 15 }]
+				});
+			}
+			if (path === '/api/v1/chat/admin/providers') {
+				return Promise.resolve([{ ...provider, name: 'Custom gateway', provider_type: 'custom', models_dev_provider_id: null }]);
+			}
+			if (path === '/api/v1/chat/admin/models') return Promise.resolve(models);
+			if (path === '/api/v1/chat/admin/models/title') return Promise.resolve({ model_id: null });
+			return Promise.resolve([]);
+		});
+		render(ModelPage);
+		await screen.findAllByText('models.dev 가격');
+		await fireEvent.click(screen.getAllByText('models.dev 가격')[0]);
+		const providerSelect = await screen.findByLabelText('가격표 프로바이더') as HTMLSelectElement;
+		expect(providerSelect.value).toBe('');
+		expect((screen.getByRole('button', { name: '선택 가격 적용' }) as HTMLButtonElement).disabled).toBe(true);
+	});
+
 	it('keeps the modal open and shows a concrete error when import fails', async () => {
 		post.mockRejectedValueOnce(new Error('catalog unavailable'));
 		get.mockImplementation((path: string) => {
-			if (path === '/api/v1/chat/admin/models/pricing/models-dev/providers') return Promise.resolve({ providers: [{ id: 'openai', name: 'OpenAI', model_count: 1 }] });
+			if (path.startsWith('/api/v1/chat/admin/models/pricing/models-dev/providers?')) return Promise.resolve({ providers: [{ id: 'openai', name: 'OpenAI', model_count: 1 }] });
 			if (path.includes('/pricing/models-dev/providers/openai')) return Promise.resolve({ models: [{ id: 'openai/gpt-test', name: 'GPT Test', input_price_per_million: '2', output_price_per_million: '8', price_available: true, unsupported_price_fields: [] }] });
 			if (path === '/api/v1/chat/admin/providers') return Promise.resolve([provider]);
 			if (path === '/api/v1/chat/admin/models') return Promise.resolve(models);

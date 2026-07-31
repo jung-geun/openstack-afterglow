@@ -76,6 +76,30 @@ class TestAdminGlobal:
         assert admin_response.json()["has_oauth_client_secret"] is True
         assert "oauth_client_secret" not in admin_response.json()
 
+    async def test_admin_create_accepts_global_loading_policy(self, admin_client, monkeypatch):
+        captured: dict = {}
+
+        async def fake_create(kind, fields, **kwargs):
+            captured["kind"] = kind
+            captured["fields"] = fields
+            return {"id": 1, "scope": kwargs["scope"], "name": fields["name"]}
+
+        monkeypatch.setattr(es, "create", fake_create)
+        response = await admin_client.post(
+            _ADMIN_TOOL,
+            json={"name": "weather", "url": "https://api.example/weather", "load_policy": "preloaded"},
+        )
+
+        assert response.status_code == 201
+        assert captured == {
+            "kind": "tool",
+            "fields": {
+                "name": "weather",
+                "url": "https://api.example/weather",
+                "load_policy": "preloaded",
+            },
+        }
+
 
 class TestSkills:
     async def test_admin_create_skill_is_global(self, admin_client, monkeypatch):
@@ -171,6 +195,18 @@ class TestUserScope:
         assert captured["scope"] == "user"
         assert captured["owner_user_id"] == "test-user-123"
         assert captured["owner_project_id"] == "test-project-123"
+
+    async def test_user_tool_cannot_set_global_loading_policy(self, client, monkeypatch):
+        async def unexpected_create(*_args, **_kwargs):
+            raise AssertionError("user policy escalation must fail validation before storage")
+
+        monkeypatch.setattr(es, "create", unexpected_create)
+        response = await client.post(
+            _USER_TOOL,
+            json={"name": "weather", "url": "https://api.example/weather", "load_policy": "preloaded"},
+        )
+
+        assert response.status_code == 422
 
     async def test_user_create_detects_oauth_without_user_secret_fields(self, client, monkeypatch):
         captured: dict = {}

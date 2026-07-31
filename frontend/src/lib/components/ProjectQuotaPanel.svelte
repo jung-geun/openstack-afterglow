@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
 	import { api, ApiError } from '$lib/api/client';
+	import { MOTION_DURATION_MS } from '$lib/design/tokens';
+	import { motionDuration } from '$lib/utils/motion';
 
 	interface QuotaItem {
 		limit: number;
@@ -112,8 +114,8 @@
 
 <!-- 오버레이 -->
 <div
-	class="fixed inset-0 bg-black/40 z-40"
-	transition:fade={{ duration: 200 }}
+	class="fixed inset-0 bg-surface-scrim-soft z-[var(--z-panel)]"
+	transition:fade={{ duration: motionDuration(MOTION_DURATION_MS.base) }}
 	role="button"
 	tabindex="0"
 	aria-label="패널 닫기"
@@ -122,8 +124,8 @@
 ></div>
 
 <!-- 슬라이드 패널 -->
-<div class="fixed right-0 top-0 h-full w-[440px] bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl"
-	transition:fly={{ x: 440, duration: 300, opacity: 1 }}>
+<div class="fixed right-0 top-0 h-full w-[440px] bg-gray-950 border-l border-gray-800 z-[var(--z-modal)] flex flex-col shadow-2xl"
+	transition:fly={{ x: 440, duration: motionDuration(MOTION_DURATION_MS.panel), opacity: 1 }}>
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
 		<div>

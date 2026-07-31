@@ -19,8 +19,8 @@ def _clear_initiator_cookie(response):
     return response
 
 
-def _return_url(*, connected: bool, server_id: int | None = None) -> str | None:
-    raw = get_settings().frontend_base_url.strip().rstrip("/")
+def _return_url(*, connected: bool, server_id: int | None = None, return_origin: str | None = None) -> str | None:
+    raw = mcp_oauth.approved_return_origin(return_origin) or get_settings().frontend_base_url.strip().rstrip("/")
     try:
         parsed = urlsplit(raw)
     except ValueError:
@@ -38,7 +38,7 @@ def _return_url(*, connected: bool, server_id: int | None = None) -> str | None:
     query = {"mcp_oauth": "connected" if connected else "failed"}
     if server_id is not None:
         query["mcp_server_id"] = str(server_id)
-    return urlunsplit((parsed.scheme, parsed.netloc, f"{parsed.path.rstrip('/')}/chat", urlencode(query), ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, f"{parsed.path.rstrip('/')}/dashboard/chat", urlencode(query), ""))
 
 
 @router.get("/mcp-oauth/callback")
@@ -50,11 +50,11 @@ async def callback(
     initiator_nonce: str | None = Cookie(default=None, alias=mcp_oauth.INITIATOR_COOKIE),
 ):
     try:
-        server_id = await mcp_oauth.complete(
+        server_id, return_origin = await mcp_oauth.complete(
             state=state, code=code, error=error, iss=iss, initiator_nonce=initiator_nonce
         )
-    except mcp_oauth.McpOAuthError:
-        target = _return_url(connected=False)
+    except mcp_oauth.McpOAuthError as exc:
+        target = _return_url(connected=False, return_origin=getattr(exc, "return_origin", None))
         if target:
             return _clear_initiator_cookie(RedirectResponse(target, status_code=303, headers=_HEADERS))
         return _clear_initiator_cookie(
@@ -64,7 +64,7 @@ async def callback(
                 headers=_HEADERS,
             )
         )
-    target = _return_url(connected=True, server_id=server_id)
+    target = _return_url(connected=True, server_id=server_id, return_origin=return_origin)
     if target:
         return _clear_initiator_cookie(RedirectResponse(target, status_code=303, headers=_HEADERS))
     return _clear_initiator_cookie(

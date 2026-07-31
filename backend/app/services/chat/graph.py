@@ -424,6 +424,14 @@ def _build_graph(params: dict, ctx: ToolContext):
             return await callback(**payload)
         return None
 
+    async def tool_activity_metadata(tool_name: str) -> tuple[str, str]:
+        v2_bindings = params.get("v2_bindings")
+        if isinstance(v2_bindings, dict):
+            binding = v2_bindings.get(tool_name)
+            if binding is not None:
+                return binding.definition.source, binding.definition.activity_category
+        return await tool_runtime.context_tool_activity_metadata(tool_name, ctx)
+
     async def call_model(state: ChatState) -> dict:
         writer = get_stream_writer()
         model_turn_count = int(state.get("model_turn_count", 0))
@@ -447,11 +455,29 @@ def _build_graph(params: dict, ctx: ToolContext):
 
         messages = list(state["messages"])
         v2_bindings = params.get("v2_bindings")
+        if isinstance(ctx.binding_session, tool_runtime.ToolBindingSession) and not ctx.binding_session.loaded_names:
+            restored = await boundary("loaded_tool_names")
+            if isinstance(restored, list) and all(isinstance(name, str) for name in restored):
+                if isinstance(v2_bindings, dict):
+                    await tool_runtime.restore_v2_deferred_bindings(
+                        ctx,
+                        v2_bindings,
+                        restored,
+                        include_managed=True,
+                    )
+                else:
+                    await tool_runtime.restore_v2_deferred_bindings(
+                        ctx,
+                        ctx.binding_session.legacy_bindings,
+                        restored,
+                        include_managed=False,
+                    )
         schemas = (
             _v2_tool_schemas(v2_bindings)
             if isinstance(v2_bindings, dict)
             else await tool_runtime.context_tool_schemas(ctx)
         )
+
         reasoning_effort = None if params["model"] in _REASONING_UNSUPPORTED else params.get("reasoning_effort")
         disable_reasoning_for_tools = bool(schemas) and (
             params["model"] in _TOOL_REASONING_EXPLICIT_NONE
@@ -935,6 +961,7 @@ def _build_graph(params: dict, ctx: ToolContext):
                 arguments = json.loads(tool_call.get("args") or "{}")
             except (json.JSONDecodeError, TypeError):
                 arguments = {}
+            source, category = await tool_activity_metadata(tool_call["name"])
             replay_payload = await boundary(
                 "tool_started",
                 round_index=round_index,
@@ -942,6 +969,8 @@ def _build_graph(params: dict, ctx: ToolContext):
                 tool_call_id=tool_call_id,
                 tool_name=tool_call["name"],
                 arguments=arguments,
+                source=source,
+                category=category,
             )
             if _abort_code(replay_payload) is not None:
                 raise _BoundaryAbort(_abort_code(replay_payload))
@@ -959,6 +988,8 @@ def _build_graph(params: dict, ctx: ToolContext):
                 "tool_call": tool_call,
                 "tool_call_id": tool_call_id,
                 "arguments": arguments,
+                "source": source,
+                "category": category,
                 "replay_payload": replay_payload,
             }
 
@@ -1063,6 +1094,8 @@ def _build_graph(params: dict, ctx: ToolContext):
                     tool_index=prepared["index"],
                     tool_call_id=prepared["tool_call_id"],
                     tool_name=tool_call["name"],
+                    source=prepared["source"],
+                    category=prepared["category"],
                     result_payload={
                         "content": result,
                         "tool_name": tool_call["name"],
@@ -1198,6 +1231,7 @@ async def stream(
     selected_tool_ids: tuple[int, ...] | None = None,
     selected_mcp_ids: tuple[int, ...] | None = None,
     expected_mcp_credential_versions: tuple[tuple[int, int], ...] | None = None,
+    expected_extension_fingerprints: tuple[tuple[str, int, str], ...] | None = None,
     tools_enabled: bool = True,
     managed_search: dict[str, Any] | None = None,
     managed_fetch: dict[str, Any] | None = None,
@@ -1240,6 +1274,7 @@ async def stream(
         tools_enabled=tools_enabled,
         selected_mcp_ids=selected_mcp_ids,
         expected_mcp_credential_versions=expected_mcp_credential_versions,
+        expected_extension_fingerprints=expected_extension_fingerprints,
         run_id=run_id,
         lumen_snapshot=lumen_snapshot,
         lumen_snapshot_frozen=lumen_snapshot_frozen,
@@ -1247,9 +1282,20 @@ async def stream(
         managed_search=managed_search,
         managed_fetch=managed_fetch,
         managed_advisor=managed_advisor,
+        binding_session=tool_runtime.ToolBindingSession(),
     )
     if execution_protocol_version == 2:
-        params["v2_bindings"] = await tool_runtime.v2_tool_bindings(ctx)
+        initial_bindings = await tool_runtime.v2_tool_bindings(ctx)
+        params["v2_bindings"] = {
+            name: binding
+            for name, binding in initial_bindings.items()
+            if getattr(binding, "load_policy", None) != "on_demand"
+        }
+        if "list_available_tools" in params["v2_bindings"]:
+            params["v2_bindings"]["list_available_tools"] = tool_runtime._catalog_binding(
+                params["v2_bindings"],
+                include_managed=True,
+            )
     graph = _build_graph(params, ctx)
     config = {"configurable": {"thread_id": run_id}} if run_id else None
     graph_input: dict[str, list[dict]] | Command = (

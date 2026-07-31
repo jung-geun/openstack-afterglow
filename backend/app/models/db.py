@@ -573,6 +573,76 @@ class PalimpsestHubUpload(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
+class PalimpsestImageExport(Base):
+    """Glance 이미지를 hub blob 으로 내보내는 프로젝트 소유 durable job."""
+
+    __tablename__ = "palimpsest_image_exports"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+
+    source_image_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    source_name: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    source_disk_format: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    source_size_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    source_virtual_size_bytes: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+    source_checksum: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    source_hash_algo: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)
+    source_hash_value: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    source_updated_at: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    source_fingerprint: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    artifact_key: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+
+    target_disk_format: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    result_blob_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    result_size_bytes: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+
+    status: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="queued", server_default="queued")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
+    error_code: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    attempts: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
+    next_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
+    lease_owner: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+        onupdate=_now,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "artifact_key", name="uq_palimpsest_exports_project_artifact"),
+        Index("idx_palimpsest_exports_artifact", "artifact_key"),
+        Index("idx_palimpsest_exports_digest", "result_blob_digest"),
+        Index("idx_palimpsest_exports_claim", "status", "next_at"),
+        Index("idx_palimpsest_exports_project_created", "project_id", "deleted_at", "created_at"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # (폐기) 2세대 union ORM — UnionLayer / UnionTemplate / UnionUserMount
 #

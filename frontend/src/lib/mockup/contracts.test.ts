@@ -32,3 +32,10 @@ describe('administrator mockup route contract', () => {
 		expect(isMockupPathAllowed('admin', path)).toBe(false);
 	});
 });
+
+describe('tutorial OAuth consent route contract', () => {
+	it('allows the local consent handoff without widening administrator routes', () => {
+		expect(isMockupPathAllowed('on', '/oauth/mcp/authorize')).toBe(true);
+		expect(isMockupPathAllowed('admin', '/oauth/mcp/authorize')).toBe(false);
+	});
+});

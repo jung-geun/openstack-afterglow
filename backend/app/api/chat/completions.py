@@ -335,23 +335,27 @@ async def _resolve_extension_selection(
     async def resolve(kind: str, explicit_ids: list[int] | None, agent_key: str) -> list[dict[str, object]]:
         allowed = [int(item) for item in (agent or {}).get(agent_key, []) if isinstance(item, int)]
         if agent is None:
-            selected_ids = explicit_ids or []
+            selected_ids = explicit_ids
         elif explicit_ids is None:
             selected_ids = allowed
         else:
             if not set(explicit_ids) <= set(allowed):
                 raise HTTPException(status_code=422, detail=f"selected {kind} is outside the agent allowlist")
             selected_ids = explicit_ids
-        if not selected_ids:
+        if selected_ids == []:
             return []
         try:
             visible = await es.list_for_user(kind, user_id=user_id, project_id=project_id, active_only=True)
+            if selected_ids is None:
+                selected_ids = [item["id"] for item in visible if isinstance(item.get("id"), int)]
             credential_versions = (
                 await es.mcp_credential_versions(selected_ids, user_id=user_id, project_id=project_id)
                 if kind == "mcp"
                 else {}
             )
         except es.ChatStorageUnavailable as exc:
+            if agent is None and explicit_ids is None:
+                return []
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         by_id = {item["id"]: item for item in visible if isinstance(item.get("id"), int)}
         selected: list[dict[str, object]] = []
@@ -791,6 +795,7 @@ async def create_completion(
             "code_workspace_id": payload.code_workspace_id,
             "reasoning_effort": payload.reasoning_effort,
             "skill_ids": payload.skill_ids,
+            "client_timezone": payload.client_timezone,
         }
         existing = await durable_runs.existing_run_for_intent(
             project_id=project_id,
@@ -859,6 +864,7 @@ async def create_completion(
             agent_id=agent.get("id") if agent else None,
             user_content=message_text,
             user_parts=[part.model_dump(mode="json", by_alias=True) for part in payload.parts],
+            client_timezone=payload.client_timezone,
             request_payload={
                 "input_messages": input_messages,
                 "input_parts": [part.model_dump(mode="json", by_alias=True) for part in payload.parts],
@@ -867,6 +873,7 @@ async def create_completion(
                 "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
                 "temperature": temperature,
                 "reasoning_effort": reasoning_effort,
+                "client_timezone": payload.client_timezone,
                 "skill_ids": payload.skill_ids,
                 "extension_snapshot": extension_selection,
                 **(
@@ -915,6 +922,7 @@ async def regenerate_message(
         "parent_id": str(turn_user["id"]),
         "model_id": payload.model_id,
         "features": features,
+        "client_timezone": payload.client_timezone,
         "reasoning_effort": payload.reasoning_effort,
     }
     try:
@@ -961,6 +969,7 @@ async def regenerate_message(
                 "max_tokens": min(max_tokens or _MAX_TOKENS_CAP, _MAX_TOKENS_CAP),
                 "temperature": temperature,
                 "reasoning_effort": reasoning_effort,
+                "client_timezone": payload.client_timezone,
             },
             capability_snapshot=capability_snapshot,
             pricing_snapshot=pricing_snapshot,

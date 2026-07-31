@@ -150,7 +150,7 @@ async def lock_owner(session: AsyncSession, *, owner_user_id: str, owner_project
     await session.execute(
         mysql_insert(McpOwnerLock)
         .values(owner_user_id=owner_user_id, owner_project_id=owner_project_id, lumen_selection_generation=0)
-        .prefix_with("IGNORE")
+        .on_duplicate_key_update(lumen_selection_generation=McpOwnerLock.lumen_selection_generation)
     )
     row = await session.scalar(
         select(McpOwnerLock)
@@ -731,7 +731,7 @@ async def confirm_keystone_cleanup(
     username: str,
     application_credential_id: str | None,
 ) -> bool:
-    """Delete only after the locked grant has no live authorized dispatch lease."""
+    """Delete after an initial lease check; reconcile local state after external confirmation."""
     if (
         getattr(conn, "_afterglow_user_id", None) != owner_user_id
         or getattr(conn, "_afterglow_project_id", None) != owner_project_id
@@ -799,6 +799,13 @@ async def confirm_keystone_cleanup(
             session, grant_id=grant_id, owner_user_id=owner_user_id, owner_project_id=owner_project_id
         )
         grant.cleanup_last_attempt_at = _now()
+        if (
+            grant.status in {"revoked", "expired"}
+            and not grant.cleanup_pending
+            and grant.application_credential_id is None
+            and grant.credential_ciphertext is None
+        ):
+            return True
         is_orphan_recovery = (
             grant.status == "pending"
             and grant.cleanup_pending
@@ -815,14 +822,18 @@ async def confirm_keystone_cleanup(
             or (grant.status not in {"revoked", "expired"} and not is_orphan_recovery)
             or not grant.cleanup_pending
             or (application_credential_id is not None and grant.application_credential_id != application_credential_id)
-            or await has_live_lease(session, grant)
         ):
             grant.cleanup_pending = True
             return False
+        dispatch_lease_in_flight = await has_live_lease(session, grant)
         if is_orphan_recovery:
             grant.status = "revoked"
             grant.revoked_at = _now()
             grant.credential_epoch += 1
+        # Keystone confirmed the credential is absent. A lease that begins in
+        # between the two local transactions cannot restore that credential;
+        # retain the invocation for its eventual outcome, but never retain a
+        # local credential reference that no longer exists upstream.
         grant.cleanup_pending = False
         grant.application_credential_id = None
         grant.credential_ciphertext = None
@@ -835,7 +846,11 @@ async def confirm_keystone_cleanup(
             username=username,
             action="mcp_grant.cleanup_confirmed",
             grant=grant,
-            extra={"cleanup_confirmed": True, "orphan_recovery": is_orphan_recovery},
+            extra={
+                "cleanup_confirmed": True,
+                "orphan_recovery": is_orphan_recovery,
+                "dispatch_lease_in_flight": dispatch_lease_in_flight,
+            },
         )
     return True
 

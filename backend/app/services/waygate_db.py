@@ -123,7 +123,7 @@ async def get_server(project_id: str, server_id: str) -> dict | None:
         return _server_to_dict(server)
 
 
-async def list_servers(project_id: str) -> list[dict]:
+async def list_servers(project_id: str, *, limit: int | None = None) -> list[dict]:
     factory = get_session_factory()
     async with factory() as session:
         stmt = (
@@ -131,6 +131,8 @@ async def list_servers(project_id: str) -> list[dict]:
             .where(WaygateServer.project_id == project_id, WaygateServer.deleted_at.is_(None))
             .order_by(WaygateServer.created_at.desc())
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         result = await session.execute(stmt)
         return [_server_to_dict(s) for s in result.scalars().all()]
 

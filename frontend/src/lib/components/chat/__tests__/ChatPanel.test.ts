@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { auth } from '$lib/stores/auth';
 import { parseChatRunEvent } from '$lib/api/chatContracts';
 import ChatPanel from '../ChatPanel.svelte';
@@ -113,6 +114,13 @@ describe('ChatPanel', () => {
 	});
 
 
+	it('opens MCP settings when reached from an OAuth callback', async () => {
+		render(ChatPanel, { initialSettingsSection: 'mcp' });
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: '원격 MCP 서버' })).toBeTruthy());
+		expect(screen.queryByRole('heading', { name: '이번 달 사용량' })).toBeNull();
+	});
+
 	it('inserts a Lumen starter into the composer without directly starting a run', async () => {
 		render(ChatPanel);
 
@@ -122,6 +130,70 @@ describe('ChatPanel', () => {
 			'현재 프로젝트의 컴퓨팅, 스토리지, 네트워크 리소스를 읽기 전용으로 요약해 주세요.'
 		);
 		expect(mocks.createRun).not.toHaveBeenCalled();
+	});
+
+	it('uses the base motion duration for composer movement without reduced motion', async () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({
+			matches: false,
+			media: query,
+			onchange: null,
+			addEventListener: () => {},
+			removeEventListener: () => {},
+			addListener: () => {},
+			removeListener: () => {},
+			dispatchEvent: () => false
+		}));
+		const animate = vi.fn().mockReturnValue({
+			finished: Promise.resolve(),
+			cancel: vi.fn(),
+			play: vi.fn()
+		});
+		Object.defineProperty(Element.prototype, 'animate', { configurable: true, value: animate });
+		mocks.post.mockImplementation(async (path: string) => {
+			if (path === '/api/v1/chat/conversations') {
+				return {
+					id: 'conversation-motion',
+					title: '움직임 확인',
+					model_name: 'model-1',
+					workspace_id: null,
+					updated_at: at
+				};
+			}
+			return {};
+		});
+		const streamFinished = Promise.withResolvers<void>();
+		mocks.followRun.mockImplementation(async function* () {
+			await streamFinished.promise;
+		});
+		const { container } = render(ChatPanel);
+		const composer = container.querySelector<HTMLElement>('.composer-anchor');
+		if (!composer) throw new Error('Composer anchor is missing');
+		let composerTop = 100;
+		const getBoundingClientRect = vi.spyOn(composer, 'getBoundingClientRect').mockImplementation(() => {
+			const rect = new DOMRect(0, composerTop, 0, 0);
+			composerTop = 50;
+			return rect;
+		});
+		await waitFor(() => {
+			expect(mocks.get).toHaveBeenCalledWith('/api/v1/chat/models', 'token', 'project-1');
+		});
+		await screen.findByText('Model 1');
+		await tick();
+		composerTop = 100;
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '움직임 확인' } });
+		await fireEvent.click(screen.getByRole('button', { name: '전송' }));
+		await waitFor(() => expect(mocks.createRun).toHaveBeenCalledOnce());
+
+		expect(getBoundingClientRect).toHaveBeenCalledTimes(2);
+		await waitFor(() => {
+			expect(animate).toHaveBeenCalledWith(
+				expect.any(Array),
+				{ duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+			);
+		});
+		getBoundingClientRect.mockRestore();
+		streamFinished.resolve();
+		Reflect.deleteProperty(Element.prototype, 'animate');
 	});
 
 	it('keeps a pre-persistence send failure visible and retries with the same request key', async () => {

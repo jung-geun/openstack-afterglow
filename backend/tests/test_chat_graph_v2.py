@@ -949,3 +949,123 @@ async def test_v2_role_effect_ceiling_denies_mutation_before_binding_io(monkeypa
 
     assert called is False
     assert any(event.get("error_code") == "policy_effect_denied" for event in events)
+
+
+async def test_v2_graph_excludes_on_demand_extension_schemas_from_initial_request(monkeypatch):
+    async def execute(_arguments, _context):
+        return ToolExecutionResult(status="completed", model_content="unused")
+
+    def binding(name: str, load_policy: str | None) -> ToolBinding:
+        return ToolBinding(
+            definition=ToolDefinition(
+                name=name,
+                description=f"Describe {name}.",
+                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                effect="read",
+                source="custom_http",
+            ),
+            execute=execute,
+            load_policy=load_policy,
+        )
+
+    async def bindings(_context):
+        return {
+            "custom_preloaded": binding("custom_preloaded", "preloaded"),
+            "custom_deferred": binding("custom_deferred", "on_demand"),
+        }
+
+    captured: list[dict] = []
+
+    async def completion_stream(**kwargs):
+        captured.extend(kwargs["tools"])
+
+        async def chunks():
+            yield {"choices": [{"delta": {"content": "done"}}]}
+            yield {"usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+        return chunks()
+
+    monkeypatch.setattr(graph.tool_runtime, "v2_tool_bindings", bindings)
+    monkeypatch.setattr(graph.litellm_client, "acompletion_stream", completion_stream)
+    monkeypatch.setattr(graph.chat_checkpointer, "_saver", MemorySaver())
+
+    _ = [
+        event
+        async for event in graph.stream(
+            model="test-model",
+            messages=[{"role": "user", "content": "hello"}],
+            project_id="project",
+            user_id="user",
+            execution_protocol_version=2,
+            run_id="run-v2-on-demand-schemas",
+        )
+    ]
+
+    assert {schema["function"]["name"] for schema in captured} == {"custom_preloaded"}
+
+
+async def test_v2_graph_exposes_no_bindings_or_dispatch_when_tools_disabled(monkeypatch):
+    tool_name = "builtin_disabled_policy_probe"
+    dispatched = False
+
+    async def execute(_arguments, _context):
+        nonlocal dispatched
+        dispatched = True
+        return ToolExecutionResult(status="completed", model_content="must not run")
+
+    binding = ToolBinding(
+        definition=ToolDefinition(
+            name=tool_name,
+            description="Probe disabled tool policy.",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            effect="read",
+            source="builtin",
+        ),
+        execute=execute,
+    )
+    captured_schemas: list[list[dict]] = []
+
+    async def completion_stream(**kwargs):
+        captured_schemas.append(kwargs["tools"])
+
+        async def chunks():
+            yield {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "disabled-tools-call",
+                                    "function": {"name": tool_name, "arguments": "{}"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+            yield {"usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+        return chunks()
+
+    monkeypatch.setattr(graph.tool_runtime, "v2_builtin_tool_bindings", lambda: {tool_name: binding})
+    monkeypatch.setattr(graph.litellm_client, "acompletion_stream", completion_stream)
+    monkeypatch.setattr(graph.chat_checkpointer, "_saver", MemorySaver())
+
+    with pytest.raises(RuntimeError, match="model requested an unavailable v2 tool"):
+        _ = [
+            event
+            async for event in graph.stream(
+                model="test-model",
+                messages=[{"role": "user", "content": "try disabled tool"}],
+                project_id="project",
+                user_id="user",
+                tools_enabled=False,
+                execution_protocol_version=2,
+                max_model_turns=1,
+                run_id="run-v2-tools-disabled",
+            )
+        ]
+
+    assert captured_schemas == [[]]
+    assert dispatched is False

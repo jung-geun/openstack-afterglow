@@ -5,6 +5,7 @@ import {
 	getSiblings,
 	lastAssistantModel,
 	resolveLeafFor,
+	projectMessagesForDisplay,
 	siblingLeafInDirection,
 	type ChatMessage,
 	type ChatUsage
@@ -135,6 +136,52 @@ describe('lastAssistantModel', () => {
 		expect(
 			lastAssistantModel([withModel(msg('a1', 'assistant', null, '2026-01-01T00:00:01Z'), null)])
 		).toBeNull();
+	});
+});
+
+describe('projectMessagesForDisplay', () => {
+	it('keeps a durable MCP call and final answer inside one assistant message', () => {
+		const path = [
+			msg('u1', 'user', null, '2026-07-28T00:00:00Z'),
+			{
+				...msg('a-tool', 'assistant', 'u1', '2026-07-28T00:00:01Z'),
+				parts: [
+					{
+						type: 'tool_call',
+						call_id: 'call-1',
+						name: 'mcp__1__notion_search',
+						arguments: { query: 'database' },
+						status: 'completed'
+					},
+					{
+						type: 'tool_result',
+						call_id: 'call-1',
+						name: 'mcp__1__notion_search',
+						content: [{ type: 'text', text: 'found' }],
+						is_error: false
+					}
+				],
+				execution: { tool_durations_ms: { 'call-1': 840 } }
+			},
+			{ ...msg('a-final', 'assistant', 'a-tool', '2026-07-28T00:00:02Z'), content: '검색 결과입니다.' }
+		];
+
+		const projected = projectMessagesForDisplay(path);
+
+		expect(projected).toHaveLength(2);
+		expect(projected[1]).toMatchObject({
+			id: 'a-final',
+			content: '검색 결과입니다.',
+			tool_items: [
+				{
+					id: 'call-1',
+					name: 'mcp__1__notion_search',
+					result: 'found',
+					running: false,
+					durationMs: 840
+				}
+			]
+		});
 	});
 });
 

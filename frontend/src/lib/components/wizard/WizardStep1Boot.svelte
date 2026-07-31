@@ -6,21 +6,22 @@
 	const s = useVmCreate();
 </script>
 
-<h2 class="text-lg font-semibold text-white mb-3">부트 소스 선택</h2>
-
-<div class="flex mb-5 rounded-lg overflow-hidden border border-gray-700">
-	<button
-		class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'image' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
-		onclick={() => wizard.update(w => ({ ...w, bootSource: 'image', bootVolumeId: null, bootVolumeName: null }))}
-	>OS 이미지</button>
-	<button
-		class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'volume' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
-		onclick={() => wizard.update(w => ({ ...w, bootSource: 'volume', imageId: null, imageName: null }))}
-	>기존 부팅 볼륨</button>
+<div class="mb-4 flex items-center justify-between gap-3">
+	<span id="boot-source-label" class="text-sm font-medium text-[var(--color-ink-1)]">부팅 소스</span>
+	<div role="group" aria-labelledby="boot-source-label" class="inline-flex overflow-hidden rounded-lg border border-[var(--color-line)]">
+		<button
+			class="px-3 py-1.5 text-xs font-medium transition-colors {$wizard.bootSource === 'image' ? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]' : 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
+			onclick={() => wizard.update(w => ({ ...w, bootSource: 'image', bootVolumeId: null, bootVolumeName: null }))}
+		>OS 이미지</button>
+		<button
+			class="border-l border-[var(--color-line)] px-3 py-1.5 text-xs font-medium transition-colors {$wizard.bootSource === 'volume' ? 'bg-[var(--color-accent)] text-[var(--color-action-on-accent)]' : 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
+			onclick={() => wizard.update(w => ({ ...w, bootSource: 'volume', imageId: null, imageName: null }))}
+		>기존 부팅 볼륨</button>
+	</div>
 </div>
 
 {#if $wizard.bootSource === 'image'}
-	<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
+	<p class="mb-4 hidden text-sm text-[var(--color-ink-2)] md:block">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-[var(--color-accent)] hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
 	<SelectImage images={s.images} selectedId={$wizard.imageId} onSelect={s.selectImage} />
 {:else}
 	{@const bootableVols = s.volumes.filter(v => v.bootable && v.status === 'available')}

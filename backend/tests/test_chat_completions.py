@@ -36,7 +36,7 @@ async def test_selected_skills_are_loaded_once_from_owned_active_extensions(monk
     assert len(provenance[0]["content_hash"]) == 64
 
 
-async def test_extension_selection_never_expands_omitted_or_empty_ids(monkeypatch):
+async def test_extension_selection_expands_omitted_ids_for_default_chat(monkeypatch):
     async def fake_list(kind, **_kwargs):
         return [
             {
@@ -61,9 +61,18 @@ async def test_extension_selection_never_expands_omitted_or_empty_ids(monkeypatc
             },
         ]
 
+    async def fake_credential_versions(server_ids, *, user_id, project_id):
+        assert server_ids == [7, 8]
+        assert (user_id, project_id) == ("u1", "p1")
+        return {7: 3, 8: 4}
+
     monkeypatch.setattr(completions.es, "list_for_user", fake_list)
+    monkeypatch.setattr(completions.es, "mcp_credential_versions", fake_credential_versions)
+
     no_agent = await completions._resolve_extension_selection(None, ChatFeatureOptions(), user_id="u1", project_id="p1")
-    assert no_agent == {"tools": [], "mcp": []}
+    assert [item["id"] for item in no_agent["tools"]] == [7, 8]
+    assert [item["id"] for item in no_agent["mcp"]] == [7, 8]
+    assert [item["credential_version"] for item in no_agent["mcp"]] == [3, 4]
 
     agent = {"tool_ids": [7], "mcp_ids": []}
     agent_default = await completions._resolve_extension_selection(
@@ -73,7 +82,7 @@ async def test_extension_selection_never_expands_omitted_or_empty_ids(monkeypatc
     assert agent_default["mcp"] == []
 
     explicit = await completions._resolve_extension_selection(
-        agent,
+        None,
         ChatFeatureOptions(tool_policy={"enabled_tool_ids": [], "enabled_mcp_ids": []}),
         user_id="u1",
         project_id="p1",
@@ -552,7 +561,11 @@ class TestCanonicalCompletionRequests:
             )
 
         monkeypatch.setattr(durable_runs, "create_persistent_run", create_persistent_run)
-        response = await client.post(f"{_BASE}/c1/completions", headers=_HEADERS, json=_request("first"))
+        response = await client.post(
+            f"{_BASE}/c1/completions",
+            headers=_HEADERS,
+            json=_request("first", client_timezone="Asia/Seoul"),
+        )
 
         assert response.status_code == 202
         assert response.json()["run_id"] == "run-1"
@@ -560,6 +573,8 @@ class TestCanonicalCompletionRequests:
         assert seen["intent"]["parts"] == [{"type": "text", "text": "first"}]
         assert seen["execution_protocol_version"] == 1
         assert seen["capability_snapshot"]["execution_protocol_version"] == 1
+        assert seen["client_timezone"] == "Asia/Seoul"
+        assert seen["request_payload"]["client_timezone"] == "Asia/Seoul"
 
     async def test_v2_completion_freezes_effective_agent_policy(self, client, monkeypatch):
         await _patch_text_execution(monkeypatch)

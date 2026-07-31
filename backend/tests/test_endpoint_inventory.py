@@ -92,6 +92,8 @@ EXPECTED_PUBLIC = frozenset(
         ("POST", "/api/v1/instances/{instance_id}/credentials/rotate-cephx"),
         # 단발 다운로드 토큰(?token=) 또는 X-Auth-Token 헤더 중 하나 수용 — 내부 분기로 인증
         ("GET", "/api/v1/object-storage/{container_name}/objects/{object_name:path}/download"),
+        # Palimpsest export download — one-use Redis dl_token으로 자체 인증
+        ("GET", "/api/v1/palimpsest/hub/image-exports/{export_id}/download"),
         # Prometheus SD — Bearer monitoring_sd_token으로 자체 인증 (Keystone X-Auth-Token 불가)
         ("GET", "/api/v1/sd/prometheus/targets"),
         ("GET", "/api/v1/sd/prometheus/libvirt-targets"),

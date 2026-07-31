@@ -32,7 +32,7 @@
 		padding: 0.5rem 0.75rem;
 		font-size: 0.875rem;
 		line-height: 1.45;
-		transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+		transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard);
 		resize: vertical;
 	}
 	.control::placeholder { color: var(--color-ink-3); }

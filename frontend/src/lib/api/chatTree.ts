@@ -1,4 +1,12 @@
 import type { ModelCapabilities } from './chatContracts';
+import {
+	mergeToolActivity,
+	parseAssistantToolCalls,
+	toolActivityFromCanonicalParts,
+	toolNameFromResultMeta,
+	type ToolActivityItem
+} from './chatToolActivity';
+import type { RunActivityItem } from './chatRunReducer';
 
 /**
  * 채팅 메시지 버전 트리 파생 (순수 함수).
@@ -49,12 +57,25 @@ export interface ChatMessage {
 	citations?: unknown;
 	parts?: unknown;
 	status?: 'streaming' | 'complete' | 'failed' | 'canceled' | null;
-	execution?: { run_id?: string; agent_id?: string | null; skill_ids?: number[]; skills?: { id: number; name: string }[]; status?: string; retryable?: boolean } | null;
+	execution?: {
+		run_id?: string;
+		agent_id?: string | null;
+		skill_ids?: number[];
+		skills?: { id: number; name: string }[];
+		status?: string;
+		retryable?: boolean;
+		tool_durations_ms?: Record<string, number>;
+		activity?: RunActivityItem[];
+	} | null;
 	reasoning?: string | null;
 	token_prompt?: number | null;
 	token_completion?: number | null;
 	model_name?: string | null;
 	created_at: string | null;
+	created_at_local?: string | null;
+	created_timezone?: string | null;
+	/** Presentation-only aggregation for a run's collapsed tool activity. */
+	tool_items?: ToolActivityItem[];
 }
 
 /** Lightweight, content-free message metadata used for version navigation. */
@@ -101,6 +122,62 @@ export function buildActivePath(
 	}
 	path.reverse();
 	return path;
+}
+
+function activityFromMessage(message: ChatMessage): ToolActivityItem[] {
+	const canonical = toolActivityFromCanonicalParts(message.parts);
+	const raw = canonical.length > 0 ? canonical : parseAssistantToolCalls(message.tool_calls);
+	if (message.role === 'tool') {
+		const metadata = Array.isArray(message.tool_calls) ? message.tool_calls[0] : null;
+		const record = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>) : null;
+		const id = typeof record?.tool_call_id === 'string' ? record.tool_call_id : null;
+		raw.push({
+			id,
+			name: toolNameFromResultMeta(message.tool_calls) ?? '도구',
+			args: null,
+			result: message.content,
+			running: false
+		});
+	}
+	const durations = message.execution?.tool_durations_ms ?? {};
+	return raw.map((item) => ({
+		...item,
+		durationMs: item.id ? durations[item.id] ?? item.durationMs ?? null : item.durationMs ?? null
+	}));
+}
+
+/**
+ * A durable run stores model/tool boundaries as separate tree messages for replay.
+ * The conversation surface collapses one uninterrupted assistant/tool segment into
+ * its final assistant bubble so execution remains part of the same answer.
+ */
+export function projectMessagesForDisplay(path: readonly ChatMessage[]): ChatMessage[] {
+	const projected: ChatMessage[] = [];
+	let segment: ChatMessage[] = [];
+
+	const flush = () => {
+		if (segment.length === 0) return;
+		const assistants = segment.filter((message) => message.role === 'assistant');
+		const tools = mergeToolActivity(segment.flatMap(activityFromMessage));
+		if (assistants.length === 0 || tools.length === 0) {
+			projected.push(...segment);
+		} else {
+			const finalAssistant = assistants[assistants.length - 1];
+			projected.push({ ...finalAssistant, tool_items: tools });
+		}
+		segment = [];
+	};
+
+	for (const message of path) {
+		if (message.role === 'user') {
+			flush();
+			projected.push(message);
+		} else {
+			segment.push(message);
+		}
+	}
+	flush();
+	return projected;
 }
 
 /**

@@ -24,6 +24,8 @@ export interface ToolActivityItem {
 	status?: 'completed' | 'failed';
 	/** 서버가 안전하게 공개한 실패 코드. */
 	errorCode?: string | null;
+	/** 실행 경과 시간(ms). 라이브와 durable 기록 모두에서 제공될 수 있다. */
+	durationMs?: number | null;
 }
 
 function asArray(value: unknown): unknown[] {
@@ -117,4 +119,28 @@ export function toolActivityFromCanonicalParts(value: unknown): ToolActivityItem
 		}
 	}
 	return [...items.values()];
+}
+
+/** Merge a chronological set of tool observations into one card per call. */
+export function mergeToolActivity(items: readonly ToolActivityItem[]): ToolActivityItem[] {
+	const merged = new Map<string, ToolActivityItem>();
+	const order: string[] = [];
+	for (const [index, item] of items.entries()) {
+		const key = item.id ?? `${item.name}:${index}`;
+		const previous = merged.get(key);
+		if (!previous) {
+			merged.set(key, { ...item });
+			order.push(key);
+			continue;
+		}
+		merged.set(key, {
+			...previous,
+			...item,
+			args: item.args ?? previous.args ?? null,
+			result: item.result ?? previous.result ?? null,
+			status: item.status ?? previous.status,
+			durationMs: item.durationMs ?? previous.durationMs ?? null
+		});
+	}
+	return order.map((key) => merged.get(key)!);
 }

@@ -2,7 +2,7 @@
 	import type { RunActivityItem } from '$lib/api/chatRunReducer';
 	import type { ToolActivityItem } from '$lib/api/chatToolActivity';
 	import { taskLabelForStage } from '$lib/api/chatTaskLabels';
-	import ToolCallCard from './ToolCallCard.svelte';
+	import ToolCategoryGroup from './ToolCategoryGroup.svelte';
 	import ThinkingBlock from './ThinkingBlock.svelte';
 
 	interface Props {
@@ -10,6 +10,10 @@
 		active?: boolean;
 	}
 	let { items, active = false }: Props = $props();
+
+	type TimelineEntry =
+		| { kind: 'item'; item: Exclude<RunActivityItem, { kind: 'tool' }> }
+		| { kind: 'tool-group'; id: string; category: string; items: Extract<RunActivityItem, { kind: 'tool' }>[] };
 	let open = $state(false);
 	$effect(() => {
 		if (active) open = true;
@@ -52,32 +56,61 @@
 				.join('\n'),
 			running: item.status === 'running',
 			status: item.status === 'running' ? undefined : item.status,
-			errorCode: item.errorCode
+			errorCode: item.errorCode,
+			durationMs: item.durationMs
 		};
 	}
+
+	function timelineEntries(items: RunActivityItem[]): TimelineEntry[] {
+		const entries: TimelineEntry[] = [];
+		for (const item of items) {
+			if (item.kind !== 'tool') {
+				entries.push({ kind: 'item', item });
+				continue;
+			}
+			const last = entries[entries.length - 1];
+			if (last?.kind === 'tool-group' && last.category === item.category) {
+				last.items.push(item);
+				continue;
+			}
+			entries.push({
+				kind: 'tool-group',
+				id: `tool-group:${item.seq}:${item.category}`,
+				category: item.category,
+				items: [item]
+			});
+		}
+		return entries;
+	}
+
+	const entries = $derived(timelineEntries(taskItems));
 </script>
 
-{#if taskItems.length}
+{#if entries.length}
 	<details class="execution-timeline" bind:open>
 		<summary aria-label="작업 내역 열기">
 			<span class="summary-mark" aria-hidden="true"></span>
-			<span class="summary-title">작업 내역</span>
-			<span class="summary-count">{taskItems.length}개</span>
+			<span class="summary-title">실행 기록</span>
+			<span class="summary-count">{taskItems.length}개 단계</span>
 			<svg class="summary-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
 			</svg>
 		</summary>
-		<ol aria-label="작업 기록">
-			{#each taskItems as item (item.id)}
-				<li class:live={isLive(item)}>
+		<ol aria-label="실행 기록">
+			{#each entries as entry (entry.kind === 'tool-group' ? entry.id : entry.item.id)}
+				<li class:live={entry.kind === 'tool-group' ? entry.items.some((item) => isLive(item)) : isLive(entry.item)}>
 					<span class="timeline-dot" aria-hidden="true"></span>
 					<div class="timeline-entry">
-						{#if item.kind === 'stage'}
-							<p class="stage-label">{stageLabel(item)}</p>
-						{:else if item.kind === 'reasoning'}
-							<ThinkingBlock text={item.text} active={item.active} />
+						{#if entry.kind === 'tool-group'}
+							<ToolCategoryGroup
+								category={entry.category}
+								items={entry.items.map(toolItem)}
+								active={active && entry.items.some((item) => item.status === 'running')}
+							/>
+						{:else if entry.item.kind === 'stage'}
+							<p class="stage-label">{stageLabel(entry.item)}</p>
 						{:else}
-							<ToolCallCard item={toolItem(item)} />
+							<ThinkingBlock text={entry.item.text} active={entry.item.active} />
 						{/if}
 					</div>
 				</li>

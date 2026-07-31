@@ -1,6 +1,8 @@
 <script lang="ts">
   import { fly, fade } from 'svelte/transition';
   import type { Snippet } from 'svelte';
+  import { MOTION_DURATION_MS } from '$lib/design/tokens';
+  import { motionDuration } from '$lib/utils/motion';
 
   interface Props {
     onClose: () => void;
@@ -102,11 +104,11 @@
 
 <!-- main 영역(헤더 z-50 아래 + sidebar 우측)만 덮음. 헤더/sidebar 는 항상 보여 다른 페이지 navigation 가능.
      fixed top-14 left-0 md:left-60 right-0 bottom-0 — viewport 기준이지만 헤더(56px) 와 sidebar(60=240px) 영역 제외. -->
-<div class="fixed top-14 left-0 md:left-60 right-0 bottom-0 z-40" role="dialog" aria-modal="true"
+<div class="fixed top-14 left-0 md:left-60 right-0 bottom-0 z-[var(--z-panel)]" role="dialog" aria-modal="true"
      onkeydown={(e) => e.key === 'Escape' && onClose()} tabindex="-1">
   <button
-    class="absolute inset-0 bg-black/50 cursor-default"
-    transition:fade={{ duration: 200 }}
+    class="absolute inset-0 bg-surface-scrim-soft cursor-default"
+    transition:fade={{ duration: motionDuration(MOTION_DURATION_MS.base) }}
     onclick={onClose}
     aria-label="패널 닫기"
   ></button>
@@ -115,7 +117,7 @@
     data-tour={dataTour}
     class="@container/panel absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
     style={isDesktop && widthPx !== null ? `width: ${clampPanelWidth(widthPx)}px; max-width: 100%` : ''}
-    transition:fly={{ x: 400, duration: 300, opacity: 1 }}
+    transition:fly={{ x: 400, duration: motionDuration(MOTION_DURATION_MS.panel), opacity: 1 }}
   >
     {#if resizable}
       <!-- 폭 조정 핸들: 데스크톱에서만 노출, 더블클릭으로 기본값 리셋 -->

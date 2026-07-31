@@ -170,14 +170,14 @@
 {#if $palette}
   <!-- Backdrop -->
   <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]"
+    class="fixed inset-0 bg-surface-scrim backdrop-blur-sm z-[var(--z-command)]"
     onclick={() => palette.close()}
     role="presentation"
   ></div>
 
   <!-- Panel -->
   <div
-    class="fixed top-[20vh] left-1/2 -translate-x-1/2 w-full max-w-xl z-[201] px-4"
+    class="fixed top-[20vh] left-1/2 -translate-x-1/2 w-full max-w-xl z-[calc(var(--z-command)+1)] px-4"
     role="dialog"
     aria-modal="true"
     aria-label="커맨드 팔레트"

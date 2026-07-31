@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import PageHeader from '../PageHeader.svelte';
+
+const pageHeaderSource = readFileSync(resolve(__dirname, '../PageHeader.svelte'), 'utf8');
 
 describe('PageHeader', () => {
 	it('breadcrumb 텍스트 렌더링', () => {
@@ -22,5 +26,13 @@ describe('PageHeader', () => {
 	it('subtitle이 없으면 p 요소 없음', () => {
 		const { container } = render(PageHeader, { breadcrumb: 'NAV', title: 'T' });
 		expect(container.querySelector('p')).toBeNull();
+	});
+
+	it('keeps header actions wrapped through tablet and restores the row on desktop', () => {
+		expect(pageHeaderSource).toContain('flex-direction: column');
+		expect(pageHeaderSource).toContain('flex-wrap: wrap');
+		expect(pageHeaderSource).toContain('@media (min-width: 1024px)');
+		expect(pageHeaderSource).toContain('flex-direction: row');
+		expect(pageHeaderSource).toContain('flex-wrap: nowrap');
 	});
 });

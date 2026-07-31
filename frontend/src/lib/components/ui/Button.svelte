@@ -85,11 +85,11 @@
 		font-weight: 500;
 		line-height: 1.2;
 		transition:
-			background 0.15s,
-			border-color 0.15s,
-			box-shadow 0.15s,
-			color 0.15s,
-			filter 0.15s;
+			background var(--motion-duration-fast) var(--motion-ease-standard),
+			border-color var(--motion-duration-fast) var(--motion-ease-standard),
+			box-shadow var(--motion-duration-fast) var(--motion-ease-standard),
+			color var(--motion-duration-fast) var(--motion-ease-standard),
+			filter var(--motion-duration-fast) var(--motion-ease-standard);
 		border: 1px solid transparent;
 		cursor: pointer;
 		white-space: nowrap;

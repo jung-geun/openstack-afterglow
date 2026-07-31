@@ -51,12 +51,14 @@ def test_cli_uses_only_standard_library():
         "argparse",
         "hashlib",
         "json",
+        "hmac",
         "os",
         "shutil",
         "subprocess",
         "sys",
         "urllib",
         "pathlib",
+        "time",
         "__future__",
     }
     assert imported <= stdlib, f"표준 라이브러리 밖 의존성: {sorted(imported - stdlib)}"
@@ -241,3 +243,230 @@ def test_bundle_can_request_base_image():
 
     assert args.include_base_image is True
     assert args.refs == ["sha256:" + "a" * 64]
+
+
+def test_parser_supports_nested_image_commands():
+    parser = cli.build_parser()
+    subparsers = next(action for action in parser._actions if action.dest == "command")
+    assert "image" in subparsers.choices
+
+    # image list
+    args_list = parser.parse_args(["image", "list"])
+    assert args_list.command == "image"
+    assert args_list.subcommand == "list"
+    assert args_list.func == cli.cmd_image_list
+
+    # image pull
+    args_pull = parser.parse_args(["image", "pull", "img-123", "--format", "qcow2", "-o", "out.qcow2"])
+    assert args_pull.command == "image"
+    assert args_pull.subcommand == "pull"
+    assert args_pull.image_id == "img-123"
+    assert args_pull.format == "qcow2"
+    assert args_pull.output == "out.qcow2"
+    assert args_pull.func == cli.cmd_image_pull
+
+    # All six formats supported in --format
+    for fmt in ["raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx"]:
+        parsed = parser.parse_args(["image", "pull", "img-123", "--format", fmt, "-o", "out"])
+        assert parsed.format == fmt
+
+    # Unsupported format rejected by parser
+    with pytest.raises(SystemExit):
+        parser.parse_args(["image", "pull", "img-123", "--format", "iso", "-o", "out"])
+
+
+def test_cmd_image_list_glance_output(monkeypatch, capsys):
+    rows = [
+        {
+            "id": "img-001",
+            "name": "ubuntu-24.04",
+            "disk_format": "qcow2",
+            "status": "active",
+            "size": 104857600,
+        }
+    ]
+    monkeypatch.setattr(cli, "_json_request", lambda method, path: rows)
+    args = cli.build_parser().parse_args(["image", "list"])
+    ret = cli.cmd_image_list(args)
+
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "img-001" in out
+    assert "ubuntu-24.04" in out
+    assert "qcow2" in out
+    assert "active" in out
+    assert "100.0 MiB" in out
+
+    # Empty list
+    monkeypatch.setattr(cli, "_json_request", lambda method, path: [])
+    ret_empty = cli.cmd_image_list(args)
+    assert ret_empty == 0
+    assert "베이스 이미지가 없습니다" in capsys.readouterr().out
+
+
+def test_cmd_image_pull_refuses_existing_output_and_part_before_enqueue(tmp_path, monkeypatch):
+    out_file = tmp_path / "out.qcow2"
+    part_file = tmp_path / "out.qcow2.part"
+    called = False
+
+    def _mock_json(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(cli, "_json_request", _mock_json)
+
+    # Existing final output file
+    out_file.write_bytes(b"existing")
+    args = cli.build_parser().parse_args(["image", "pull", "img-123", "--format", "qcow2", "-o", str(out_file)])
+    with pytest.raises(cli.PalimpsestCliError, match="출력 파일이 이미 존재합니다"):
+        cli.cmd_image_pull(args)
+    assert not called
+
+    # Existing .part file
+    out_file.unlink()
+    part_file.write_bytes(b"existing part")
+    with pytest.raises(cli.PalimpsestCliError, match="임시 파일이 이미 존재합니다"):
+        cli.cmd_image_pull(args)
+    assert not called
+
+
+def test_cmd_image_pull_queued_to_complete_polling_and_atomic_publication(tmp_path, monkeypatch, capsys):
+    out_file = tmp_path / "downloaded.qcow2"
+    part_file = tmp_path / "downloaded.qcow2.part"
+    payload = b"converted-qcow2-image-bytes-content"
+    digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+    responses = [
+        {"id": "job-777"},  # POST /image-exports
+        {"status": "queued", "progress_pct": 0},  # GET job status 1
+        {"status": "converting", "progress_pct": 50},  # GET job status 2
+        {  # GET job status 3
+            "status": "complete",
+            "progress_pct": 100,
+            "blob_digest": digest,
+            "download_path": "/api/v1/palimpsest/hub/image-exports/job-777/blob",
+        },
+    ]
+
+    def _mock_json_request(method, path, body=None):
+        return responses.pop(0)
+
+    class _MockStreamResp:
+        def read(self, chunk_size=None):
+            return b""
+
+        def __enter__(self):
+            import io
+
+            return io.BytesIO(payload)
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(cli, "_json_request", _mock_json_request)
+    monkeypatch.setattr(cli, "_request", lambda method, path: _MockStreamResp())
+    monkeypatch.setattr("time.sleep", lambda secs: None)
+
+    args = cli.build_parser().parse_args(["image", "pull", "img-777", "--format", "qcow2", "-o", str(out_file)])
+    ret = cli.cmd_image_pull(args)
+
+    assert ret == 0
+    assert out_file.is_file()
+    assert out_file.read_bytes() == payload
+    assert not part_file.exists()
+
+    captured = capsys.readouterr()
+    err = captured.err
+    assert "상태: queued (0%)" in err
+    assert "상태: converting (50%)" in err
+    assert "상태: complete (100%)" in err
+
+    stdout = captured.out
+    assert str(out_file) in stdout
+    assert digest in stdout
+
+
+def test_cmd_image_pull_terminal_error(tmp_path, monkeypatch):
+    out_file = tmp_path / "err.qcow2"
+    part_file = tmp_path / "err.qcow2.part"
+
+    responses = [
+        {"id": "job-888"},
+        {"status": "error", "error_code": "conversion_failed", "error_message": "qemu-img convert exited with 1"},
+    ]
+
+    monkeypatch.setattr(cli, "_json_request", lambda method, path, body=None: responses.pop(0))
+    monkeypatch.setattr("time.sleep", lambda secs: None)
+
+    args = cli.build_parser().parse_args(["image", "pull", "img-888", "--format", "qcow2", "-o", str(out_file)])
+    with pytest.raises(cli.PalimpsestCliError, match="내보내기 작업 실패: qemu-img convert exited with 1"):
+        cli.cmd_image_pull(args)
+
+    assert not out_file.exists()
+    assert not part_file.exists()
+
+
+def test_cmd_image_pull_digest_mismatch_and_owned_part_cleanup(tmp_path, monkeypatch):
+    out_file = tmp_path / "mismatch.qcow2"
+    part_file = tmp_path / "mismatch.qcow2.part"
+    payload = b"some bytes"
+    expected_digest = "sha256:" + "0" * 64
+
+    responses = [
+        {"id": "job-999"},
+        {
+            "status": "complete",
+            "progress_pct": 100,
+            "blob_digest": expected_digest,
+            "download_path": "/api/v1/palimpsest/hub/image-exports/job-999/blob",
+        },
+    ]
+
+    class _MockStreamResp:
+        def __enter__(self):
+            import io
+
+            return io.BytesIO(payload)
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(cli, "_json_request", lambda method, path, body=None: responses.pop(0))
+    monkeypatch.setattr(cli, "_request", lambda method, path: _MockStreamResp())
+    monkeypatch.setattr("time.sleep", lambda secs: None)
+
+    args = cli.build_parser().parse_args(["image", "pull", "img-999", "--format", "qcow2", "-o", str(out_file)])
+    with pytest.raises(cli.PalimpsestCliError, match="digest 불일치"):
+        cli.cmd_image_pull(args)
+
+    assert not out_file.exists()
+    assert not part_file.exists()
+
+
+def test_cmd_image_pull_interrupt_cleanup_ownership(tmp_path, monkeypatch):
+    out_file = tmp_path / "interrupted.qcow2"
+    part_file = tmp_path / "interrupted.qcow2.part"
+
+    responses = [
+        {"id": "job-intr"},
+        {
+            "status": "complete",
+            "progress_pct": 100,
+            "blob_digest": "sha256:" + "a" * 64,
+            "download_path": "/blob",
+        },
+    ]
+
+    def _interrupt_request(method, path):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cli, "_json_request", lambda method, path, body=None: responses.pop(0))
+    monkeypatch.setattr(cli, "_request", _interrupt_request)
+    monkeypatch.setattr("time.sleep", lambda secs: None)
+
+    args = cli.build_parser().parse_args(["image", "pull", "img-intr", "--format", "qcow2", "-o", str(out_file)])
+    with pytest.raises(cli.PalimpsestCliError, match="작업이 중단되었습니다"):
+        cli.cmd_image_pull(args)
+
+    assert not part_file.exists()

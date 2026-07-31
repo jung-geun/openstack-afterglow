@@ -20,6 +20,7 @@
 		oauth_scopes?: string[];
 		has_oauth_client?: boolean;
 		has_oauth_client_secret?: boolean;
+		load_policy?: 'preloaded' | 'on_demand';
 		is_active: boolean;
 	}
 	interface McpOAuthStatus {
@@ -34,6 +35,7 @@
 		description: string;
 		method: string;
 		url: string;
+		load_policy?: 'preloaded' | 'on_demand';
 		is_active: boolean;
 	}
 	interface Skill {
@@ -63,6 +65,7 @@
 	let mOAuthScopes = $state('');
 	let mOAuthClientId = $state('');
 	let mOAuthClientSecret = $state('');
+	let mLoadPolicy = $state<'preloaded' | 'on_demand'>('on_demand');
 	let addingMcp = $state(false);
 
 	let oauthStatus = $state<Record<number, McpOAuthStatus>>({});
@@ -115,6 +118,7 @@
 	let tDesc = $state('');
 	let tMethod = $state('GET');
 	let tUrl = $state('');
+	let tLoadPolicy = $state<'preloaded' | 'on_demand'>('on_demand');
 	let addingTool = $state(false);
 
 	let sName = $state('');
@@ -203,7 +207,8 @@
 								...(Object.keys(headers).length ? { headers } : {}),
 								...(oauthScopes.length ? { oauth_scopes: oauthScopes } : {}),
 								...(mOAuthClientId.trim() ? { oauth_client_id: mOAuthClientId.trim() } : {}),
-								...(mOAuthClientSecret ? { oauth_client_secret: mOAuthClientSecret } : {})
+								...(mOAuthClientSecret ? { oauth_client_secret: mOAuthClientSecret } : {}),
+								load_policy: mLoadPolicy
 							}
 						: {})
 				},
@@ -217,6 +222,7 @@
 			mOAuthScopes = '';
 			mOAuthClientId = '';
 			mOAuthClientSecret = '';
+			mLoadPolicy = 'on_demand';
 			await load();
 			toast.success('MCP 서버가 추가되었습니다');
 		} catch (e) {
@@ -235,7 +241,13 @@
 		try {
 			await api.post(
 				`${base}/custom-tools`,
-				{ name: tName.trim(), description: tDesc.trim() || tName.trim(), method: tMethod, url: tUrl.trim() },
+				{
+					name: tName.trim(),
+					description: tDesc.trim() || tName.trim(),
+					method: tMethod,
+					url: tUrl.trim(),
+					...(isAdmin ? { load_policy: tLoadPolicy } : {})
+				},
 				token,
 				projectId
 			);
@@ -243,6 +255,7 @@
 			tDesc = '';
 			tUrl = '';
 			await load();
+			tLoadPolicy = 'on_demand';
 			toast.success('커스텀 툴이 추가되었습니다');
 		} catch (e) {
 			toast.error(e instanceof ApiError ? e.message : '추가 실패');
@@ -267,6 +280,19 @@
 			await load();
 		} catch {
 			toast.error('변경 실패');
+		}
+	}
+
+	async function setLoadPolicy(
+		kind: 'mcp-servers' | 'custom-tools',
+		id: number,
+		loadPolicy: 'preloaded' | 'on_demand'
+	) {
+		try {
+			await api.patch(`${base}/${kind}/${id}`, { load_policy: loadPolicy }, token, projectId);
+			await load();
+		} catch {
+			toast.error('로딩 정책을 변경하지 못했습니다');
 		}
 	}
 
@@ -301,6 +327,13 @@
 					<option value="none">공개</option>
 					<option value="oauth">OAuth</option>
 					<option value="admin">관리자 승인 정적 인증</option>
+				</select>
+			</div>
+			<div class="mt-3">
+				<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="mcp-load-policy">초기 로딩 정책</label>
+				<select id="mcp-load-policy" class={inputCls} bind:value={mLoadPolicy}>
+					<option value="on_demand">필요할 때 로드</option>
+					<option value="preloaded">응답 시작 시 미리 로드</option>
 				</select>
 			</div>
 			{#if mAuthMode === 'oauth'}
@@ -362,6 +395,22 @@
 									</button>
 								{/if}
 							{/if}
+							{#if isAdmin}
+								<select
+									class="rounded border border-[var(--color-line)] bg-[var(--color-sunken)] px-1 py-0.5 text-xs text-[var(--color-ink-2)]"
+									aria-label={`${m.name} 로딩 정책`}
+									value={m.load_policy ?? 'on_demand'}
+									onchange={(event) =>
+										void setLoadPolicy(
+											'mcp-servers',
+											m.id,
+											(event.currentTarget as HTMLSelectElement).value as 'preloaded' | 'on_demand'
+										)}
+								>
+									<option value="on_demand">필요 시</option>
+									<option value="preloaded">미리 로드</option>
+								</select>
+							{/if}
 							<button class="text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]" onclick={() => toggle('mcp-servers', m.id, m.is_active)}>{m.is_active ? '비활성화' : '활성화'}</button>
 							<button class="text-[var(--color-state-danger)] hover:opacity-80" onclick={() => removeItem('mcp-servers', m.id)}>삭제</button>
 						</div>
@@ -388,6 +437,15 @@
 			</select>
 			<input class={inputCls} placeholder="URL" bind:value={tUrl} />
 		</div>
+		{#if isAdmin}
+			<div class="mt-3">
+				<label class="mb-1 block text-xs text-[var(--color-ink-3)]" for="tool-load-policy">초기 로딩 정책</label>
+				<select id="tool-load-policy" class={inputCls} bind:value={tLoadPolicy}>
+					<option value="on_demand">필요할 때 로드</option>
+					<option value="preloaded">응답 시작 시 미리 로드</option>
+				</select>
+			</div>
+		{/if}
 		<div class="mt-3 flex justify-end">
 			<Button onclick={addTool} disabled={addingTool}>{addingTool ? '추가 중…' : '+ 커스텀 툴 추가'}</Button>
 		</div>
@@ -409,6 +467,22 @@
 						<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{t.description} · {t.url}</div>
 					</div>
 					<div class="flex shrink-0 items-center gap-3 text-xs">
+						{#if isAdmin}
+							<select
+								class="rounded border border-[var(--color-line)] bg-[var(--color-sunken)] px-1 py-0.5 text-xs text-[var(--color-ink-2)]"
+								aria-label={`${t.name} 로딩 정책`}
+								value={t.load_policy ?? 'on_demand'}
+								onchange={(event) =>
+									void setLoadPolicy(
+										'custom-tools',
+										t.id,
+										(event.currentTarget as HTMLSelectElement).value as 'preloaded' | 'on_demand'
+									)}
+							>
+								<option value="on_demand">필요 시</option>
+								<option value="preloaded">미리 로드</option>
+							</select>
+						{/if}
 						<button class="text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]" onclick={() => toggle('custom-tools', t.id, t.is_active)}>{t.is_active ? '비활성화' : '활성화'}</button>
 						<button class="text-[var(--color-state-danger)] hover:opacity-80" onclick={() => removeItem('custom-tools', t.id)}>삭제</button>
 					</div>

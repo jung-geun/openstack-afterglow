@@ -67,7 +67,7 @@
 					{#if $wizard.step === 1}
 						<WizardStep1Boot />
 					{:else if $wizard.step === 2}
-						<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
+						<h2 class="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg font-semibold text-[var(--color-ink-0)]"><span>플레이버 선택</span><span class="text-sm font-normal text-[var(--color-ink-2)]">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
 						<SelectFlavor flavors={s.flavors} selectedId={$wizard.flavorId} onSelect={s.selectFlavor} quota={s.flavorQuota} />
 					{:else if $wizard.step === 3}
 						<WizardStep3Library />

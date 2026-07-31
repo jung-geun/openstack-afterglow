@@ -6,6 +6,7 @@ const TOOL_TASK_LABELS: Record<string, string> = {
 	managed_advisor: '전문가 검토',
 	list_my_conversations: '대화 목록 확인',
 	get_conversation_detail: '대화 내용 확인',
+	list_available_tools: '필요한 도구 확인',
 	afterglow_vm_delete: '가상 머신 삭제',
 	afterglow_volume_delete: '볼륨 삭제',
 	afterglow_volume_snapshot_delete: '볼륨 스냅샷 삭제',

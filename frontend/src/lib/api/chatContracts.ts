@@ -99,11 +99,13 @@ export interface ChatCompletionRequest {
 	skill_ids?: number[];
 	execution_mode?: ChatExecutionMode;
 	code_workspace_id?: string;
+	client_timezone?: string | null;
 }
 
 export interface RegenerateRequest {
 	model_id: string;
 	features: ChatFeatureOptions;
+	client_timezone?: string | null;
 }
 
 export type ChatRunStatus =
@@ -147,6 +149,8 @@ interface EventBase<T extends string, P> {
 
 export type RunStage = 'queued' | 'model_request' | 'model_response' | 'tool_execution' | 'response_writing' | 'awaiting_input' | 'finalizing';
 
+export type ToolActivitySource = 'builtin' | 'managed' | 'custom_http' | 'mcp' | 'workspace' | 'agent';
+
 
 
 export type ChatRunEvent =
@@ -156,8 +160,8 @@ export type ChatRunEvent =
 	| EventBase<'message.created', { message_id: string; role: 'assistant' | 'tool'; parent_id: string | null }>
 	| EventBase<'part.delta', { message_id: string; part_index: number; part_type: 'text' | 'reasoning'; delta: string }>
 	| EventBase<'part.completed', { message_id: string; part_index: number; part: ChatPart }>
-	| EventBase<'tool.call.started', { call_id: string; name: string; arguments: Record<string, unknown> }>
-	| EventBase<'tool.call.completed', { call_id: string; name: string; content: ChatPart[]; status: 'completed' | 'failed'; error_code: string | null }>
+	| EventBase<'tool.call.started', { call_id: string; name: string; arguments: Record<string, unknown>; source: ToolActivitySource; category: string }>
+	| EventBase<'tool.call.completed', { call_id: string; name: string; content: ChatPart[]; status: 'completed' | 'failed'; error_code: string | null; source: ToolActivitySource; category: string }>
 	| EventBase<'tool.approval_required', { call_id: string; name: string; source: 'builtin' | 'managed' | 'custom_http' | 'mcp' | 'workspace' | 'agent'; effect: 'read' | 'workspace_write' | 'process' | 'external_mutation'; destination: string | null; redacted_arguments: Record<string, unknown>; preview: ChatPart[]; expected_state_revision: number | null; writer_fence: number | null; expires_at: string }>
 	| EventBase<'tool.approval_resolved', { call_id: string; decision: 'approve' | 'deny'; decided_by_user_id: string | null; decided_at: string }>
 	| EventBase<'interaction.resolved', { interaction_id: string; status: 'answered' | 'timeout' | 'canceled'; response: { option_ids: string[]; text: string | null } | null }>
@@ -271,6 +275,21 @@ function exact(source: Record<string, unknown>, keys: readonly string[], label: 
 	}
 }
 
+function exactOptional(
+	source: Record<string, unknown>,
+	required: readonly string[],
+	optional: readonly string[],
+	label: string
+): void {
+	const keys = Object.keys(source);
+	if (
+		required.some((key) => !keys.includes(key)) ||
+		keys.some((key) => !required.includes(key) && !optional.includes(key))
+	) {
+		throw new ChatContractError(`${label} contains unknown or missing fields`);
+	}
+}
+
 function nullableText(value: unknown, label: string): string | null {
 	if (value === null) return null;
 	return text(value, label)!;
@@ -352,14 +371,41 @@ export function parseChatRunEvent(value: unknown): ChatRunEvent {
 			return { ...base, type, payload: { message_id: text(payload.message_id, 'message_id')!, part_index: integer(payload.part_index, 'part_index'), part: parseChatPartsStrict([payload.part])[0] } };
 		}
 		case 'tool.call.started': {
-			exact(payload, ['call_id', 'name', 'arguments'], 'tool.call.started payload');
-			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, arguments: record(payload.arguments, 'tool arguments') } };
+			exactOptional(payload, ['call_id', 'name', 'arguments'], ['source', 'category'], 'tool.call.started payload');
+			const source = payload.source === undefined
+				? 'builtin'
+				: enumValue(payload.source, ['builtin', 'managed', 'custom_http', 'mcp', 'workspace', 'agent'] as const, 'tool source');
+			return {
+				...base,
+				type,
+				payload: {
+					call_id: text(payload.call_id, 'call_id')!,
+					name: text(payload.name, 'tool name')!,
+					arguments: record(payload.arguments, 'tool arguments'),
+					source,
+					category: payload.category === undefined ? '기본 도구' : text(payload.category, 'tool category')!
+				}
+			};
 		}
 		case 'tool.call.completed': {
-			const hasErrorCode = payload.error_code !== undefined;
-			exact(payload, hasErrorCode ? ['call_id', 'name', 'content', 'status', 'error_code'] : ['call_id', 'name', 'content', 'status'], 'tool.call.completed payload');
+			exactOptional(payload, ['call_id', 'name', 'content', 'status'], ['error_code', 'source', 'category'], 'tool.call.completed payload');
 			const errorCode = payload.error_code === undefined || payload.error_code === null ? null : text(payload.error_code, 'tool error code')!;
-			return { ...base, type, payload: { call_id: text(payload.call_id, 'call_id')!, name: text(payload.name, 'tool name')!, content: parseChatPartsStrict(payload.content), status: enumValue(payload.status, ['completed', 'failed'] as const, 'tool status'), error_code: errorCode } };
+			const source = payload.source === undefined
+				? 'builtin'
+				: enumValue(payload.source, ['builtin', 'managed', 'custom_http', 'mcp', 'workspace', 'agent'] as const, 'tool source');
+			return {
+				...base,
+				type,
+				payload: {
+					call_id: text(payload.call_id, 'call_id')!,
+					name: text(payload.name, 'tool name')!,
+					content: parseChatPartsStrict(payload.content),
+					status: enumValue(payload.status, ['completed', 'failed'] as const, 'tool status'),
+					error_code: errorCode,
+					source,
+					category: payload.category === undefined ? '기본 도구' : text(payload.category, 'tool category')!
+				}
+			};
 		}
 		case 'tool.approval_required': {
 			exact(payload, ['call_id', 'name', 'source', 'effect', 'destination', 'redacted_arguments', 'preview', 'expected_state_revision', 'writer_fence', 'expires_at'], 'tool.approval_required payload');

@@ -4,13 +4,13 @@ import { createRunViewState, reduceRunEvent } from '../chatRunReducer';
 
 const at = '2026-07-21T00:00:00Z';
 
-function event(seq: number, type: string, payload: object) {
+function event(seq: number, type: string, payload: object, createdAt = at) {
 	return parseChatRunEvent({
 		event_id: `run-1:${seq}`,
 		run_id: 'run-1',
 		seq,
 		type,
-		created_at: at,
+		created_at: createdAt,
 		payload
 	});
 }
@@ -89,6 +89,37 @@ describe('chat run reducer', () => {
 				content: [{ type: 'text', text: '결과' }]
 			})
 		]);
+	});
+
+	it('measures completed tool activity from durable event timestamps', () => {
+		let state = createRunViewState('run-1');
+		state = reduceRunEvent(
+			state,
+			event(
+				1,
+				'tool.call.started',
+				{ call_id: 'call-1', name: 'notion_search', arguments: { query: 'Afterglow' } },
+				'2026-07-28T00:00:00Z'
+			)
+		);
+		state = reduceRunEvent(
+			state,
+			event(
+				2,
+				'tool.call.completed',
+				{ call_id: 'call-1', name: 'notion_search', content: [], status: 'completed', error_code: null },
+				'2026-07-28T00:00:00.840Z'
+			)
+		);
+
+		expect(state.tools['call-1']).toMatchObject({
+			callId: 'call-1',
+			status: 'completed',
+			durationMs: 840
+		});
+		expect(state.activity).toContainEqual(
+			expect.objectContaining({ kind: 'tool', callId: 'call-1', durationMs: 840 })
+		);
 	});
 
 	it('preserves same-index reasoning from successive model messages around a tool call', () => {

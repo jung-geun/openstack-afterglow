@@ -76,6 +76,120 @@ describe('ChatWindow', () => {
 		expect(getByText('확인할 메시지')).toBeTruthy();
 	});
 
+	it('renders durable tool activity and its execution time inside the final assistant bubble', () => {
+		const { container, getByText } = render(ChatWindow, {
+			activePath: [
+				{
+					id: 'user-1',
+					conversation_id: 'conversation-1',
+					role: 'user',
+					parent_id: null,
+					content: 'Notion을 검색해 주세요.',
+					created_at: '2026-07-28T00:00:00Z'
+				},
+				{
+					id: 'assistant-tool-1',
+					conversation_id: 'conversation-1',
+					role: 'assistant',
+					parent_id: 'user-1',
+					content: '',
+					parts: [
+						{
+							type: 'tool_call',
+							call_id: 'call-1',
+							name: 'mcp__1__notion_search',
+							arguments: { query: 'Notion' },
+							status: 'completed'
+						},
+						{
+							type: 'tool_result',
+							call_id: 'call-1',
+							name: 'mcp__1__notion_search',
+							content: [{ type: 'text', text: 'found' }],
+							is_error: false
+						}
+					],
+					execution: { tool_durations_ms: { 'call-1': 840 } },
+					created_at: '2026-07-28T00:00:01Z'
+				},
+				{
+					id: 'assistant-final-1',
+					conversation_id: 'conversation-1',
+					role: 'assistant',
+					parent_id: 'assistant-tool-1',
+					content: '검색 결과입니다.',
+					created_at: '2026-07-28T00:00:02Z'
+				}
+			],
+			models: [],
+			...callbacks
+		});
+
+		expect(container.querySelectorAll('article.chat')).toHaveLength(2);
+		expect(getByText('MCP: Notion Search')).toBeTruthy();
+		expect(getByText('840ms')).toBeTruthy();
+		expect(getByText('검색 결과입니다.')).toBeTruthy();
+	});
+
+	it('attaches persisted execution activity to the final assistant bubble', async () => {
+		const { container, getByLabelText, getByText } = render(ChatWindow, {
+			activePath: [
+				{
+					id: 'user-1',
+					conversation_id: 'conversation-1',
+					role: 'user',
+					parent_id: null,
+					content: '문서를 찾아 주세요.',
+					created_at: '2026-07-28T00:00:00Z'
+				},
+				{
+					id: 'assistant-final-1',
+					conversation_id: 'conversation-1',
+					role: 'assistant',
+					parent_id: 'user-1',
+					content: '검색 결과입니다.',
+					execution: {
+						activity: [
+							{
+								id: 'reasoning:1',
+								kind: 'reasoning',
+								seq: 1,
+								createdAt: '2026-07-28T00:00:01Z',
+								text: '검색 범위를 정리합니다.',
+								active: false
+							},
+							{
+								id: 'tool:call-1',
+								kind: 'tool',
+								seq: 2,
+								createdAt: '2026-07-28T00:00:02Z',
+								callId: 'call-1',
+								name: 'mcp__1__notion_search',
+								source: 'mcp',
+								category: 'MCP · Notion',
+								arguments: { query: 'Afterglow' },
+								status: 'completed',
+								content: [{ type: 'text', text: 'found' }],
+								errorCode: null,
+								durationMs: 840
+							}
+						]
+					},
+					created_at: '2026-07-28T00:00:03Z'
+				}
+			],
+			models: [],
+			...callbacks
+		});
+
+		expect(container.querySelectorAll('article.chat')).toHaveLength(2);
+		const summary = getByLabelText('작업 내역 열기');
+		expect((summary.closest('details') as HTMLDetailsElement).open).toBe(false);
+		await fireEvent.click(summary);
+		expect(getByText('MCP · Notion')).toBeTruthy();
+		expect(getByText('검색 결과입니다.')).toBeTruthy();
+	});
+
 	it('shows a visible retry action for a failed user turn and invokes it', async () => {
 		const onRetry = vi.fn();
 		const { getByRole, getByText } = render(ChatWindow, {

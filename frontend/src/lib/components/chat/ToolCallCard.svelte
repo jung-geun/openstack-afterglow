@@ -12,6 +12,13 @@
 	const hasDetail = $derived(Boolean(argsText) || Boolean(item.result) || Boolean(item.errorCode));
 	const taskName = $derived(taskLabelForTool(item.name));
 	const statusLabel = $derived(item.running ? '실행 중…' : item.status === 'failed' ? '실패' : '완료');
+	const durationLabel = $derived(
+		item.durationMs == null
+			? null
+			: item.durationMs < 1_000
+				? `${item.durationMs}ms`
+				: `${(item.durationMs / 1_000).toFixed(item.durationMs < 10_000 ? 1 : 0)}s`
+	);
 </script>
 
 <div class="tool-card" class:running={item.running} class:failed={item.status === 'failed'}>
@@ -31,6 +38,9 @@
 		{/if}
 		<span class="tool-name">{taskName}</span>
 		<span class="tool-status">{statusLabel}</span>
+		{#if durationLabel}
+			<time class="tool-duration" aria-label={`실행 시간 ${durationLabel}`}>{durationLabel}</time>
+		{/if}
 		{#if hasDetail}
 			<svg class="chevron" class:open viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
@@ -99,6 +109,12 @@
 	.tool-status {
 		color: var(--color-ink-3);
 		font-size: 0.7rem;
+	}
+	.tool-duration {
+		color: var(--color-ink-3);
+		font-size: 0.66rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 	.tool-card.failed .tool-status {
 		color: var(--color-state-danger);

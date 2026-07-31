@@ -20,6 +20,8 @@ from app.services.mcp_control_plane.registry import (
     entry_by_name,
     output_payload,
     parse_entry_arguments,
+    registry_entries,
+    validate_registry_inventory,
 )
 
 
@@ -61,6 +63,23 @@ def _mutation_entry() -> RegistryEntry:
         handler=_mutation_handler,
         preview_builder=_mutation_preview,
     )
+
+
+def test_registry_inventory_is_complete_and_fail_closed():
+    entries = registry_entries()
+    database_entry = entry_by_name("afterglow_database_instance_list")
+
+    assert database_entry is not None
+    assert "afterglow_subnet_list" in {entry.name for entry in entries}
+    with pytest.raises(ValueError, match="unclassified"):
+        validate_registry_inventory((_mutation_entry(),))
+    with pytest.raises(ValueError, match="invalid service gate"):
+        validate_registry_inventory((replace(database_entry, service_flag=None),))
+    with pytest.raises(ValueError, match="duplicate tool"):
+        validate_registry_inventory((database_entry, database_entry))
+    without_operations = tuple(entry for entry in entries if entry.name != "afterglow_operation_get")
+    with pytest.raises(ValueError, match="no registered tool for domains: operations"):
+        validate_registry_inventory(without_operations)
 
 
 def test_registry_exposes_only_explicit_safe_entries(monkeypatch):

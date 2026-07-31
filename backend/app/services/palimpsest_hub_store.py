@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import hmac
 import logging
@@ -37,17 +38,34 @@ _logger = logging.getLogger(__name__)
 # squashfs 레이어 blob 의 mediaType. OCI image manifest 의 layers[] 에 실린다.
 MEDIA_TYPE_LAYER_SQUASHFS = "application/vnd.afterglow.palimpsest.layer.squashfs.v1"
 MEDIA_TYPE_LAYER_CONFIG = "application/vnd.afterglow.palimpsest.layer.config.v1+json"
-# 베이스 cloud image(qcow2/raw). 레이어가 아니라 스택의 출발점이다 — 로컬 빌드 환경이
-# 여기서 VM 을 띄우고 그 위에 레이어를 만든다.
-MEDIA_TYPE_IMAGE_QCOW2 = "application/vnd.afterglow.palimpsest.image.qcow2.v1"
 MEDIA_TYPE_IMAGE_RAW = "application/vnd.afterglow.palimpsest.image.raw.v1"
+MEDIA_TYPE_IMAGE_QCOW2 = "application/vnd.afterglow.palimpsest.image.qcow2.v1"
+MEDIA_TYPE_IMAGE_VMDK = "application/vnd.afterglow.palimpsest.image.vmdk.v1"
+MEDIA_TYPE_IMAGE_VDI = "application/vnd.afterglow.palimpsest.image.vdi.v1"
+MEDIA_TYPE_IMAGE_VHD = "application/vnd.afterglow.palimpsest.image.vhd.v1"
+MEDIA_TYPE_IMAGE_VHDX = "application/vnd.afterglow.palimpsest.image.vhdx.v1"
+
+
+@dataclass(frozen=True)
+class ImageFormatSpec:
+    """Public export format mapped to qemu-img and artifact metadata."""
+
+    media_type: str
+    qemu_driver: str
+    extension: str
+
 
 # kind='cloud-image' 는 레이어와 같은 blob store·업로드 세션을 쓰되 parent/chain 이 없다.
 KIND_CLOUD_IMAGE = "cloud-image"
-DISK_FORMAT_MEDIA_TYPES = {
-    "qcow2": MEDIA_TYPE_IMAGE_QCOW2,
-    "raw": MEDIA_TYPE_IMAGE_RAW,
+IMAGE_FORMAT_SPECS = {
+    "raw": ImageFormatSpec(MEDIA_TYPE_IMAGE_RAW, "raw", "raw"),
+    "qcow2": ImageFormatSpec(MEDIA_TYPE_IMAGE_QCOW2, "qcow2", "qcow2"),
+    "vmdk": ImageFormatSpec(MEDIA_TYPE_IMAGE_VMDK, "vmdk", "vmdk"),
+    "vdi": ImageFormatSpec(MEDIA_TYPE_IMAGE_VDI, "vdi", "vdi"),
+    "vhd": ImageFormatSpec(MEDIA_TYPE_IMAGE_VHD, "vpc", "vhd"),
+    "vhdx": ImageFormatSpec(MEDIA_TYPE_IMAGE_VHDX, "vhdx", "vhdx"),
 }
+DISK_FORMAT_MEDIA_TYPES = {name: spec.media_type for name, spec in IMAGE_FORMAT_SPECS.items()}
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -99,6 +117,34 @@ class LocalPathBlobStore:
     def uploads_dir(self) -> Path:
         return self.root / "uploads"
 
+    @property
+    def exports_dir(self) -> Path:
+        return self.root / "exports"
+
+    @property
+    def locks_dir(self) -> Path:
+        return self.root / "locks"
+
+    def acquire_blob_lock(self, digest: str) -> int:
+        """Acquire a cross-process exclusive lock for one validated blob digest."""
+        hex_part = _digest_hex(digest)
+        self.locks_dir.mkdir(parents=True, exist_ok=True)
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.locks_dir / f"{hex_part}.lock", flags, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except Exception:
+            os.close(fd)
+            raise
+        return fd
+
+    @staticmethod
+    def release_blob_lock(fd: int) -> None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
     def blob_path(self, digest: str) -> Path:
         return self.blobs_dir / _digest_hex(digest)
 
@@ -109,14 +155,18 @@ class LocalPathBlobStore:
 
     # ── 조회 ────────────────────────────────────────────────────────────
     def exists(self, digest: str) -> bool:
-        return self.blob_path(digest).is_file()
+        path = self.blob_path(digest)
+        return path.is_file() and not path.is_symlink()
 
     def size(self, digest: str) -> int:
-        return self.blob_path(digest).stat().st_size
+        path = self.blob_path(digest)
+        if not path.is_file() or path.is_symlink():
+            raise HubStoreError(f"blob 이 없습니다: {digest}")
+        return path.stat().st_size
 
     def open_read(self, digest: str) -> BinaryIO:
         path = self.blob_path(digest)
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink():
             raise HubStoreError(f"blob 이 없습니다: {digest}")
         return path.open("rb")
 
@@ -141,23 +191,21 @@ class LocalPathBlobStore:
     def start_upload(self, session_id: str) -> None:
         path = self.upload_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
+        with path.open("xb"):
+            pass
 
     def append_upload(self, session_id: str, chunk: bytes) -> int:
         path = self.upload_path(session_id)
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink():
             raise HubStoreError("업로드 세션을 찾을 수 없습니다")
         with path.open("ab") as handle:
             handle.write(chunk)
         return path.stat().st_size
 
     def finalize_upload(self, session_id: str, declared_digest: str | None) -> FinalizedBlob:
-        """수신 바이트의 digest 를 **재계산**해 검증하고 blob 으로 승격한다.
-
-        선언된 digest 를 신뢰하지 않는다. 불일치면 임시 파일을 지우고 거부한다(fail-closed).
-        """
+        """Recompute and verify the digest before atomically promoting an upload."""
         path = self.upload_path(session_id)
-        if not path.is_file():
+        if not path.is_file() or path.is_symlink():
             raise HubStoreError("업로드 세션을 찾을 수 없습니다")
 
         sha = hashlib.sha256()
@@ -178,8 +226,9 @@ class LocalPathBlobStore:
 
         target = self.blob_path(actual)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.is_file():
-            # 이미 있는 콘텐츠 — content-addressable 이므로 동일 파일이다. 임시본만 정리.
+        if target.exists() or target.is_symlink():
+            if not self.exists(actual):
+                raise HubStoreError("blob 대상 경로가 일반 파일이 아닙니다")
             path.unlink(missing_ok=True)
         else:
             os.replace(path, target)
@@ -201,8 +250,52 @@ class LocalPathBlobStore:
         actual = f"sha256:{sha.hexdigest()}"
         target = self.blob_path(actual)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.is_file():
+        if target.exists() or target.is_symlink():
+            if not self.exists(actual):
+                raise HubStoreError("blob 대상 경로가 일반 파일이 아닙니다")
+        else:
             shutil.copyfile(source, target)
+        return FinalizedBlob(blob_digest=actual, blob_md5=md5.hexdigest(), size_bytes=size)
+
+    def promote_file(self, source: Path, *, max_bytes: int) -> FinalizedBlob:
+        """Atomically promote a bounded regular scratch file into the blob store."""
+        root = self.root.resolve()
+        resolved = source.resolve()
+        if source.is_symlink() or not resolved.is_relative_to(root) or not resolved.is_file():
+            raise HubStoreError("승격할 파일은 허브 루트 안의 일반 파일이어야 합니다")
+
+        initial_size = resolved.stat().st_size
+        if initial_size > max_bytes:
+            raise HubStoreError("승격할 파일이 허용 크기를 초과합니다")
+
+        sha = hashlib.sha256()
+        md5 = hashlib.md5()  # noqa: S324 — 보조 검색 키. 무결성 권위는 sha256
+        size = 0
+        with resolved.open("rb") as handle:
+            while chunk := handle.read(_READ_CHUNK):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HubStoreError("승격할 파일이 허용 크기를 초과합니다")
+                sha.update(chunk)
+                md5.update(chunk)
+
+        if size != initial_size or resolved.stat().st_size != initial_size:
+            raise HubStoreError("승격 중 파일 크기가 변경되었습니다")
+
+        actual = f"sha256:{sha.hexdigest()}"
+        target = self.blob_path(actual)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = self.acquire_blob_lock(actual)
+        try:
+            if target.exists() or target.is_symlink():
+                if not self.exists(actual):
+                    raise HubStoreError("blob 대상 경로가 일반 파일이 아닙니다")
+                os.utime(target, None, follow_symlinks=False)
+                resolved.unlink(missing_ok=True)
+            else:
+                os.replace(resolved, target)
+        finally:
+            self.release_blob_lock(lock_fd)
         return FinalizedBlob(blob_digest=actual, blob_md5=md5.hexdigest(), size_bytes=size)
 
     def delete(self, digest: str) -> None:

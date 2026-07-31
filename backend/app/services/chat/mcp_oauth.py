@@ -185,6 +185,49 @@ def callback_cookie_secure() -> bool:
     return urlsplit(_callback_url()).scheme.lower() == "https"
 
 
+def _normalize_origin(value: object, *, require_bare_path: bool = False) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    if (
+        not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or (require_bare_path and parsed.path not in {"", "/"})
+        or (scheme != "https" and not is_development_loopback_http_url(value))
+    ):
+        return None
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    if port is not None and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+def approved_return_origin(value: object) -> str | None:
+    """Return a configured browser origin only when it is explicitly allowlisted."""
+    origin = _normalize_origin(value, require_bare_path=True)
+    if origin is None:
+        return None
+    settings = get_settings()
+    configured_origins = (
+        *settings.cors_origin_list,
+        settings.frontend_base_url,
+        settings.public_api_base,
+    )
+    allowed = {
+        normalized for configured in configured_origins if (normalized := _normalize_origin(configured)) is not None
+    }
+    return origin if origin in allowed else None
+
+
 async def _json_response(response: httpx.Response, *, operation: str) -> dict[str, Any]:
     if response.status_code < 200 or response.status_code >= 300:
         raise McpOAuthError(f"OAuth {operation} failed ({response.status_code})")
@@ -380,7 +423,9 @@ async def detect(server_id: int, *, user_id: str, project_id: str) -> dict[str, 
         raise ChatStorageUnavailable("chat DB 오류") from exc
 
 
-async def begin(server_id: int, *, user_id: str, project_id: str, initiator_nonce: str) -> dict[str, str]:
+async def begin(
+    server_id: int, *, user_id: str, project_id: str, initiator_nonce: str, return_origin: str | None = None
+) -> dict[str, str]:
     """Create an OAuth authorization request bound to one user, project, server, and browser."""
     if not isinstance(initiator_nonce, str) or len(initiator_nonce) < 32:
         raise McpOAuthError("OAuth initiator binding is invalid")
@@ -402,6 +447,7 @@ async def begin(server_id: int, *, user_id: str, project_id: str, initiator_nonc
         if client is None:
             client = await _register_client(metadata, callback_url)
         verifier = _pkce_verifier()
+        approved_origin = approved_return_origin(return_origin)
         state = secrets.token_urlsafe(32)
         request_payload = {
             **metadata,
@@ -409,6 +455,7 @@ async def begin(server_id: int, *, user_id: str, project_id: str, initiator_nonc
             "code_verifier": verifier,
             "callback_url": callback_url,
             "initiator_nonce_hash": _hash(initiator_nonce),
+            "return_origin": approved_origin,
             "scopes": scopes,
         }
         async with factory() as session, session.begin():
@@ -473,7 +520,7 @@ async def _set_request_status(state_hash: str, status: str) -> None:
 
 async def complete(
     *, state: str, code: str | None, error: str | None, iss: str | None, initiator_nonce: str | None
-) -> int:
+) -> tuple[int, str | None]:
     """Consume a callback once, exchange its code, and save an encrypted connection."""
     if not state or len(state) > 512:
         raise McpOAuthError("OAuth callback state is invalid")
@@ -482,6 +529,7 @@ async def complete(
     if factory is None:
         raise ChatStorageUnavailable("chat DB 오류")
     processing = False
+    return_origin: str | None = None
     try:
         async with factory() as session, session.begin():
             request = (
@@ -503,6 +551,7 @@ async def complete(
             callback_rejected = False
             try:
                 _verify_initiator_nonce(payload, initiator_nonce)
+                return_origin = approved_return_origin(payload.get("return_origin"))
                 if not _callback_issuer_matches(payload.get("issuer"), iss):
                     raise McpOAuthError("OAuth callback issuer does not match the authorization request")
             except McpOAuthError:
@@ -603,10 +652,12 @@ async def complete(
                 request.completed_at = _now()
         if server_config_changed:
             raise McpOAuthError("MCP server configuration changed; start OAuth again")
-        return server_id
-    except McpOAuthError:
+        return server_id, return_origin
+    except McpOAuthError as exc:
         if processing:
             await _set_request_status(state_hash, "failed")
+        if return_origin is not None:
+            exc.return_origin = return_origin
         raise
     except (ChatStorageUnavailable, ExtensionSecretUnavailable):
         raise

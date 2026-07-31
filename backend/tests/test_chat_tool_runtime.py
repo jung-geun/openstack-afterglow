@@ -9,6 +9,8 @@ import json
 
 from app.services.chat import conversation_store as cs
 from app.services.chat import ssrf, tool_runtime
+from app.services.chat.agent_protocol import ToolBinding, ToolDefinition
+from app.services.chat.agent_protocol import ToolExecutionResult as V2ToolExecutionResult
 from app.services.chat.tools import ToolContext
 
 _CTX = ToolContext(project_id="p1", user_id="u1")
@@ -423,3 +425,246 @@ class TestMcpTools:
         monkeypatch.setattr(oauth, "headers_for_user", connected_headers)
         servers = await tool_runtime._load_mcp(_CTX)
         assert servers[0]["headers"]["Authorization"] == "Bearer user-oauth-token"
+
+
+class TestDeferredToolBinding:
+    async def test_catalog_binds_at_most_requested_on_demand_schemas(self, monkeypatch):
+        tools = [
+            {
+                "id": identifier,
+                "name": f"weather_{identifier}",
+                "description": "Retrieve weather forecasts.",
+                "method": "GET",
+                "url": f"https://api{identifier}.example/weather",
+                "params_schema": {"type": "object", "properties": {}},
+                "effect": "read",
+                "config_version": 1,
+                "load_policy": "on_demand",
+            }
+            for identifier in range(10)
+        ]
+
+        async def fake_custom(_ctx):
+            return tools
+
+        async def fake_mcp(_ctx):
+            return []
+
+        monkeypatch.setattr(tool_runtime, "_load_custom", fake_custom)
+        monkeypatch.setattr(tool_runtime, "_load_mcp", fake_mcp)
+        ctx = ToolContext(
+            project_id="p1",
+            user_id="u1",
+            binding_session=tool_runtime.ToolBindingSession(),
+        )
+
+        initial = await tool_runtime.context_tool_schemas(ctx)
+        initial_names = {schema["function"]["name"] for schema in initial}
+        assert "list_available_tools" in initial_names
+        assert not any(name.startswith("custom__") for name in initial_names)
+
+        result = await tool_runtime.context_execute_result(
+            "list_available_tools",
+            {"query": "weather", "max_results": 3, "category": "커스텀"},
+            ctx,
+        )
+        loaded = json.loads(result.content)
+        assert len(loaded["tools"]) == 3
+        assert all(len(item["description"]) <= 280 for item in loaded["tools"])
+
+        loaded_names = {schema["function"]["name"] for schema in await tool_runtime.context_tool_schemas(ctx)}
+        assert set(loaded["loaded_tools"]) <= loaded_names
+
+    async def test_catalog_loads_safe_mcp_schema_for_natural_language_mcp_query(self, monkeypatch):
+        async def no_custom(_ctx):
+            return []
+
+        async def mcp_server(_ctx):
+            return [
+                {
+                    "id": 7,
+                    "name": "Notion",
+                    "url": "https://mcp.example.test",
+                    "effect_overrides": {},
+                    "config_version": 1,
+                    "load_policy": "on_demand",
+                }
+            ]
+
+        async def discovered_tools(_server):
+            return [
+                {
+                    "name": "notion-search",
+                    "description": "Search the connected Notion workspace.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "filter": {
+                                "type": "object",
+                                "properties": {"query": {"type": "string"}},
+                                "additionalProperties": {},
+                            }
+                        },
+                        "additionalProperties": {},
+                    },
+                },
+                {
+                    "name": "notion-update-properties",
+                    "description": "Update a page with dynamic property names.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "properties": {"type": "object", "additionalProperties": {}},
+                        },
+                    },
+                },
+            ]
+
+        monkeypatch.setattr(tool_runtime, "_load_custom", no_custom)
+        monkeypatch.setattr(tool_runtime, "_load_mcp", mcp_server)
+        monkeypatch.setattr(tool_runtime.mcp_client, "list_tools", discovered_tools)
+        ctx = ToolContext(
+            project_id="p1",
+            user_id="u1",
+            binding_session=tool_runtime.ToolBindingSession(),
+        )
+
+        result = await tool_runtime.context_execute_result(
+            "list_available_tools",
+            {"query": "현재 연결되어 사용 가능한 MCP 서버와 MCP 도구 목록"},
+            ctx,
+        )
+        loaded = json.loads(result.content)
+
+        assert len(loaded["loaded_tools"]) == 1
+        assert loaded["loaded_tools"][0].startswith("mcp__7__notion_search")
+
+    async def test_bound_extension_is_revalidated_before_dispatch(self, monkeypatch):
+        import app.services.chat.extensions_store as es
+
+        original = {
+            "id": 1,
+            "name": "weather",
+            "description": "Retrieve weather forecasts.",
+            "method": "GET",
+            "url": "https://api.example/weather",
+            "params_schema": {"type": "object", "properties": {}},
+            "effect": "read",
+            "config_version": 1,
+            "load_policy": "on_demand",
+        }
+        current = dict(original)
+
+        async def fake_custom(context):
+            return tool_runtime._frozen_selection([current], context, "tool")
+
+        async def fake_mcp(_ctx):
+            return []
+
+        async def unexpected_network(*_args, **_kwargs):
+            raise AssertionError("changed extension must not dispatch")
+
+        monkeypatch.setattr(tool_runtime, "_load_custom", fake_custom)
+        monkeypatch.setattr(tool_runtime, "_load_mcp", fake_mcp)
+        monkeypatch.setattr(tool_runtime, "_execute_custom_http_tool", unexpected_network)
+        ctx = ToolContext(
+            project_id="p1",
+            user_id="u1",
+            selected_tool_ids=(1,),
+            expected_extension_fingerprints=(("tool", 1, es.selection_fingerprint(original)),),
+            binding_session=tool_runtime.ToolBindingSession(),
+        )
+        bindings = await tool_runtime.v2_tool_bindings(
+            ctx,
+            extension_load_policy="on_demand",
+            include_platform=False,
+        )
+        binding = next(iter(bindings.values()))
+        current["config_version"] = 2
+
+        result = await binding.execute({}, ctx)
+
+        assert result.error_code == "extension_unavailable"
+
+    async def test_v1_catalog_cannot_load_or_dispatch_managed_mutation(self, monkeypatch):
+        mutation_name = "managed_delete_cloud_instance"
+        executed = False
+        include_managed_requests: list[bool] = []
+
+        async def execute_mutation(_args, _context):
+            nonlocal executed
+            executed = True
+            return V2ToolExecutionResult(status="completed", model_content="mutation dispatched")
+
+        mutation_binding = ToolBinding(
+            definition=ToolDefinition(
+                name=mutation_name,
+                description="Delete a cloud instance.",
+                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                effect="external_mutation",
+                source="managed",
+                activity_category="클라우드 제어",
+            ),
+            execute=execute_mutation,
+        )
+
+        async def fake_v2_bindings(
+            _ctx,
+            *,
+            extension_load_policy=None,
+            include_platform=True,
+            include_managed=False,
+        ):
+            include_managed_requests.append(include_managed)
+            if extension_load_policy == "on_demand" and include_managed:
+                return {mutation_name: mutation_binding}
+            return {}
+
+        monkeypatch.setattr(tool_runtime, "v2_tool_bindings", fake_v2_bindings)
+        ctx = ToolContext(
+            project_id="p1",
+            user_id="u1",
+            binding_session=tool_runtime.ToolBindingSession(),
+        )
+
+        catalog_result = await tool_runtime.context_execute_result(
+            "list_available_tools",
+            {"query": "delete cloud"},
+            ctx,
+        )
+        loaded = json.loads(catalog_result.content)
+        schema_names = {schema["function"]["name"] for schema in await tool_runtime.context_tool_schemas(ctx)}
+        dispatch_result = await tool_runtime.context_execute_result(mutation_name, {}, ctx)
+
+        assert loaded["loaded_tools"] == []
+        assert mutation_name not in schema_names
+        assert dispatch_result.content == f"알 수 없는 툴입니다: {mutation_name}"
+        assert executed is False
+        assert include_managed_requests and not any(include_managed_requests)
+
+    async def test_v1_deferred_replay_rejects_managed_mutation(self, monkeypatch):
+        mutation_name = "managed_delete_cloud_instance"
+
+        async def fake_v2_bindings(_ctx, *, include_managed=False, **_kwargs):
+            return {mutation_name: object()} if include_managed else {}
+
+        monkeypatch.setattr(tool_runtime, "v2_tool_bindings", fake_v2_bindings)
+        ctx = ToolContext(
+            project_id="p1",
+            user_id="u1",
+            binding_session=tool_runtime.ToolBindingSession(),
+        )
+
+        try:
+            await tool_runtime.restore_v2_deferred_bindings(
+                ctx,
+                ctx.binding_session.legacy_bindings,
+                [mutation_name],
+                include_managed=False,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "a previously loaded tool is no longer eligible for this run"
+        else:
+            raise AssertionError("v1 replay must not restore managed mutation bindings")
+
+        assert mutation_name not in ctx.binding_session.legacy_bindings

@@ -44,6 +44,7 @@ class ToolDefinition(_StrictModel):
     effect: Literal["read", "workspace_write", "process", "external_mutation"]
     parallel_safe: bool = False
     source: Literal["builtin", "managed", "custom_http", "mcp", "workspace", "agent"]
+    activity_category: str = Field(default="기본 도구", min_length=1, max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -71,6 +72,7 @@ class ToolBinding:
     preview: Callable[[dict[str, Any], object], Awaitable[dict[str, Any]]] | None = None
     config_fingerprint: str | None = None
     destination_origin: str | None = None
+    load_policy: Literal["preloaded", "on_demand"] | None = None
 
 
 class ToolArtifactRef(_StrictModel):

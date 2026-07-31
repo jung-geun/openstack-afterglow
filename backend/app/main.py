@@ -171,10 +171,17 @@ from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
+from app.api.mcp import auth_router as mcp_oauth_router
+from app.api.mcp import root_router as mcp_root_router
 from app.api.mcp import router as mcp_router
 from app.api.union.layer_ops import router as admin_libraries_router
 from app.api.union.layer_public import router as squashfs_libraries_router
-from app.services.mcp_control_plane.transport import install_mcp_route, start_mcp_transport, stop_mcp_transport
+from app.services.mcp_control_plane.transport import (
+    install_mcp_route,
+    mcp_paths,
+    start_mcp_transport,
+    stop_mcp_transport,
+)
 
 _mark("api.identity")
 
@@ -421,7 +428,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     return response
@@ -451,13 +458,9 @@ async def request_logging_middleware(request: Request, call_next):
 _CORS_ALLOW_HEADERS = "Content-Type, X-Project-Id, Authorization, Idempotency-Key, Last-Event-ID"
 _CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
 
-_MCP_OAUTH_NO_CORS_PATHS = {
-    "/api/v1/mcp/oauth/register",
-    "/api/v1/mcp/oauth/authorize",
-    "/api/v1/mcp/oauth/token",
-    "/api/v1/mcp/oauth/revoke",
-    "/api/v1/mcp",
-}
+
+def _is_mcp_no_cors_path(path: str) -> bool:
+    return any(path == resource_path or path.startswith(f"{resource_path}/oauth/") for resource_path in mcp_paths())
 
 
 def _get_allowed_origins() -> set[str]:
@@ -469,7 +472,7 @@ def _get_allowed_origins() -> set[str]:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
-    if request.url.path in _MCP_OAUTH_NO_CORS_PATHS:
+    if _is_mcp_no_cors_path(request.url.path):
         return await call_next(request)
     if request.method == "OPTIONS":
         if origin not in _get_allowed_origins():
@@ -546,7 +549,9 @@ async def activity_audit_middleware(request: Request, call_next):
 # Identity
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(mcp_access_router, prefix="/api/v1/auth", tags=["mcp-access"])
-app.include_router(mcp_router, tags=["mcp"])
+app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+app.include_router(mcp_root_router, tags=["mcp"])
+app.include_router(mcp_oauth_router, prefix="/api/v1/auth", tags=["mcp-oauth"])
 # OIDC/OAuth API routes follow the project-wide /api/v1 mount rule.
 app.include_router(gitlab_auth_router, prefix="/api/v1/auth", tags=["auth-oidc"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)

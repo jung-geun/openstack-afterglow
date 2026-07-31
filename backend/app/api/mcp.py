@@ -33,6 +33,8 @@ from app.services.mcp_control_plane.oauth_authority import (
 )
 
 router = APIRouter()
+root_router = APIRouter()
+auth_router = APIRouter()
 
 _OAUTH_NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 _MAX_PUBLIC_BODY = 64 * 1024
@@ -68,6 +70,14 @@ def _matches_metadata_path(path: str, url: str) -> bool:
 def _require_public_mcp_path(path: str) -> None:
     if not _matches_metadata_path(path, _urls().resource):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+
+def _oauth_authorization_error(detail: str) -> JSONResponse:
+    return JSONResponse(
+        {"error": "invalid_client", "error_description": detail},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={**_OAUTH_NO_STORE, "WWW-Authenticate": 'Basic realm="MCP OAuth"'},
+    )
 
 
 def _oauth_error(detail: str, *, error: str = "invalid_request", status_code: int = 400) -> JSONResponse:
@@ -135,7 +145,7 @@ def _redirect_with_code(result) -> str:
     return f"{result.redirect_uri}{separator}{urlencode(pairs)}"
 
 
-@router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
+@root_router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
 async def oauth_protected_resource_metadata(resource_path: str):
     _require_enabled()
     urls = _urls()
@@ -151,7 +161,7 @@ async def oauth_protected_resource_metadata(resource_path: str):
     )
 
 
-@router.get("/.well-known/oauth-authorization-server/{issuer_path:path}")
+@root_router.get("/.well-known/oauth-authorization-server/{issuer_path:path}")
 async def oauth_authorization_server_metadata(issuer_path: str):
     _require_enabled()
     urls = _urls()
@@ -174,7 +184,7 @@ async def oauth_authorization_server_metadata(issuer_path: str):
     )
 
 
-@router.post("/api/v1/mcp/oauth/register")
+@router.post("/oauth/register")
 @limiter.limit("10/minute")
 async def oauth_register(request: Request):
     _require_enabled()
@@ -198,13 +208,13 @@ async def oauth_register(request: Request):
     )
 
 
-@router.post("/{mcp_path:path}/oauth/register")
+@root_router.post("/{mcp_path:path}/oauth/register")
 async def oauth_register_alias(mcp_path: str, request: Request):
     _require_public_mcp_path(mcp_path)
     return await oauth_register(request)
 
 
-@router.get("/api/v1/mcp/oauth/authorize")
+@router.get("/oauth/authorize")
 @limiter.limit("10/minute")
 async def oauth_authorize(request: Request):
     _require_enabled()
@@ -230,20 +240,22 @@ async def oauth_authorize(request: Request):
     return RedirectResponse(location, status_code=status.HTTP_303_SEE_OTHER, headers=_OAUTH_NO_STORE)
 
 
-@router.get("/{mcp_path:path}/oauth/authorize")
+@root_router.get("/{mcp_path:path}/oauth/authorize")
 async def oauth_authorize_alias(mcp_path: str, request: Request):
     _require_public_mcp_path(mcp_path)
     return await oauth_authorize(request)
 
 
-@router.post("/api/v1/mcp/oauth/token")
+@router.post("/oauth/token")
 @limiter.limit("30/minute")
 async def oauth_token(request: Request):
     _require_enabled()
     try:
         form = await _public_form(request)
+        if request.headers.get("authorization"):
+            return _oauth_authorization_error("public clients must not use HTTP Authorization")
         if "client_secret" in form:
-            raise McpOAuthAuthorityError("public clients must not send client_secret")
+            return _oauth_error("public clients must not send client_secret", error="invalid_client")
         grant_type = form.get("grant_type")
         if grant_type == "authorization_code":
             result = await exchange_authorization_code(
@@ -281,20 +293,22 @@ async def oauth_token(request: Request):
     )
 
 
-@router.post("/{mcp_path:path}/oauth/token")
+@root_router.post("/{mcp_path:path}/oauth/token")
 async def oauth_token_alias(mcp_path: str, request: Request):
     _require_public_mcp_path(mcp_path)
     return await oauth_token(request)
 
 
-@router.post("/api/v1/mcp/oauth/revoke", status_code=status.HTTP_200_OK)
+@router.post("/oauth/revoke", status_code=status.HTTP_200_OK)
 @limiter.limit("30/minute")
 async def oauth_revoke(request: Request):
     _require_enabled()
     try:
         form = await _public_form(request)
+        if request.headers.get("authorization"):
+            return _oauth_authorization_error("public clients must not use HTTP Authorization")
         if "client_secret" in form:
-            raise McpOAuthAuthorityError("public clients must not send client_secret")
+            return _oauth_error("public clients must not send client_secret", error="invalid_client")
         await revoke_oauth_token(_session_factory(), token=form.get("token", ""))
     except HTTPException:
         raise
@@ -303,13 +317,13 @@ async def oauth_revoke(request: Request):
     return Response(status_code=status.HTTP_200_OK, headers=_OAUTH_NO_STORE)
 
 
-@router.post("/{mcp_path:path}/oauth/revoke", status_code=status.HTTP_200_OK)
+@root_router.post("/{mcp_path:path}/oauth/revoke", status_code=status.HTTP_200_OK)
 async def oauth_revoke_alias(mcp_path: str, request: Request):
     _require_public_mcp_path(mcp_path)
     return await oauth_revoke(request)
 
 
-@router.get("/api/v1/auth/mcp-oauth/consents/{ticket}")
+@auth_router.get("/mcp-oauth/consents/{ticket}")
 async def get_oauth_consent(ticket: str, token_info: dict = Depends(get_token_info)):
     _require_enabled()
     try:
@@ -333,7 +347,7 @@ async def get_oauth_consent(ticket: str, token_info: dict = Depends(get_token_in
     )
 
 
-@router.post("/api/v1/auth/mcp-oauth/consents/{ticket}/approve")
+@auth_router.post("/mcp-oauth/consents/{ticket}/approve")
 async def approve_oauth_consent(
     ticket: str,
     request: Request,
@@ -357,7 +371,7 @@ async def approve_oauth_consent(
     return JSONResponse({"redirect_uri": _redirect_with_code(result)}, headers=_OAUTH_NO_STORE)
 
 
-@router.post("/api/v1/auth/mcp-oauth/consents/{ticket}/deny")
+@auth_router.post("/mcp-oauth/consents/{ticket}/deny")
 async def deny_oauth_consent(ticket: str, request: Request, token_info: dict = Depends(get_token_info)):
     _require_browser_mutation(request)
     try:
@@ -378,7 +392,7 @@ async def deny_oauth_consent(ticket: str, request: Request, token_info: dict = D
     )
 
 
-@router.options("/api/v1/mcp/oauth/{path:path}")
+@router.options("/oauth/{path:path}")
 async def oauth_options(path: str):
     _require_enabled()
     return Response(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, headers=_OAUTH_NO_STORE)

@@ -14,10 +14,29 @@ import type { MonitoringSummary } from '$lib/components/admin/monitoring/Monitor
 const NOW = '2026-07-09T00:00:00Z';
 const PROJECT_ID = 'mock-project-1';
 
+interface MockMcpAccessRecord {
+	id: string;
+	grant_id: string;
+	name: string;
+	source: 'personal_token' | 'oauth';
+	access_level: 'read' | 'manage';
+	status: 'active' | 'revoked';
+	visible_prefix: string | null;
+	issued_at: string | null;
+	expires_at: string;
+	last_used_at: string | null;
+	revoked_at: string | null;
+	is_lumen_default: boolean;
+}
+
 interface MockupState {
 	projects: Project[];
 	selectedProjectId: string;
 	tutorialStatuses: Record<string, 'completed' | 'dismissed'>;
+	mcpAccess: {
+		personalTokens: MockMcpAccessRecord[];
+		oauthGrants: MockMcpAccessRecord[];
+	};
 	instances: Instance[];
 	volumes: Volume[];
 	k3sClusters: K3sCluster[];
@@ -186,6 +205,40 @@ function seedState(): MockupState {
 		],
 		selectedProjectId: PROJECT_ID,
 		tutorialStatuses: {},
+		mcpAccess: {
+			personalTokens: [
+				{
+					id: 'mock-mcp-token-lumen',
+					grant_id: 'mock-mcp-grant-lumen',
+					name: 'Lumen',
+					source: 'personal_token',
+					access_level: 'read',
+					status: 'active',
+					visible_prefix: 'mcp_mock_lumen_',
+					issued_at: NOW,
+					expires_at: '2026-12-31T23:59:59Z',
+					last_used_at: '2026-07-08T18:30:00Z',
+					revoked_at: null,
+					is_lumen_default: true,
+				},
+			],
+			oauthGrants: [
+				{
+					id: 'mock-mcp-oauth-desktop',
+					grant_id: 'mock-mcp-oauth-grant-desktop',
+					name: 'Desktop MCP client',
+					source: 'oauth',
+					access_level: 'read',
+					status: 'active',
+					visible_prefix: null,
+					issued_at: '2026-07-06T12:00:00Z',
+					expires_at: '2026-12-31T23:59:59Z',
+					last_used_at: '2026-07-08T16:15:00Z',
+					revoked_at: null,
+					is_lumen_default: false,
+				},
+			],
+		},
 		instances,
 		volumes: [
 			{ id: 'mock-volume-1', name: 'root-disk', status: 'in-use', size: 80, volume_type: 'ceph-ssd', attachments: [{ server_id: 'mock-instance-1', device: '/dev/vda' }], bootable: true },

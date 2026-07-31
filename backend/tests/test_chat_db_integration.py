@@ -17,6 +17,7 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from threading import Barrier, Event
 from types import SimpleNamespace
 
 import pytest
@@ -30,11 +31,14 @@ from app.models.chat_db import (
     ChatUsageLog,
     LlmProvider,
     McpDelegatedGrant,
+    McpLumenSelection,
     McpOAuthAuthorizationRequest,
     McpOAuthClient,
     McpOAuthCode,
     McpOAuthToken,
     McpOAuthTokenFamily,
+    McpOwnerLock,
+    McpToolInvocation,
     UserWallet,
 )
 from app.models.chat_runs import ChatRun
@@ -423,6 +427,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
         capability_snapshot=capability_snapshot,
         pricing_snapshot=pricing_snapshot,
     )
+    streamed_text = "x" * 398 + " \n"
 
     async def fake_resolve_model(_capability_snapshot):
         return {
@@ -441,7 +446,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
             attempt=1,
             usage={"prompt_tokens": 1, "completion_tokens": 400},
             result_payload={
-                "text": "x" * 400,
+                "text": streamed_text,
                 "tool_calls": [],
                 "citations": [],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 400},
@@ -465,7 +470,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
         )
         provider_replay = await hooks.provider_started(round_index=0, attempt=1)
         assert provider_replay is not None
-        assert provider_replay["text"] == "x" * 400
+        assert provider_replay["text"] == streamed_text
         tool_replay = await hooks.tool_started(
             round_index=0,
             tool_index=0,
@@ -473,8 +478,8 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
             tool_name="list_my_conversations",
         )
         assert tool_replay == {"content": "[]", "_durable_replay": True}
-        for _ in range(400):
-            yield {"type": "token", "text": "x"}
+        for token in streamed_text:
+            yield {"type": "token", "text": token}
         yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 400}}
 
     part_delta_writes = 0
@@ -524,7 +529,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
     assert tool_segment is not None and tool_segment.status == "completed"
     assert turn is not None and turn.assistant_message_id == run.assistant_message_id
     assert turn.message_event_seq is not None
-    assert "".join(deltas) == "x" * 400
+    assert "".join(deltas) == streamed_text
     assert stages == ["queued", "model_request", "model_response", "response_writing", "finalizing"]
 
     async def failing_stream(**_kwargs):
@@ -2877,6 +2882,7 @@ async def test_message_tree_marks_failed_user_run_retryable(chat_db):
 async def test_mcp_oauth_cleanup_expires_and_reclaims_public_authority_rows(chat_db):
     factory = chat_db.get_session_factory()
     now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+    expired_grant_id = "00000000-0000-0000-0000-000000000950"
     stale_client_id = "00000000-0000-0000-0000-000000000951"
     revoked_client_id = "00000000-0000-0000-0000-000000000952"
     terminal_request_id = "00000000-0000-0000-0000-000000000953"
@@ -2885,6 +2891,26 @@ async def test_mcp_oauth_cleanup_expires_and_reclaims_public_authority_rows(chat
     async with factory() as session, session.begin():
         session.add_all(
             [
+                McpDelegatedGrant(
+                    id=expired_grant_id,
+                    owner_user_id="mcp-owner",
+                    owner_project_id="mcp-project",
+                    upstream_credential_name="afterglow-mcp-expired",
+                    display_name="Expired MCP grant",
+                    source="personal_token",
+                    access_level="read",
+                    status="active",
+                    application_credential_id="expired-upstream-credential",
+                    credential_ciphertext="opaque-ciphertext",
+                    credential_epoch=7,
+                    issued_at=now - timedelta(days=1),
+                    expires_at=now - timedelta(minutes=1),
+                ),
+                McpLumenSelection(
+                    owner_user_id="mcp-owner",
+                    owner_project_id="mcp-project",
+                    grant_id=expired_grant_id,
+                ),
                 McpOAuthClient(
                     id=stale_client_id,
                     client_id="stale-public-client",
@@ -2932,13 +2958,381 @@ async def test_mcp_oauth_cleanup_expires_and_reclaims_public_authority_rows(chat
     assert counts.deleted_clients == 1
     assert counts.expired_tickets == 1
     assert counts.deleted_authorization_requests == 1
+    assert counts.expired_grants == 1
     async with factory() as session:
         stale_client = await session.get(McpOAuthClient, stale_client_id)
         deleted_client = await session.get(McpOAuthClient, revoked_client_id)
         deleted_request = await session.get(McpOAuthAuthorizationRequest, terminal_request_id)
         expired_request = await session.get(McpOAuthAuthorizationRequest, pending_request_id)
+        expired_grant = await session.get(McpDelegatedGrant, expired_grant_id)
+        selection = await session.get(
+            McpLumenSelection,
+            {"owner_user_id": "mcp-owner", "owner_project_id": "mcp-project"},
+        )
 
     assert stale_client is not None and stale_client.revoked_at is not None
     assert deleted_client is None
     assert deleted_request is None
     assert expired_request is not None and expired_request.status == "expired"
+    assert expired_grant is not None
+    assert expired_grant.status == "expired"
+    assert expired_grant.credential_epoch == 8
+    assert expired_grant.cleanup_pending is True
+    assert expired_grant.application_credential_id == "expired-upstream-credential"
+    assert expired_grant.credential_ciphertext == "opaque-ciphertext"
+    assert selection is None
+
+
+async def test_mcp_cleanup_reconciles_confirmed_deletion_after_late_dispatch_lease(chat_db, monkeypatch):
+    """A lease that starts after Keystone deletion cannot leave stale local credentials."""
+    from app.models.activity import ActivityLog
+    from app.services.mcp_control_plane.authority import (
+        confirm_keystone_cleanup,
+        mark_expired_grants_for_cleanup,
+    )
+
+    factory = chat_db.get_session_factory()
+    now = datetime.now(UTC)
+    cleanup_grant_id = "00000000-0000-0000-0000-000000000955"
+    expiry_grant_id = "00000000-0000-0000-0000-000000000956"
+    async with factory() as session, session.begin():
+        session.add_all(
+            [
+                McpDelegatedGrant(
+                    id=cleanup_grant_id,
+                    owner_user_id="cleanup-owner",
+                    owner_project_id="cleanup-project",
+                    upstream_credential_name="afterglow-mcp-cleanup",
+                    display_name="Cleanup race",
+                    source="personal_token",
+                    access_level="read",
+                    status="revoked",
+                    application_credential_id="cleanup-credential",
+                    credential_ciphertext="opaque-ciphertext",
+                    cleanup_pending=True,
+                    expires_at=now - timedelta(days=1),
+                    revoked_at=now - timedelta(minutes=1),
+                ),
+                McpDelegatedGrant(
+                    id=expiry_grant_id,
+                    owner_user_id="expiry-owner",
+                    owner_project_id="expiry-project",
+                    upstream_credential_name="afterglow-mcp-expiry",
+                    display_name="Expiry race",
+                    source="personal_token",
+                    access_level="read",
+                    status="active",
+                    expires_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+
+    cleanup_started = Event()
+    allow_cleanup_return = Event()
+    cleanup_waits: list[bool] = []
+
+    def confirm_absent(*_args, **_kwargs):
+        cleanup_started.set()
+        completed = allow_cleanup_return.wait(timeout=2)
+        cleanup_waits.append(completed)
+        return completed
+
+    monkeypatch.setattr(
+        "app.services.mcp_control_plane.authority.delete_and_confirm_application_credential",
+        confirm_absent,
+    )
+    cleanup_task = asyncio.create_task(
+        confirm_keystone_cleanup(
+            factory,
+            conn=SimpleNamespace(
+                _afterglow_user_id="cleanup-owner",
+                _afterglow_project_id="cleanup-project",
+            ),
+            grant_id=cleanup_grant_id,
+            owner_user_id="cleanup-owner",
+            owner_project_id="cleanup-project",
+            username="cleanup-user",
+            application_credential_id="cleanup-credential",
+        )
+    )
+    try:
+        assert await asyncio.to_thread(cleanup_started.wait, 2)
+        async with factory() as session, session.begin():
+            session.add(
+                McpToolInvocation(
+                    grant_id=cleanup_grant_id,
+                    source="mcp",
+                    tool_name="afterglow_vm_delete",
+                    arguments_hash="a" * 64,
+                    registry_version="1",
+                    status="dispatch_authorized",
+                    lease_expires_at=now + timedelta(minutes=1),
+                )
+            )
+        allow_cleanup_return.set()
+        assert await cleanup_task is True
+        assert cleanup_waits == [True]
+    finally:
+        allow_cleanup_return.set()
+        if not cleanup_task.done():
+            await cleanup_task
+
+    expiry_counts = await asyncio.gather(
+        mark_expired_grants_for_cleanup(factory, now=now),
+        mark_expired_grants_for_cleanup(factory, now=now),
+    )
+    assert sorted(expiry_counts) == [0, 1]
+
+    async with factory() as session:
+        cleanup_grant = await session.get(McpDelegatedGrant, cleanup_grant_id)
+        expiry_grant = await session.get(McpDelegatedGrant, expiry_grant_id)
+        cleanup_audit = await session.scalar(
+            select(ActivityLog).where(
+                ActivityLog.resource_id == cleanup_grant_id,
+                ActivityLog.action == "mcp_grant.cleanup_confirmed",
+            )
+        )
+
+    assert cleanup_grant is not None
+    assert cleanup_grant.cleanup_pending is False
+    assert cleanup_grant.application_credential_id is None
+    assert cleanup_grant.credential_ciphertext is None
+    assert cleanup_audit is not None
+    assert cleanup_audit.extra["dispatch_lease_in_flight"] is True
+    assert expiry_grant is not None
+    assert expiry_grant.status == "expired"
+    assert expiry_grant.credential_epoch == 2
+
+
+async def test_mcp_authorize_and_revoke_serialize_before_cleanup(chat_db, monkeypatch):
+    """A dispatch that owns the owner lock blocks revocation until its lease is durable."""
+    from app.services.mcp_control_plane import authority as authority_service
+    from app.services.mcp_control_plane import ledger as ledger_service
+    from app.services.mcp_control_plane.authentication import McpPrincipal
+    from app.services.mcp_control_plane.registry import entry_by_name
+
+    factory = chat_db.get_session_factory()
+    now = datetime.now(UTC)
+    grant_id = "00000000-0000-0000-0000-000000000957"
+    principal = McpPrincipal(
+        grant_id=grant_id,
+        user_id="race-owner",
+        project_id="race-project",
+        credential_epoch=1,
+        scopes=frozenset(("mcp:read", "mcp:write")),
+        source="personal_token",
+    )
+    async with factory() as session, session.begin():
+        session.add(
+            McpDelegatedGrant(
+                id=grant_id,
+                owner_user_id=principal.user_id,
+                owner_project_id=principal.project_id,
+                upstream_credential_name="afterglow-mcp-canonical-race",
+                display_name="Canonical race",
+                source="personal_token",
+                access_level="manage",
+                status="active",
+                application_credential_id="canonical-race-credential",
+                credential_ciphertext="opaque-ciphertext",
+                expires_at=now + timedelta(days=1),
+                issued_at=now,
+            )
+        )
+
+    entry = entry_by_name("afterglow_vm_delete")
+    assert entry is not None
+    claim = await ledger_service.claim_mutation(
+        principal,
+        entry=entry,
+        arguments={"server_id": "server-a"},
+        idempotency_key="canonical-race-key",
+    )
+
+    authorization_has_lock = asyncio.Event()
+    allow_authorization = asyncio.Event()
+    revocation_lock_query_issued = asyncio.Event()
+    original_ledger_lock = ledger_service.lock_owner
+
+    async def hold_authorization_lock(session, *, owner_user_id, owner_project_id):
+        row = await original_ledger_lock(
+            session,
+            owner_user_id=owner_user_id,
+            owner_project_id=owner_project_id,
+        )
+        authorization_has_lock.set()
+        await allow_authorization.wait()
+        return row
+
+    async def wait_for_revocation_lock(session, *, owner_user_id, owner_project_id):
+        statement = (
+            authority_service.select(McpOwnerLock)
+            .where(
+                McpOwnerLock.owner_user_id == owner_user_id,
+                McpOwnerLock.owner_project_id == owner_project_id,
+            )
+            .with_for_update()
+        )
+        revocation_lock_query_issued.set()
+        row = await session.scalar(statement)
+        if row is None:
+            raise authority_service.McpAuthorityError("MCP owner lock is unavailable")
+        return row
+
+    monkeypatch.setattr(ledger_service, "lock_owner", hold_authorization_lock)
+    monkeypatch.setattr(authority_service, "lock_owner", wait_for_revocation_lock)
+
+    authorization_task = asyncio.create_task(
+        ledger_service.authorize_mutation_dispatch(principal, invocation_id=claim.invocation_id)
+    )
+    await asyncio.wait_for(authorization_has_lock.wait(), timeout=2)
+    revocation_task = asyncio.create_task(
+        authority_service.revoke_grant(
+            factory,
+            grant_id=grant_id,
+            owner_user_id=principal.user_id,
+            owner_project_id=principal.project_id,
+            username="race-user",
+        )
+    )
+    await asyncio.wait_for(revocation_lock_query_issued.wait(), timeout=2)
+    assert not revocation_task.done()
+    allow_authorization.set()
+    assert await authorization_task is None
+    assert await revocation_task == ("canonical-race-credential", False)
+
+    monkeypatch.setattr(
+        authority_service,
+        "delete_and_confirm_application_credential",
+        lambda *_args, **_kwargs: True,
+    )
+    cleanup_confirmed = await authority_service.confirm_keystone_cleanup(
+        factory,
+        conn=SimpleNamespace(
+            _afterglow_user_id=principal.user_id,
+            _afterglow_project_id=principal.project_id,
+        ),
+        grant_id=grant_id,
+        owner_user_id=principal.user_id,
+        owner_project_id=principal.project_id,
+        username="race-user",
+        application_credential_id="canonical-race-credential",
+    )
+
+    async with factory() as session:
+        grant = await session.get(McpDelegatedGrant, grant_id)
+        invocation = await session.get(McpToolInvocation, claim.invocation_id)
+
+    assert cleanup_confirmed is False
+    assert grant is not None
+    assert grant.status == "revoked"
+    assert grant.credential_epoch == 2
+    assert grant.application_credential_id == "canonical-race-credential"
+    assert grant.credential_ciphertext == "opaque-ciphertext"
+    assert invocation is not None and invocation.status == "dispatch_authorized"
+
+
+async def test_mcp_concurrent_cleanup_confirmation_is_idempotent(chat_db, monkeypatch):
+    """Two confirmed external cleanups reconcile the same revoked grant once."""
+    from app.services.mcp_control_plane.authority import confirm_keystone_cleanup
+
+    factory = chat_db.get_session_factory()
+    now = datetime.now(UTC)
+    grant_id = "00000000-0000-0000-0000-000000000958"
+    async with factory() as session, session.begin():
+        session.add(
+            McpDelegatedGrant(
+                id=grant_id,
+                owner_user_id="idempotent-owner",
+                owner_project_id="idempotent-project",
+                upstream_credential_name="afterglow-mcp-idempotent",
+                display_name="Idempotent cleanup",
+                source="personal_token",
+                access_level="read",
+                status="revoked",
+                application_credential_id="idempotent-credential",
+                credential_ciphertext="opaque-ciphertext",
+                cleanup_pending=True,
+                expires_at=now - timedelta(days=1),
+                revoked_at=now - timedelta(minutes=1),
+            )
+        )
+
+    external_barrier = Barrier(2, timeout=10)
+    confirmations: list[str] = []
+
+    def confirm_absent(*_args, **_kwargs):
+        external_barrier.wait()
+        confirmations.append("confirmed")
+        return True
+
+    monkeypatch.setattr(
+        "app.services.mcp_control_plane.authority.delete_and_confirm_application_credential",
+        confirm_absent,
+    )
+    conn = SimpleNamespace(
+        _afterglow_user_id="idempotent-owner",
+        _afterglow_project_id="idempotent-project",
+    )
+    results = await asyncio.gather(
+        confirm_keystone_cleanup(
+            factory,
+            conn=conn,
+            grant_id=grant_id,
+            owner_user_id="idempotent-owner",
+            owner_project_id="idempotent-project",
+            username="idempotent-user",
+            application_credential_id="idempotent-credential",
+        ),
+        confirm_keystone_cleanup(
+            factory,
+            conn=conn,
+            grant_id=grant_id,
+            owner_user_id="idempotent-owner",
+            owner_project_id="idempotent-project",
+            username="idempotent-user",
+            application_credential_id="idempotent-credential",
+        ),
+    )
+
+    async with factory() as session:
+        grant = await session.get(McpDelegatedGrant, grant_id)
+
+    assert results == [True, True]
+    assert confirmations == ["confirmed", "confirmed"]
+    assert grant is not None
+    assert grant.cleanup_pending is False
+    assert grant.application_credential_id is None
+    assert grant.credential_ciphertext is None
+
+
+async def test_mcp_concurrent_owner_lock_bootstrap_is_atomic(chat_db):
+    """Concurrent first access creates one owner serialization row without deadlock."""
+    from app.services.mcp_control_plane.authority import lock_owner
+
+    factory = chat_db.get_session_factory()
+    barrier = asyncio.Barrier(2)
+
+    async def acquire_owner_lock():
+        await barrier.wait()
+        async with factory() as session, session.begin():
+            row = await lock_owner(
+                session,
+                owner_user_id="bootstrap-owner",
+                owner_project_id="bootstrap-project",
+            )
+            return row.lumen_selection_generation
+
+    generations = await asyncio.gather(acquire_owner_lock(), acquire_owner_lock())
+    async with factory() as session:
+        rows = (
+            await session.scalars(
+                select(McpOwnerLock).where(
+                    McpOwnerLock.owner_user_id == "bootstrap-owner",
+                    McpOwnerLock.owner_project_id == "bootstrap-project",
+                )
+            )
+        ).all()
+
+    assert generations == [0, 0]
+    assert len(rows) == 1

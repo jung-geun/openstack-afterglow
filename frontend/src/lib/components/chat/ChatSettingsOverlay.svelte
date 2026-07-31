@@ -3,7 +3,6 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
-	import { theme, type ThemePreference } from '$lib/stores/theme';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ChatExtensionsManager from './ChatExtensionsManager.svelte';
@@ -12,18 +11,22 @@
 	import type { ChatUsage } from '$lib/api/chatTree';
 	import type { Memory } from '$lib/api/chatWorkspaces';
 
+	type Section = 'usage' | 'apikeys' | 'memory' | 'mcp' | 'tools' | 'skills';
+
 	interface Props {
 		open: boolean;
 		onClose: () => void;
 		usage: ChatUsage | null;
+		initialSection?: Section;
 	}
-	let { open, onClose, usage }: Props = $props();
+	let { open, onClose, usage, initialSection = 'usage' }: Props = $props();
+	let section = $state<Section>('usage');
 
-	type Section = 'general' | 'usage' | 'apikeys' | 'memory' | 'mcp' | 'tools' | 'skills';
-	let section = $state<Section>('general');
+	$effect(() => {
+		if (open) section = initialSection;
+	});
 
 	const sections: { key: Section; label: string }[] = [
-		{ key: 'general', label: '일반' },
 		{ key: 'usage', label: '사용량' },
 		{ key: 'apikeys', label: 'API 키' },
 		{ key: 'memory', label: '메모리' },
@@ -32,11 +35,6 @@
 		{ key: 'skills', label: '스킬' }
 	];
 
-	const themeOptions: { key: ThemePreference; label: string }[] = [
-		{ key: 'light', label: '라이트' },
-		{ key: 'dark', label: '다크' },
-		{ key: 'system', label: '시스템' }
-	];
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -172,25 +170,7 @@
 			</nav>
 
 			<div class="content">
-				{#if section === 'general'}
-					<section class="sec">
-						<h3 class="sec-title">테마</h3>
-						<p class="sec-desc">인터페이스 색상 모드를 선택합니다.</p>
-						<div class="theme-row">
-							{#each themeOptions as opt (opt.key)}
-								<button
-									type="button"
-									class="theme-btn"
-									class:active={$theme === opt.key}
-									aria-pressed={$theme === opt.key}
-									onclick={() => theme.set(opt.key)}
-								>
-									{opt.label}
-								</button>
-							{/each}
-						</div>
-					</section>
-				{:else if section === 'usage'}
+				{#if section === 'usage'}
 					<section class="sec">
 						<h3 class="sec-title">이번 달 사용량</h3>
 						<div class="stats">
@@ -406,32 +386,6 @@
 		margin: 0;
 		font-size: 0.78rem;
 		color: var(--color-ink-3);
-	}
-	.theme-row {
-		display: flex;
-		gap: 0.4rem;
-		margin-top: 0.35rem;
-	}
-	.theme-btn {
-		flex: 1;
-		padding: 0.55rem 0.75rem;
-		border-radius: 0.6rem;
-		border: 1px solid var(--color-line);
-		background: var(--color-surface-base);
-		color: var(--color-ink-2);
-		font-size: 0.8125rem;
-		font-weight: 550;
-		cursor: pointer;
-		transition: background 0.12s, color 0.12s, border-color 0.12s;
-	}
-	.theme-btn:hover {
-		color: var(--color-ink-0);
-		border-color: var(--color-line-2);
-	}
-	.theme-btn.active {
-		background: var(--color-accent);
-		color: var(--color-action-on-accent);
-		border-color: var(--color-accent);
 	}
 	.stats {
 		display: grid;

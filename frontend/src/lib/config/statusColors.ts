@@ -46,6 +46,7 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   awaiting_input:     { tone: 'warning', pulse: true, label: '입력 대기' },
   waiting_children:   { tone: 'info', pulse: true, label: '하위 작업 대기' },
   finalizing:         { tone: 'info', pulse: true, label: '마무리 중' },
+  complete:           { tone: 'success', label: '완료' },
   completed:          { tone: 'success', label: '완료' },
   canceled:           { tone: 'neutral', label: '취소됨' },
   deleting:            { tone: 'warning', pulse: true },
@@ -63,7 +64,7 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
 
   // danger — errors / failures
   ERROR:               { tone: 'danger' },
-  error:               { tone: 'danger' },
+  error:               { tone: 'danger', label: '오류' },
   error_deleting:      { tone: 'danger' },
   error_backing_up:    { tone: 'danger' },
   error_restoring:     { tone: 'danger' },
@@ -82,7 +83,8 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   backing_up:          { tone: 'info', pulse: true },
   'restoring-backup':  { tone: 'info', pulse: true },
   restoring_backup:    { tone: 'info', pulse: true },
-  downloading:         { tone: 'info', pulse: true },
+  downloading:         { tone: 'info', pulse: true, label: '다운로드 중' },
+  converting:          { tone: 'info', pulse: true, label: '변환 중' },
   uploading:           { tone: 'info', pulse: true },
 
   // info — stable in-use / created states

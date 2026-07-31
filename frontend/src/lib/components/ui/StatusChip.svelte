@@ -71,7 +71,7 @@
   }
 
   .pulse .dot {
-    animation: pulse 1.4s ease-in-out infinite;
+    animation: pulse var(--motion-duration-status-pulse) var(--motion-ease-in-out) infinite;
   }
 
   @keyframes pulse {

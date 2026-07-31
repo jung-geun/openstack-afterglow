@@ -52,6 +52,7 @@ from app.services.chat.execution_protocol import SUPPORTED_EXECUTION_PROTOCOL_VE
 from app.services.chat.litellm_client import UsageCost
 from app.services.chat.memory_jobs import enqueue_completed_run_in_transaction
 from app.services.chat.message_parts import serialize_parts
+from app.services.chat.message_timestamps import message_timestamps
 from app.services.chat.run_protocol_v2 import transition_allowed
 from app.services.chat.run_store import (
     NONTERMINAL,
@@ -74,6 +75,16 @@ logger = logging.getLogger(__name__)
 _LEASE_SECONDS = 45
 _V2_DEFAULT_MAX_MODEL_TURNS = 8
 _V2_DEFAULT_MAX_TOOL_CALLS = 24
+
+
+def _message_timestamps_for_run(run: ChatRun) -> tuple[datetime, datetime | None, str | None]:
+    """Resolve the validated browser timezone frozen in a durable run payload."""
+    try:
+        payload = json.loads(decrypt_chat_content(run.request_payload) or "{}")
+        timezone_name = payload.get("client_timezone") if isinstance(payload, dict) else None
+        return message_timestamps(timezone_name if isinstance(timezone_name, str) else None)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return message_timestamps(None)
 
 
 def _freeze_v2_tool_call_limit(request_payload: dict[str, Any], execution_protocol_version: int) -> dict[str, Any]:
@@ -1313,6 +1324,7 @@ async def create_persistent_run(
     request_payload: dict[str, Any],
     capability_snapshot: dict[str, Any],
     pricing_snapshot: dict[str, Any],
+    client_timezone: str | None = None,
     execution_protocol_version: int = 1,
 ) -> ChatRunDescriptor:
     """Atomically create the user turn, run, and first journal event.
@@ -1325,7 +1337,11 @@ async def create_persistent_run(
     except ValueError as exc:
         raise DurableRunError("Idempotency-Key must be a UUID") from exc
     _require_supported_execution_protocol_version(execution_protocol_version)
-    request_payload = {**request_payload, "execution_protocol_version": execution_protocol_version}
+    request_payload = {
+        **request_payload,
+        "client_timezone": client_timezone,
+        "execution_protocol_version": execution_protocol_version,
+    }
     request_payload = _freeze_v2_tool_call_limit(request_payload, execution_protocol_version)
     request_payload = await _freeze_v2_lumen_snapshot(
         request_payload,
@@ -1376,6 +1392,7 @@ async def create_persistent_run(
         if active is not None:
             raise DurableRunConflict("conversation_run_active")
 
+        created_at, created_at_local, created_timezone = message_timestamps(client_timezone)
         user_message = ChatMessage(
             conversation_id=conversation_id,
             role="user",
@@ -1384,6 +1401,9 @@ async def create_persistent_run(
             parts=serialize_parts(user_parts),
             parts_version=1,
             status="complete",
+            created_at=created_at,
+            created_at_local=created_at_local,
+            created_timezone=created_timezone,
         )
         session.add(user_message)
         await session.flush()
@@ -2337,6 +2357,38 @@ class _DurableExecutionHooks:
         self.active_turn_ordinal: int | None = None
         self.active_message_id: str | None = None
 
+    async def loaded_tool_names(self) -> list[str]:
+        """Restore completed deferred bindings after restart or approval resume."""
+        factory = _factory()
+        async with factory() as session:
+            segments = (
+                await session.execute(
+                    select(ChatRunSegment)
+                    .where(
+                        ChatRunSegment.run_id == self.run_id,
+                        ChatRunSegment.endpoint == "tool",
+                        ChatRunSegment.status == "completed",
+                    )
+                    .order_by(ChatRunSegment.ordinal.asc())
+                )
+            ).scalars()
+            loaded: list[str] = []
+            for segment in segments:
+                try:
+                    payload = load_segment_payload(segment.result_payload)
+                    if not isinstance(payload, dict) or payload.get("tool_name") != "list_available_tools":
+                        continue
+                    content = json.loads(str(payload.get("content") or ""))
+                    names = content.get("loaded_tools") if isinstance(content, dict) else None
+                except (RunStoreError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(names, list):
+                    continue
+                for name in names:
+                    if isinstance(name, str) and name not in loaded:
+                        loaded.append(name)
+            return loaded
+
     async def _ensure_provider_turn(self, session, run: ChatRun, turn_ordinal: int) -> None:
         turn = (
             await session.execute(
@@ -2368,6 +2420,7 @@ class _DurableExecutionHooks:
                     .limit(1)
                 )
             ).scalar_one_or_none()
+            created_at, created_at_local, created_timezone = _message_timestamps_for_run(run)
             placeholder = ChatMessage(
                 conversation_id=run.conversation_id,
                 role="assistant",
@@ -2375,6 +2428,9 @@ class _DurableExecutionHooks:
                 content=encrypt_chat_content(""),
                 status="streaming",
                 model_name=run.model_name,
+                created_at=created_at,
+                created_at_local=created_at_local,
+                created_timezone=created_timezone,
             )
             session.add(placeholder)
             await session.flush()
@@ -2558,6 +2614,8 @@ class _DurableExecutionHooks:
         tool_call_id: str,
         tool_name: str,
         arguments: dict[str, Any] | None = None,
+        source: str = "builtin",
+        category: str = "기본 도구",
     ) -> dict[str, Any] | None:
         return await self._start(
             segment_id=f"tool:{round_index}:{tool_index}",
@@ -2571,6 +2629,8 @@ class _DurableExecutionHooks:
                     "call_id": tool_call_id,
                     "name": tool_name,
                     "arguments": arguments if isinstance(arguments, dict) else {},
+                    "source": source,
+                    "category": category,
                 },
             ),
         )
@@ -2600,6 +2660,8 @@ class _DurableExecutionHooks:
         tool_call_id: str,
         tool_name: str,
         result_payload: dict[str, Any],
+        source: str = "builtin",
+        category: str = "기본 도구",
     ) -> None:
         content = result_payload.get("content")
         if not isinstance(content, str):
@@ -2622,6 +2684,8 @@ class _DurableExecutionHooks:
                     "name": tool_name,
                     "content": display_parts,
                     "status": status,
+                    "source": source,
+                    "category": category,
                     "error_code": error_code,
                 },
             ),
@@ -2804,6 +2868,7 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
         async with factory() as session, session.begin():
             run = (await session.execute(select(ChatRun).where(ChatRun.id == run_id).with_for_update())).scalar_one()
             _require_owned_running_lease(run, owner)
+            created_at, created_at_local, created_timezone = _message_timestamps_for_run(run)
             placeholder = ChatMessage(
                 conversation_id=conversation_id,
                 role="assistant",
@@ -2811,6 +2876,9 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                 content=encrypt_chat_content(""),
                 status="streaming",
                 model_name=model_name,
+                created_at=created_at,
+                created_at_local=created_at_local,
+                created_timezone=created_timezone,
             )
             session.add(placeholder)
             await session.flush()
@@ -2980,6 +3048,7 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
             selected_tool_ids = _selected_tool_ids(payload.get("features"))
             selected_mcp_ids = None
             expected_mcp_credential_versions = None
+            expected_extension_fingerprints = None
         else:
             try:
                 selected_tool_ids, selected_mcp_ids, warnings = await extensions_store.validated_frozen_selection(
@@ -2992,6 +3061,11 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
                     run_id, "run.warning", {"code": "extension_config_changed", "safe_message": warning}, owner=owner
                 )
             expected_mcp_credential_versions = _selected_mcp_credential_versions(extension_snapshot, selected_mcp_ids)
+            expected_extension_fingerprints = extensions_store.frozen_selection_fingerprints(
+                extension_snapshot,
+                selected_tool_ids,
+                selected_mcp_ids,
+            )
         input_messages = [dict(message) for message in payload["input_messages"]]
         input_parts = payload.get("input_parts")
         if isinstance(input_parts, list) and any(
@@ -3054,6 +3128,7 @@ async def execute_queued_run(run_id: str, *, owner: str) -> bool:
             selected_tool_ids=selected_tool_ids,
             selected_mcp_ids=selected_mcp_ids,
             expected_mcp_credential_versions=expected_mcp_credential_versions,
+            expected_extension_fingerprints=expected_extension_fingerprints,
             tools_enabled=_tools_enabled(payload.get("features")),
             managed_search=managed_search,
             managed_fetch=managed_fetch,
