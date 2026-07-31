@@ -24,6 +24,8 @@ describe('WizardFooter', () => {
 
 		const footer = container.querySelector('.wizard-footer');
 		expect(footer?.className).toContain('sticky');
+		expect(footer?.className).toContain('bg-[var(--color-surface-base)]');
+		expect(footer?.className).toContain('border-[var(--color-line)]');
 		expect(footer?.className).toContain('top-0');
 		expect(footer?.className).toContain('md:bottom-0');
 		expect(footer?.className).toContain('order-first');

@@ -175,17 +175,17 @@
 <style>
   .review-edit-btn {
     font-size: 11.5px;
-    color: rgb(156 163 175);
+    color: var(--color-ink-2);
     padding: 2px 10px;
     border-radius: 6px;
-    border: 1px solid rgb(55 65 81);
+    border: 1px solid var(--color-line-2);
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
   }
   .review-edit-btn:hover {
-    color: rgb(96 165 250);
-    border-color: rgb(29 78 216 / 0.7);
-    background: rgb(23 37 84 / 0.3);
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   }
 </style>

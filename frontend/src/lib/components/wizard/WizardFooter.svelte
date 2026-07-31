@@ -19,7 +19,7 @@
 	const isLast = $derived(step === totalSteps);
 </script>
 
-<div class="wizard-footer order-first md:order-last sticky top-0 md:top-auto md:bottom-0 z-20 flex items-center justify-between flex-wrap gap-3 px-4 py-3 md:px-8 md:py-4 border-b md:border-b-0 md:border-t border-gray-800">
+<div class="wizard-footer order-first md:order-last sticky top-0 md:top-auto md:bottom-0 z-20 flex items-center justify-between flex-wrap gap-3 px-4 py-3 md:px-8 md:py-4 bg-[var(--color-surface-base)] border-b md:border-b-0 md:border-t border-[var(--color-line)]">
 	<!-- selection chips strip -->
 	<div class="hidden md:flex flex-wrap items-center gap-2 text-xs text-gray-500 min-w-0">
 		{#if imageDisplay}
@@ -56,17 +56,14 @@
 </div>
 
 <style>
-	.wizard-footer {
-		background: rgb(3 7 18);
-	}
   .pick {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     padding: 3px 10px;
     border-radius: 6px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgb(55 65 81 / 0.8);
+    background: var(--color-surface-sunken);
+    border: 1px solid var(--color-line);
   }
 	@media (min-width: 768px) {
 		.wizard-footer {
