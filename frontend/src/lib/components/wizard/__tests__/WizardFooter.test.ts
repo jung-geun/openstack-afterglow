@@ -23,12 +23,13 @@ describe('WizardFooter', () => {
 		});
 
 		const footer = container.querySelector('.wizard-footer');
-		expect(footer?.className).toContain('sticky');
+		expect(footer?.className.split(/\s+/)).not.toContain('sticky');
+		expect(footer?.className).toContain('md:sticky');
 		expect(footer?.className).toContain('bg-[var(--color-surface-base)]');
 		expect(footer?.className).toContain('border-[var(--color-line)]');
-		expect(footer?.className).toContain('top-0');
+		expect(footer?.className).toContain('border-t');
 		expect(footer?.className).toContain('md:bottom-0');
-		expect(footer?.className).toContain('order-first');
+		expect(footer?.className).not.toContain('order-first');
 		expect(footer?.className).toContain('md:order-last');
 		expect(container.querySelectorAll('[data-tour="wizard-nav"]')).toHaveLength(1);
 		expect(container.querySelector('[data-tour="wizard-cancel"]')?.className).toContain('order-2');
