@@ -375,6 +375,25 @@ docker compose pull
 docker compose up -d
 ```
 
+### Database Schema Migrations
+
+`auto_create_tables` does not add columns to existing tables. Before rolling out an image that references a new ORM column, apply its SQL migration to the production database. Use the logical IDs in `backend/migrations/manifest.txt` to determine the required migrations and order; never rely on a numeric filename prefix alone.
+
+Example for the 2026-08-02 chat message timezone migration in local Compose:
+
+```bash
+docker compose exec -T mariadb sh -c \
+  'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' \
+  < backend/migrations/070_chat_message_local_timestamps.sql
+```
+
+For Kubernetes or an external MariaDB, run the same SQL file through the approved production database access path. Do not place database passwords on the command line or in Git. Confirm both columns before rolling out the backend:
+
+```sql
+SHOW COLUMNS FROM chat_messages LIKE 'created_at_local';
+SHOW COLUMNS FROM chat_messages LIKE 'created_timezone';
+```
+
 ### Kubernetes
 
 ```bash

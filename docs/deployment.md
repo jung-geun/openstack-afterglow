@@ -471,6 +471,25 @@ docker compose pull
 docker compose up -d
 ```
 
+### 데이터베이스 스키마 마이그레이션
+
+`auto_create_tables`는 기존 테이블에 컬럼을 추가하지 않습니다. 이미지가 새 ORM 컬럼을 참조하는 릴리스는 **롤아웃 전에** 해당 SQL 마이그레이션을 운영 데이터베이스에 적용해야 합니다. 적용 대상과 순서는 `backend/migrations/manifest.txt`의 논리 ID를 기준으로 판단하며, 숫자 접두사만으로 판단하지 않습니다.
+
+로컬 Compose의 2026-08-02 채팅 메시지 시간대 컬럼 마이그레이션 예시:
+
+```bash
+docker compose exec -T mariadb sh -c \
+  'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' \
+  < backend/migrations/070_chat_message_local_timestamps.sql
+```
+
+Kubernetes 또는 외부 MariaDB에서는 운영 DB 접근 권한을 가진 관리 경로에서 같은 SQL 파일을 실행합니다. 비밀번호를 명령행이나 Git에 기록하지 않습니다. 적용 후 다음 두 컬럼을 확인한 뒤 backend를 롤아웃합니다.
+
+```sql
+SHOW COLUMNS FROM chat_messages LIKE 'created_at_local';
+SHOW COLUMNS FROM chat_messages LIKE 'created_timezone';
+```
+
 ### Kubernetes
 
 ```bash
