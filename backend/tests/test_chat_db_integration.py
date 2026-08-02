@@ -483,6 +483,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
         yield {"type": "usage", "usage": {"prompt_tokens": 1, "completion_tokens": 400}}
 
     part_delta_writes = 0
+    monkeypatch.setattr(durable_runs, "monotonic", lambda: 0.0)
     original_append = durable_runs._append
 
     async def slow_append(run_id, event_type, payload, *, owner):
@@ -497,7 +498,7 @@ async def test_worker_batches_slow_journal_delta_writes(chat_db, execution_snaps
     monkeypatch.setattr(durable_runs, "_append", slow_append)
 
     assert await durable_runs.execute_queued_run(descriptor.run_id, owner="worker-test") is True
-    assert part_delta_writes <= 4
+    assert part_delta_writes == 4
 
     factory = chat_db.get_session_factory()
     async with factory() as session:
