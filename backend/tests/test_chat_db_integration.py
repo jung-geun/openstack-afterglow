@@ -845,12 +845,46 @@ async def test_worker_projects_failed_policy_limit_tool_result(chat_db, executio
         "is_error": True,
     }
     assert public_messages[1]["parts"] == persisted_parts[0]
-    assert public_messages[1]["execution"] == {
+    assert public_messages[1]["execution"] is None
+    execution = public_messages[2]["execution"]
+    assert execution is not None
+    assert {key: execution[key] for key in ("run_id", "agent_id", "skill_ids", "skills")} == {
         "run_id": descriptor.run_id,
         "agent_id": None,
         "skill_ids": [],
         "skills": [],
     }
+    assert len(execution["activity"]) == 1
+    activity = execution["activity"][0]
+    assert {
+        key: activity[key]
+        for key in (
+            "id",
+            "kind",
+            "callId",
+            "name",
+            "source",
+            "category",
+            "arguments",
+            "status",
+            "content",
+            "errorCode",
+        )
+    } == {
+        "id": "tool:call_1",
+        "kind": "tool",
+        "callId": "call_1",
+        "name": "builtin_read_status",
+        "source": "builtin",
+        "category": "기본 도구",
+        "arguments": {},
+        "status": "failed",
+        "content": [{"type": "text", "text": "Tool call exceeded the run policy limit."}],
+        "errorCode": "policy_limit_exceeded",
+    }
+    assert isinstance(activity["seq"], int)
+    assert activity["createdAt"]
+    assert isinstance(activity["durationMs"], int)
     assert (public_messages[2]["token_prompt"], public_messages[2]["token_completion"]) == (3, 3)
 
 
