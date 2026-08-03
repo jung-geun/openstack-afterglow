@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.baseline_migrations import MANIFEST, MigrationLedgerError, baseline_pre037, load_manifest
+from scripts.baseline_migrations import MANIFEST, MIGRATIONS, MigrationLedgerError, baseline_pre037, load_manifest
 
 
 def test_manifest_has_unique_logical_ids_and_checksums_for_duplicate_numeric_migrations():
@@ -14,6 +14,12 @@ def test_manifest_has_unique_logical_ids_and_checksums_for_duplicate_numeric_mig
         "035-vm-cloud-init-snippets",
     }
     assert all(len(migration.sha256) == 64 for migration in migrations)
+
+
+def test_manifest_tracks_every_sql_migration_file():
+    manifest_paths = {Path(migration.relative_path).name for migration in load_manifest()}
+
+    assert manifest_paths == {path.name for path in MIGRATIONS.glob("*.sql")}
 
 
 def test_manifest_checksum_drift_is_fail_closed(tmp_path: Path):

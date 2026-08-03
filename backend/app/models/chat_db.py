@@ -24,7 +24,7 @@ from sqlalchemy import (
     Numeric,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.mysql import MEDIUMTEXT
+from sqlalchemy.dialects.mysql import DATETIME, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -158,9 +158,15 @@ class ChatMessage(Base):
     # 재생성 시 어떤 모델로 생성했는지(형제 버전 구분·표시용). 미지정 시 대화 기본 모델.
     model_name: Mapped[str | None] = mapped_column(VARCHAR(190))
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
     # Browser-local wall-clock representation of the same `created_at` instant. Legacy rows stay NULL.
-    created_at_local: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    created_at_local: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
     created_timezone: Mapped[str | None] = mapped_column(VARCHAR(64))
 
     conversation: Mapped["ChatConversation"] = relationship("ChatConversation", back_populates="messages")
@@ -248,7 +254,9 @@ class ChatMcpServer(Base):
     source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
     managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
-    load_policy: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="on_demand")
+    load_policy: Mapped[str] = mapped_column(
+        VARCHAR(16), nullable=False, default="on_demand", server_default="on_demand"
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
@@ -354,7 +362,9 @@ class ChatCustomTool(Base):
     source_package_version: Mapped[str | None] = mapped_column(VARCHAR(64))
     managed_by_package: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
-    load_policy: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="on_demand")
+    load_policy: Mapped[str] = mapped_column(
+        VARCHAR(16), nullable=False, default="on_demand", server_default="on_demand"
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

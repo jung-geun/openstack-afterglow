@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.dialects import mysql
 
+from app.models.chat_db import ChatMessage
 from app.services.chat.conversation_store import _iso, _local_iso
 from app.services.chat.message_timestamps import message_timestamps, validate_client_timezone
 
@@ -42,3 +44,10 @@ def test_timestamp_serialization_marks_naive_database_utc_with_z_without_rewriti
 def test_unknown_client_timezone_is_rejected():
     with pytest.raises(ValueError, match="client_timezone"):
         validate_client_timezone("not-a-timezone")
+
+
+def test_message_timestamp_columns_preserve_microseconds_on_mysql():
+    for column_name in ("created_at", "created_at_local"):
+        timestamp_type = ChatMessage.__table__.c[column_name].type.dialect_impl(mysql.dialect())
+
+        assert timestamp_type.fsp == 6

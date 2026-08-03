@@ -1,7 +1,7 @@
 """빌트인 AI 채팅 — MariaDB 실 SQL 통합 테스트 (마이그레이션/ORM/쿼리/암호화/쿼터 라운드트립).
 
 로컬에서 AFTERGLOW_TEST_DATABASE_URL 미설정 시 자동 skip, CI 의 test-backend-db 잡에서 실행된다.
-실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test \
+실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest \
      AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL=postgresql://afterglow:dev@127.0.0.1:5433/afterglow_checkpoints \
      pytest tests/test_chat_db_integration.py -v -m db
 

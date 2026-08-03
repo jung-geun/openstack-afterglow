@@ -6,7 +6,7 @@ const { spawn, spawnSync } = require("child_process");
 const rootDir = path.resolve(__dirname, "..");
 const backendDir = path.join(rootDir, "backend");
 const frontendDir = path.join(rootDir, "frontend");
-const dbRequirementMessage = "AFTERGLOW_TEST_DATABASE_URL is required for target db. Example: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test";
+const dbRequirementMessage = "AFTERGLOW_TEST_DATABASE_URL is required for target db. Example: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest";
 
 function expandK3sBackendSelectors() {
 	const testsDir = path.join(backendDir, "tests");

@@ -3,7 +3,7 @@
 upsert(신규 insert / 기존 update), 사용자 격리, 화이트리스트 검증을 실 DB 로 확인한다
 (tests/test_announcements_db.py 패턴 준용).
 
-실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test \
+실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest \
      pytest tests/test_tutorial_status_db.py -v -m db
 """
 

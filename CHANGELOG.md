@@ -7,15 +7,26 @@
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-07-31
+
 ### Added
 
 - **사용자 리소스 목록 일괄 선택** — Compute, Storage, File Storage, 컨테이너, Database, Object Storage, Key Manager, Network 관리 목록에 공통 선택·전체 선택·상태별 일괄 작업 오버레이를 추가했다.
 - **관리자 가이드 투어** — Compute·Storage·Library·Network·Containers·Key Manager·Monitoring·System·Identity의 주요 화면에 읽기 전용 단계별 튜토리얼과 관리자 전용 mockup fixture·경로·상태 저장을 추가했다.
 
+
+### Changed
+
+- **채팅·MCP 제어 플레인 통합** — 내장 AI 채팅, 멀티모달 입력·대화 버전 트리·사용자 메모리, 사용자/관리자 MCP·커스텀 HTTP 도구와 OAuth 위임 흐름을 일관된 제어 플레인으로 통합.
+- **Palimpsest 런타임과 이미지 카탈로그 확장** — 콘텐츠 주소화 레이어·OCI 번들 허브·로컬 KVM 런타임 및 Glance 이미지 태그 관리 흐름을 추가.
+- **Waygate 네트워크·복구 흐름 완성** — 기존 VPN 흐름을 Waygate 연결·백업·마이그레이션 지원으로 전환.
+
 ### Fixed
 
 - **Notion GPU map relation 복구** — Nova server의 embedded flavor metadata를 우선하고 UUID/이름 기반 상세 조회로 보충하며, exact GPU Spec title이 없으면 시스템 canonical GPU 이름을 등록해 alias·개수·relation을 연결하도록 수정.
 - **대시보드 화면 높이별 정보 밀도 조정** — overview API가 최근 인스턴스를 최대 12개까지 안전하게 제공하고, dashboard는 화면 높이에 따라 5·8·10·12개 행을 표시한다. 데스크톱 시스템 알림은 사용 가능한 높이에 맞춰 확장·스크롤된다.
+- **운영 DB 스키마 조정 복구** — 기존 테이블에 누락된 채팅·MCP 열/인덱스/외래 키를 멱등 마이그레이션으로 보정해 관리 API 503을 방지.
+- **로컬 DB 테스트 대상 격리** — 개발 스키마를 대상으로 한 파괴적 DB 테스트를 거부하고, 전용 pytest 스키마만 사용하도록 고정.
 
 ## [1.16.2] - 2026-07-14
 

@@ -22,10 +22,37 @@ from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import ArgumentError
 
 from app.api.deps import get_os_conn, get_token_info
 from app.main import app
 from app.rate_limit import limiter as _rate_limiter
+from tests.db_target_safety import (
+    UnsafeDatabaseTargetError,
+    assert_isolated_test_database,
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Block destructive DB tests from sharing the configured app schema."""
+    if not any(item.get_closest_marker("db") for item in items):
+        return
+
+    test_database_url = os.environ.get("AFTERGLOW_TEST_DATABASE_URL", "")
+    if not test_database_url:
+        return
+
+    from app.config import get_settings
+
+    try:
+        assert_isolated_test_database(
+            test_database_url=test_database_url,
+            application_database_url=get_settings().database_url,
+            allow_shared=os.environ.get("AFTERGLOW_ALLOW_SHARED_TEST_DATABASE") == "1",
+        )
+    except (ArgumentError, UnsafeDatabaseTargetError) as exc:
+        raise pytest.UsageError(str(exc)) from exc
+
 
 # 단위 테스트는 rate limit 동작 자체를 검증하지 않는 한 limiter 를 비활성화 — 누적
 # state 가 다음 테스트에 누수되거나 동일 IP 로 5/min 같은 제한에 부딪히는 것을 회피.

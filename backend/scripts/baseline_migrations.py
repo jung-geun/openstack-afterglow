@@ -63,6 +63,11 @@ def load_manifest(path: Path = MANIFEST) -> list[Migration]:
         seen_ids.add(logical_id)
         seen_paths.add(relative_path)
         migrations.append(Migration(logical_id, relative_path, checksum))
+    unlisted_files = {migration.name for migration in MIGRATIONS.glob("*.sql")} - {
+        Path(relative_path).name for relative_path in seen_paths
+    }
+    if unlisted_files:
+        raise MigrationLedgerError(f"migration files absent from manifest: {', '.join(sorted(unlisted_files))}")
     if not migrations:
         raise MigrationLedgerError("migration manifest is empty")
     return migrations
