@@ -456,7 +456,10 @@ class TestMcpOAuthRoutes:
             follow_redirects=False,
         )
 
-        assert response.status_code in {200, 303}
+        assert response.status_code == 303
+        assert (
+            response.headers["location"] == "http://localhost:3080/dashboard/chat?mcp_oauth=connected&mcp_server_id=7"
+        )
         assert received == ["initiator-browser-nonce"]
         assert "max-age=0" in response.headers["set-cookie"].lower()
 
