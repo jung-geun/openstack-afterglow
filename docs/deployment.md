@@ -91,7 +91,7 @@ docker compose --profile monitoring up -d
 
 ```bash
 # 헬스체크
-curl http://localhost:8000/api/health
+curl http://localhost:8000/api/v1/health
 
 # 브라우저
 open http://localhost:3000
@@ -209,7 +209,7 @@ docker logs afterglow_worker
 
 ```
 deploy/k8s-template/
-├── configmap.yaml      # afterglow.conf/config.toml ConfigMap
+├── configmap.yaml      # afterglow.conf ConfigMap
 ├── secret.yaml         # afterglow-secrets 예시
 ├── ingress.yaml
 ├── cert-manager.yaml
@@ -247,7 +247,7 @@ kubectl create secret generic afterglow-secrets \
 ### 2. 프로덕션 ConfigMap 및 Kustomize 배포
 
 ```bash
-# afterglow.conf/config.toml ConfigMap은 prod overlay에 포함되지 않으므로 먼저 적용
+# afterglow.conf ConfigMap은 prod overlay에 포함되지 않으므로 먼저 적용
 kubectl apply -f deploy/k8s-template/configmap.yaml
 
 # 프로덕션 환경
@@ -267,7 +267,7 @@ kubectl logs -f deployment/frontend -n afterglow
 
 ### ConfigMap 주요 설정
 
-`deploy/k8s-template/configmap.yaml`은 `afterglow.conf`를 인라인으로 제공합니다. `generate_k8s.py`로 생성하는 경우 ConfigMap에는 브라우저/프론트엔드용 `APP_REDIS_URL`, `APP_ORIGIN`, `PUBLIC_S3_BASE`, `APP_GRAFANA_BASE`와 런타임 설정 `afterglow.conf`가 들어갑니다. 하위호환을 위해 같은 TOML 본문을 `config.toml` 키에도 함께 출력합니다.
+`deploy/k8s-template/configmap.yaml`은 `afterglow.conf`를 인라인으로 제공합니다. `generate_k8s.py`로 생성하는 경우 ConfigMap에는 브라우저/프론트엔드용 `APP_REDIS_URL`, `APP_ORIGIN`, `PUBLIC_S3_BASE`, `APP_GRAFANA_BASE`와 런타임 설정 `afterglow.conf`가 들어갑니다.
 
 ```yaml
 data:
@@ -380,29 +380,32 @@ kubectl apply -n argocd \
 ```bash
 kubectl apply -f argocd/00-namespace.yaml
 kubectl apply -f argocd/01-appproject.yaml
-kubectl apply -f argocd/02-application.dev.yaml    # 개발
-kubectl apply -f argocd/02-application.prod.yaml   # 프로덕션
 kubectl apply -f argocd/03-ingress.yaml
 kubectl apply -f argocd/04-server-config.yaml
+
+# Helm Application 생성 — 생성물에는 Secret 값이 들어가므로 커밋하지 않음
+backend/.venv/bin/python argocd/generate_helm_application.py dev
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-dev.yaml
+
+backend/.venv/bin/python argocd/generate_helm_application.py prod
+KUBECONFIG=/Users/pieroot/code/afterglow/deploy/k8s/kubeconfig \
+  kubectl apply -f deploy/k8s/argocd-application-prod.yaml
 ```
 
-`02-application.*.yaml`은 `deploy/k8s-template/overlays/*`만 동기화합니다. root의 `configmap.yaml`/`secret.yaml`은 ArgoCD Application 범위 밖이고 `namespace: afterglow`가 고정되어 있으므로, sync 전에 대상 네임스페이스(`afterglow-dev` 또는 `afterglow`)에 `afterglow-config`와 `afterglow-secrets`를 별도로 생성하거나 ExternalSecret으로 공급해야 합니다.
+`generate_helm_application.py`가 dev/prod Application의 유일한 생성 경로입니다.
+Application은 모두 `helm/afterglow`를 source로 사용하며, Helm valuesObject,
+`selfHeal`, Image Updater 설정, `afterglow-config`/`afterglow-secrets`의
+`ignoreDifferences`가 함께 생성됩니다. 삭제된 `argocd/02-application.*.yaml`
+Kustomize Application은 다시 적용하지 않습니다.
 
-`argocd/02-application.dev.yaml` 주요 설정:
+### 3. 동기화 확인
 
-```yaml
-spec:
-  source:
-    repoURL: https://github.com/openstack-afterglow/openstack-afterglow
-    targetRevision: dev          # 감시할 브랜치
-    path: deploy/k8s-template/overlays/dev
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: afterglow-dev
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+```bash
+argocd app list
+argocd app sync afterglow-dev
+argocd app sync afterglow-prod
+argocd app get afterglow-dev
 ```
 
 ### 3. 동기화 확인
@@ -466,6 +469,25 @@ spec:
 git pull origin dev
 docker compose pull
 docker compose up -d
+```
+
+### 데이터베이스 스키마 마이그레이션
+
+`auto_create_tables`는 기존 테이블에 컬럼을 추가하지 않습니다. 이미지가 새 ORM 컬럼을 참조하는 릴리스는 **롤아웃 전에** 해당 SQL 마이그레이션을 운영 데이터베이스에 적용해야 합니다. 적용 대상과 순서는 `backend/migrations/manifest.txt`의 논리 ID를 기준으로 판단하며, 숫자 접두사만으로 판단하지 않습니다.
+
+로컬 Compose의 2026-08-02 채팅 메시지 시간대 컬럼 마이그레이션 예시:
+
+```bash
+docker compose exec -T mariadb sh -c \
+  'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE"' \
+  < backend/migrations/070_chat_message_local_timestamps.sql
+```
+
+Kubernetes 또는 외부 MariaDB에서는 운영 DB 접근 권한을 가진 관리 경로에서 같은 SQL 파일을 실행합니다. 비밀번호를 명령행이나 Git에 기록하지 않습니다. 적용 후 다음 두 컬럼을 확인한 뒤 backend를 롤아웃합니다.
+
+```sql
+SHOW COLUMNS FROM chat_messages LIKE 'created_at_local';
+SHOW COLUMNS FROM chat_messages LIKE 'created_timezone';
 ```
 
 ### Kubernetes

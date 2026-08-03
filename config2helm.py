@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""config.toml → Helm values.yaml 변환기.
+"""afterglow.conf → Helm values.yaml 변환기.
 
-config.toml (및 config.*.toml 오버라이드)을 읽어
+afterglow.conf(및 afterglow.*.conf 오버라이드)을 읽어
 helm/afterglow/values-override.yaml (또는 지정 경로)을 생성합니다.
 
-config.toml 옆에 config.gpu.toml(GPU 디바이스 맵 오버라이드)이 있으면
+afterglow.conf 옆에 config.gpu.toml(GPU 디바이스 맵 오버라이드)이 있으면
 원본 텍스트가 gpu.configToml 값으로 포함되어, 차트 기본값
 (helm/afterglow/files/config.gpu.toml) 대신 configmap에 렌더링됩니다.
 
 생성된 파일은 values.yaml 위에 덮어쓰는 오버라이드로 사용합니다:
-    helm upgrade --install afterglow helm/afterglow \\
-        -f helm/afterglow/values-prod.yaml \\
+    helm upgrade --install afterglow helm/afterglow \
+        -f helm/afterglow/values-prod.yaml \
         -f <output>
 
 사용법:
     python3 config2helm.py
-    python3 config2helm.py --config /path/to/config.toml
+    python3 config2helm.py --config /path/to/afterglow.conf
     python3 config2helm.py --output helm/afterglow/values-local.yaml
     python3 config2helm.py --no-secrets   # 시크릿 제외 (git 안전)
     python3 config2helm.py --dry-run      # 파일 쓰지 않고 stdout 출력
@@ -58,9 +58,7 @@ def _deep_merge(base: dict, override: dict) -> None:
 def load_config(config_path: Path) -> dict:
     with open(config_path, "rb") as f:
         cfg = tomllib.load(f)
-    for override_path in sorted(config_path.parent.glob("config.*.toml")):
-        if not override_path.name.endswith(".toml"):
-            continue
+    for override_path in sorted(config_path.parent.glob(f"{config_path.stem}.*{config_path.suffix}")):
         if override_path.resolve() == config_path.resolve():
             continue
         with open(override_path, "rb") as f:
@@ -112,7 +110,7 @@ def _s(key: str) -> str:
 
 
 def convert(cfg: dict, include_secrets: bool) -> dict:
-    """config.toml dict → Helm values dict."""
+    """afterglow.conf dict → Helm values dict."""
     out: dict = {}
 
     os_cfg  = cfg.get("openstack", {})
@@ -124,6 +122,7 @@ def convert(cfg: dict, include_secrets: bool) -> dict:
     union   = cfg.get("union", {})
     gpu     = cfg.get("gpu", {})
     svc     = cfg.get("services", {})
+    mcp     = cfg.get("mcp", {})
     k3s     = cfg.get("k3s", {})
     db      = cfg.get("database", {})
     cors    = cfg.get("cors", {})
@@ -241,11 +240,19 @@ def convert(cfg: dict, include_secrets: bool) -> dict:
 
     # ── services ───────────────────────────────────────────────────────────
     svc_out: dict = {}
-    for k in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican"):
+    for k in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "mcp"):
         if k in svc:
             svc_out[k] = svc[k]
     if svc_out:
         out["services"] = svc_out
+
+    # ── MCP ────────────────────────────────────────────────────────────────
+    mcp_out: dict = {}
+    for k in ("public_url", "oauth_consent_url"):
+        if k in mcp:
+            mcp_out[_s(k)] = mcp[k]
+    if mcp_out:
+        out["mcp"] = mcp_out
 
     # ── k3s ────────────────────────────────────────────────────────────────
     k3s_out: dict = {}
@@ -391,12 +398,12 @@ def render_yaml(data: dict, comment_header: str = "") -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="config.toml → Helm values.yaml 변환기"
+        description="afterglow.conf → Helm values.yaml 변환기"
     )
     parser.add_argument(
         "--config", type=Path,
-        default=SCRIPT_DIR / "config.toml",
-        help="config.toml 경로 (기본값: ./config.toml)",
+        default=SCRIPT_DIR / "afterglow.conf",
+        help="afterglow.conf 경로 (기본값: ./afterglow.conf)",
     )
     parser.add_argument(
         "--output", type=Path,
@@ -414,8 +421,8 @@ def main() -> None:
     args = parser.parse_args()
 
     config_path = args.config.resolve()
-    if not config_path.exists():
-        print(f"{red('오류')}: config.toml을 찾을 수 없습니다: {config_path}",
+    if config_path.name != "afterglow.conf" or not config_path.is_file():
+        print(f"{red('오류')}: afterglow.conf을(를) 찾을 수 없습니다: {config_path}",
               file=sys.stderr)
         sys.exit(1)
 
@@ -436,7 +443,7 @@ def main() -> None:
         print(f"  {green('✓')} GPU 디바이스 맵 포함: {dim(str(gpu_toml_path))}")
 
     header_lines = [
-        "config.toml → Helm values 자동 변환 파일",
+        "afterglow.conf → Helm values 자동 변환 파일",
         "생성: python3 config2helm.py",
         "",
         "사용법:",

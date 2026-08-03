@@ -10,6 +10,7 @@
 		onDownloadKubeconfig,
 		onDelete,
 		onOpenCreate,
+		onOpenCreateIntent,
 	}: {
 		clusters: K3sCluster[];
 		loading: boolean;
@@ -18,6 +19,7 @@
 		onDownloadKubeconfig: (id: string, name: string) => void;
 		onDelete: (id: string, name: string) => void;
 		onOpenCreate: () => void;
+		onOpenCreateIntent?: () => void;
 	} = $props();
 </script>
 
@@ -31,7 +33,7 @@
 	<div class="text-center py-20 text-gray-600">
 		<div class="text-5xl mb-4">☸</div>
 		<p class="text-lg">Drover 클러스터가 없습니다</p>
-		<button onclick={onOpenCreate} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
+		<button onclick={onOpenCreate} onpointerenter={onOpenCreateIntent} onfocus={onOpenCreateIntent} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
 			첫 클러스터를 생성하세요 →
 		</button>
 	</div>

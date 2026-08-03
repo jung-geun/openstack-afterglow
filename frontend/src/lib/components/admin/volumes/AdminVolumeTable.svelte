@@ -62,12 +62,13 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each volumes as v (v.id)}
+			{#each volumes as v, index (v.id)}
 				<tr
 					class="border-b border-gray-800/50 text-xs transition-colors {selectedVolumeId === v.id ? 'bg-gray-800/50' : ''}"
+					data-tour={index === 0 ? 'admin-storage-row' : undefined}
 				>
 					<td class="p-0">
-						<button type="button" onclick={() => onSelect(v.id)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={v.name || v.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{v.name || v.id.slice(0, 8)}</span></button>
+						<button type="button" data-tour={index === 0 ? 'admin-storage-row-open' : undefined} onclick={() => onSelect(v.id)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={v.name || v.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{v.name || v.id.slice(0, 8)}</span></button>
 					</td>
 					<td class="py-2 pr-4"><StatusChip status={v.status} /></td>
 					<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>

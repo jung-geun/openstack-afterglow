@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { flushSync, tick } from 'svelte';
 import AutoRefreshWrapper from './_AutoRefreshWrapper.svelte';
 
@@ -13,6 +13,10 @@ vi.stubGlobal('localStorage', {
 		delete storage[key];
 	},
 });
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	return Promise.withResolvers<void>();
+}
 
 describe('createAutoRefresh (via component)', () => {
 	beforeEach(() => {
@@ -85,6 +89,27 @@ describe('createAutoRefresh (via component)', () => {
 		flushSync();
 		vi.advanceTimersByTime(10_000);
 		expect(fn).toHaveBeenCalled();
+	});
+
+	it('실행 중 강제 새로고침 요청을 한 번의 후행 라운드로 합침', async () => {
+		const first = deferred();
+		const second = deferred();
+		const fn = vi.fn()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		render(AutoRefreshWrapper, { fn, defaultActive: true, invokeOnMount: true });
+		await tick();
+		await vi.waitFor(() => expect(fn).toHaveBeenCalledOnce());
+
+		await fireEvent.click(screen.getByTestId('force-refresh'));
+		await fireEvent.click(screen.getByTestId('force-refresh'));
+		expect(fn).toHaveBeenCalledOnce();
+
+		first.resolve();
+		await vi.waitFor(() => expect(fn).toHaveBeenCalledTimes(2));
+		second.resolve();
+		await tick();
+		expect(fn).toHaveBeenCalledTimes(2);
 	});
 
 	it('visibilitychange: hidden 시 clearInterval 호출', async () => {

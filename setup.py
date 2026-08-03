@@ -526,7 +526,7 @@ def render_config_toml(cfg: dict, for_k8s: bool = False) -> str:
     lines = []
     lines.append("# afterglow 통합 설정 파일")
     lines.append("# 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.")
-    lines.append("# 우선순위: 환경변수 > afterglow.conf/config.toml (프로젝트 루트) > 기본값")
+    lines.append("# 우선순위: 환경변수 > afterglow.conf (프로젝트 루트) > 기본값")
     lines.append("")
 
     # [openstack]
@@ -705,7 +705,7 @@ def render_k8s_configmap(cfg: dict) -> str:
     app = cfg["app"]
     frontend_port = app["frontend_port"]
 
-    # afterglow.toml 내용 생성 (비밀 제외)
+    # afterglow.conf 내용 생성 (비밀 제외)
     afterglow_toml = render_config_toml(cfg, for_k8s=True)
     # 4칸 들여쓰기
     indented = "\n".join("    " + line for line in afterglow_toml.splitlines())
@@ -724,7 +724,7 @@ def render_k8s_configmap(cfg: dict) -> str:
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)',
         f'  APP_ORIGIN: "{app_origin}"',
-        "  afterglow.toml: |",
+        "  afterglow.conf: |",
         indented,
         "",
     ]

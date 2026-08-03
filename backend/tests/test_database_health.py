@@ -15,8 +15,24 @@ def test_mark_db_unhealthy_blocks_is_db_available():
 
         assert db_mod.is_db_available() is True
 
-        db_mod.mark_db_unhealthy(seconds=30)
+        db_mod.mark_db_unhealthy(RuntimeError(2003, "connection refused"), seconds=30)
         assert db_mod.is_db_available() is False
+    finally:
+        db_mod._engine = original_engine
+        db_mod._db_unhealthy_until = original_until
+
+
+def test_schema_error_does_not_open_database_circuit_breaker():
+    """A missing-column query must not make unrelated DB routes return 503."""
+    import app.database as db_mod
+
+    original_engine = db_mod._engine
+    original_until = db_mod._db_unhealthy_until
+    try:
+        db_mod._engine = MagicMock()
+        db_mod._db_unhealthy_until = 0.0
+        assert db_mod.mark_db_unhealthy(RuntimeError(1054, "unknown column")) is False
+        assert db_mod.is_db_available() is True
     finally:
         db_mod._engine = original_engine
         db_mod._db_unhealthy_until = original_until
@@ -58,7 +74,7 @@ def test_is_db_available_false_when_engine_none():
 
 
 def test_init_db_passes_timeout_options():
-    """init_db가 create_async_engine에 connect_timeout/pool_timeout/pool_recycle을 전달한다."""
+    """init_db가 연결 풀과 connect_timeout/pool_timeout/pool_recycle을 전달한다."""
     captured_kwargs: dict = {}
 
     def fake_engine(url, **kwargs):
@@ -76,6 +92,9 @@ def test_init_db_passes_timeout_options():
             db_mod._engine = original_engine
             db_mod._session_factory = original_factory
 
+    assert captured_kwargs.get("pool_size") == 5
+    assert captured_kwargs.get("max_overflow") == 10
+    assert captured_kwargs.get("pool_pre_ping") is True
     assert captured_kwargs.get("pool_timeout") == 10
     assert captured_kwargs.get("pool_recycle") == 1800
     assert captured_kwargs.get("connect_args", {}).get("connect_timeout") == 10
@@ -97,6 +116,8 @@ def test_init_db_uses_custom_timeouts():
         try:
             db_mod.init_db(
                 "mysql+aiomysql://u:p@localhost/db",
+                pool_size=7,
+                max_overflow=3,
                 connect_timeout=20,
                 pool_timeout=30,
             )
@@ -104,6 +125,8 @@ def test_init_db_uses_custom_timeouts():
             db_mod._engine = original_engine
             db_mod._session_factory = original_factory
 
+    assert captured_kwargs.get("pool_size") == 7
+    assert captured_kwargs.get("max_overflow") == 3
     assert captured_kwargs.get("pool_timeout") == 30
     assert captured_kwargs.get("connect_args", {}).get("connect_timeout") == 20
 
@@ -123,7 +146,7 @@ def test_mark_db_unhealthy_uses_init_db_default():
         db_mod._default_unhealthy_seconds = 7
 
         before = time.time()
-        db_mod.mark_db_unhealthy()  # 인자 없이 호출
+        db_mod.mark_db_unhealthy(RuntimeError(2003, "connection refused"))
         elapsed = db_mod._db_unhealthy_until - before
         assert 6.5 <= elapsed <= 7.5
     finally:

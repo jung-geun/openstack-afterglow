@@ -101,6 +101,32 @@ async def test_get_dashboard_summary_overview_exact_shape_and_no_heavy_calls(cli
 
 
 @pytest.mark.asyncio
+async def test_get_dashboard_summary_overview_honors_bounded_recent_limit(client):
+    servers = [
+        {
+            "id": f"server-{index}",
+            "name": f"server-{index}",
+            "status": "ACTIVE",
+            "flavor_name": "small",
+            "created_at": f"2026-01-{index:02d}T00:00:00Z",
+        }
+        for index in range(1, 14)
+    ]
+
+    with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=servers)):
+        response = await client.get("/api/v1/dashboard/summary?view=overview&recent_limit=12")
+
+    assert response.status_code == 200
+    assert [instance["id"] for instance in response.json()["recent_instances"]] == [
+        f"server-{index}" for index in range(13, 1, -1)
+    ]
+
+    response = await client.get("/api/v1/dashboard/summary?view=overview&recent_limit=13")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_dashboard_summary_overview_source_failure_is_503(client):
     with patch(
         "app.api.common.dashboard.cached_call",
@@ -125,7 +151,7 @@ async def test_get_dashboard_quotas_success(client):
     # cached_call은 결과를 캐시 key별로 1회씩 호출한다 — _fetch_quotas 내부의
     # asyncio.gather를 진짜로 실행하되, 각 service 함수는 cached_call로 묶여 있음.
     # 가장 단순한 방법: cached_call 전체를 patch해서 results 리스트를 한 번에 반환.
-    # 활성화된 서비스(config.toml): manila/trove/swift → compute/volume/network/manila/trove/swift = 최대 6건
+    # 활성화된 서비스(afterglow.conf): manila/trove/swift → compute/volume/network/manila/trove/swift = 최대 6건
     # 실제 활성 수를 맞추기 위해 넉넉히 6개 제공
     quota_int = 0  # trove count
     swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}

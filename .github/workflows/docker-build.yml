@@ -78,6 +78,14 @@ jobs:
             echo "frontend=true" >> $GITHUB_OUTPUT
             exit 0
           fi
+          # 빌드 파이프라인 변경은 모든 이미지 대상으로 검증한다.
+          if echo "$CHANGED" | grep -qE '^\.github/workflows/docker-build\.yml$'; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "worker=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
 
           if echo "$CHANGED" | grep -qE '^(backend/|Dockerfile$|\.dockerignore$)'; then
             echo "backend=true" >> $GITHUB_OUTPUT
@@ -125,7 +133,8 @@ jobs:
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["worker"]')
           fi
-          if [[ "${CHANGED_FRONTEND}" == "true" ]]; then
+          # Backend/worker와 frontend는 같은 dev 배포 세트로 갱신한다.
+          if [[ "${CHANGED_FRONTEND}" == "true" || "${CHANGED_BACKEND}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
           fi
           echo "targets=${TARGETS}" >> $GITHUB_OUTPUT

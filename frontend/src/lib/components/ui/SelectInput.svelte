@@ -8,6 +8,7 @@
 		required?: boolean;
 		class?: string;
 		children: Snippet;
+		ariaLabel?: string;
 		onchange?: (event: Event) => void;
 	}
 
@@ -17,12 +18,13 @@
 		disabled = false,
 		required = false,
 		class: className = '',
+		ariaLabel,
 		children,
 		onchange,
 	}: Props = $props();
 </script>
 
-<select {id} bind:value {disabled} {required} {onchange} class="control select-input {className}">
+<select {id} bind:value {disabled} {required} {onchange} aria-label={ariaLabel} class="control select-input {className}">
 	{@render children()}
 </select>
 
@@ -36,7 +38,7 @@
 		padding: 0.5rem 0.75rem;
 		font-size: 0.875rem;
 		line-height: 1.4;
-		transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+		transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard);
 	}
 	.control:focus {
 		outline: none;

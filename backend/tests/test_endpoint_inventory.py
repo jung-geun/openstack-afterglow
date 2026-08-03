@@ -92,17 +92,27 @@ EXPECTED_PUBLIC = frozenset(
         ("POST", "/api/v1/instances/{instance_id}/credentials/rotate-cephx"),
         # 단발 다운로드 토큰(?token=) 또는 X-Auth-Token 헤더 중 하나 수용 — 내부 분기로 인증
         ("GET", "/api/v1/object-storage/{container_name}/objects/{object_name:path}/download"),
+        # Palimpsest export download — one-use Redis dl_token으로 자체 인증
+        ("GET", "/api/v1/palimpsest/hub/image-exports/{export_id}/download"),
         # Prometheus SD — Bearer monitoring_sd_token으로 자체 인증 (Keystone X-Auth-Token 불가)
         ("GET", "/api/v1/sd/prometheus/targets"),
         ("GET", "/api/v1/sd/prometheus/libvirt-targets"),
         # refresh 토큰으로 자체 인증 (만료된 access token 갱신용)
         ("POST", "/api/v1/auth/refresh"),
-        # VPN 에이전트(VM 내부) — Bearer report_token(vpn_agent_auth)으로 자체 인증
+        # Waygate 에이전트(VM 내부) — Bearer report_token(waygate_agent_auth)으로 자체 인증
         # (Keystone X-Auth-Token 불가). instance_health.report 패턴과 동일하게
         # FastAPI Depends()가 아닌 핸들러 내부 _verify_and_bind()로 fail-closed 검증.
-        ("POST", "/api/v1/vpn/servers/{server_id}/agent/register"),
-        ("GET", "/api/v1/vpn/servers/{server_id}/agent/desired-state"),
-        ("POST", "/api/v1/vpn/servers/{server_id}/agent/status"),
+        ("POST", "/api/v1/waygate/servers/{server_id}/agent/register"),
+        ("GET", "/api/v1/waygate/servers/{server_id}/agent/desired-state"),
+        ("POST", "/api/v1/waygate/servers/{server_id}/agent/status"),
+        # MCP OAuth client redirect — validates signed state plus initiating-browser nonce cookie.
+        ("GET", "/api/v1/chat/mcp-oauth/callback"),
+        # MCP OAuth public-client endpoints validate their own signed/browser-bound requests.
+        ("POST", "/api/v1/mcp/oauth/register"),
+        ("GET", "/api/v1/mcp/oauth/authorize"),
+        ("POST", "/api/v1/mcp/oauth/token"),
+        ("POST", "/api/v1/mcp/oauth/revoke"),
+        ("OPTIONS", "/api/v1/mcp/oauth/{path:path}"),
     }
 )
 

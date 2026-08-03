@@ -4,7 +4,7 @@
 영속성은 SQLAlchemy where절의 실제 SQL 평가에 의존하므로 mock 우회 없이 실 DB로
 검증한다 (tests/test_union_layers_db.py 패턴 준용).
 
-실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test \
+실행: AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest \
      pytest tests/test_announcements_db.py -v -m db
 """
 

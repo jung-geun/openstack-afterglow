@@ -1,11 +1,21 @@
-import { writable, get } from 'svelte/store';
+import { writable } from 'svelte/store';
 import { api } from '$lib/api/client';
+import { getActiveMockupProfile } from '$lib/mockup/transport';
+import { getMockupRevision, onMockupRevisionChange } from '$lib/mockup/state';
+import type { MockupProfileId } from '$lib/mockup/contracts';
 
 export type GrafanaDashboardKey = 'node' | 'rabbitmq' | 'mysqld' | 'memcached' | 'etcd' | 'haproxy' | 'libvirt' | 'openstack' | 'ceph' | 'instance-cpu' | 'instance-gpu';
 
-interface GrafanaContext {
+export interface GrafanaContext {
 	grafanaUrl: string;
 	dashboards: Record<GrafanaDashboardKey, string>;
+}
+
+interface GrafanaScope {
+	token?: string;
+	projectId?: string;
+	mockProfile: MockupProfileId | null;
+	mockRevision: number;
 }
 
 interface GrafanaContextStore {
@@ -15,52 +25,108 @@ interface GrafanaContextStore {
 }
 
 const store = writable<GrafanaContextStore>({ ctx: null, loading: false, error: false });
+let generation = 0;
+let currentScopeKey: string | null = null;
+let settledContext: GrafanaContext | null = null;
+let hasSettledContext = false;
+let inFlight: { scopeKey: string; promise: Promise<GrafanaContext | null> } | null = null;
 
-let _inflight: Promise<GrafanaContext | null> | null = null;
+function keyForScope(scope: GrafanaScope): string {
+	return JSON.stringify([
+		scope.token ?? null,
+		scope.projectId ?? null,
+		scope.mockProfile,
+		scope.mockRevision,
+	]);
+}
+
+function copyContext(context: GrafanaContext | null): GrafanaContext | null {
+	return context ? { ...context, dashboards: { ...context.dashboards } } : null;
+}
+
+function currentScopeKeyFor(token?: string, projectId?: string): string {
+	return keyForScope({
+		token,
+		projectId,
+		mockProfile: getActiveMockupProfile(),
+		mockRevision: getMockupRevision(),
+	});
+}
+
+function clearInFlight(requestGeneration: number, requestedScopeKey: string): void {
+	if (generation === requestGeneration && inFlight?.scopeKey === requestedScopeKey) {
+		inFlight = null;
+	}
+}
 
 export async function loadGrafanaContext(
 	token: string | undefined,
-	projectId: string | undefined
+	projectId: string | undefined,
 ): Promise<GrafanaContext | null> {
-	const current = get(store);
-	if (current.ctx) return current.ctx;
-	if (current.loading && _inflight) return _inflight;
+	const requestedScopeKey = currentScopeKeyFor(token, projectId);
+	if (currentScopeKey === requestedScopeKey && hasSettledContext) return copyContext(settledContext);
+	if (inFlight?.scopeKey === requestedScopeKey) {
+		return inFlight.promise.then(copyContext);
+	}
 
-	store.update((s) => ({ ...s, loading: true, error: false }));
+	generation += 1;
+	const requestGeneration = generation;
+	currentScopeKey = requestedScopeKey;
+	settledContext = null;
+	hasSettledContext = false;
+	inFlight = null;
+	store.set({ ctx: null, loading: true, error: false });
 
-	_inflight = (async () => {
+	const promise = (async () => {
 		try {
 			const dashData = await api.get<{ grafana_url: string; dashboards: Record<string, string> }>(
 				'/api/v1/grafana/dashboards',
 				token,
-				projectId
+				projectId,
 			);
-
-			if (!dashData.grafana_url) {
-				store.update((s) => ({ ...s, loading: false, ctx: null }));
-				return null;
+			const context = dashData.grafana_url
+				? {
+					grafanaUrl: dashData.grafana_url.replace(/\/$/, ''),
+					dashboards: { ...dashData.dashboards } as Record<GrafanaDashboardKey, string>,
+				}
+				: null;
+			if (
+				generation === requestGeneration
+				&& currentScopeKey === requestedScopeKey
+				&& currentScopeKeyFor(token, projectId) === requestedScopeKey
+			) {
+				settledContext = context;
+				hasSettledContext = true;
+				store.set({ ctx: copyContext(context), loading: false, error: false });
 			}
-
-			const ctx: GrafanaContext = {
-				grafanaUrl: dashData.grafana_url.replace(/\/$/, ''),
-				dashboards: dashData.dashboards as Record<GrafanaDashboardKey, string>,
-			};
-			store.update((s) => ({ ...s, loading: false, ctx }));
-			return ctx;
+			return context;
 		} catch {
-			store.update((s) => ({ ...s, loading: false, error: true, ctx: null }));
+			if (
+				generation === requestGeneration
+				&& currentScopeKey === requestedScopeKey
+				&& currentScopeKeyFor(token, projectId) === requestedScopeKey
+			) {
+				hasSettledContext = false;
+				store.set({ ctx: null, loading: false, error: true });
+			}
 			return null;
 		} finally {
-			_inflight = null;
+			clearInFlight(requestGeneration, requestedScopeKey);
 		}
 	})();
-
-	return _inflight;
+	inFlight = { scopeKey: requestedScopeKey, promise };
+	return promise.then(copyContext);
 }
 
-export function resetGrafanaContext() {
+export function invalidateGrafanaContext(): void {
+	generation += 1;
+	currentScopeKey = null;
+	settledContext = null;
+	hasSettledContext = false;
+	inFlight = null;
 	store.set({ ctx: null, loading: false, error: false });
-	_inflight = null;
 }
 
 export const grafanaStore = { subscribe: store.subscribe };
+
+onMockupRevisionChange(invalidateGrafanaContext);

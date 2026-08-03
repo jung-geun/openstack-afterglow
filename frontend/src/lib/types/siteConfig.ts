@@ -6,6 +6,7 @@ export interface PublicSiteConfig {
 	logo_light_path: string;
 	favicon_path: string;
 	refresh_interval_ms: number;
+	mcp_url?: string;
 	services: {
 		magnum: boolean;
 		manila: boolean;
@@ -14,8 +15,9 @@ export interface PublicSiteConfig {
 		trove: boolean;
 		swift: boolean;
 		barbican: boolean;
-		vpn: boolean;
+		waygate: boolean;
 		chat: boolean;
+		mcp: boolean;
 	};
 	runtime: {
 		api_base: string;

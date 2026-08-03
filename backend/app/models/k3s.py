@@ -198,6 +198,7 @@ class K3sInterfaceInfo(BaseModel):
     fixed_ips: list[dict]
     vm_id: str
     node_role: str  # "server" | "agent"
+    is_primary: bool
 
 
 # ---------------------------------------------------------------------------

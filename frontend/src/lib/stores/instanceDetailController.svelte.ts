@@ -48,6 +48,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
+	let fetchGeneration = 0;
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
 	let consoleLog = $state('');
@@ -100,6 +101,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60, 120],
+		invokeOnMount: false,
 	});
 
 	const consolePollAr = createAutoRefresh(() => loadConsoleLog(logFull), {
@@ -153,46 +155,69 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 			loading = true;
 			error = '';
 		}
-		const projectId = opts.effectiveProjectId();
+		const requestToken = tok();
+		const requestProjectId = opts.effectiveProjectId();
+		const generation = ++fetchGeneration;
+		const ownsRequest = () => (
+			generation === fetchGeneration
+			&& opts.instanceId() === id
+			&& opts.effectiveProjectId() === requestProjectId
+			&& tok() === requestToken
+		);
+
+		const instancePromise = api.get<Instance>(`/api/v1/instances/${id}`, requestToken, requestProjectId);
+		const fipsPromise = api.get<FloatingIpDetail[]>('/api/v1/networks/floating-ips', requestToken, requestProjectId).catch(() => []);
+		const interfacesPromise = api.get<PortInfo[]>(`/api/v1/instances/${id}/interfaces`, requestToken, requestProjectId).catch(() => []);
+		const volumesPromise = api.get<VolumeAttachment[]>(`/api/v1/instances/${id}/volumes`, requestToken, requestProjectId).catch(() => []);
+		const securityGroupsPromise = api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(
+			`/api/v1/instances/${id}/security-groups`,
+			requestToken,
+			requestProjectId,
+		).catch(() => ({ ports: [], security_groups: [] }));
+		const allVolumesPromise = api.get<VolumeInfo[]>('/api/v1/volumes', requestToken, requestProjectId).catch(() => []);
+		const networksPromise = api.get<NetworkInfo[]>('/api/v1/networks', requestToken, requestProjectId).catch(() => []);
+		const ownerPromise = api.get<{ display: string }>(`/api/v1/instances/${id}/owner`, requestToken, requestProjectId).catch(() => ({ display: '' }));
+
+		void interfacesPromise.then((value) => { if (ownsRequest()) interfaces = value; });
+		void volumesPromise.then((value) => { if (ownsRequest()) volumes = value; });
+		void securityGroupsPromise.then((value) => { if (ownsRequest()) allSecurityGroups = value.security_groups; });
+		void networksPromise.then((value) => { if (ownsRequest()) availableNetworks = value; });
+		void ownerPromise.then((value) => { if (ownsRequest()) ownerDisplay = value.display || ''; });
+		void Promise.all([instancePromise, fipsPromise]).then(([loadedInstance, fips]) => {
+			if (!ownsRequest()) return;
+			const instanceIps = new Set(
+				loadedInstance.ip_addresses.filter((ip) => ip.type === 'floating').map((ip) => ip.addr)
+			);
+			floatingIps = fips.filter((floatingIp) => instanceIps.has(floatingIp.floating_ip_address));
+		}).catch(() => undefined);
+		void Promise.all([volumesPromise, allVolumesPromise]).then(([attachments, allVolumes]) => {
+			if (!ownsRequest()) return;
+			const attachedIds = new Set(attachments.map((attachment) => attachment.volume_id));
+			availableVolumes = allVolumes.filter((volume) => volume.status === 'available' && !attachedIds.has(volume.id));
+		});
+
 		try {
-			instance = await api.get<Instance>(`/api/v1/instances/${id}`, tok(), projectId);
-			const [fips, ifaces, vols, sgData, allVols, nets, ownerData] = await Promise.all([
-				api.get<FloatingIpDetail[]>('/api/v1/networks/floating-ips', tok(), projectId).catch(() => []),
-				api.get<PortInfo[]>(`/api/v1/instances/${id}/interfaces`, tok(), projectId).catch(() => []),
-				api.get<VolumeAttachment[]>(`/api/v1/instances/${id}/volumes`, tok(), projectId).catch(() => []),
-				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/v1/instances/${id}/security-groups`, tok(), projectId).catch(() => ({ ports: [], security_groups: [] })),
-				api.get<VolumeInfo[]>('/api/v1/volumes', tok(), projectId).catch(() => []),
-				api.get<NetworkInfo[]>('/api/v1/networks', tok(), projectId).catch(() => []),
-				api.get<{ display: string }>(`/api/v1/instances/${id}/owner`, tok(), projectId).catch(() => ({ display: '' })),
-			]);
-			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
-			floatingIps = fips.filter(f => instIps.has(f.floating_ip_address));
-			interfaces = ifaces;
-			volumes = vols;
-			allSecurityGroups = sgData.security_groups;
-			const attachedIds = new Set(vols.map(v => v.volume_id));
-			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
-			availableNetworks = nets;
-			ownerDisplay = ownerData.display || '';
+			const loadedInstance = await instancePromise;
+			if (!ownsRequest()) return;
+			instance = loadedInstance;
+			error = '';
 			if (opts.adminMode()) {
-				fetchPasswordPrecheck(id);
-				// MIGRATING 중이면 migration-status도 함께 갱신
-				if (instance?.status === 'MIGRATING') {
-					loadMigrationStatus(id);
-				} else {
-					// 마이그레이션이 끝나면 상태를 초기화하지 않고 최종 결과를 유지
-					// (실패 사유나 이동 완료된 호스트를 표시하기 위해)
-					if (migrationStatus?.migration?.status !== 'running') {
-						// 비-MIGRATING 상태로 전환됐으면 한 번 더 조회해 최종 상태 확보
-						loadMigrationStatus(id);
-					}
+				void fetchPasswordPrecheck(id);
+				if (loadedInstance.status === 'MIGRATING') {
+					void loadMigrationStatus(id);
+				} else if (migrationStatus?.migration?.status !== 'running') {
+					void loadMigrationStatus(id);
 				}
 			}
 		} catch (e) {
-			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
+			if (ownsRequest()) {
+				error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
+			}
 		} finally {
-			if (fetchOpts?.silent) refreshing = false;
-			else loading = false;
+			if (ownsRequest()) {
+				if (fetchOpts?.silent) refreshing = false;
+				else loading = false;
+			}
 		}
 	}
 
@@ -597,6 +622,8 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		get consoleOpenMessage() { return consoleOpenMessage; },
 		get consoleOpenError() { return consoleOpenError; },
 		set logFull(v: boolean) { logFull = v; },
+		get instanceId() { return opts.instanceId(); },
+		get effectiveProjectId() { return opts.effectiveProjectId(); },
 		get fixedIpsList() { return fixedIpsList; },
 		get floatingIpsList() { return floatingIpsList; },
 		get assignedPortIds() { return assignedPortIds; },

@@ -10,6 +10,7 @@
 		refreshing,
 		onForceRefresh,
 		onOpenCreate,
+		onOpenCreateIntent,
 		onToggleDeleted,
 	}: {
 		showDeleted: boolean;
@@ -17,6 +18,7 @@
 		refreshing: boolean;
 		onForceRefresh: () => void;
 		onOpenCreate: () => void;
+		onOpenCreateIntent?: () => void;
 		onToggleDeleted: () => void;
 	} = $props();
 </script>
@@ -42,6 +44,8 @@
 		<button
 			data-tour="drover-create-open"
 			onclick={onOpenCreate}
+			onpointerenter={onOpenCreateIntent}
+			onfocus={onOpenCreateIntent}
 			class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
 		>
 			+ 클러스터 생성

@@ -16,7 +16,7 @@ from sqlalchemy import (
     LargeBinary,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.mysql import MEDIUMBLOB
+from sqlalchemy.dialects.mysql import DATETIME, MEDIUMBLOB, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -39,6 +39,7 @@ class K3sCluster(Base):
     server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     server_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    server_image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
@@ -91,6 +92,7 @@ class K3sCluster(Base):
     # Template 추적 (생성 시 사용한 템플릿)
     template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Stampede 오토스케일 모드
     stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
@@ -141,7 +143,7 @@ class GpuQuota(Base):
 
 
 class GpuDeviceCatalog(Base):
-    """관리자가 추가한 GPU PCI 장치 카탈로그. 내장 기본값 + config.toml 위에 overlay된다."""
+    """관리자가 추가한 GPU PCI 장치 카탈로그. 내장 기본값 + afterglow.conf 위에 overlay된다."""
 
     __tablename__ = "gpu_device_catalog"
 
@@ -275,6 +277,8 @@ class LibraryBuild(Base):
     console_log_excerpt: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     # queued/booting/installing/finalizing/success/failure/indeterminate
     cloud_init_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
+    # OpenStack IDs/names selected before the build was queued.
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 상태: pending, creating_share, creating_access, creating_vm, building, verifying, cleanup, complete, error, timeout
     status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
@@ -326,6 +330,10 @@ class LayerBuild(Base):
         nullable=True,
     )
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    # OpenStack IDs/names selected before the build was queued.
+    builder_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    builder_network_id: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 빌더 VM 추적
     server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
@@ -359,6 +367,7 @@ class LayerConsume(Base):
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
     artifact_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     server_name: Mapped[str | None] = mapped_column(VARCHAR(128))
 
     # 상태: creating/active/error
@@ -414,6 +423,22 @@ class LayerArtifact(Base):
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     build_id: Mapped[int | None] = mapped_column(INT, ForeignKey("layer_builds.id", ondelete="SET NULL"))
     size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    # ── Palimpsest 콘텐츠 주소화 (마이그레이션 057) ──────────────────────────
+    # 레이어 정체성 = `.sqsh` blob 바이트의 sha256. 설계 근거는 docs/palimpsest.md §3.
+    # UNIQUE 를 걸지 않는다 — 같은 콘텐츠가 서로 다른 Manila share 에 존재할 수 있고,
+    # 중복 제거는 허브 계층의 책임이다.
+    blob_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    # 외부 도구 호환용 보조 검색 키. 무결성 권위 아님 — 보안 용도 금지.
+    blob_md5: Mapped[str | None] = mapped_column(CHAR(32), nullable=True)
+    # 빌드 의도(name/kind/base/packages/parent digest)를 정규화한 sha256
+    config_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    # 스택 전체의 정체성(OCI chainID 방식). 부모가 pending 이면 자식도 계산하지 않는다.
+    chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    # pending | ready | failed — digest 미확보 행도 소비는 계속 가능해야 한다
+    # 빌드 캐시 키 = sha256(부모 참조 + "\n" + 정규화된 Dockerfile instruction).
+    # 같은 부모 위에 같은 명령이면 기존 sealed artifact 를 재사용해 빌드를 건너뛴다.
+    step_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    digest_state: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="pending", server_default="pending")
     # 단일 부모 체인: child → parent → grandparent → ... → base(parent_id=NULL)
     parent_id: Mapped[int | None] = mapped_column(
         INT, ForeignKey("layer_artifacts.id", ondelete="SET NULL"), nullable=True
@@ -440,13 +465,17 @@ class LayerImportJob(Base):
     progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
     error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
-    github_url: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
-    repo_owner: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    repo_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    commit_sha: Mapped[str] = mapped_column(CHAR(40), nullable=False)
-    dockerfile_path: Mapped[str] = mapped_column(
-        VARCHAR(255), nullable=False, default="Dockerfile", server_default="Dockerfile"
-    )
+    # source_type='github_dockerfile' 일 때만 채워진다. inline 업로드는 전부 NULL. (마이그레이션 060)
+    github_url: Mapped[str | None] = mapped_column(VARCHAR(512), nullable=True)
+    repo_owner: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    repo_name: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(CHAR(40), nullable=True)
+    # inline 업로드 원문과 그 sha256 — 감사·재현용. source_type='inline_dockerfile' 일 때 채워진다.
+    dockerfile_text: Mapped[str | None] = mapped_column(MEDIUMTEXT, nullable=True)
+    dockerfile_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    # FROM 이 기존 Palimpsest 레이어를 가리킬 때의 부모 blob digest
+    parent_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    dockerfile_path: Mapped[str | None] = mapped_column(VARCHAR(255), nullable=True)
 
     layer_prefix: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
@@ -461,6 +490,7 @@ class LayerImportJob(Base):
     planned_layers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     artifact_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     build_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    resource_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -485,93 +515,142 @@ class LayerProfile(Base):
 
 
 # ---------------------------------------------------------------------------
-# Union Mount 레이어 시스템
+# Palimpsest 허브 — digest 로 주소화된 레이어 레지스트리 (마이그레이션 059)
 # ---------------------------------------------------------------------------
 
 
-class UnionLayer(Base):
-    """Content-addressable 불변 레이어. id = 'sha256:<64hex>'."""
+class PalimpsestHubLayer(Base):
+    """허브에 보관된 레이어 한 건. blob 은 HubBlobStore 가 소유한다.
 
-    __tablename__ = "union_layers"
+    `layer_artifacts` 와 분리한 이유: 그쪽은 **이 사이트에서 빌드된** 레이어이고 산출물이
+    Manila share 에 있다. 허브 항목은 외부 업로드·번들 import 로도 들어오며 blob 을 허브가
+    직접 소유한다. 로컬 artifact → 허브는 publish 로 연결한다.
 
-    id: Mapped[str] = mapped_column(VARCHAR(71), primary_key=True)  # sha256:<64hex>
-    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
-    version: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    `parent_digest` 가 FK 가 아닌 이유: 부모가 자식보다 늦게 올라오거나 아예 없을 수 있고
+    번들 import 는 순서를 보장하지 않는다. digest 로 느슨히 참조하고 조회 시 해석한다.
+    """
 
-    # 단일 상속: 부모 0개(최상위) 또는 1개
-    parent_id: Mapped[str | None] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), index=True
-    )
-    # 다중 상속(실험, opt-in): parent_ids 가 NOT NULL 이면 multi 모드, parent_id 는 NULL.
-    # 단일/다중은 mutually exclusive (둘 중 하나만 사용).
-    parent_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    # 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
-    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 재현/재빌드용 메타데이터
-    build_recipe: Mapped[dict] = mapped_column(JSON, nullable=False)
-    installed_packages: Mapped[dict] = mapped_column(JSON, nullable=False)
-
-    # 검증용
-    content_hash: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)  # sha256:<64hex>
-    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
-    file_count: Mapped[int | None] = mapped_column(INT)
-
-    # 프로젝트 격리 (NULL = 공유/시스템 레이어, 값 있음 = 해당 프로젝트 전용)
-    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
-    # 봉인 시각 (sealed=True 로 변경된 시점)
-    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    # 라이선스 메타데이터 (None = 제한 없음)
-    license_type: Mapped[str | None] = mapped_column(VARCHAR(64))
-    max_concurrent_mounts: Mapped[int | None] = mapped_column(INT)
-
-    # 관계
-    parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
-    templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")
-
-    __table_args__ = (
-        Index("idx_union_layers_name_version", "name", "version"),
-        Index("idx_union_layers_parent", "parent_id"),
-    )
-
-
-class UnionTemplate(Base):
-    """이름 붙은 레이어 조합 (leaf layer + ubuntu base 지정)."""
-
-    __tablename__ = "union_templates"
-
-    name: Mapped[str] = mapped_column(VARCHAR(128), primary_key=True)
-    version: Mapped[int] = mapped_column(INT, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
-    parent_version: Mapped[int | None] = mapped_column(INT)
-    ubuntu_base: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
-    leaf_layer_id: Mapped[str] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    note: Mapped[str | None] = mapped_column(TEXT)
-
-    # 관계
-    leaf_layer: Mapped["UnionLayer"] = relationship("UnionLayer", back_populates="templates")
-
-
-class UnionUserMount(Base):
-    """사용자 VM 마운트 추적 (GC 판단 및 운영 가시성)."""
-
-    __tablename__ = "union_user_mounts"
+    __tablename__ = "palimpsest_hub_layers"
 
     id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
-    vm_hostname: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
-    leaf_layer_id: Mapped[str] = mapped_column(
-        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
+    # 허브에서는 digest 가 UNIQUE 다 — 중복 제거는 허브 계층의 책임(layer_artifacts 와 다른 점)
+    blob_digest: Mapped[str] = mapped_column(VARCHAR(71), nullable=False, unique=True)
+    blob_md5: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, index=True)
+    size_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    media_type: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    # --- kind='cloud-image' 전용 (마이그레이션 061). 레이어에서는 NULL ---
+    disk_format: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)  # qcow2 | raw
+    arch: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)  # x86_64 | aarch64
+    os_variant: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)  # ubuntu24.04 등
+    config_digest: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)
+    chain_id: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    parent_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    # 'cloud-image' | squashfs 레이어 종류(uv/python/pip/dockerfile/…)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, index=True)
+    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)
+    # OCI config blob 원문 — 번들 export 시 그대로 직렬화한다
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # NULL = 사이트 공용. 값이 있으면 해당 프로젝트 소유(소유권 검증 대상)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0")
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class PalimpsestHubUpload(Base):
+    """업로드 세션. OCI Distribution 의 blob upload(POST/PATCH/PUT)를 `/v2/` 없이 차용."""
+
+    __tablename__ = "palimpsest_hub_uploads"
+
+    id: Mapped[str] = mapped_column(CHAR(32), primary_key=True)
+    declared_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    received_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False, default=0)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class PalimpsestImageExport(Base):
+    """Glance 이미지를 hub blob 으로 내보내는 프로젝트 소유 durable job."""
+
+    __tablename__ = "palimpsest_image_exports"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+
+    source_image_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    source_name: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    source_disk_format: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    source_size_bytes: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    source_virtual_size_bytes: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+    source_checksum: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    source_hash_algo: Mapped[str | None] = mapped_column(VARCHAR(16), nullable=True)
+    source_hash_value: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    source_updated_at: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    source_fingerprint: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    artifact_key: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+
+    target_disk_format: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)
+    result_blob_digest: Mapped[str | None] = mapped_column(VARCHAR(71), nullable=True)
+    result_size_bytes: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+
+    status: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="queued", server_default="queued")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
+    error_code: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    attempts: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
+    next_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
     )
-    mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner: Mapped[str | None] = mapped_column(VARCHAR(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+        onupdate=_now,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "artifact_key", name="uq_palimpsest_exports_project_artifact"),
+        Index("idx_palimpsest_exports_artifact", "artifact_key"),
+        Index("idx_palimpsest_exports_digest", "result_blob_digest"),
+        Index("idx_palimpsest_exports_claim", "status", "next_at"),
+        Index("idx_palimpsest_exports_project_created", "project_id", "deleted_at", "created_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# (폐기) 2세대 union ORM — UnionLayer / UnionTemplate / UnionUserMount
+#
+# 인프라(중앙 Manila share, CephX keyring, Builder VM)가 배포된 적이 없어
+# Palimpsest 통합 과정에서 제거했다. `union_layers` / `union_templates` /
+# `union_user_mounts` **테이블 자체는 데이터 보존을 위해 남긴다** — DROP 마이그레이션
+# 없음. 레이어 정체성은 이제 `LayerArtifact.blob_digest` 다(docs/palimpsest.md §3).
+# ---------------------------------------------------------------------------
 
 
 class K3sNodegroup(Base):
@@ -748,18 +827,18 @@ class UserTutorialStatus(Base):
 
 
 # ---------------------------------------------------------------------------
-# WireGuard VPN 게이트웨이 (Phase 1 — 서버 프로비저닝 + 클라이언트 관리)
+# Waygate (WireGuard 게이트웨이 — Phase 1 서버 프로비저닝 + 클라이언트 관리)
 # ---------------------------------------------------------------------------
 
 
-class VpnServer(Base):
-    """WireGuard VPN 게이트웨이 인스턴스 1개.
+class WaygateServer(Base):
+    """Waygate 게이트웨이 인스턴스 1개.
 
     테넌트 프로젝트에 부팅되는 bastion VM. 서버 private key는 VM 내부에서만
     생성되고 백엔드 DB에는 절대 저장하지 않는다(마이그레이션 요구사항 ③ 자연 충족).
     """
 
-    __tablename__ = "vpn_servers"
+    __tablename__ = "waygate_servers"
 
     id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
@@ -770,12 +849,20 @@ class VpnServer(Base):
     # OpenStack 리소스 ID
     server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     provider_network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    floating_network_id: Mapped[str | None] = mapped_column(VARCHAR(128))
     provider_port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     endpoint_ip: Mapped[str | None] = mapped_column(VARCHAR(45))  # FIP 또는 provider fixed IP
     key_name: Mapped[str | None] = mapped_column(VARCHAR(255))
+    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # 에이전트 제어채널 자격증명 — AES-256-GCM 암호화 저장(도메인 wg_agent_token).
+    # Redis(휘발성)가 아니라 여기에 durable 하게 보관해, Redis eviction/재시작이나 이전
+    # 7일 TTL 만료 후에도 에이전트 register/desired-state/status 채널이 유지된다.
+    agent_token_encrypted: Mapped[str | None] = mapped_column(TEXT)
 
     # WireGuard 설정
     server_public_key: Mapped[str | None] = mapped_column(VARCHAR(64))  # 에이전트 register가 채움
@@ -798,31 +885,31 @@ class VpnServer(Base):
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
     # 관계
-    clients: Mapped[list["VpnClient"]] = relationship(
-        "VpnClient", back_populates="server", cascade="all, delete-orphan"
+    clients: Mapped[list["WaygateClient"]] = relationship(
+        "WaygateClient", back_populates="server", cascade="all, delete-orphan"
     )
-    network_attachments: Mapped[list["VpnNetworkAttachment"]] = relationship(
-        "VpnNetworkAttachment", back_populates="server", cascade="all, delete-orphan"
+    network_attachments: Mapped[list["WaygateNetworkAttachment"]] = relationship(
+        "WaygateNetworkAttachment", back_populates="server", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (Index("idx_vpn_server_project_created", "project_id", "created_at"),)
+    __table_args__ = (Index("idx_waygate_server_project_created", "project_id", "created_at"),)
 
 
-class VpnClient(Base):
+class WaygateClient(Base):
     """WireGuard peer(=wg-easy client). 클라이언트 private key는 AES-256-GCM 암호화 저장.
 
     private key는 백엔드가 X25519로 생성하며 서버 VM에는 절대 전송하지 않는다
     (서버는 peer의 public key만 필요).
     """
 
-    __tablename__ = "vpn_clients"
+    __tablename__ = "waygate_clients"
 
     id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
     server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("vpn_servers.id", ondelete="CASCADE"), nullable=False, index=True
+        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    # NOTE: soft-delete 시 NULL로 비워 uq_vpn_client_server_name 슬롯을 해제한다(아래 참고).
+    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_name 슬롯을 해제한다(아래 참고).
     name: Mapped[str | None] = mapped_column(VARCHAR(63))
     enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
 
@@ -830,7 +917,7 @@ class VpnClient(Base):
     private_key_encrypted: Mapped[str] = mapped_column(TEXT, nullable=False)
     preshared_key_encrypted: Mapped[str | None] = mapped_column(TEXT)
 
-    # NOTE: soft-delete 시 NULL로 비워 uq_vpn_client_server_tunnel_ip 슬롯을 해제한다.
+    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_tunnel_ip 슬롯을 해제한다.
     # MySQL/MariaDB는 partial/filtered unique index를 지원하지 않으므로, 활성 클라이언트만
     # unique 제약을 갖도록 하려면 값 자체를 NULL로 비우는 방법뿐이다(NULL은 unique index에서
     # 여러 번 허용됨). list_clients/list_all_active_clients 등 조회 경로는 전부
@@ -848,26 +935,26 @@ class VpnClient(Base):
     deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
-    server: Mapped["VpnServer"] = relationship("VpnServer", back_populates="clients")
+    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="clients")
 
     __table_args__ = (
-        UniqueConstraint("server_id", "tunnel_ip", name="uq_vpn_client_server_tunnel_ip"),
-        UniqueConstraint("server_id", "name", name="uq_vpn_client_server_name"),
-        Index("idx_vpn_client_project_created", "project_id", "created_at"),
+        UniqueConstraint("server_id", "tunnel_ip", name="uq_waygate_client_server_tunnel_ip"),
+        UniqueConstraint("server_id", "name", name="uq_waygate_client_server_name"),
+        Index("idx_waygate_client_project_created", "project_id", "created_at"),
     )
 
 
-class VpnNetworkAttachment(Base):
-    """VPN VM에 붙은 테넌트 네트워크 (Phase 2용 스키마 — Phase 1 API는 이 테이블을 사용하지 않음).
+class WaygateNetworkAttachment(Base):
+    """Waygate VM에 붙은 테넌트 네트워크 (Phase 2용 스키마 — Phase 1 API는 이 테이블을 사용하지 않음).
 
     다중 테넌트 네트워크 연결(요구사항 ②) 시 nova.attach_interface로 생성된 포트를 기록한다.
     """
 
-    __tablename__ = "vpn_network_attachments"
+    __tablename__ = "waygate_network_attachments"
 
     id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
     server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("vpn_servers.id", ondelete="CASCADE"), nullable=False, index=True
+        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
     network_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
@@ -880,9 +967,9 @@ class VpnNetworkAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
-    server: Mapped["VpnServer"] = relationship("VpnServer", back_populates="network_attachments")
+    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="network_attachments")
 
-    __table_args__ = (Index("idx_vpn_netattach_server", "server_id"),)
+    __table_args__ = (Index("idx_waygate_netattach_server", "server_id"),)
 
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
@@ -890,3 +977,113 @@ from app.models.activity import ActivityLog  # noqa: E402,F401
 
 # Announcement/AnnouncementRead 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402,F401
+from app.models.chat_agent_platform import (  # noqa: E402,F401
+    ChatCodeWorkspace,
+    ChatCodeWorkspaceAsset,
+    ChatCommand,
+    ChatContextCheckpoint,
+    ChatExtensionPackage,
+    ChatExtensionPackageComponent,
+    ChatExtensionPackageInstall,
+    ChatGitCredential,
+    ChatRunInteraction,
+)
+from app.models.chat_assets import ChatAsset, ChatMessageAsset, ChatRunAsset  # noqa: E402,F401
+
+# 빌트인 AI 채팅 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
+from app.models.chat_db import (  # noqa: E402,F401
+    ChatAgent,
+    ChatApiKey,
+    ChatConversation,
+    ChatCustomTool,
+    ChatMcpOAuthConnection,
+    ChatMcpOAuthRequest,
+    ChatMcpServer,
+    ChatMemory,
+    ChatMemoryOwnerLock,
+    ChatMessage,
+    ChatSkill,
+    ChatUsageLog,
+    ChatWorkspace,
+    LlmModel,
+    LlmProvider,
+    McpDelegatedGrant,
+    McpLumenSelection,
+    McpOAuthAuthorizationRequest,
+    McpOAuthClient,
+    McpOAuthCode,
+    McpOAuthToken,
+    McpOAuthTokenFamily,
+    McpOwnerLock,
+    McpPersonalToken,
+    McpToolInvocation,
+    UserWallet,
+)
+from app.models.chat_jobs import ChatInputDerivation, ChatJob, ChatMemoryOutbox, ChatMemoryProvenance  # noqa: E402,F401
+from app.models.chat_runs import (  # noqa: E402,F401
+    ChatRun,
+    ChatRunEventRow,
+    ChatRunProvider,
+    ChatRunSegment,
+    ChatRunTurn,
+    ChatSchedulerLease,
+    ChatTempThread,
+    ChatToolApproval,
+)
+
+
+class VmCloudInitSnippet(Base):
+    """사용자별 VM cloud-init 실행 이력과 명명된 재사용 프리셋."""
+
+    __tablename__ = "vm_cloud_init_snippets"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False)  # history | preset
+    name: Mapped[str | None] = mapped_column(VARCHAR(100))
+    content_encrypted: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True).with_variant(DATETIME(fsp=6), "mysql").with_variant(DATETIME(fsp=6), "mariadb"),
+        nullable=False,
+        default=_now,
+        onupdate=_now,
+    )
+
+    __table_args__ = (
+        Index("idx_vm_cloud_init_snippets_user_kind_created", "user_id", "kind", "created_at"),
+        UniqueConstraint("user_id", "kind", "name", name="uq_vm_cloud_init_snippet_user_kind_name"),
+    )
+
+
+class ResourcePolicy(Base):
+    """Global admin-owned selection of a discovered OpenStack resource."""
+
+    __tablename__ = "resource_policies"
+
+    policy_key: Mapped[str] = mapped_column(VARCHAR(100), primary_key=True)
+    resource_kind: Mapped[str] = mapped_column(VARCHAR(32), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(VARCHAR(128))
+    resource_name: Mapped[str | None] = mapped_column(VARCHAR(255))
+    constraints: Mapped[dict | None] = mapped_column(JSON)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_resource_policies_kind", "resource_kind"),)
+
+
+class RuntimeSetting(Base):
+    """Allowlisted scalar runtime settings owned by the administrator."""
+
+    __tablename__ = "runtime_settings"
+
+    setting_key: Mapped[str] = mapped_column(VARCHAR(100), primary_key=True)
+    value_json: Mapped[object] = mapped_column(JSON, nullable=False)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

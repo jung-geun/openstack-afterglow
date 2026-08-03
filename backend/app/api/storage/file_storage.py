@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
-from app.config import get_settings
 from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest, FileStorageInfo
 from app.rate_limit import limiter
 from app.services import manila
@@ -113,14 +113,43 @@ async def create_file_storage(
 ):
     pid = conn._afterglow_project_id
     try:
-        settings = get_settings()
+        from app.services.resource_policies import validate_existing_selection
+        from app.services.resource_policy_store import resolve_policy_snapshot
+
+        policy_key = "manila.nfs_share_type" if req.share_proto == "NFS" else "manila.cephfs_share_type"
+        if req.share_type:
+            share_types = await asyncio.to_thread(manila.list_share_types, conn)
+            match = next(
+                (
+                    item
+                    for item in share_types
+                    if req.share_type in {str(item.get("id") or ""), str(item.get("name") or "")}
+                ),
+                None,
+            )
+            if match is None:
+                raise HTTPException(status_code=422, detail="선택한 share type을 사용할 수 없습니다")
+            selected = await validate_existing_selection(conn, policy_key, str(match.get("id") or match["name"]))
+            share_type = selected["name"]
+        else:
+            selected = await resolve_policy_snapshot(conn=conn, keys=(policy_key,))
+            share_type = selected[policy_key]["name"]
+
+        share_network_id = ""
+        if req.share_proto == "NFS":
+            if not req.share_network_id:
+                raise HTTPException(status_code=422, detail="NFS share에는 tenant share network가 필요합니다")
+            share_network = await asyncio.to_thread(manila.get_share_network, conn, req.share_network_id)
+            if not share_network or not share_network.get("id"):
+                raise HTTPException(status_code=422, detail="선택한 share network를 사용할 수 없습니다")
+            share_network_id = str(share_network["id"])
+
         result = manila.create_file_storage(
             conn,
             name=req.name,
             size_gb=req.size_gb,
-            share_network_id=req.share_network_id or settings.os_manila_share_network_id,
-            share_type=req.share_type
-            or (settings.os_manila_nfs_share_type if req.share_proto == "NFS" else settings.os_manila_share_type),
+            share_network_id=share_network_id,
+            share_type=share_type,
             share_proto=req.share_proto,
             metadata=req.metadata,
         )
@@ -135,6 +164,8 @@ async def create_file_storage(
             extra={"size_gb": req.size_gb},
         )
         return result
+    except HTTPException:
+        raise
     except httpx.HTTPStatusError as e:
         # Manila API 가 4xx/5xx 응답을 준 경우 — status code 와 detail 메시지를 그대로 전달
         status, message = extract_manila_error(e)

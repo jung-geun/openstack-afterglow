@@ -127,6 +127,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-orphans',
+		invokeOnMount: false,
 		defaultActive: false,
 		defaultInterval: 60,
 		intervalOptions: [30, 60, 120]

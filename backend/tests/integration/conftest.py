@@ -1,12 +1,11 @@
 """
 통합 테스트 공통 픽스처.
-
-config.toml 또는 credentials.toml 의 실제 OpenStack 인증 정보를 사용하여 로그인 후
+afterglow.conf 또는 credentials.toml 의 실제 OpenStack 인증 정보를 사용하여 로그인 후
 토큰을 획득하고, httpx AsyncClient로 FastAPI 앱에 실제 요청을 보낸다.
 
 사전 조건:
-  - Redis 실행 중 (config.toml의 redis_url)
-  - OpenStack 접근 가능 (config.toml의 openstack 섹션 또는 credentials.toml)
+  - Redis 실행 중 (afterglow.conf의 redis_url)
+  - OpenStack 접근 가능 (afterglow.conf의 openstack 섹션 또는 credentials.toml)
   - 환경변수 AFTERGLOW_ALLOW_INSECURE=1 (개발 시크릿 키 허용)
 
 실행:
@@ -56,7 +55,7 @@ class IntegrationResources:
 
 def assert_forbidden(resp) -> None:
     """403 응답 + 관리자 관련 메시지 검증."""
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
+    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
     body = resp.json()
     assert "detail" in body
 
@@ -72,7 +71,25 @@ def require_service(flag: str) -> None:
         pytest.skip(f"{flag}=false — 서비스 미활성화")
 
 
-@dataclass
+class RedactedMapping(dict[str, Any]):
+    """Mapping-compatible fixture payload that never renders values in tracebacks."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(keys={sorted(self)!r})"
+
+
+class RedactedCredentials(RedactedMapping):
+    """Credential-specific redacted mapping."""
+
+
+class RedactedSecret(str):
+    """String-compatible secret value with a traceback-safe representation."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}('***')"
+
+
+@dataclass(repr=False)
 class IntegrationAuthSession:
     """실제 로그인 세션 상태.
 
@@ -86,24 +103,27 @@ class IntegrationAuthSession:
     token_data: dict[str, Any] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    async def get_token_data(self) -> dict[str, Any]:
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(label={self.label!r}, authenticated={self.token_data is not None})"
+
+    async def get_token_data(self) -> RedactedMapping:
         async with self._lock:
             if self.token_data is None:
                 await self._login_locked()
             assert self.token_data is not None
-            return dict(self.token_data)
+            return RedactedMapping(self.token_data)
 
-    async def refresh_or_relogin(self) -> dict[str, Any]:
+    async def refresh_or_relogin(self) -> RedactedMapping:
         async with self._lock:
             if not await self._refresh_locked():
                 await self._login_locked()
             assert self.token_data is not None
-            return dict(self.token_data)
+            return RedactedMapping(self.token_data)
 
     async def _login_locked(self) -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/api/v1/auth/login", json=self.credentials)
-        assert resp.status_code == 200, f"{self.label} 로그인 실패: {resp.text}"
+        assert resp.status_code == 200, f"{self.label} 로그인 실패 (HTTP {resp.status_code})"
         self.token_data = resp.json()
 
     async def _refresh_locked(self) -> bool:
@@ -228,10 +248,10 @@ def integration_resources():
 
 @pytest.fixture(scope="session")
 def admin_credentials_fx():
-    """admin 크리덴셜 (credentials.toml > config.toml 폴백)."""
+    """admin 크리덴셜 (credentials.toml > afterglow.conf 폴백)."""
     from .credentials import admin_credentials
 
-    return admin_credentials()
+    return RedactedCredentials(admin_credentials())
 
 
 @pytest.fixture(scope="session")
@@ -246,7 +266,7 @@ def admin_user_credentials_fx():
             "tests/integration/credentials.toml 의 [admin_user] 섹션 또는 "
             "AFTERGLOW_TEST_ADMIN_USER_USERNAME / AFTERGLOW_TEST_ADMIN_USER_PASSWORD 환경변수를 설정하세요."
         )
-    return creds
+    return RedactedCredentials(creds)
 
 
 @pytest.fixture(scope="session")
@@ -261,7 +281,7 @@ def user_credentials_fx():
             "tests/integration/credentials.toml 의 [user] 섹션 또는 "
             "AFTERGLOW_TEST_USER_USERNAME / AFTERGLOW_TEST_USER_PASSWORD 환경변수를 설정하세요."
         )
-    return creds
+    return RedactedCredentials(creds)
 
 
 @pytest.fixture(scope="session")
@@ -276,7 +296,7 @@ def project_b_credentials_fx():
             "tests/integration/credentials.toml 의 [project_b] 섹션 또는 "
             "AFTERGLOW_TEST_PROJECT_B_USERNAME / AFTERGLOW_TEST_PROJECT_B_PASSWORD 환경변수를 설정하세요."
         )
-    return creds
+    return RedactedCredentials(creds)
 
 
 # 하위 호환: 기존 테스트가 사용하던 `credentials` 픽스처는 admin 계정을 반환
@@ -368,7 +388,7 @@ async def auth_data(admin_auth_data):
 
 @pytest.fixture(scope="session")
 def token(admin_auth_data):
-    return admin_auth_data["token"]
+    return RedactedSecret(str(admin_auth_data["token"]))
 
 
 @pytest.fixture(scope="session")

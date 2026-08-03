@@ -3,22 +3,66 @@ import { ApiError } from '$lib/api/errors';
 import { getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 import { siteConfig } from '$lib/config/site';
 import { buildMockAuth } from '$lib/mockup/auth';
-import { MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
+import { MOCK_MCP_CONSENT_TICKET, MOCKUP_QUERY_KEY, MOCKUP_SESSION_KEY, MOCKUP_SERVICE_OVERRIDES, isMockupProfileId } from '$lib/mockup/contracts';
 import type { MockupProfileId } from '$lib/mockup/contracts';
 import { cloneMockup, getMockupState } from '$lib/mockup/state';
 import type { K3sSseProgressMessage } from '$lib/api/k3sSseStream';
+import { isTourId } from '$lib/tutorial/tours';
 
 export const symbolNoMatch = Symbol('mockup-no-match');
 const UNSUPPORTED = '튜토리얼 모드에서는 이 작업을 아직 지원하지 않습니다.';
 const MOCK_EXPIRES_AT_ISO = '2026-12-31T23:59:59Z';
 const NOW_ISO = '2026-07-09T00:00:00Z';
+const MOCK_IMAGES = [
+	{
+		id: 'fixture-image-ubuntu',
+		name: 'Ubuntu 24.04 LTS',
+		status: 'active',
+		visibility: 'public',
+		size: 2361393152,
+		virtual_size: 2361393152,
+		min_disk: 10,
+		min_ram: 1024,
+		disk_format: 'qcow2',
+		container_format: 'bare',
+		checksum: '0'.repeat(32),
+		owner: 'mock-project-1',
+		protected: false,
+		tags: ['ubuntu', 'lts'],
+		properties: {},
+		os_distro: 'ubuntu',
+		os_version: '24.04',
+		created_at: NOW_ISO,
+		updated_at: NOW_ISO,
+	},
+	{
+		id: 'fixture-image-rocky',
+		name: 'Rocky Linux 9',
+		status: 'active',
+		visibility: 'public',
+		size: 1932735283,
+		virtual_size: 1932735283,
+		min_disk: 10,
+		min_ram: 1024,
+		disk_format: 'qcow2',
+		container_format: 'bare',
+		checksum: '1'.repeat(32),
+		owner: 'mock-project-1',
+		protected: false,
+		tags: ['rocky', 'linux'],
+		properties: {},
+		os_distro: 'rocky',
+		created_at: NOW_ISO,
+		updated_at: NOW_ISO,
+	},
+] as const;
 
 function nextMockId(existingIds: string[], prefix: string): string {
 	let n = existingIds.length + 1;
 	while (existingIds.includes(`${prefix}-${n}`)) n += 1;
 	return `${prefix}-${n}`;
 }
-function activeProfile(): MockupProfileId | null {
+export function getActiveMockupProfile(): MockupProfileId | null {
 	if (typeof window !== 'undefined' && typeof window.location?.search === 'string') {
 		const params = new URLSearchParams(window.location.search);
 		const requested = params.get(MOCKUP_QUERY_KEY);
@@ -104,8 +148,10 @@ function dashboardTrend(range: string | null, includeNetwork: boolean): Record<s
 	};
 }
 
-function dashboardOverviewSummary(): Record<string, unknown> {
+function dashboardOverviewSummary(recentLimit: string | null): Record<string, unknown> {
 	const state = getMockupState();
+	const parsedLimit = Number.parseInt(recentLimit ?? '', 10);
+	const limit = Number.isInteger(parsedLimit) ? Math.min(Math.max(parsedLimit, 5), 12) : 5;
 	const instances = [...state.instances]
 		.sort((a, b) => {
 			const aTime = a.created_at ? Date.parse(a.created_at) : Number.NaN;
@@ -116,7 +162,7 @@ function dashboardOverviewSummary(): Record<string, unknown> {
 			if (aValid !== bValid) return aValid ? -1 : 1;
 			return a.id.localeCompare(b.id);
 		})
-		.slice(0, 5)
+		.slice(0, limit)
 		.map(({ id, name, status, flavor_name, ip_addresses, created_at }) => ({
 			id,
 			name,
@@ -191,11 +237,164 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	}
 	if (method === 'GET' && (pathname === '/api/v1/auth/projects/recent' || pathname === '/api/v1/auth/projects')) return state.projects;
 	if (method === 'GET' && pathname === '/api/v1/profile') return { id: 'mock-user-1', name: 'Demo User', email: 'demo@example.com', default_project_id: null };
+	if (method === 'GET' && pathname === '/api/v1/tutorials/status') {
+		return { statuses: state.tutorialStatuses };
+	}
+	const tutorialStatusMatch = pathname.match(/^\/api\/v1\/tutorials\/([^/]+)\/status$/);
+	if (method === 'POST' && tutorialStatusMatch) {
+		const tourId = tutorialStatusMatch[1];
+		const status = (body as { status?: unknown } | null)?.status;
+		if (!isTourId(tourId) || (status !== 'completed' && status !== 'dismissed')) mockUnsupported();
+		state.tutorialStatuses[tourId] = status;
+		return { tour_id: tourId, status };
+	}
+
+	if (method === 'GET' && pathname === '/api/v1/auth/mcp-tokens') return state.mcpAccess.personalTokens;
+	if (method === 'GET' && pathname === '/api/v1/auth/mcp-oauth/grants') return state.mcpAccess.oauthGrants;
+	if (method === 'POST' && pathname === '/api/v1/auth/mcp-tokens') {
+		const payload = body as { name?: unknown; access_level?: unknown; expires_at?: unknown } | null;
+		const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+		const accessLevel = payload?.access_level;
+		if (!name || (accessLevel !== 'read' && accessLevel !== 'manage')) mockUnsupported();
+		const id = nextMockId(state.mcpAccess.personalTokens.map((record) => record.id), 'mock-mcp-token');
+		const record = {
+			id,
+			grant_id: `mock-mcp-grant-${id}`,
+			name,
+			source: 'personal_token' as const,
+			access_level: accessLevel,
+			status: 'active' as const,
+			visible_prefix: `mcp_mock_${id.slice(-4)}_`,
+			issued_at: NOW_ISO,
+			expires_at: typeof payload?.expires_at === 'string' && !Number.isNaN(Date.parse(payload.expires_at)) ? payload.expires_at : MOCK_EXPIRES_AT_ISO,
+			last_used_at: null,
+			revoked_at: null,
+			is_lumen_default: false,
+		};
+		state.mcpAccess.personalTokens.unshift(record);
+		return { ...record, token: `sk-afgl-mock-${id}` };
+	}
+	if (method === 'DELETE' && pathname === '/api/v1/auth/mcp-tokens/lumen-default') {
+		for (const record of state.mcpAccess.personalTokens) record.is_lumen_default = false;
+		return { lumen_selection_generation: 2 };
+	}
+	const lumenDefaultTokenId = pathname.match(/^\/api\/v1\/auth\/mcp-tokens\/([^/]+)\/lumen-default$/)?.[1];
+	if (method === 'PUT' && lumenDefaultTokenId) {
+		const selected = state.mcpAccess.personalTokens.find((record) => record.id === lumenDefaultTokenId && record.status === 'active');
+		if (!selected) mockUnsupported();
+		for (const record of state.mcpAccess.personalTokens) record.is_lumen_default = record.id === lumenDefaultTokenId;
+		return { lumen_selection_generation: 2 };
+	}
+	const personalTokenId = pathname.match(/^\/api\/v1\/auth\/mcp-tokens\/([^/]+)$/)?.[1];
+	if (method === 'DELETE' && personalTokenId) {
+		const record = state.mcpAccess.personalTokens.find((item) => item.id === personalTokenId);
+		if (!record) mockUnsupported();
+		record.status = 'revoked';
+		record.revoked_at = NOW_ISO;
+		record.is_lumen_default = false;
+		return ok204();
+	}
+	const oauthGrantId = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/grants\/([^/]+)$/)?.[1];
+	if (method === 'DELETE' && oauthGrantId) {
+		const record = state.mcpAccess.oauthGrants.find((item) => item.grant_id === oauthGrantId);
+		if (!record) mockUnsupported();
+		record.status = 'revoked';
+		record.revoked_at = NOW_ISO;
+		return ok204();
+	}
+	const consentTicket = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/consents\/([^/]+)$/)?.[1];
+	if (method === 'GET' && consentTicket) {
+		if (consentTicket !== MOCK_MCP_CONSENT_TICKET) mockUnsupported();
+		return {
+			client_id: 'mock-mcp-desktop-client',
+			client_name: 'Tutorial Desktop MCP',
+			redirect_uri: 'http://mock-client.example.test/oauth/callback',
+			scopes: ['mcp:read'],
+			grant_deadline: MOCK_EXPIRES_AT_ISO,
+		};
+	}
+	const consentDecision = pathname.match(/^\/api\/v1\/auth\/mcp-oauth\/consents\/([^/]+)\/(approve|deny)$/);
+	if (method === 'POST' && consentDecision) {
+		if (consentDecision[1] !== MOCK_MCP_CONSENT_TICKET) mockUnsupported();
+		return { redirect_uri: `/dashboard/account?${MOCKUP_QUERY_KEY}=on` };
+	}
+
+
+	if (profile === 'admin' && method !== 'GET') mockUnsupported();
+
+	if (profile === 'admin' && pathname === '/api/v1/admin/projects/names') {
+		return state.projects.map(({ id, name }) => ({ id, name }));
+	}
+	if (profile === 'admin' && pathname === '/api/v1/admin/all-instances') {
+		let items = [...state.admin.instances];
+		const name = params.get('name')?.toLowerCase();
+		const status = params.get('status')?.toLowerCase();
+		const project = params.get('project_id');
+		const host = params.get('host')?.toLowerCase();
+		if (name) items = items.filter((item) => item.name.toLowerCase().includes(name));
+		if (status) items = items.filter((item) => item.status.toLowerCase() === status);
+		if (project) items = items.filter((item) => item.project_id === project);
+		if (host) items = items.filter((item) => item.host?.toLowerCase() === host);
+		return { items, next_marker: null, count: items.length };
+	}
+	if (profile === 'admin' && pathname === '/api/v1/admin/instances/health') return state.admin.instanceHealth;
+	if (profile === 'admin' && pathname === '/api/v1/admin/timeseries/instances') return state.admin.instanceTimeseries;
+	if (profile === 'admin' && pathname === '/api/v1/admin/hypervisors') return state.admin.hypervisors;
+
+	if (profile === 'admin' && pathname === '/api/v1/admin/all-volumes') {
+		let items = [...state.admin.volumes];
+		const name = params.get('name')?.toLowerCase();
+		const status = params.get('status')?.toLowerCase();
+		const project = params.get('project_id');
+		if (name) items = items.filter((item) => item.name.toLowerCase().includes(name));
+		if (status) items = items.filter((item) => item.status.toLowerCase() === status);
+		if (project) items = items.filter((item) => item.project_id === project);
+		return { items, next_marker: null, count: items.length };
+	}
+	if (profile === 'admin' && pathname === '/api/v1/admin/volumes/status-summary') return state.admin.volumeStatusSummary;
+	if (profile === 'admin' && pathname === '/api/v1/admin/timeseries/volumes') return state.admin.volumeTimeseries;
+	const adminVolumeId = pathname.match(/^\/api\/v1\/admin\/volumes\/([^/]+)$/)?.[1];
+	if (profile === 'admin' && adminVolumeId) return state.admin.volumeDetails[adminVolumeId] ?? mockUnsupported();
+
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/base-images') return state.admin.library.baseImages;
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/artifacts') return state.admin.library.artifacts;
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/profiles') return state.admin.library.profiles;
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/builds') return state.admin.library.builds;
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/imports') return state.admin.library.imports;
+	if (profile === 'admin' && pathname === '/api/v1/admin/libraries/consumes') return state.admin.library.consumes;
+
+	if (profile === 'admin' && pathname === '/api/v1/admin/topology') return state.topology;
+	if (profile === 'admin' && pathname === '/api/v1/admin/all-containers') return state.admin.containers;
+	const adminContainerLogsId = pathname.match(/^\/api\/v1\/admin\/containers\/([^/]+)\/logs$/)?.[1];
+	if (profile === 'admin' && adminContainerLogsId) {
+		return { logs: state.admin.containerLogs[adminContainerLogsId] ?? '' };
+	}
+	const adminContainerId = pathname.match(/^\/api\/v1\/admin\/containers\/([^/]+)$/)?.[1];
+	if (profile === 'admin' && adminContainerId) return state.admin.containerDetails[adminContainerId] ?? mockUnsupported();
+	if (profile === 'admin' && pathname === '/api/v1/admin/key-manager/project-quotas') return state.admin.keyManagerQuotas;
+	if (profile === 'admin' && pathname === '/api/v1/admin/monitoring/summary') return state.admin.monitoringSummary;
+	if (profile === 'admin' && pathname === '/api/v1/admin/services') {
+		const category = params.get('category');
+		if (!category || !(category in state.admin.services)) mockUnsupported();
+		return { [category]: state.admin.services[category as keyof typeof state.admin.services] };
+	}
+	if (profile === 'admin' && pathname === '/api/v1/admin/users/activity') return state.admin.userActivity;
+	if (profile === 'admin' && pathname === '/api/v1/admin/users') {
+		let items = [...state.admin.users];
+		const marker = params.get('marker');
+		if (marker) {
+			const index = items.findIndex((item) => item.id === marker);
+			items = index >= 0 ? items.slice(index + 1) : [];
+		}
+		const limit = Math.max(1, Number.parseInt(params.get('limit') ?? '100', 10) || 100);
+		const page = items.slice(0, limit);
+		return { items: page, next_marker: items.length > limit ? page.at(-1)?.id ?? null : null, count: state.admin.users.length };
+	}
 	if (method === 'POST' && pathname === '/api/v1/auth/token/project') return projectTokenResponse(String((body as { project_id?: string } | null)?.project_id ?? state.projects[0].id), profile);
 	if (method === 'POST' && pathname === '/api/v1/networks/ensure-default') return ok204();
 
 	if (method === 'GET' && pathname === '/api/v1/dashboard/summary') {
-		if (params.get('view') === 'overview') return dashboardOverviewSummary();
+		if (params.get('view') === 'overview') return dashboardOverviewSummary(params.get('recent_limit'));
 		return { instances: { total: state.instances.length, active: state.instances.filter((item) => item.status === 'ACTIVE').length, shutoff: state.instances.filter((item) => item.status === 'SHUTOFF').length, error: state.instances.filter((item) => item.status === 'ERROR').length }, gpu_used: state.instances.filter((item) => item.flavor_name?.startsWith('gpu.')).length };
 	}
 	if (method === 'GET' && pathname === '/api/v1/dashboard/quotas') {
@@ -245,7 +444,6 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && /^\/api\/v1\/instances\/[^/]+\/security-groups$/.test(pathname)) return { ports: [], security_groups: [{ id: 'mock-sg-default', name: 'default', description: 'Mock default SG', rules: [{ id: 'mock-rule-ssh', direction: 'ingress', protocol: 'tcp', port_range_min: 22, port_range_max: 22, remote_ip_prefix: '0.0.0.0/0', ethertype: 'IPv4' }] }] };
 	if (method === 'GET' && /^\/api\/v1\/instances\/[^/]+\/owner$/.test(pathname)) return { display: 'Sample Cloud Demo / demo-user' };
 	if (method === 'GET' && /^\/api\/v1\/instances\/[^/]+\/storage-attachments$/.test(pathname)) return [{ file_storage_id: 'mock-share-1', name: 'demo-dataset', share_proto: 'CEPHFS', status: 'available' }];
-	if (method === 'GET' && pathname === '/api/v1/storage/file-storages') return [{ id: 'mock-share-2', name: 'training-output', status: 'available', share_proto: 'CEPHFS' }];
 
 	if (method === 'GET' && pathname === '/api/v1/volumes') return state.volumes;
 	if (method === 'POST' && pathname === '/api/v1/volumes') {
@@ -270,12 +468,45 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && pathname === '/api/v1/volume-snapshots') return [];
 	if (method === 'POST' && pathname === '/api/v1/volumes/backups/auto-backup/configs') return [];
 
-	if (method === 'GET' && pathname === '/api/v1/images') {
-		return [
-			{ id: 'fixture-image-ubuntu', name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 2361393152, min_disk: 10, min_ram: 1024, os_distro: 'ubuntu', os_version: '24.04', created_at: NOW_ISO },
-			{ id: 'fixture-image-rocky', name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1932735283, min_disk: 10, min_ram: 1024, os_distro: 'rocky', created_at: NOW_ISO },
-		];
+	const imageId = pathname.match(/^\/api\/v1\/images\/([^/]+)$/)?.[1];
+	if (method === 'GET' && imageId) {
+		return MOCK_IMAGES.find((image) => image.id === imageId) ?? mockUnsupported();
 	}
+	if (method === 'GET' && pathname === '/api/v1/palimpsest/hub/image-exports') return [];
+	if (method === 'POST' && pathname === '/api/v1/palimpsest/hub/image-exports') {
+		const payload = body as { image_id?: string; disk_format?: string } | null;
+		return {
+			id: 'mock-image-export-1',
+			source_image_id: payload?.image_id ?? 'fixture-image-ubuntu',
+			target_disk_format: payload?.disk_format ?? 'qcow2',
+			status: 'queued',
+			progress_pct: 0,
+			error_code: null,
+			error_message: null,
+			download_path: null,
+		};
+	}
+	const imageExportId = pathname.match(/^\/api\/v1\/palimpsest\/hub\/image-exports\/([^/]+)$/)?.[1];
+	if (method === 'GET' && imageExportId) {
+		return {
+			id: imageExportId,
+			source_image_id: 'fixture-image-ubuntu',
+			target_disk_format: 'qcow2',
+			status: 'complete',
+			progress_pct: 100,
+			error_code: null,
+			error_message: null,
+			download_path: `/api/v1/palimpsest/hub/image-exports/${imageExportId}/blob`,
+		};
+	}
+	const imageExportDownloadId = pathname.match(
+		/^\/api\/v1\/palimpsest\/hub\/image-exports\/([^/]+)\/download-token$/,
+	)?.[1];
+	if (method === 'POST' && imageExportDownloadId) {
+		return { url: 'http://127.0.0.1:3080/robots.txt', expires_in: 60 };
+	}
+
+	if (method === 'GET' && pathname === '/api/v1/images') return MOCK_IMAGES;
 	if (method === 'GET' && pathname === '/api/v1/libraries') return [];
 	if (method === 'GET' && pathname === '/api/v1/security-groups') return [{ id: 'mock-sg-default', name: 'default', description: 'Mock default SG', rules: [] }];
 	if (method === 'GET' && pathname === '/api/v1/networks/default') return { network_id: 'mock-net-private' };
@@ -314,7 +545,21 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	if (method === 'GET' && /^\/api\/v1\/projects\/[^/]+\/invitations$/.test(pathname)) return { items: [] };
 	if (method === 'GET' && pathname === '/api/v1/announcements') return [];
 	if (method === 'GET' && pathname === '/api/v1/announcements/unread-count') return { unread_count: 0 };
-	if (method === 'GET' && pathname === '/api/v1/chat/usage') return { found: false, total_raw_amount: 0, total_token_value: 0, transaction_count: 0 };
+	if (method === 'GET' && pathname === '/api/v1/chat/usage') {
+		return {
+			found: false,
+			total_credited_cost: 0,
+			lifetime_prompt_tokens: 0,
+			lifetime_completion_tokens: 0,
+			lifetime_request_count: 0,
+			month_credited_cost: 0,
+			month_prompt_tokens: 0,
+			month_completion_tokens: 0,
+			month_request_count: 0,
+			quota_used: 0,
+			quota_max: 0
+		};
+	}
 	if (method === 'GET' && pathname === '/api/v1/dashboard/usage-stats') {
 		return {
 			range: params.get('range') ?? '7d',
@@ -399,7 +644,7 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 }
 
 export async function maybeMockJson<T>(method: string, path: string, body?: unknown, _token?: string, _projectId?: string): Promise<T | typeof symbolNoMatch> {
-	const profile = activeProfile();
+	const profile = getActiveMockupProfile();
 	if (!profile) return symbolNoMatch;
 	const normalized = normalizePath(path);
 	const upperMethod = method.toUpperCase();
@@ -411,7 +656,7 @@ export async function maybeMockJson<T>(method: string, path: string, body?: unkn
 }
 
 export async function maybeMockBlob(method: string, path: string, _token?: string, _projectId?: string): Promise<Blob | typeof symbolNoMatch> {
-	if (!activeProfile()) return symbolNoMatch;
+	if (!getActiveMockupProfile()) return symbolNoMatch;
 	const normalized = normalizePath(path);
 	if (method.toUpperCase() === 'GET' && /^\/api\/v1\/k3s\/clusters\/[^/]+\/kubeconfig$/.test(normalized)) {
 		const content = 'apiVersion: v1\nkind: Config\nclusters:\n- name: afterglow-mockup\ncontexts:\n- name: afterglow-mockup\ncurrent-context: afterglow-mockup\n';
@@ -430,7 +675,7 @@ export async function maybeMockBlob(method: string, path: string, _token?: strin
 }
 
 export async function maybeMockHead(path: string, _token?: string, _projectId?: string): Promise<Response | typeof symbolNoMatch> {
-	if (!activeProfile()) return symbolNoMatch;
+	if (!getActiveMockupProfile()) return symbolNoMatch;
 	const normalized = normalizePath(path);
 	if (/^\/api\/v1\/k3s\/clusters\/[^/]+\/kubeconfig$/.test(normalized)) return new Response(null, { status: 204 });
 	if (normalized.startsWith('/api/v1/')) mockUnsupported();
@@ -452,7 +697,7 @@ export interface MockInstanceProgressMessage {
 }
 
 export function maybeMockInstanceCreateStream(path: string, body: unknown): AsyncGenerator<MockInstanceProgressMessage> | null {
-	if (!activeProfile()) return null;
+	if (!getActiveMockupProfile()) return null;
 	const normalized = normalizePath(path);
 	if (normalized !== '/api/v1/instances/async' && normalized !== '/api/v1/admin/instances/async') return null;
 	const state = getMockupState();
@@ -484,7 +729,7 @@ export function maybeMockInstanceCreateStream(path: string, body: unknown): Asyn
 }
 
 export function maybeMockK3sStream(path: string, body: unknown, token?: string, projectId?: string): AsyncGenerator<K3sSseProgressMessage> | null {
-	if (!activeProfile()) return null;
+	if (!getActiveMockupProfile()) return null;
 	const normalized = normalizePath(path);
 	const state = getMockupState();
 	if (normalized === '/api/v1/k3s/clusters/async') {

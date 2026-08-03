@@ -13,6 +13,10 @@ export default defineConfig({
 			{ find: '$lib', replacement: fileURLToPath(new URL('./src/lib', import.meta.url)) },
 			// SvelteKit 가상 모듈 스텁 — 테스트에서 vi.mock()으로 재정의 가능
 			{
+				find: '$app/stores',
+				replacement: fileURLToPath(new URL('./src/__mocks__/sveltekit/app-stores.ts', import.meta.url)),
+			},
+			{
 				find: '$app/environment',
 				replacement: fileURLToPath(new URL('./src/__mocks__/sveltekit/app-environment.ts', import.meta.url)),
 			},

@@ -1,3 +1,10 @@
+{{- $appOrigin := (splitList "," .Values.cors.origins) | first | trim -}}
+{{- $publicApiBase := (default (default $appOrigin .Values.app.frontendBaseUrl) .Values.app.publicApiBase) -}}
+{{- $defaultMcpPublicURL := printf "%s/api/v1/mcp" (trimSuffix "/" $publicApiBase) -}}
+{{- $mcpPublicURL := default $defaultMcpPublicURL .Values.mcp.publicUrl -}}
+{{- $parsedMcpURL := urlParse $mcpPublicURL -}}
+{{- $mcpPath := default "/api/v1/mcp" (trimSuffix "/" $parsedMcpURL.path) -}}
+{{- $mcpEnabled := and .Values.services.mcp $mcpPublicURL -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -13,11 +20,40 @@ spec:
   tls:
     - hosts:
         - {{ .Values.ingress.host }}
+        {{- range .Values.ingress.apiHosts }}
+        - {{ . }}
+        {{- end }}
+        {{- if $mcpEnabled }}
+        {{- $mcpURL := urlParse $mcpPublicURL }}
+        {{- if and (ne $mcpURL.host $.Values.ingress.host) (not (has $mcpURL.host $.Values.ingress.apiHosts)) }}
+        - {{ $mcpURL.host }}
+        {{- end }}
+        {{- end }}
       secretName: {{ .Values.ingress.tlsSecretName }}
   rules:
+    # 기본 host — 웹 앱(/) + 내부 API(/api). 외부 /v1 은 여기서 노출하지 않는다.
     - host: {{ .Values.ingress.host }}
       http:
         paths:
+          {{- if $mcpEnabled }}
+          {{- $mcpURL := urlParse $mcpPublicURL }}
+          {{- if eq $mcpURL.host $.Values.ingress.host }}
+          - path: {{ $mcpPath | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          {{- end }}
+          {{- end }}
           - path: /api
             pathType: Prefix
             backend:
@@ -32,3 +68,72 @@ spec:
                 name: frontend
                 port:
                   number: 3080
+    {{- range .Values.ingress.apiHosts }}
+    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)만 백엔드로. 나머지는 프론트(랜딩).
+    - host: {{ . }}
+      http:
+        paths:
+          {{- if $mcpEnabled }}
+          {{- $mcpURL := urlParse $mcpPublicURL }}
+          {{- if eq $mcpURL.host . }}
+          - path: {{ $mcpPath | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          {{- end }}
+          {{- end }}
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3080
+    {{- end }}
+    {{- if $mcpEnabled }}
+    {{- $mcpURL := urlParse $mcpPublicURL }}
+    {{- if and (ne $mcpURL.host $.Values.ingress.host) (not (has $mcpURL.host $.Values.ingress.apiHosts)) }}
+    # Public Streamable HTTP MCP resource and OAuth discovery endpoints.
+    - host: {{ $mcpURL.host }}
+      http:
+        paths:
+          - path: {{ $mcpPath | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+    {{- end }}
+    {{- end }}

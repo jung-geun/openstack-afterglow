@@ -27,8 +27,9 @@ class SiteServicesResponse(BaseModel):
     trove: bool
     swift: bool
     barbican: bool
-    vpn: bool
+    waygate: bool
     chat: bool
+    mcp: bool
 
 
 class PublicSiteConfigResponse(BaseModel):
@@ -39,6 +40,7 @@ class PublicSiteConfigResponse(BaseModel):
     logo_light_path: str
     favicon_path: str
     services: SiteServicesResponse
+    mcp_url: str = ""
 
 
 class BrandingSlotResponse(BaseModel):

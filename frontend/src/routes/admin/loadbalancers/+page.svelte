@@ -30,6 +30,7 @@
 
 	const ar = createAutoRefresh(() => fetchLoadbalancers(), {
 		storageKey: 'admin-loadbalancers',
+		invokeOnMount: false,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]
 	});

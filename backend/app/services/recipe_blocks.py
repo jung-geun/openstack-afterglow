@@ -322,6 +322,20 @@ def squashfs_uv_layer(name: str) -> str:
         f"mkdir -p {output_dir}\n"
         f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
         'mksquashfs "$STAGING" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        # ── Palimpsest 콘텐츠 주소화 (docs/palimpsest.md §3) ──────────────────
+        # 레이어 정체성 = .sqsh blob 바이트의 sha256. 빌드 VM 에서 계산해 콘솔 sentinel 로
+        # 방출하면 오케스트레이터가 palimpsest_digest.parse_digest_sentinel 로 회수한다.
+        # `|| true`: run-build.sh 는 `set -euo pipefail` 이므로 digest 계산이 실패해도
+        # 빌드 전체를 죽이지 않도록 막는다 — digest 는 나중에 백필할 수 있지만
+        # 빌드 산출물은 되살릴 수 없다.
+        'PALIMPSEST_SHA256="$(sha256sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_MD5="$(md5sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_SIZE="$(stat -c %s "$OUT_SQSH" 2>/dev/null)" || true\n'
+        # 레이어 이름을 함께 싣는다 — 한 번의 빌드가 여러 레이어를 만들 수 있고(Dockerfile
+        # import), 콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다. quoted_name 은
+        # `_LAYER_NAME_RE` 로 검증된 뒤 shlex.quote 된 값이다.
+        f'echo "::AFTERGLOW::DIGEST::layer={quoted_name} sha256=${{PALIMPSEST_SHA256:-}}'
+        ' md5=${PALIMPSEST_MD5:-} size=${PALIMPSEST_SIZE:-}"\n'
         f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
         'rm -rf "$STAGING"\n'
     )
@@ -385,6 +399,20 @@ def squashfs_system_apt_layer(name: str, apt_packages: list[str], *, capture_siz
         f"mkdir -p {output_dir}\n"
         f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
         'mksquashfs "$CAP/upper" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        # ── Palimpsest 콘텐츠 주소화 (docs/palimpsest.md §3) ──────────────────
+        # 레이어 정체성 = .sqsh blob 바이트의 sha256. 빌드 VM 에서 계산해 콘솔 sentinel 로
+        # 방출하면 오케스트레이터가 palimpsest_digest.parse_digest_sentinel 로 회수한다.
+        # `|| true`: run-build.sh 는 `set -euo pipefail` 이므로 digest 계산이 실패해도
+        # 빌드 전체를 죽이지 않도록 막는다 — digest 는 나중에 백필할 수 있지만
+        # 빌드 산출물은 되살릴 수 없다.
+        'PALIMPSEST_SHA256="$(sha256sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_MD5="$(md5sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_SIZE="$(stat -c %s "$OUT_SQSH" 2>/dev/null)" || true\n'
+        # 레이어 이름을 함께 싣는다 — 한 번의 빌드가 여러 레이어를 만들 수 있고(Dockerfile
+        # import), 콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다. quoted_name 은
+        # `_LAYER_NAME_RE` 로 검증된 뒤 shlex.quote 된 값이다.
+        f'echo "::AFTERGLOW::DIGEST::layer={quoted_name} sha256=${{PALIMPSEST_SHA256:-}}'
+        ' md5=${PALIMPSEST_MD5:-} size=${PALIMPSEST_SIZE:-}"\n'
         f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
     )
 
@@ -488,6 +516,20 @@ echo "[afterglow-nvidia] installed NVIDIA driver branch $BRANCH for kernel $(una
         f"mkdir -p {output_dir}\n"
         f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
         'mksquashfs "$STAGING" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        # ── Palimpsest 콘텐츠 주소화 (docs/palimpsest.md §3) ──────────────────
+        # 레이어 정체성 = .sqsh blob 바이트의 sha256. 빌드 VM 에서 계산해 콘솔 sentinel 로
+        # 방출하면 오케스트레이터가 palimpsest_digest.parse_digest_sentinel 로 회수한다.
+        # `|| true`: run-build.sh 는 `set -euo pipefail` 이므로 digest 계산이 실패해도
+        # 빌드 전체를 죽이지 않도록 막는다 — digest 는 나중에 백필할 수 있지만
+        # 빌드 산출물은 되살릴 수 없다.
+        'PALIMPSEST_SHA256="$(sha256sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_MD5="$(md5sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_SIZE="$(stat -c %s "$OUT_SQSH" 2>/dev/null)" || true\n'
+        # 레이어 이름을 함께 싣는다 — 한 번의 빌드가 여러 레이어를 만들 수 있고(Dockerfile
+        # import), 콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다. quoted_name 은
+        # `_LAYER_NAME_RE` 로 검증된 뒤 shlex.quote 된 값이다.
+        f'echo "::AFTERGLOW::DIGEST::layer={quoted_name} sha256=${{PALIMPSEST_SHA256:-}}'
+        ' md5=${PALIMPSEST_MD5:-} size=${PALIMPSEST_SIZE:-}"\n'
         f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
     )
 
@@ -526,6 +568,20 @@ def squashfs_python_layer(name: str, python_version: str) -> str:
         f"mkdir -p {output_dir}\n"
         f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
         'mksquashfs "$STAGING" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        # ── Palimpsest 콘텐츠 주소화 (docs/palimpsest.md §3) ──────────────────
+        # 레이어 정체성 = .sqsh blob 바이트의 sha256. 빌드 VM 에서 계산해 콘솔 sentinel 로
+        # 방출하면 오케스트레이터가 palimpsest_digest.parse_digest_sentinel 로 회수한다.
+        # `|| true`: run-build.sh 는 `set -euo pipefail` 이므로 digest 계산이 실패해도
+        # 빌드 전체를 죽이지 않도록 막는다 — digest 는 나중에 백필할 수 있지만
+        # 빌드 산출물은 되살릴 수 없다.
+        'PALIMPSEST_SHA256="$(sha256sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_MD5="$(md5sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_SIZE="$(stat -c %s "$OUT_SQSH" 2>/dev/null)" || true\n'
+        # 레이어 이름을 함께 싣는다 — 한 번의 빌드가 여러 레이어를 만들 수 있고(Dockerfile
+        # import), 콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다. quoted_name 은
+        # `_LAYER_NAME_RE` 로 검증된 뒤 shlex.quote 된 값이다.
+        f'echo "::AFTERGLOW::DIGEST::layer={quoted_name} sha256=${{PALIMPSEST_SHA256:-}}'
+        ' md5=${PALIMPSEST_MD5:-} size=${PALIMPSEST_SIZE:-}"\n'
         f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
         'rm -rf "$STAGING"\n'
     )
@@ -667,6 +723,20 @@ def squashfs_stacked_layer(
         f"mkdir -p {output_dir}\n"
         f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
         'mksquashfs /mnt/upper "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        # ── Palimpsest 콘텐츠 주소화 (docs/palimpsest.md §3) ──────────────────
+        # 레이어 정체성 = .sqsh blob 바이트의 sha256. 빌드 VM 에서 계산해 콘솔 sentinel 로
+        # 방출하면 오케스트레이터가 palimpsest_digest.parse_digest_sentinel 로 회수한다.
+        # `|| true`: run-build.sh 는 `set -euo pipefail` 이므로 digest 계산이 실패해도
+        # 빌드 전체를 죽이지 않도록 막는다 — digest 는 나중에 백필할 수 있지만
+        # 빌드 산출물은 되살릴 수 없다.
+        'PALIMPSEST_SHA256="$(sha256sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_MD5="$(md5sum "$OUT_SQSH" 2>/dev/null | awk \'{print $1}\')" || true\n'
+        'PALIMPSEST_SIZE="$(stat -c %s "$OUT_SQSH" 2>/dev/null)" || true\n'
+        # 레이어 이름을 함께 싣는다 — 한 번의 빌드가 여러 레이어를 만들 수 있고(Dockerfile
+        # import), 콘솔이 잘리면 위치 기반 매핑은 조용히 어긋난다. quoted_name 은
+        # `_LAYER_NAME_RE` 로 검증된 뒤 shlex.quote 된 값이다.
+        f'echo "::AFTERGLOW::DIGEST::layer={quoted_name} sha256=${{PALIMPSEST_SHA256:-}}'
+        ' md5=${PALIMPSEST_MD5:-} size=${PALIMPSEST_SIZE:-}"\n'
         f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
     )
     return script

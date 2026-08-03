@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
@@ -6,7 +7,10 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+  import { executeBulkMutations, partitionBulkIds } from '$lib/utils/bulkActions';
   import { buildContainerCreatePayload } from '$lib/utils/containerCreatePayload';
   import type { ZunContainer, ContainerListResponse, EnvVar, PortMapping } from '$lib/types/zunContainer';
   import ZunServiceBanner from '$lib/components/dashboard/containers/instances/ZunServiceBanner.svelte';
@@ -14,7 +18,6 @@
   import ContainersTable from '$lib/components/dashboard/containers/instances/ContainersTable.svelte';
   import ContainerCreateModal from '$lib/components/dashboard/containers/instances/ContainerCreateModal.svelte';
   import { toast } from '$lib/stores/toast';
-
   let containers = $state<ZunContainer[]>([]);
   let serviceAvailable = $state(true);
   let serviceMessage = $state('');
@@ -25,11 +28,17 @@
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
+  const selection = createResourceSelection();
+  let bulkBusy = $state(false);
+  const selectableIds = $derived(new Set(containers.map((container) => container.uuid)));
+  const startIds = $derived(new Set(containers.filter((container) => container.status === 'Stopped' || container.status === 'Created').map((container) => container.uuid)));
+  const stopIds = $derived(new Set(containers.filter((container) => container.status === 'Running').map((container) => container.uuid)));
 
   async function fetchContainers(opts?: { refresh?: boolean }) {
     try {
       const resp = await api.get<ContainerListResponse>('/api/v1/containers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       containers = resp.items;
+      selection.retain(resp.items.map((container) => container.uuid));
       serviceAvailable = resp.service_available;
       serviceMessage = resp.message;
       error = '';
@@ -106,9 +115,55 @@
       actionTarget = null;
     }
   }
+  async function runBulk(action: 'start' | 'stop' | 'delete') {
+    const snapshot = [...selection.ids];
+    if (snapshot.length === 0) return;
+    const eligible = action === 'start' ? startIds : action === 'stop' ? stopIds : selectableIds;
+    const { eligible: applicable, skipped } = partitionBulkIds(snapshot, eligible);
+    const label = action === 'start' ? '시작' : action === 'stop' ? '중지' : '삭제';
+    if (applicable.length === 0) {
+      if (skipped.length > 0) toast.warning(`${skipped.length}개는 현재 상태에서 ${label}할 수 없어 제외했습니다.`);
+      return;
+    }
+    const note = skipped.length > 0 ? `\n${skipped.length}개는 현재 상태에서 제외됩니다.` : '';
+    if (action === 'delete' || skipped.length > 0) {
+      const prompt = action === 'delete'
+        ? `선택한 컨테이너 ${applicable.length}개를 삭제하시겠습니까?${note}`
+        : `선택한 컨테이너 ${applicable.length}개를 ${label}하시겠습니까?${note}`;
+      if (!await confirmDialog(prompt)) return;
+    }
+    const tokenSnapshot = $auth.token ?? undefined;
+    const projectSnapshot = $auth.projectId ?? undefined;
+    bulkBusy = true;
+    try {
+      const results = await executeBulkMutations(applicable, (id) => {
+        if (action === 'start') return api.post(`/api/v1/containers/${id}/start`, {}, tokenSnapshot, projectSnapshot);
+        if (action === 'stop') return api.post(`/api/v1/containers/${id}/stop`, {}, tokenSnapshot, projectSnapshot);
+        return api.delete(`/api/v1/containers/${id}`, tokenSnapshot, projectSnapshot);
+      });
+      const successful = results.filter((result) => result.ok).map((result) => result.id);
+      const failedCount = results.length - successful.length;
+      if (skipped.length > 0) toast.warning(`${skipped.length}개는 현재 상태에서 ${label}할 수 없어 제외했습니다.`);
+      if (successful.length > 0) toast.success(`${successful.length}개 ${label} 요청을 완료했습니다.`);
+      if (failedCount > 0) toast.error(`${failedCount}개 ${label}에 실패했습니다.`);
+      if ($auth.projectId === projectSnapshot) {
+        selection.remove(successful);
+        await fetchContainers();
+      }
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  const bulkActions = $derived<BulkSelectionAction[]>([
+    { key: 'start', label: '시작', tone: 'success', disabled: ![...selection.ids].some((id) => startIds.has(id)), onAction: () => runBulk('start') },
+    { key: 'stop', label: '중지', tone: 'warning', disabled: ![...selection.ids].some((id) => stopIds.has(id)), onAction: () => runBulk('stop') },
+    { key: 'delete', label: '삭제', tone: 'danger', onAction: () => runBulk('delete') },
+  ]);
 
   const ar = createAutoRefresh(() => fetchContainers(), {
     storageKey: 'dashboard-zun-containers',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 10,
     intervalOptions: [10, 15, 30, 60],
@@ -116,9 +171,12 @@
 
   $effect(() => {
     const projectId = $auth.projectId;
-    if (!projectId) return;
-    loading = true;
-    untrack(() => fetchContainers());
+    untrack(() => {
+      selection.clear();
+      if (!projectId) return;
+      loading = true;
+      void fetchContainers();
+    });
   });
 
   $effect(() => {
@@ -133,7 +191,7 @@
   onCreate={createContainer}
 />
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
   <PageHeader breadcrumb="CONTAINERS / INSTANCES" title="컨테이너">
     {#snippet actions()}
       <AutoRefreshControl
@@ -159,9 +217,22 @@
     <ContainersTable
       {containers}
       {actionTarget}
+      selectedIds={selection.ids}
+      selectableIds={selectableIds}
+      selectionDisabled={bulkBusy}
+      onToggleSelect={(id) => selection.toggle(id)}
+      onToggleAll={() => selection.toggleAll(selectableIds)}
       onStart={startContainer}
       onStop={stopContainer}
       onDelete={deleteContainer}
+      onOpen={(id) => goto(`/dashboard/containers/instances/${id}`)}
+    />
+    <BulkSelectionOverlay
+      count={selection.count}
+      ariaLabel="선택한 컨테이너 일괄 작업"
+      actions={bulkActions}
+      busy={bulkBusy}
+      onClear={() => selection.clear()}
     />
   {/if}
 </div>

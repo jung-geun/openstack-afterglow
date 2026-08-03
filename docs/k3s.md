@@ -238,7 +238,7 @@ kubectl config set-cluster default \
 
 ## Cloud Provider OpenStack 플러그인
 
-k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다。
+k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `afterglow.conf [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다。
 
 ### 지원 플러그인
 
@@ -251,7 +251,7 @@ k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통
 | **Keystone Auth** | `keystone_auth_enabled` | Kubernetes 인증 → Keystone 토큰 연동 |
 | **Barbican KMS** | `barbican_kms_enabled` | Kubernetes Secret at-rest 암호화 → Barbican 연동 |
 
-### config.toml 예시
+### afterglow.conf 예시
 
 ```toml
 [k3s]
@@ -298,4 +298,4 @@ OCCM이 활성화된 클러스터 삭제 시, Kubernetes LoadBalancer 서비스�
 
 ### kubeconfig 존재 확인 (HEAD)
 
-`HEAD /api/k3s/clusters/{id}/kubeconfig` 요청으로 kubeconfig 파일 존재 여부만 확인할 수 있습니다. 이는 파일을 다운로드하지 않고 클러스터 준비 상태를 확인할 때 유용합니다.
+`HEAD /api/v1/k3s/clusters/{id}/kubeconfig` 요청으로 kubeconfig 파일 존재 여부만 확인할 수 있습니다. 이는 파일을 다운로드하지 않고 클러스터 준비 상태를 확인할 때 유용합니다.

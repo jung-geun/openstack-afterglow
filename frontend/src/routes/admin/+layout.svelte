@@ -6,6 +6,7 @@
 	import AdminSidebar from '$lib/components/AdminSidebar.svelte';
 	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
 	import { wizardOpen } from '$lib/stores/wizard';
+	import { loadTutorialStatuses } from '$lib/tutorial/status';
 
 	let redirecting = $state(false);
 
@@ -15,6 +16,10 @@
 			redirecting = true;
 			setTimeout(() => goto('/dashboard'), 2000);
 		}
+	});
+
+	$effect(() => {
+		if ($auth.token) void loadTutorialStatuses();
 	});
 
 	// mount 시 /me를 강제 호출해 stale 캐시 우회 — 60s 내 admin 박탈을 즉시 반영

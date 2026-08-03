@@ -14,6 +14,7 @@
 	import ProjectFilter from '$lib/components/admin/topology/ProjectFilter.svelte';
 	import TopologyLegend from '$lib/components/admin/topology/TopologyLegend.svelte';
 	import TopologyLBPanel from '$lib/components/admin/topology/TopologyLBPanel.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -32,6 +33,7 @@
 
 	const ar = createAutoRefresh(ctrl.fetchTopology, {
 		storageKey: 'admin-topology',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]
@@ -39,6 +41,7 @@
 
 	const arTraffic = createAutoRefresh(ctrl.loadTraffic, {
 		storageKey: 'admin-topology-traffic',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30],
@@ -64,8 +67,10 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
+	<div data-tour="admin-network-header">
 	<PageHeader breadcrumb="NETWORK / TOPOLOGY" title="토폴로지">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-network" compactOnMobile />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -75,9 +80,10 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
 	<!-- 프로젝트 필터 -->
-	<div class="flex gap-3 mb-4">
+	<div class="flex gap-3 mb-4" data-tour="admin-network-filter">
 		<ProjectFilter bind:projectFilter={ctrl.projectFilter} bind:searchText={ctrl.projectSearchText} bind:dropdownOpen={ctrl.projectDropdownOpen} />
 	</div>
 
@@ -88,7 +94,8 @@
 	{:else if ctrl.loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if ctrl.data}
-		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
+		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4" data-tour="admin-network-canvas">
+			<div data-tour="admin-network-ready">
 			<GlobalTopology
 				data={ctrl.data}
 				traffic={ctrl.traffic}
@@ -108,8 +115,10 @@
 					else { ctrl.selectedLB = lb; ctrl.selectedInstanceId = null; ctrl.selectedRouterId = null; }
 				}}
 			/>
+			</div>
 		</div>
 
+		<div data-tour="admin-network-legend">
 		<TopologyLegend {isLight} />
 
 		<!-- 전체 요약 -->
@@ -119,6 +128,7 @@
 			<span>인스턴스 {ctrl.data.instances.length}개</span>
 			<span>Floating IP {ctrl.data.floating_ips.length}개</span>
 			<span>로드밸런서 {(ctrl.data.load_balancers ?? []).length}개</span>
+		</div>
 		</div>
 	{/if}
 </div>
@@ -130,7 +140,7 @@
 {/if}
 
 {#if ctrl.selectedRouterId}
-	<SlidePanel onClose={() => ctrl.selectedRouterId = null} width="w-full md:w-[60vw] max-w-3xl">
+	<SlidePanel onClose={() => ctrl.selectedRouterId = null} width="w-full md:w-[60vw] max-w-3xl" dataTour="admin-network-detail">
 		<RouterDetailPanel routerId={ctrl.selectedRouterId} onClose={() => ctrl.selectedRouterId = null} />
 	</SlidePanel>
 {/if}

@@ -1,6 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
+  import { api } from '$lib/api/client';
+  import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { executeBulkMutations } from '$lib/utils/bulkActions';
+  import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+  import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
   import { createVolumesController } from '$lib/stores/volumesController.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
   import VolumeCreateModal from '$lib/components/volume/VolumeCreateModal.svelte';
@@ -24,22 +30,95 @@
     volumeBackupsEnabled: () => $betaFeatures.volumeBackups,
     volumeSnapshotsEnabled: () => $betaFeatures.volumeSnapshots,
   });
+  const volumeSelection = createResourceSelection();
+  const snapshotSelection = createResourceSelection();
+  let bulkBusy = $state(false);
+  const selectableVolumeIds = $derived(new Set(ctrl.volumes.filter((volume) => volume.attachments.length === 0).map((volume) => volume.id)));
+  const selectableSnapshotIds = $derived(new Set(ctrl.snapshots.map((snapshot) => snapshot.id)));
+
+  function retainSelections() {
+    volumeSelection.retain(ctrl.volumes.map((volume) => volume.id));
+    snapshotSelection.retain(ctrl.snapshots.map((snapshot) => snapshot.id));
+  }
+
+  async function runBulkDelete(kind: 'volume' | 'snapshot') {
+    const selection = kind === 'volume' ? volumeSelection : snapshotSelection;
+    const ids = [...selection.ids];
+    if (ids.length === 0) return;
+    const eligible = kind === 'volume'
+      ? ids.filter((id) => selectableVolumeIds.has(id))
+      : ids.filter((id) => selectableSnapshotIds.has(id));
+    const skipped = ids.length - eligible.length;
+    if (eligible.length === 0) {
+      toast.warning(`${ids.length}개는 현재 상태에서 삭제할 수 없어 제외했습니다.`);
+      return;
+    }
+    const label = kind === 'volume' ? '볼륨' : '스냅샷';
+    const warning = skipped > 0 ? `\n${skipped}개는 현재 상태에서 제외됩니다.` : '';
+    if (!await confirmDialog(`선택한 ${label} ${eligible.length}개를 삭제하시겠습니까?${warning}`)) return;
+    const tokenSnapshot = $auth.token ?? undefined;
+    const projectSnapshot = $auth.projectId ?? undefined;
+    bulkBusy = true;
+    try {
+      const results = await executeBulkMutations(eligible, (id) =>
+        api.delete(kind === 'volume' ? `/api/v1/volumes/${id}` : `/api/v1/volume-snapshots/${id}`, tokenSnapshot, projectSnapshot),
+      );
+      const successful = results.filter((result) => result.ok).map((result) => result.id);
+      const failed = results.length - successful.length;
+      if (successful.length > 0) toast.success(`${successful.length}개 삭제 요청을 완료했습니다.`);
+      if (failed > 0) toast.error(`${failed}개 삭제에 실패했습니다.`);
+      if (skipped > 0) toast.warning(`${skipped}개는 현재 상태에서 삭제할 수 없어 제외했습니다.`);
+      if ($auth.projectId !== projectSnapshot) return;
+      selection.remove(successful);
+      if (kind === 'volume') await ctrl.fetchVolumes();
+      else await ctrl.fetchSnapshots();
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  const volumeBulkActions = $derived<BulkSelectionAction[]>([
+    { key: 'delete', label: '삭제', tone: 'danger', disabled: [...volumeSelection.ids].every((id) => !selectableVolumeIds.has(id)), onAction: () => runBulkDelete('volume') },
+  ]);
+  const snapshotBulkActions = $derived<BulkSelectionAction[]>([
+    { key: 'delete', label: '삭제', tone: 'danger', disabled: [...snapshotSelection.ids].every((id) => !selectableSnapshotIds.has(id)), onAction: () => runBulkDelete('snapshot') },
+  ]);
 
   const ar = createAutoRefresh(() => ctrl.fetchAll(), {
     storageKey: 'dashboard-volumes',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 10,
     intervalOptions: [10, 15, 30, 60],
   });
+  $effect(() => {
+    const volumeIds = ctrl.volumes.map((volume) => volume.id);
+    const snapshotIds = ctrl.snapshots.map((snapshot) => snapshot.id);
+    untrack(() => {
+      volumeSelection.retain(volumeIds);
+      snapshotSelection.retain(snapshotIds);
+    });
+  });
 
   $effect(() => {
     const projectId = $auth.projectId;
-    if (!$betaFeatures.volumeSnapshots && ctrl.tab === 'snapshots') {
-      ctrl.tab = 'volumes';
-    }
-    if (!projectId) return;
-    ctrl.loading = true;
-    untrack(() => ctrl.fetchAll());
+    untrack(() => {
+      volumeSelection.clear();
+      snapshotSelection.clear();
+      if (!projectId) return;
+      ctrl.loading = true;
+      void ctrl.fetchAll();
+    });
+  });
+
+  $effect(() => {
+    const tab = ctrl.tab;
+    const snapshotsEnabled = $betaFeatures.volumeSnapshots;
+    untrack(() => {
+      if (!snapshotsEnabled && tab === 'snapshots') ctrl.tab = 'volumes';
+      if (!snapshotsEnabled || tab === 'volumes') snapshotSelection.clear();
+      else volumeSelection.clear();
+    });
   });
 </script>
 
@@ -49,7 +128,7 @@
 
 <VolumeCreateModal bind:open={ctrl.showModal} onCreated={() => ctrl.fetchVolumes()} />
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
   <PageHeader breadcrumb="VOLUMES / BLOCK VOLUMES" title="블록 볼륨">
     {#snippet actions()}
       <TutorialStartButton tour="volume" />
@@ -83,6 +162,11 @@
         autoBackupConfigs={ctrl.autoBackupConfigs}
         autoBackupToggling={ctrl.autoBackupToggling}
         openActionMenu={ctrl.openActionMenu}
+        selectedIds={volumeSelection.ids}
+        selectableIds={selectableVolumeIds}
+        selectionDisabled={bulkBusy}
+        onToggleSelect={(id) => volumeSelection.toggle(id)}
+        onToggleAll={() => volumeSelection.toggleAll(selectableVolumeIds)}
         isSystemAdmin={!!$auth.isSystemAdmin}
         onOpenDetail={ctrl.openVolumePanel}
         onActionMenuOpen={(id) => (ctrl.openActionMenu = id)}
@@ -98,11 +182,30 @@
         volumeBackupsEnabled={$betaFeatures.volumeBackups}
         volumeSnapshotsEnabled={$betaFeatures.volumeSnapshots}
       />
+      <BulkSelectionOverlay
+        count={volumeSelection.count}
+        ariaLabel="선택한 볼륨 일괄 작업"
+        actions={volumeBulkActions}
+        busy={bulkBusy}
+        onClear={() => volumeSelection.clear()}
+      />
       </div>
     {:else}
+      <BulkSelectionOverlay
+        count={snapshotSelection.count}
+        ariaLabel="선택한 스냅샷 일괄 작업"
+        actions={snapshotBulkActions}
+        busy={bulkBusy}
+        onClear={() => snapshotSelection.clear()}
+      />
       <SnapshotListTable
         snapshots={ctrl.snapshots}
         deleting={ctrl.deleting}
+        selectedIds={snapshotSelection.ids}
+        selectableIds={selectableSnapshotIds}
+        selectionDisabled={bulkBusy}
+        onToggleSelect={(id) => snapshotSelection.toggle(id)}
+        onToggleAll={() => snapshotSelection.toggleAll(selectableSnapshotIds)}
         openSnapshotActionMenu={ctrl.openSnapshotActionMenu}
         onActionMenuOpen={(id) => (ctrl.openSnapshotActionMenu = id)}
         onActionMenuClose={() => (ctrl.openSnapshotActionMenu = null)}

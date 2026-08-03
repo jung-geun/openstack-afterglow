@@ -4,12 +4,14 @@
 	interface Props {
 		open: boolean;
 		onClose?: () => void;
+		dismissible?: boolean;
 		children: Snippet;
 	}
 
-	let { open = $bindable(false), onClose, children }: Props = $props();
+	let { open = $bindable(false), onClose, dismissible = true, children }: Props = $props();
 
 	function close() {
+		if (!dismissible) return;
 		open = false;
 		onClose?.();
 	}
@@ -17,7 +19,7 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+		class="fixed inset-0 bg-surface-scrim flex items-center justify-center z-[var(--z-modal)]"
 		onclick={close}
 		onkeydown={(e) => e.key === 'Escape' && close()}
 		role="dialog"

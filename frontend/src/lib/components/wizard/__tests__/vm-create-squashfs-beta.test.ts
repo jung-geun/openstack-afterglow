@@ -60,6 +60,23 @@ describe('VM create squashfs beta workflow contract', () => {
 		expect(wizardStepSource).not.toContain('계정 설정에서 squashfs 라이브러리 소비 베타');
 	});
 
+	it('uses theme tokens for the squashfs selection surface and controls', () => {
+		expect(wizardStepSource).toContain('bg-[var(--color-surface-sunken)]');
+		expect(wizardStepSource).toContain('border-[var(--color-line-2)]');
+		expect(wizardStepSource).toContain('bg-[var(--color-accent)]');
+		expect(wizardStepSource).toContain('text-[var(--color-ink-0)]');
+		expect(wizardStepSource).not.toContain('bg-blue-950/20');
+		expect(wizardStepSource).not.toContain('text-blue-100');
+	});
+
+	it('uses ToggleGroup for library mode selection rather than recreating the segmented control', () => {
+		expect(wizardStepSource).toContain("import ToggleGroup, { type ToggleOption }");
+		expect(wizardStepSource).toContain('value={$wizard.squashfsMode}');
+		expect(wizardStepSource).toContain('ariaLabel="squashfs 라이브러리 선택 방식"');
+		expect(wizardStepSource).toContain('fullWidth');
+		expect(wizardStepSource).not.toContain('aria-pressed');
+	});
+
 	it('detects supported Ubuntu images from metadata or image name', () => {
 		expect(
 			detectUbuntuBaseImage({
@@ -190,7 +207,7 @@ describe('VM create squashfs beta workflow contract', () => {
 		expect(normalizeSchedulingForBeta({ haDeploy: true }, 'ha')).toBe('ha');
 		expect(storeSource).toContain('/api/v1/libraries/squashfs/consume');
 		expect(storeSource).toContain('normalizeSchedulingForBeta(betaState, w.scheduling)');
-		expect(storeSource).toContain('w.instanceName.trim() || null');
+		expect(storeSource).toContain('normalizeRequestedInstanceName(w.instanceName)');
 	});
 
 	it('hides the HA option in the strategy step unless the beta flag is enabled', async () => {

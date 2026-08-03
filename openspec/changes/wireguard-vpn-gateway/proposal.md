@@ -1,6 +1,6 @@
 ## Why
 
-테넌트 네트워크 내부 인스턴스에 접근하는 안전한 단일 진입점(bastion)이 없다. 현재는 인스턴스별 Floating IP 또는 router를 통한 인터넷 노출에 의존해야 하며, 이는 공격 표면을 넓힌다. [wg-easy](https://github.com/wg-easy/wg-easy)를 모티브로 한 WireGuard VPN을 OpenStack 대시보드(Afterglow)에 통합해, 클라이언트 발급·관리·연결 모니터링을 대시보드에서 수행하고 테넌트 네트워크 접근을 VPN 단일 경로로 좁힌다.
+테넌트 네트워크 내부 인스턴스에 접근하는 안전한 단일 진입점(bastion)이 없다. 현재는 인스턴스별 Floating IP 또는 router를 통한 인터넷 노출에 의존해야 하며, 이는 공격 표면을 넓힌다. [wg-easy](https://github.com/wg-easy/wg-easy)를 모티브로 한 **Waygate**(WireGuard 기반 보안 게이트웨이)를 OpenStack 대시보드(Afterglow)에 통합해, 클라이언트 발급·관리·연결 모니터링을 대시보드에서 수행하고 테넌트 네트워크 접근을 Waygate 단일 경로로 좁힌다.
 
 ## What Changes
 
@@ -22,6 +22,10 @@
 ### Modified Capabilities
 
 - 없음 (신규 기능, 기존 엔드포인트/모델 변경 없음).
+
+## Technical Namespace Cutover
+
+- [x] `vpn` API/config/module/table/Redis/agent/frontend namespace를 `waygate`로 clean cutover 한다. 이전 VPN 인스턴스는 없으므로 데이터 이전·호환 경로·리다이렉트는 제공하지 않는다. (테스트 `test_vpn_*`→`test_waygate_*` 리네임, 빈 `app/api/vpn`·`routes/.../vpn` 디렉터리 제거, 로그 프리픽스·사용자 대면 문자열 `waygate` 통일 완료.)
 
 ## Impact
 

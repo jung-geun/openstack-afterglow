@@ -2,6 +2,8 @@ export interface AdminImage {
 	id: string;
 	name: string;
 	status: string;
+	repository?: string;
+	tag?: string;
 	size: number;
 	min_disk: number;
 	min_ram: number;
@@ -11,6 +13,24 @@ export interface AdminImage {
 	owner: string;
 	created_at: string | null;
 	protected: boolean;
+}
+
+export interface ImageDetail extends AdminImage {
+	virtual_size: number;
+	container_format: string;
+	checksum: string | null;
+	updated_at: string | null;
+	os_version?: string | null;
+	tags: string[];
+	properties: Record<string, string>;
+	os_hash_algo?: string | null;
+	os_hash_value?: string | null;
+	direct_url?: string | null;
+}
+
+export interface ImageMember {
+	member_id: string;
+	status: string;
 }
 
 export interface PagedResponse<T> {

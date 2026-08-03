@@ -3,7 +3,7 @@
 ### Phase 1 — 설정 동기화 + 백엔드 사용량 미러링 API
 
 - [x] `backend/app/config.py` — `_load_toml()` flat dict + `Settings`에 `librechat_mongo_url`(비밀), `librechat_base_url` 필드 추가
-- [x] `config.toml.example` — `[chat]` 섹션(mongo_url, base_url) 예시/주석 추가
+- [x] `afterglow.conf.example` — `[chat]` 섹션(mongo_url, base_url) 예시/주석 추가
 - [x] `generate_k8s.py` — `librechat_mongo_url`은 `render_secret()`, `librechat_base_url`은 `_render_toml_for_k8s()`/`render_configmap()`(`APP_LIBRECHAT_BASE`)에 반영
 - [x] MongoDB 읽기 클라이언트 추가(`motor` 의존성 `pyproject.toml`, `backend/app/services/librechat_mongo.py` — 연결 lazy init + 읽기 전용 헬퍼)
 - [x] `backend/app/api/chat/usage.py` — `GET /usage`(prefix `/api/v1/chat`), `get_token_info` 의존, username으로 `users`→`transactions` 조회·집계, 실패 시 found=false로 200(fail-open, Grafana 패턴과 동일)
@@ -42,7 +42,7 @@
 
 - [ ] 기존 LibreChat(`chat.dmslab.re.kr`) nginx/ingress에서 `X-Frame-Options` 제거 + `Content-Security-Policy: frame-ancestors https://cloud.dmslab.re.kr` 설정
 - [ ] 기존 LibreChat `.env`에 `OPENID_AUTO_REDIRECT=true` 반영
-- [ ] Afterglow 백엔드 → LibreChat MongoDB 읽기 전용 네트워크 경로/전용 읽기 계정 확보, `config.toml`의 `[chat] mongo_url`/`base_url` 실값 설정
+- [ ] Afterglow 백엔드 → LibreChat MongoDB 읽기 전용 네트워크 경로/전용 읽기 계정 확보, `afterglow.conf`의 `[chat] mongo_url`/`base_url` 실값 설정
 - [ ] **LibreChat의 GitLab OIDC는 Afterglow가 쓰는 것과 동일한 GitLab OAuth Application(같은 client_id/client_secret)을 재사용**한다.
       GitLab Application 설정에서 Redirect URI 목록에 `https://chat.dmslab.re.kr/oauth/openid/callback`을 추가로 등록하고,
       `OPENID_CLIENT_ID`/`OPENID_CLIENT_SECRET`은 Afterglow(`gitlab_oidc_client_id`/`_client_secret`)와 동일한 값을 사용한다.

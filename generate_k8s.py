@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""afterglow.conf/config.toml → K8s configmap.yaml + secret.yaml + grafana-deployment.yaml 변환기.
+"""afterglow.conf → K8s configmap.yaml + secret.yaml + grafana-deployment.yaml 변환기.
 
-현재 afterglow.conf/config.toml (및 오버라이드)을 읽어
+afterglow.conf(및 오버라이드)을 읽어
 deploy/k8s/{secret.yaml, configmap.yaml, grafana-deployment.yaml}을 자동 생성합니다.
+`--namespace`는 해당 환경 프로필(deploy/afterglow-prod.conf 또는
+deploy/afterglow-dev.conf)을 항상 먼저 적용합니다. `--override`는 추가 오버라이드입니다.
 
 grafana-deployment.yaml 은 anonymous 인증으로 동작하는 Grafana Deployment 매니페스트로,
 iframe 임베드를 위해 GF_SECURITY_ALLOW_EMBEDDING 이 활성화되어 있습니다.
 Afterglow 앱 인증이 실질적인 접근 게이트 역할을 합니다.
 
 사용법:
-    python3 generate_k8s.py
     python3 generate_k8s.py --config /path/to/afterglow.conf
     python3 generate_k8s.py --output-dir /path/to/deploy/k8s
+    python3 generate_k8s.py --config afterglow.conf \
+        --override deploy/afterglow-dev.conf \
+        --namespace afterglow-dev
 
 Python 3.12+ 표준 라이브러리만 사용합니다.
 """
@@ -75,12 +79,10 @@ def _deep_merge(base: dict, override: dict) -> None:
 
 
 def _config_override_paths(config_path: Path) -> list[Path]:
-    """설정 파일과 같은 디렉토리의 오버라이드 파일 목록을 알파벳순으로 반환."""
+    """설정 파일과 같은 디렉터리의 지원되는 오버라이드 파일을 반환한다."""
     patterns = [f"{config_path.stem}.*{config_path.suffix}"]
-    if config_path.suffix != ".toml":
-        patterns.append(f"{config_path.stem}.*.toml")
     if config_path.name == "afterglow.conf":
-        patterns.append("config.*.toml")
+        patterns.append("config.gpu.toml")
 
     overrides: dict[Path, Path] = {}
     for pattern in patterns:
@@ -89,18 +91,26 @@ def _config_override_paths(config_path: Path) -> list[Path]:
                 continue
             if not override_path.is_file() or override_path.stat().st_size == 0:
                 continue
-            if override_path.name == "config.toml":
-                continue
             overrides[override_path.resolve()] = override_path
     return [overrides[key] for key in sorted(overrides)]
 
 
-def load_config(config_path: Path) -> dict:
-    """afterglow.conf/config.toml + 오버라이드 파일을 로드하고 딥 머지."""
+def load_config(
+    config_path: Path, extra_override_paths: list[Path] | None = None
+) -> dict:
+    """afterglow.conf와 오버라이드 파일을 로드하고 딥 머지한다."""
     with open(config_path, "rb") as f:
         cfg = tomllib.load(f)
-    # 알파벳순으로 오버라이드 파일 적용 (뒤 파일이 앞을 이김)
-    for override_path in _config_override_paths(config_path):
+    # 자동 오버라이드 뒤에 명시적 오버라이드를 적용해 환경별 값을 우선한다.
+    override_paths = _config_override_paths(config_path)
+    for override_path in extra_override_paths or []:
+        resolved_path = override_path.resolve()
+        if not resolved_path.is_file():
+            raise FileNotFoundError(f"오버라이드 파일을 찾을 수 없습니다: {resolved_path}")
+        if resolved_path not in override_paths:
+            override_paths.append(resolved_path)
+    # 알파벳순으로 자동 오버라이드를 적용한 뒤 명시적 오버라이드를 적용한다.
+    for override_path in override_paths:
         with open(override_path, "rb") as f:
             _deep_merge(cfg, tomllib.load(f))
         print(f"  {dim(f'오버라이드 로드: {override_path.name}')}")
@@ -108,11 +118,7 @@ def load_config(config_path: Path) -> dict:
 
 
 def default_config_path() -> Path:
-    """기본 설정 파일 경로. 신규 afterglow.conf를 우선하고 config.toml은 호환 fallback."""
-    for name in ("afterglow.conf", "config.toml"):
-        path = SCRIPT_DIR / name
-        if path.exists():
-            return path
+    """기본 설정 파일 경로."""
     return SCRIPT_DIR / "afterglow.conf"
 
 
@@ -257,7 +263,7 @@ def _validate_k8s_secret_key(secret_key: str) -> None:
         raise ValueError("K8s secret.yaml의 SECRET_KEY는 32자 이상이어야 합니다.")
 
 
-def render_secret(cfg: dict) -> str:
+def render_secret(cfg: dict, namespace: str = "afterglow") -> str:
     """secret.yaml 생성: 비밀 값만 추출."""
     os_cfg = cfg.get("openstack", {})
     app = cfg.get("app", {})
@@ -277,7 +283,7 @@ def render_secret(cfg: dict) -> str:
         "kind: Secret",
         "metadata:",
         "  name: afterglow-secrets",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "type: Opaque",
         "stringData:",
         "  # OpenStack 관리자 계정 비밀번호",
@@ -325,15 +331,17 @@ def render_secret(cfg: dict) -> str:
         ]
     )
 
-    librechat_mongo_url = chat.get("mongo_url", "")
-    if librechat_mongo_url:
-        lines.extend(
-            [
-                "",
-                "  # LibreChat MongoDB 읽기 전용 접속 URL",
-                f"  LIBRECHAT_MONGO_URL: {_yaml_str(librechat_mongo_url)}",
-            ]
-        )
+    lines.extend(
+        [
+            "",
+            "  # Chat worker / PostgreSQL / asset storage secrets",
+            f"  CHAT_CHECKPOINTER_POSTGRES_URL: {_yaml_str(chat.get('checkpointer_postgres_url', ''))}",
+            f"  CHAT_MEMORY_PGVECTOR_URL: {_yaml_str(chat.get('memory_pgvector_url', ''))}",
+            f"  CHAT_ASSET_S3_ACCESS_KEY: {_yaml_str(chat.get('asset_s3_access_key', ''))}",
+            f"  CHAT_ASSET_S3_SECRET_KEY: {_yaml_str(chat.get('asset_s3_secret_key', ''))}",
+            f"  CHAT_SANDBOX_API_KEY: {_yaml_str(chat.get('sandbox_api_key', ''))}",
+        ]
+    )
 
     sd_token = mon.get("sd_token", "")
     if sd_token:
@@ -383,12 +391,12 @@ def render_secret(cfg: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# config.toml 인라인 렌더링 (비밀 제외)
+# afterglow.conf 인라인 렌더링 (비밀 제외)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _render_toml_for_k8s(cfg: dict) -> str:
-    """config.toml 전체를 렌더링하되 비밀 값은 주석으로 대체."""
+def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
+    """afterglow.conf 전체를 렌더링하되 비밀 값은 주석으로 대체."""
     os_cfg = cfg.get("openstack", {})
     app = cfg.get("app", {})
     cache = cfg.get("cache", {})
@@ -399,7 +407,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     k3s = cfg.get("k3s", {})
     builder = cfg.get("builder", {})
     union = cfg.get("union", {})
-    vpn = cfg.get("vpn", {})
+    palimpsest = cfg.get("palimpsest", {})
+    waygate = cfg.get("waygate", {})
+    mcp = cfg.get("mcp", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
     public_api_base = _derive_public_api_base_for_k8s(cfg)
@@ -435,25 +445,10 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     if os_cfg.get("cacert"):
         lines.append(f"cacert = {_toml_str(os_cfg['cacert'])}")
     lines.append("")
-    lines.append("# Manila 설정")
-    lines.append(f"manila_endpoint = {_toml_str(os_cfg.get('manila_endpoint', ''))}")
-    lines.append(
-        f"manila_share_network_id = {_toml_str(os_cfg.get('manila_share_network_id', ''))}"
-    )
-    lines.append(
-        f"manila_share_type = {_toml_str(os_cfg.get('manila_share_type', 'cephfs'))}"
-    )
-    lines.append(
-        f"manila_nfs_share_type = {_toml_str(os_cfg.get('manila_nfs_share_type', 'nfstype'))}"
-    )
     lines.append("")
     lines.append("# Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)")
     lines.append(f"ceph_monitors = {_toml_str(os_cfg.get('ceph_monitors', ''))}")
     lines.append("")
-    lines.append("# Union Mount 전용 service 프로젝트 UUID (Manila share + Builder VM)")
-    lines.append(
-        f"service_project_id = {_toml_str(os_cfg.get('service_project_id', ''))}"
-    )
     lines.append("")
     lines.append("# Swift 설정")
     lines.append(f"swift_endpoint = {_toml_str(os_cfg.get('swift_endpoint', ''))}")
@@ -554,93 +549,46 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [nova]
     lines.append("[nova]")
-    lines.append(
-        f"default_network_id = {_toml_str(nova.get('default_network_id', ''))}"
-    )
-    lines.append(
-        f"default_availability_zone = {_toml_str(nova.get('default_availability_zone', 'nova'))}"
-    )
     lines.append(f"boot_volume_size_gb = {nova.get('boot_volume_size_gb', 20)}")
     lines.append(f"upper_volume_size_gb = {nova.get('upper_volume_size_gb', 50)}")
-    lines.append(
-        f"default_network_enabled = {_toml_bool(nova.get('default_network_enabled', True))}"
-    )
-    lines.append(
-        f"default_network_cidr = {_toml_str(nova.get('default_network_cidr', '192.168.0.0/24'))}"
-    )
-    lines.append(
-        f"default_network_external_id = {_toml_str(nova.get('default_network_external_id', ''))}"
-    )
-    if "server_image_id" in nova:
-        lines.append(f"server_image_id = {_toml_str(nova['server_image_id'])}")
     lines.append("")
 
     # [builder] (선택)
     if builder:
         lines.append("[builder]")
-        if "image_id" in builder:
-            lines.append(f"image_id = {_toml_str(builder['image_id'])}")
-        for key in (
-            "ubuntu_18_04_image_id",
-            "ubuntu_20_04_image_id",
-            "ubuntu_22_04_image_id",
-            "ubuntu_24_04_image_id",
-        ):
-            if key in builder:
-                lines.append(f"{key} = {_toml_str(builder[key])}")
-        if "flavor_id" in builder:
-            lines.append(f"flavor_id = {_toml_str(builder['flavor_id'])}")
-        if "network_id" in builder:
-            lines.append(f"network_id = {_toml_str(builder['network_id'])}")
-        if "persistent_server_id" in builder:
-            lines.append(
-                f"persistent_server_id = {_toml_str(builder['persistent_server_id'])}"
-            )
         if "ssh_user" in builder:
             lines.append(f"ssh_user = {_toml_str(builder['ssh_user'])}")
         if "ssh_key_path" in builder:
             lines.append(f"ssh_key_path = {_toml_str(builder['ssh_key_path'])}")
         if "ssh_host" in builder:
             lines.append(f"ssh_host = {_toml_str(builder['ssh_host'])}")
-        if "floating_network_id" in builder:
-            lines.append(
-                f"floating_network_id = {_toml_str(builder['floating_network_id'])}"
-            )
         if "build_timeout" in builder:
             lines.append(f"build_timeout = {builder['build_timeout']}")
         if "layer_share_size_gb" in builder:
             lines.append(f"layer_share_size_gb = {builder['layer_share_size_gb']}")
         lines.append("")
 
-    # [union]
-    lines.append("[union]")
-    lines.append(
-        f"layer_store_rw_share_id = {_toml_str(union.get('layer_store_rw_share_id', ''))}"
-    )
-    lines.append(
-        f"layer_store_ro_share_id = {_toml_str(union.get('layer_store_ro_share_id', ''))}"
-    )
-    lines.append(
-        f"manifest_store_share_id = {_toml_str(union.get('manifest_store_share_id', ''))}"
-    )
-    lines.append("")
 
-    # [vpn] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
-    if vpn:
-        lines.append("[vpn]")
-        lines.append(f"provider_network_id = {_toml_str(vpn.get('provider_network_id', ''))}")
-        lines.append(f"flavor_name = {_toml_str(vpn.get('flavor_name', 'cpu.1c_2g'))}")
-        if "flavor_id" in vpn:
-            lines.append(f"flavor_id = {_toml_str(vpn['flavor_id'])}")
-        lines.append(f"image_id = {_toml_str(vpn.get('image_id', ''))}")
-        lines.append(f"floating_network_id = {_toml_str(vpn.get('floating_network_id', ''))}")
-        lines.append(f"callback_base_url = {_toml_str(vpn.get('callback_base_url', ''))}")
-        if "key_name" in vpn:
-            lines.append(f"key_name = {_toml_str(vpn['key_name'])}")
+    # [palimpsest] (선택) — 허브 blob store. 비밀 값 없음이므로 configmap 인라인.
+    if palimpsest:
+        lines.append("[palimpsest]")
+        if "hub_local_path" in palimpsest:
+            lines.append(f"hub_local_path = {_toml_str(palimpsest['hub_local_path'])}")
+        for key in ("hub_max_blob_bytes", "hub_upload_ttl_seconds"):
+            if key in palimpsest:
+                lines.append(f"{key} = {int(palimpsest[key])}")
+        for key in ("kvm_uri", "kvm_layer_root", "kvm_state_dir"):
+            if key in palimpsest:
+                lines.append(f"{key} = {_toml_str(palimpsest[key])}")
+        lines.append("")
+
+    # [waygate] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
+    if waygate:
+        lines.append("[waygate]")
         lines.append(
-            f"default_tunnel_cidr = {_toml_str(vpn.get('default_tunnel_cidr', '10.8.0.0/24'))}"
+            f"default_tunnel_cidr = {_toml_str(waygate.get('default_tunnel_cidr', '10.8.0.0/24'))}"
         )
-        lines.append(f"default_listen_port = {vpn.get('default_listen_port', 51820)}")
+        lines.append(f"default_listen_port = {waygate.get('default_listen_port', 51820)}")
         lines.append("")
 
     # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
@@ -652,38 +600,47 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [services]
     lines.append("[services]")
-    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "vpn", "chat"):
+    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "waygate", "chat", "mcp"):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
     lines.append("")
+    if mcp:
+        lines.append("[mcp]")
+        for key in ("public_url", "oauth_consent_url"):
+            if key in mcp:
+                lines.append(f"{key} = {_toml_str(mcp[key])}")
+        for key in (
+            "authorization_ticket_ttl_seconds",
+            "access_token_ttl_seconds",
+            "default_grant_ttl_days",
+            "max_grant_ttl_days",
+            "max_personal_tokens",
+            "max_delegated_grants",
+            "request_max_bytes",
+            "read_result_max_bytes",
+            "mutation_result_max_bytes",
+            "default_page_size",
+            "max_page_size",
+            "concurrent_calls_per_grant",
+            "read_rate_per_minute",
+            "mutation_rate_per_minute",
+        ):
+            if key in mcp:
+                lines.append(f"{key} = {int(mcp[key])}")
+        lines.append("")
+
 
     # [k3s]
     lines.append("[k3s]")
     k3s_keys_str = (
-        "version",
-        "server_flavor_id",
-        "default_agent_flavor_id",
-        "server_image_id",
-        "fcos_image_id",
         "callback_base_url",
         "occm_image",
-        "occm_floating_network_id",
-        "occm_public_network_name",
-        "cinder_csi_image",
-        "cinder_csi_default_az",
         "manila_csi_image",
         "manila_csi_nfs_image",
         "manila_csi_share_protocol",
         "keystone_auth_image",
         "keystone_auth_policy",
         "octavia_ingress_image",
-        "octavia_ingress_subnet_id",
-        "octavia_ingress_floating_network_id",
-        "barbican_kms_image",
-        "barbican_kms_kek_id",
-        "api_lb_vip_network_id",
-        "api_lb_floating_network_id",
-        "lb_subnet_id",
         "cert_rotation_job_image",
     )
     k3s_keys_int = (
@@ -762,7 +719,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     )
     lines.append("")
     lines.append("[worker_runtime.kubernetes]")
-    lines.append(f"namespace = {_toml_str(wr_k8s.get('namespace', 'afterglow'))}")
+    lines.append(f"namespace = {_toml_str(namespace or wr_k8s.get('namespace', 'afterglow'))}")
     lines.append(
         f"service_account_token_path = {_toml_str(wr_k8s.get('service_account_token_path', '/var/run/secrets/kubernetes.io/serviceaccount/token'))}"
     )
@@ -901,12 +858,70 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         f"instance_gpu_uid = {_toml_str(dashboards.get('instance_gpu_uid', 'afterglow-instance-gpu'))}"
     )
     lines.append("")
-
-    # [chat] — 기존 LibreChat 인스턴스 임베드 + 사용량 읽기 전용 미러링
-    if chat.get("base_url") or chat.get("mongo_url"):
+    # [chat] — built-in chat configuration. Secrets are emitted only in secret.yaml.
+    if (
+        chat.get("default_model")
+        or chat.get("credit_per_usd") is not None
+        or chat.get("default_monthly_quota") is not None
+        or chat.get("stream_enabled") is not None
+        or any(
+            key in chat
+            for key in (
+                "execution_protocol_version",
+                "run_event_retention_hours",
+                "semantic_memory_enabled",
+                "memory_embedding_model",
+                "memory_embedding_dimensions",
+                "memory_candidate_limit",
+                "memory_retrieval_token_budget",
+                "memory_retention_days",
+                "asset_s3_endpoint",
+                "asset_s3_bucket",
+                "asset_s3_server_side_encryption",
+                "asset_s3_kms_key_id",
+                "asset_signed_url_ttl_seconds",
+                "clamav_host",
+                "clamav_port",
+                "sandbox_url",
+                "sandbox_workspace_url",
+                "sandbox_image_digest",
+                "sandbox_policy_version",
+                "mcp_oauth_callback_url",
+                "sandbox_egress_allowlist",
+            )
+        )
+    ):
         lines.append("[chat]")
-        lines.append(f"base_url = {_toml_str(chat.get('base_url', ''))}")
-        lines.append("# mongo_url은 secret.yaml의 LIBRECHAT_MONGO_URL 환경변수로 주입됩니다")
+        lines.append(f"default_model = {_toml_str(chat.get('default_model', ''))}")
+        lines.append(f"execution_protocol_version = {chat.get('execution_protocol_version', 1)}")
+        lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
+        lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
+        lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
+        lines.append(f"api_hosts = {_toml_str(chat.get('api_hosts', ''))}")
+        lines.append(f"reasoning_effort = {_toml_str(chat.get('reasoning_effort', 'auto'))}")
+        lines.append(f"run_event_retention_hours = {chat.get('run_event_retention_hours', 24)}")
+        lines.append(f"checkpoint_retention_days = {chat.get('checkpoint_retention_days', 7)}")
+        lines.append(f"semantic_memory_enabled = {_toml_bool(chat.get('semantic_memory_enabled', False))}")
+        lines.append(f"memory_embedding_model = {_toml_str(chat.get('memory_embedding_model', ''))}")
+        lines.append(f"memory_embedding_dimensions = {chat.get('memory_embedding_dimensions', 0)}")
+        lines.append(f"memory_candidate_limit = {chat.get('memory_candidate_limit', 20)}")
+        lines.append(f"memory_retrieval_token_budget = {chat.get('memory_retrieval_token_budget', 1200)}")
+        lines.append(f"memory_retention_days = {chat.get('memory_retention_days', 365)}")
+        lines.append(f"asset_s3_endpoint = {_toml_str(chat.get('asset_s3_endpoint', ''))}")
+        lines.append(f"asset_s3_bucket = {_toml_str(chat.get('asset_s3_bucket', ''))}")
+        lines.append(
+            f"asset_s3_server_side_encryption = {_toml_str(chat.get('asset_s3_server_side_encryption', 'AES256'))}"
+        )
+        lines.append(f"asset_s3_kms_key_id = {_toml_str(chat.get('asset_s3_kms_key_id', ''))}")
+        lines.append(f"asset_signed_url_ttl_seconds = {chat.get('asset_signed_url_ttl_seconds', 300)}")
+        lines.append(f"clamav_host = {_toml_str(chat.get('clamav_host', ''))}")
+        lines.append(f"clamav_port = {chat.get('clamav_port', 3310)}")
+        lines.append(f"sandbox_url = {_toml_str(chat.get('sandbox_url', ''))}")
+        lines.append(f"sandbox_workspace_url = {_toml_str(chat.get('sandbox_workspace_url', ''))}")
+        lines.append(f"sandbox_image_digest = {_toml_str(chat.get('sandbox_image_digest', ''))}")
+        lines.append(f"sandbox_policy_version = {_toml_str(chat.get('sandbox_policy_version', ''))}")
+        lines.append(f"sandbox_egress_allowlist = {_toml_list_str(chat.get('sandbox_egress_allowlist', []))}")
+        lines.append(f"mcp_oauth_callback_url = {_toml_str(chat.get('mcp_oauth_callback_url', ''))}")
         lines.append("")
 
     # [notion]
@@ -947,7 +962,7 @@ def _render_gpu_toml(cfg: dict) -> str:
 
     lines = [
         "# Afterglow GPU 디바이스 맵",
-        "# config.toml과 함께 로드되어 딥 머지됩니다.",
+        "# afterglow.conf와 함께 로드되어 딥 머지됩니다.",
         "",
     ]
     for dev in devices:
@@ -969,8 +984,8 @@ def _render_gpu_toml(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def render_configmap(cfg: dict) -> str:
-    """configmap.yaml 생성: Redis URL, Origin, S3 base, afterglow.conf/config.toml + config.gpu.toml 인라인."""
+def render_configmap(cfg: dict, namespace: str = "afterglow") -> str:
+    """configmap.yaml 생성: Redis URL, Origin, S3 base, afterglow.conf와 GPU 맵을 포함한다."""
     cors = cfg.get("cors", {})
     ost = cfg.get("openstack", {})
 
@@ -984,11 +999,8 @@ def render_configmap(cfg: dict) -> str:
     # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
     app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
 
-    # APP_LIBRECHAT_BASE: chat.base_url (CSP frame-src 및 frontend 임베드용)
-    app_librechat_base = cfg.get("chat", {}).get("base_url", "")
-
-    # afterglow.conf 인라인 (4칸 들여쓰기). config.toml 키도 하위호환용으로 함께 출력.
-    toml_content = _render_toml_for_k8s(cfg)
+    # afterglow.conf 인라인 (4칸 들여쓰기).
+    toml_content = _render_toml_for_k8s(cfg, namespace)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
 
     lines = [
@@ -996,18 +1008,15 @@ def render_configmap(cfg: dict) -> str:
         "kind: ConfigMap",
         "metadata:",
         "  name: afterglow-config",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  APP_ORIGIN: "{app_origin}"',
         f'  PUBLIC_API_BASE: "{public_api_base}"',
         f'  PUBLIC_S3_BASE: "{public_s3_base}"',
         f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
-        f'  APP_LIBRECHAT_BASE: "{app_librechat_base}"',
         "  afterglow.conf: |",
         indented_toml,
-        # "  config.toml: |",
-        # indented_toml,
     ]
 
     # config.gpu.toml (GPU 디바이스 맵이 있는 경우에만)
@@ -1030,7 +1039,9 @@ def render_configmap(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def render_grafana_deployment(cfg: dict) -> str:
+def render_grafana_deployment(
+    cfg: dict, namespace: str = "afterglow"
+) -> str:
     """grafana-deployment.yaml 생성.
 
     iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 익명 접근(auth.anonymous)을 설정한다.
@@ -1043,7 +1054,7 @@ def render_grafana_deployment(cfg: dict) -> str:
         "kind: Deployment",
         "metadata:",
         "  name: grafana",
-        "  namespace: afterglow",
+        f"  namespace: {namespace}",
         "  labels:",
         "    app: grafana",
         "spec:",
@@ -1129,19 +1140,34 @@ def write_atomic(path: Path, content: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="afterglow.conf/config.toml → K8s configmap.yaml + secret.yaml 변환기"
+        description="afterglow.conf → K8s configmap.yaml + secret.yaml + grafana-deployment.yaml 변환기"
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=default_config_path(),
-        help="afterglow.conf 또는 config.toml 경로 (기본값: ./afterglow.conf, 없으면 ./config.toml)",
+        help="afterglow.conf 경로 (기본값: ./afterglow.conf)",
+    )
+    parser.add_argument(
+        "--override",
+        dest="override_paths",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="PATH",
+        help="환경별 afterglow.*.conf 오버라이드 파일 (반복 지정 가능)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=SCRIPT_DIR / "deploy" / "k8s",
         help="출력 디렉토리 (기본값: ./deploy/k8s)",
+    )
+    parser.add_argument(
+        "--namespace",
+        choices=("afterglow", "afterglow-dev"),
+        default="afterglow",
+        help="대상 네임스페이스 (기본값: afterglow)",
     )
     parser.add_argument(
         "--dry-run",
@@ -1152,24 +1178,33 @@ def main() -> None:
 
     config_path = args.config.resolve()
     output_dir = args.output_dir.resolve()
-
-    if not config_path.exists():
+    profile_name = "dev" if args.namespace == "afterglow-dev" else "prod"
+    profile_path = SCRIPT_DIR / "deploy" / f"afterglow-{profile_name}.conf"
+    if not profile_path.is_file():
         print(
-            f"{red('오류')}: afterglow.conf/config.toml을 찾을 수 없습니다: {config_path}",
+            f"{red('오류')}: namespace 환경 프로필을 찾을 수 없습니다: {profile_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    override_paths = [profile_path, *args.override_paths]
+
+    if config_path.name != "afterglow.conf" or not config_path.is_file():
+        print(
+            f"{red('오류')}: afterglow.conf을(를) 찾을 수 없습니다: {config_path}",
             file=sys.stderr,
         )
         sys.exit(1)
 
     print(f"  설정 로드: {dim(str(config_path))}")
-    cfg = load_config(config_path)
+    cfg = load_config(config_path, override_paths)
     print(f"  {green('✓')} 설정 로드 완료")
     print()
 
     # 렌더링
     try:
-        secret_content = render_secret(cfg)
-        configmap_content = render_configmap(cfg)
-        grafana_deployment_content = render_grafana_deployment(cfg)
+        secret_content = render_secret(cfg, args.namespace)
+        configmap_content = render_configmap(cfg, args.namespace)
+        grafana_deployment_content = render_grafana_deployment(cfg, args.namespace)
     except ValueError as exc:
         print(f"{red('오류')}: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -1212,8 +1247,11 @@ def main() -> None:
     print("  적용 방법:")
     print(f"    kubectl apply -f {secret_path}")
     print(f"    kubectl apply -f {configmap_path}")
-    print(f"    kubectl apply -f {grafana_deployment_path}")
-    print("    kubectl rollout restart deployment -n afterglow")
+    print(
+        f"    # grafana-deployment.yaml is Helm/ArgoCD-managed; do not apply it directly: "
+        f"{grafana_deployment_path}"
+    )
+    print(f"    kubectl rollout restart deployment -n {args.namespace}")
 
 
 if __name__ == "__main__":

@@ -48,6 +48,8 @@
 	let trendData = $state<TrendData | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let trendLoading = $state(true);
+	let loadGeneration = 0;
 	let period = $state<'24h' | '7d' | '30d'>('7d');
 
 	const token = $derived($auth.token ?? undefined);
@@ -56,20 +58,51 @@
 
 	async function fetchData() {
 		if (!token || !projectId) return;
+		const requestToken = token;
+		const requestProjectId = projectId;
+		const requestPeriod = period;
+		const requestTrendRange = trendRange;
+		const generation = ++loadGeneration;
 		loading = !data;
+		trendLoading = !trendData;
 		error = null;
+		const statsPromise = api.get<UsageStats>(
+			`/api/v1/dashboard/usage-stats?range=${requestPeriod}`,
+			requestToken,
+			requestProjectId,
+		);
+		const trendPromise = api.get<TrendData>(
+			`/api/v1/dashboard/metrics/trend?range=${requestTrendRange}`,
+			requestToken,
+			requestProjectId,
+		).then((value) => {
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				trendData = value;
+			}
+		}).catch(() => {
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				trendData = null;
+			}
+		}).finally(() => {
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				trendLoading = false;
+			}
+		});
 		try {
-			await Promise.allSettled([
-				api.get<UsageStats>(`/api/v1/dashboard/usage-stats?range=${period}`, token, projectId)
-					.then(v => { data = v; })
-					.catch(e => { error = e instanceof Error ? e.message : '데이터 로딩 실패'; }),
-				api.get<TrendData>(`/api/v1/dashboard/metrics/trend?range=${trendRange}`, token, projectId)
-					.then(v => { trendData = v; })
-					.catch(() => {}),
-			]);
+			const value = await statsPromise;
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				data = value;
+			}
+		} catch (loadError) {
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				error = loadError instanceof Error ? loadError.message : '데이터 로딩 실패';
+			}
 		} finally {
-			loading = false;
+			if (generation === loadGeneration && projectId === requestProjectId && period === requestPeriod) {
+				loading = false;
+			}
 		}
+		void trendPromise;
 	}
 
 	$effect(() => {
@@ -134,6 +167,9 @@
 	{:else if data}
 		<!-- Spark trend cards — 24h 추세 (3-row: 현재값 + 그래프 + min/max) -->
 		<div class="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
+		{#if trendLoading}
+			<div class="text-[var(--color-ink-3)] text-xs">추세 메트릭을 불러오는 중...</div>
+		{/if}
 			{#each [
 				{ label: `vCPU ${trendRange} 추세`,    unit: '%',     color: 'var(--color-accent)',      key: 'vcpu'    as const },
 				{ label: `RAM ${trendRange} 추세`,      unit: '%',     color: 'var(--color-accent-2)',    key: 'memory'  as const },

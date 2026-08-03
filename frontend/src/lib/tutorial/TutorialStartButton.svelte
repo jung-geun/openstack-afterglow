@@ -6,7 +6,7 @@
 	import { recordTutorialStatus, tutorialStatuses, tutorialStatusesLoaded } from './status';
 	import type { TourId } from './tours';
 
-	let { tour }: { tour: TourId } = $props();
+	let { tour, compactOnMobile = false }: { tour: TourId; compactOnMobile?: boolean } = $props();
 
 	// "나중에" 안내 힌트 자동 사라짐까지의 시간(ms). 하단 프로그레스 바 애니메이션과 동기화한다.
 	const HINT_MS = 7000;
@@ -40,10 +40,10 @@
 	onDestroy(() => clearTimeout(hintTimer));
 </script>
 
-<span class="tutorial-start">
+<span class:tutorial-start--compact={compactOnMobile} class="tutorial-start">
 	<Button variant="outline" size="sm" onclick={startNow} ariaLabel="튜토리얼 시작">
 		<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-		튜토리얼
+		<span class={compactOnMobile ? 'hidden sm:inline' : ''}>튜토리얼</span>
 	</Button>
 
 	{#if inviteOpen}
@@ -205,6 +205,24 @@
 		background: var(--color-surface-sunken);
 		border-left: 1px solid var(--color-line);
 		border-top: 1px solid var(--color-line);
+	}
+
+	@media (max-width: 639px) {
+		.tutorial-start--compact .ts-invite,
+		.tutorial-start--compact .ts-hint {
+			position: fixed;
+			top: 6.5rem;
+			left: auto;
+			right: 1rem;
+			transform: none;
+			max-width: calc(100vw - 2rem);
+			animation: none;
+		}
+
+		.tutorial-start--compact .ts-invite__arrow,
+		.tutorial-start--compact .ts-hint__arrow {
+			display: none;
+		}
 	}
 
 	@keyframes ts-fade-in {

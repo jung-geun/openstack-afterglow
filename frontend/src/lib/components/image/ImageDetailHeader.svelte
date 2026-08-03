@@ -10,28 +10,29 @@
 	const s = useImageDetailController();
 </script>
 
-<div class="flex items-start justify-between px-6 py-4 border-b border-gray-800 shrink-0">
+<div class="flex items-start justify-between px-6 py-4 border-b border-[var(--color-line)] shrink-0">
 	<div class="min-w-0 pr-4">
 		{#if s.image}
 			<h2 class="text-lg font-bold text-white truncate">{s.image.name}</h2>
+			<div class="text-xs text-[var(--color-ink-3)] font-mono mt-1">repository: {s.image.repository ?? s.image.name} · tag: {s.image.tag ?? 'latest'}</div>
 			<div class="flex items-center gap-2 mt-1.5 flex-wrap">
-				<span class="px-2 py-0.5 rounded text-xs font-medium {s.image.status === 'active' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">
+				<span class="px-2 py-0.5 rounded text-xs font-medium {s.image.status === 'active' ? 'text-[var(--color-state-success)] bg-[var(--color-state-success)]/15' : 'text-[var(--color-ink-2)] bg-[var(--color-surface-sunken)]'}">
 					{s.image.status}
 				</span>
 				<span class="px-2 py-0.5 rounded text-xs font-medium {visibilityBadge(s.image.visibility)}">
 					{visibilityLabel(s.image.visibility)}
 				</span>
 				{#if s.image.protected}
-					<span class="px-2 py-0.5 rounded text-xs font-medium text-amber-400 bg-amber-900/30">보호됨</span>
+					<span class="px-2 py-0.5 rounded text-xs font-medium text-[var(--color-state-warning)] bg-[var(--color-state-warning)]/15">보호됨</span>
 				{/if}
 			</div>
 		{:else if s.loading}
-			<div class="h-6 w-48 bg-gray-800 rounded animate-pulse"></div>
+			<div class="h-6 w-48 bg-[var(--color-surface-sunken)] rounded animate-pulse"></div>
 		{/if}
 	</div>
 	<button
 		onclick={onClose}
-		class="shrink-0 text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+		class="shrink-0 text-[var(--color-ink-2)] hover:text-white transition-colors p-1 rounded hover:bg-[var(--color-surface-sunken)]"
 		aria-label="닫기"
 	>
 		<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">

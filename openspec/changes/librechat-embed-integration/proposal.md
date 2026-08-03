@@ -22,7 +22,7 @@
 
 ## Impact
 
-- **백엔드**: `app/api/chat/usage.py` 신규 라우터(`/api/v1/chat`, `get_token_info` 의존, 읽기 전용). `app/main.py`에 `include_router` + `_AUDIT_PREFIX_MAP`에 `("/api/v1/chat", "chat")` 등록. `app/config.py`에 `librechat_mongo_url`(비밀)·`librechat_base`(일반) 필드 추가. `generate_k8s.py`/`config.toml.example` 동기화. MongoDB 읽기 클라이언트(`motor`) 신규 의존성.
+- **백엔드**: `app/api/chat/usage.py` 신규 라우터(`/api/v1/chat`, `get_token_info` 의존, 읽기 전용). `app/main.py`에 `include_router` + `_AUDIT_PREFIX_MAP`에 `("/api/v1/chat", "chat")` 등록. `app/config.py`에 `librechat_mongo_url`(비밀)·`librechat_base`(일반) 필드 추가. `generate_k8s.py`/`afterglow.conf.example` 동기화. MongoDB 읽기 클라이언트(`motor`) 신규 의존성.
 - **프론트엔드**: `frontend/src/routes/dashboard/chat/+page.svelte` 신규, `frontend/src/lib/components/LibreChatEmbed.svelte` 신규(`GrafanaEmbed.svelte` 패턴 참고). `Sidebar.svelte`/`nav.ts`/`routes.ts`에 메뉴 3곳 등록. `site.ts`에 `librechat_base` 런타임 설정. `dashboard/usage-report/+page.svelte`에 사용량 섹션 추가.
 - **테스트**: `backend/tests/test_chat_usage.py` 신규(인증 필수, 타 사용자 데이터 격리, 집계 정확도, Mongo 스키마 가정 고정).
 - **인스턴스 운영(코드 외)**: 기존 LibreChat nginx/ingress에 iframe 허용 헤더 설정, `OPENID_AUTO_REDIRECT=true` 반영.

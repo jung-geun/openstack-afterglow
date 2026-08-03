@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	let {
 		open = $bindable(false),
@@ -27,6 +28,8 @@
 	async function createProject() {
 		creating = true;
 		createError = '';
+		const namesScope = projectNames.scope(token, projectId);
+		projectNames.invalidate(namesScope);
 		try {
 			await api.post(
 				'/api/v1/admin/projects',
@@ -34,6 +37,7 @@
 				token,
 				projectId,
 			);
+			projectNames.invalidate(namesScope);
 			open = false;
 			onCreated();
 		} catch (e) {

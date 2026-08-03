@@ -2,22 +2,22 @@
   import type { VolumeSnapshot } from '$lib/types/volume';
   import { formatStorage } from '$lib/utils/format';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
-  let {
-    snapshots,
-    deleting,
-    onDelete,
-  }: {
-    snapshots: VolumeSnapshot[];
-    deleting: string | null;
+  let { snapshots, deleting, selectedIds, selectableIds, selectionDisabled, onToggleSelect, onToggleAll, onDelete }: {
+    snapshots: VolumeSnapshot[]; deleting: string | null; selectedIds: ReadonlySet<string>;
+    selectableIds: ReadonlySet<string>; selectionDisabled: boolean;
+    onToggleSelect: (id: string) => void; onToggleAll: () => void;
     onDelete: (id: string, name: string) => Promise<void>;
   } = $props();
+  const selectedSelectableCount = $derived([...selectedIds].filter((id) => selectableIds.has(id)).length);
 </script>
 
 <div class="overflow-x-auto">
   <table class="w-full text-sm">
     <thead>
       <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+        <th class="text-left py-3 pr-3"><SelectionCheckbox checked={selectableIds.size > 0 && selectedSelectableCount === selectableIds.size} indeterminate={selectedSelectableCount > 0 && selectedSelectableCount < selectableIds.size} disabled={selectionDisabled || selectableIds.size === 0} onclick={onToggleAll} ariaLabel="전체 선택" /></th>
         <th class="text-left py-3 pr-6">이름</th>
         <th class="text-left py-3 pr-6">상태</th>
         <th class="text-left py-3 pr-6">크기</th>
@@ -29,7 +29,8 @@
     </thead>
     <tbody>
       {#each snapshots as snap (snap.id)}
-        <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
+        <tr class="resource-selection-surface border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors" data-selected={selectedIds.has(snap.id)}>
+          <td class="py-3 pr-3"><SelectionCheckbox checked={selectedIds.has(snap.id)} disabled={selectionDisabled} onclick={() => onToggleSelect(snap.id)} ariaLabel={`${snap.name || snap.id} 선택`} /></td>
           <td class="py-3 pr-6 font-medium text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={snap.name || snap.id}>{snap.name || snap.id.slice(0, 8)}</span></td>
           <td class="py-3 pr-6"><StatusChip status={snap.status} /></td>
           <td class="py-3 pr-6 text-gray-400">{formatStorage(snap.size)}</td>

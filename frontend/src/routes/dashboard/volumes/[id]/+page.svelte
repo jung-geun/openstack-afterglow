@@ -26,6 +26,7 @@
 		if (id) fetchVolume(id);
 	}, {
 		storageKey: 'dashboard-volume-detail',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],

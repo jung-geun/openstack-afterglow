@@ -1,12 +1,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { palette } from '$lib/stores/palette';
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import { allNavItems } from '$lib/config/nav';
   import { isAdmin } from '$lib/stores/auth';
-  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
   import { siteConfig } from '$lib/config/site';
+  import { isMockupPathAllowed } from '$lib/mockup/contracts';
 
   interface PaletteItem {
     id: string;
@@ -17,11 +19,25 @@
     icon?: string;
   }
 
+  const MOCKUP_BETA_FEATURES: BetaFeatures = {
+    libraryConsume: true,
+    haDeploy: true,
+    keyManager: true,
+    volumeBackups: true,
+    volumeSnapshots: true,
+    fileStorageSnapshots: true,
+    fileStorageShareNetworks: true,
+    fileStorageSecurityServices: true,
+    databaseBackups: true,
+  };
+
   let query = $state('');
   let selectedIdx = $state(0);
   let inputEl = $state<HTMLInputElement | null>(null);
   let indexedAt = $state(0);
   let resourceItems = $state<PaletteItem[]>([]);
+  const mockupAdminActive = $derived($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin');
+  const paletteBetaFeatures = $derived(mockupAdminActive ? MOCKUP_BETA_FEATURES : $betaFeatures);
 
   const ICONS: Record<PaletteItem['type'], string> = {
     route: 'M4 6h16M4 12h16M4 18h7',
@@ -33,18 +49,23 @@
   };
 
   // AI 채팅처럼 설정으로 활성화되는 항목(services.chat)은 비활성 시 팔레트에서도 숨긴다.
-  const navItems = $derived(allNavItems($isAdmin, $betaFeatures)
+  const navItems = $derived(allNavItems($isAdmin, paletteBetaFeatures)
     .filter((item) => item.service !== 'chat' || ($siteConfig.services?.chat ?? false))
+    .filter((item) => !mockupAdminActive || isMockupPathAllowed('admin', item.href))
     .map((item) => ({
-    id: `route:${item.href}`,
-    label: item.label,
-    sublabel: item.section,
-    type: 'route' as const,
-    href: item.href,
-    icon: ICONS.route,
-  })));
+      id: `route:${item.href}`,
+      label: item.label,
+      sublabel: item.section,
+      type: 'route' as const,
+      href: item.href,
+      icon: ICONS.route,
+    })));
 
   async function loadResources() {
+    if (mockupAdminActive) {
+      resourceItems = [];
+      return;
+    }
     const now = Date.now();
     if (now - indexedAt < 60_000) return;
     indexedAt = now;
@@ -149,14 +170,14 @@
 {#if $palette}
   <!-- Backdrop -->
   <div
-    class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]"
+    class="fixed inset-0 bg-surface-scrim backdrop-blur-sm z-[var(--z-command)]"
     onclick={() => palette.close()}
     role="presentation"
   ></div>
 
   <!-- Panel -->
   <div
-    class="fixed top-[20vh] left-1/2 -translate-x-1/2 w-full max-w-xl z-[201] px-4"
+    class="fixed top-[20vh] left-1/2 -translate-x-1/2 w-full max-w-xl z-[calc(var(--z-command)+1)] px-4"
     role="dialog"
     aria-modal="true"
     aria-label="커맨드 팔레트"

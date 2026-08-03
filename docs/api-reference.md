@@ -1,6 +1,31 @@
+---
+title: API 레퍼런스
+nav_order: 20
+has_children: true
+---
+
 # Afterglow API 레퍼런스
 
 Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서비스와 통신하는 단일 게이트웨이 역할을 합니다.
+이 페이지는 API 도메인 인덱스입니다. 각 도메인 문서에서 엔드포인트별 **입력 파라미터 · 파라미터 의존성 · 제한
+사항 · 출력 스키마 · 사용 예 · 오류 응답**을 확인할 수 있습니다.
+
+---
+
+## API 버전 규칙
+
+모든 라우터는 **`/api/v1` 단독 마운트**입니다(2026-06-18 전환 완료). 문서의 모든 경로는 `/api/v1/...` 기준입니다.
+
+예외로, cloud-init에 baked되어 기존 VM 재배포 없이는 경로를 바꿀 수 없는 **레거시 3종**만 `/api`·`/api/v1`
+양쪽으로 dual-mount됩니다.
+
+| 엔드포인트 | 용도 |
+|-----------|------|
+| `POST /api/k3s/callback` | k3s 서버 VM → 백엔드 kubeconfig/node_token 콜백 |
+| `POST /api/instances/{id}/health/report` | VM 헬스 에이전트 보고 |
+| `POST /api/instances/{id}/credentials/rotate-cephx` | VM cephx 자격 회전 |
+
+> 신규 레거시 `/api` 경로 추가는 금지됩니다. 위 3종 외 모든 경로는 `/api/v1` 만 유효합니다.
 
 ---
 
@@ -8,352 +33,101 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 
 인증이 필요한 모든 엔드포인트에 다음 헤더를 포함해야 합니다.
 
-| 헤더 | 설명 |
-|------|------|
-| `X-Auth-Token` | Keystone 인증 토큰 (`/api/auth/login` 응답에서 획득) |
-| `X-Project-Id` | OpenStack 프로젝트 UUID |
+| 헤더 | 필수 | 설명 |
+|------|------|------|
+| `Authorization` | 예 | `Bearer <access_token>` 형식. `POST /api/v1/auth/login` 응답의 access JWT(`token`) |
+| `X-Project-Id` | 아니오 | 요청을 처리할 프로젝트 UUID. 생략 시 JWT에 담긴 프로젝트로 처리하며, 다른 값을 주면 서버가 해당 프로젝트로 rescope(전환) |
 
-`/api/auth/login`, `/api/health`, `/api/metrics`는 토큰이 필요하지 않습니다.
+> Afterglow는 **JWT(access + refresh) 쌍** 기반 인증을 사용합니다. 로그인 시 Keystone 토큰은 서버 Redis
+> 세션에 보관되고, 클라이언트에는 access/refresh JWT가 발급됩니다. (구 `X-Auth-Token` 헤더는 더 이상
+> 사용하지 않습니다.) 자세한 토큰 수명·회전 모델은 [인증 (Auth)](api/auth.md)를 참고하세요.
+
+`POST /api/v1/auth/login`, `GET /api/v1/health`, `GET /api/v1/metrics`는 인증이 필요하지 않습니다.
+Prometheus SD(`/api/v1/sd/...`)와 VM 에이전트용 baked 경로는 별도의 Bearer 토큰을 사용합니다(각 문서 참조).
+
+> **선택 서비스**: 일부 도메인은 `afterglow.conf`의 `[services]`(또는 해당 섹션)에서 활성화된 경우에만
+> 마운트됩니다. 아래 표의 "선택" 표시를 참고하세요.
 
 ---
 
-## API 태그별 문서
+## API 도메인 인덱스
 
 ### 인증 및 사용자
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [인증 (Auth)](api/auth.md) | `auth` | `/api/auth` | Keystone 토큰 발급, 프로젝트 조회, 스코프 전환 |
-| [프로필 (Profile)](api/profile.md) | `profile` | `/api/profile` | 사용자 프로필 조회, 비밀번호 변경 |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [인증 (Auth)](api/auth.md) | `/api/v1/auth` | Keystone 토큰 발급/갱신, 세션 관리, 프로젝트 스코프 전환 |
+| [프로필 (Profile)](api/profile.md) | `/api/v1/profile` | 사용자 프로필 조회/수정, 비밀번호 변경, 활동 로그 |
+| [프로젝트·초대 (Projects)](api/projects.md) | `/api/v1/projects`, `/api/v1/invitations` | 프로젝트 self-service, 멤버·매니저·초대 관리 |
 
 ### 관리자
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [관리자 (Admin)](api/admin.md) | `admin`, `admin-services`, `admin-flavors`, `admin-identity`, `admin-gpu` | `/api/admin` | 클러스터 개요, 사용자/프로젝트/쿼터/그룹/역할 관리, Flavor 관리, GPU 모니터링, 서비스 상태, 볼륨/네트워크 관리 |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [관리자 (Admin)](api/admin.md) | `/api/v1/admin` | 클러스터 개요, 사용자/프로젝트/쿼터/그룹/역할, Flavor·GPU·이미지, 마이그레이션, 고아 리소스, 워커 런타임 등 (전 엔드포인트 `require_admin`) |
 
 ### 컴퓨트
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [이미지 (Images)](api/images.md) | `images` | `/api/images` | Glance 이미지 카탈로그 조회 |
-| [플레이버 (Flavors)](api/flavors.md) | `flavors` | `/api/flavors` | Nova 플레이버 목록 조회 |
-| [인스턴스 (Instances)](api/instances.md) | `instances` | `/api/instances` | VM 생성/조회/제어/삭제, OverlayFS 생성 (SSE), 볼륨/인터페이스/보안그룹 관리 |
-| [키페어 (Keypairs)](api/keypairs.md) | `keypairs` | `/api/keypairs` | SSH 키페어 생성/삭제 |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [인스턴스 (Instances)](api/instances.md) | `/api/v1/instances` | VM 생성/조회/제어/삭제, OverlayFS 생성(SSE), 볼륨·인터페이스·보안그룹·FIP·메트릭 |
+| [인스턴스 헬스 (Instance Health)](api/instance-health.md) | `/api/v1/instances` | VM 헬스 에이전트 보고/조회, cephx 자격 회전 (baked 경로) |
+| [이미지 (Images)](api/images.md) | `/api/v1/images` | Glance 이미지 카탈로그, 업로드, 속성/멤버 관리 |
+| [플레이버 (Flavors)](api/flavors.md) | `/api/v1/flavors` | Nova 플레이버 목록 |
+| [키페어 (Keypairs)](api/keypairs.md) | `/api/v1/keypairs` | SSH 키페어 생성/삭제 |
 
 ### 스토리지
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [볼륨 (Volumes)](api/volumes.md) | `volumes`, `volume-backups`, `volume-snapshots` | `/api/volumes`, `/api/volume-snapshots` | Cinder 볼륨, 백업, 스냅샷 관리 |
-| [파일 스토리지 (File Storage)](api/file-storage.md) | `file-storage` | `/api/file-storage` | Manila CephFS 공유 파일시스템, 접근 규칙 (선택 서비스) |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [볼륨 (Volumes)](api/volumes.md) | `/api/v1/volumes`, `/api/v1/volume-snapshots` | Cinder 볼륨, 백업, 스냅샷, 이전(transfer), 자동 백업 |
+| [파일 스토리지 (File Storage)](api/file-storage.md) | `/api/v1/file-storage` | Manila CephFS 공유, 접근 규칙 — *선택* |
+| [공유 스냅샷·네트워크 (Share Mgmt)](api/share-management.md) | `/api/v1/share-snapshots`, `/api/v1/share-networks`, `/api/v1/security-services` | Manila 스냅샷/네트워크/보안 서비스 — *선택* |
 
 ### 네트워크
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [네트워크 (Networks)](api/networks.md) | `networks` | `/api/networks` | Neutron 네트워크, 서브넷, Floating IP, 토폴로지 |
-| [라우터 (Routers)](api/routers.md) | `routers` | `/api/routers` | Neutron 라우터, 인터페이스, 게이트웨이 |
-| [로드밸런서 (Load Balancers)](api/loadbalancers.md) | `loadbalancers` | `/api/loadbalancers` | Octavia 로드밸런서, 리스너, 풀, 멤버, 헬스 모니터 |
-| [보안 그룹 (Security Groups)](api/security-groups.md) | `security-groups` | `/api/security-groups` | Neutron 보안 그룹, 규칙 관리 |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [네트워크 (Networks)](api/networks.md) | `/api/v1/networks` | Neutron 네트워크, 서브넷, Floating IP, 토폴로지 |
+| [라우터 (Routers)](api/routers.md) | `/api/v1/routers` | Neutron 라우터, 인터페이스, 게이트웨이 |
+| [로드밸런서 (Load Balancers)](api/loadbalancers.md) | `/api/v1/loadbalancers` | Octavia LB, 리스너, 풀, 멤버, 헬스 모니터 |
+| [보안 그룹 (Security Groups)](api/security-groups.md) | `/api/v1/security-groups` | Neutron 보안 그룹, 규칙 관리 |
 
-### 컨테이너 (선택 서비스)
+### 유니온 레이어
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [컨테이너 (Containers)](api/containers.md) | `clusters`, `containers` | `/api/clusters`, `/api/containers` | Magnum 쿠버네티스 클러스터, Zun 컨테이너 (config.toml에서 활성화 필요) |
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [Palimpsest 레이어](api/union.md) | `/api/v1/palimpsest`, `/api/v1/admin/libraries`, `/api/v1/libraries/squashfs` | 레이어드 VM — squashfs 레이어 빌드/소비, digest 검색, 부모 체인. (구 `/api/v1/union` 은 제거됨 — [palimpsest.md](palimpsest.md)) |
 
-### k3s 프로비저너 (선택 서비스)
+### 컨테이너 · Kubernetes
 
-> `config.toml [services] k3s = true` 활성화 필요.
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [컨테이너 (Containers)](api/containers.md) | `/api/v1/clusters`, `/api/v1/containers` | Magnum 클러스터, Zun 컨테이너 — *선택* |
+| [k3s 클러스터 (k3s)](api/k3s.md) | `/api/v1/k3s/clusters` | 경량 Kubernetes 프로비저닝(SSE), 스케일, kubeconfig, 인증서, 노드그룹 — *선택* |
+| [k3s 리소스 관리](api/k3s-resources.md) | `/api/v1/k3s/clusters/...` | 클러스터 내부 k8s 리소스(pods/deployments/services/configmaps/secrets/shell) — *선택* |
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [k3s 클러스터 (k3s)](api/k3s.md) | `k3s`, `k3s-health` | `/api/k3s/clusters` | Magnum 없이 VM에 k3s를 직접 배포하는 경량 Kubernetes 프로비저닝. SSE 비동기 생성, 스케일 인/아웃, kubeconfig 다운로드, Cloud Provider OpenStack 플러그인(OCCM, Cinder CSI, Manila CSI, Octavia Ingress, Keystone Auth, Barbican KMS) 지원. |
+### 데이터 · 키 · 부가 서비스
 
-### 대시보드 및 공통
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [데이터베이스 (Trove)](api/database.md) | `/api/v1/database-instances` | Trove DBaaS 인스턴스, databases/users, 백업 — *선택* |
+| [오브젝트 스토리지 (Swift)](api/object-storage.md) | `/api/v1/object-storage` | Swift 컨테이너/오브젝트, 업로드, 다운로드 토큰, 휴지통 — *선택* |
+| [키 관리 (Barbican)](api/secrets.md) | `/api/v1/secrets`, `/api/v1/secret-containers`, `/api/v1/secret-orders` | Barbican 시크릿/컨테이너/오더, ACL, 쿼터 — *선택* |
+| [VPN (VPNaaS)](api/vpn.md) | `/api/v1/vpn/servers` | VPN 서버/클라이언트, config 다운로드, 에이전트 콜백 — *선택* |
 
-| 문서 | 태그 | 기본 경로 | 설명 |
-|------|------|-----------|------|
-| [대시보드 (Dashboard)](api/dashboard.md) | `dashboard`, `libraries`, `site`, `user-dashboard` | `/api/dashboard`, `/api/libraries`, `/api/site-config`, `/api/user-dashboard` | 프로젝트 리소스 요약, 라이브러리 카탈로그, 사이트 설정 |
-| [메트릭 (Metrics)](api/metrics.md) | `metrics` | `/api/metrics`, `/api/health` | Prometheus 메트릭, 헬스 체크 (인증 불필요) |
+### 대시보드 · 시스템
+
+| 문서 | 기본 경로 | 설명 |
+|------|-----------|------|
+| [대시보드 (Dashboard)](api/dashboard.md) | `/api/v1/dashboard`, `/api/v1/libraries` | 프로젝트 리소스 요약, 쿼터, 라이브러리 카탈로그 |
+| [시스템 서비스](api/system-services.md) | `/api/v1/announcements`, `/api/v1/tutorials`, `/api/v1/sd`, `/api/v1/grafana`, `/api/v1/site-config`, `/api/v1/user-dashboard` | 공지, 튜토리얼, Prometheus SD, Grafana 임베드, 사이트 설정, 개인 대시보드 |
+| [채팅 (Chat)](api/chat.md) | `/api/v1/chat` | LLM 채팅 사용량/쿼터 — *선택* |
+| [메트릭 (Metrics)](api/metrics.md) | `/api/v1/metrics`, `/api/v1/health` | Prometheus 메트릭, 헬스 체크 (인증 불필요) |
 
 ---
 
-## 전체 엔드포인트 빠른 참조
+## 아키텍처 문서
 
-### 인증 `/api/auth`
-
-| 메서드 | 경로 | 인증 | 설명 |
-|--------|------|------|------|
-| `POST` | `/api/auth/login` | 없음 | Keystone 토큰 발급 |
-| `GET` | `/api/auth/me` | 필요 | 현재 사용자 정보 |
-| `GET` | `/api/auth/projects` | 필요 | 접근 가능한 프로젝트 목록 |
-| `POST` | `/api/auth/token` | 필요 | 프로젝트 스코프 전환 |
-
-### 프로필 `/api/profile`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/profile` | 사용자 프로필 정보 |
-| `PUT` | `/api/profile/password` | 비밀번호 변경 |
-
-### 관리자 `/api/admin`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/admin/overview` | 클러스터 전체 개요 |
-| `GET` | `/api/admin/hypervisors` | 하이퍼바이저 목록 |
-| `GET` | `/api/admin/overview/projects` | 프로젝트별 리소스 사용량 |
-| `GET` | `/api/admin/file-storage` | 전체 파일 스토리지 목록 |
-| `POST` | `/api/admin/file-storage/build` | 사전 빌드 파일 스토리지 share 생성 |
-| `GET` | `/api/admin/all-instances` | 전체 인스턴스 (페이지네이션) |
-| `GET` | `/api/admin/all-volumes` | 전체 볼륨 (페이지네이션) |
-| `GET` | `/api/admin/all-containers` | 전체 컨테이너 |
-| `GET` | `/api/admin/all-file-storages` | 전체 파일 스토리지 |
-| `GET` | `/api/admin/all-networks` | 전체 네트워크 |
-| `GET` | `/api/admin/all-floating-ips` | 전체 Floating IP |
-| `GET` | `/api/admin/all-routers` | 전체 라우터 |
-| `GET` | `/api/admin/all-ports` | 전체 포트 |
-| `GET` | `/api/admin/topology` | 전체 토폴로지 |
-| `GET` | `/api/admin/timeseries/{type}` | 시계열 데이터 |
-| `GET` | `/api/admin/services` | 서비스 상태 모니터링 |
-| `GET` | `/api/admin/monitoring/summary` | 모니터링 요약 |
-| `GET` | `/api/admin/gpu-hosts` | GPU 호스트 모니터링 |
-| `GET` | `/api/admin/gpu-aliases` | GPU alias 목록 |
-| `GET` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 조회 |
-| `PUT` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 수정 |
-| `DELETE` | `/api/admin/gpu-quotas/defaults/{gpu_type}` | 기본 GPU 쿼터 유형별 삭제 |
-| `GET` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 조회 |
-| `PUT` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
-| `DELETE` | `/api/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 GPU 쿼터 유형별 삭제 |
-| `GET` | `/api/admin/hypervisors/{id}` | 하이퍼바이저 상세 |
-| `GET` | `/api/admin/file-storage/builds` | 사전 빌드 파일 스토리지 빌드 목록 |
-| `GET`/`POST`/`DELETE` | `/api/v1/admin/libraries/...` | squashfs 레이어 라이브러리 빌드·프로필·소비 관리 |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/flavors/...` | Flavor 관리 |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/users/...` | 사용자 관리 |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/projects/...` | 프로젝트 관리 |
-| `GET`/`PUT` | `/api/admin/quotas/{project_id}` | 쿼터 관리 |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/groups/...` | 그룹 관리 |
-| `GET`/`POST`/`DELETE` | `/api/admin/roles/...` | 역할 관리 |
-| `PATCH`/`DELETE`/`POST` | `/api/admin/volumes/{id}/...` | 관리자 볼륨 관리 |
-| `POST`/`PUT`/`DELETE` | `/api/admin/networks/...` | 관리자 네트워크 관리 |
-| `POST`/`DELETE` | `/api/admin/floating-ips/...` | 관리자 Floating IP 관리 |
-| `POST`/`PUT`/`DELETE` | `/api/admin/routers/...` | 관리자 라우터 관리 |
-| `PUT`/`DELETE` | `/api/admin/ports/...` | 관리자 포트 관리 |
-
-### 이미지 `/api/images`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/images` | Glance 이미지 목록 (300초 캐시) |
-
-### 플레이버 `/api/flavors`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/flavors` | Nova 플레이버 목록 |
-
-### 인스턴스 `/api/instances`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/instances` | 인스턴스 목록 (15초 캐시) |
-| `GET` | `/api/instances/{id}` | 인스턴스 상세 |
-| `POST` | `/api/instances` | 동기 생성 |
-| `POST` | `/api/instances/async` | SSE 비동기 생성 |
-| `DELETE` | `/api/instances/{id}` | 삭제 |
-| `POST` | `/api/instances/{id}/start` | 시작 |
-| `POST` | `/api/instances/{id}/stop` | 중지 |
-| `POST` | `/api/instances/{id}/reboot` | 재시작 |
-| `GET` | `/api/instances/{id}/console` | VNC 콘솔 URL |
-| `GET` | `/api/instances/{id}/log` | 콘솔 로그 |
-| `GET` | `/api/instances/{id}/owner` | 소유자 정보 |
-| `GET`/`POST`/`DELETE` | `/api/instances/{id}/volumes/...` | 볼륨 관리 |
-| `GET`/`POST`/`DELETE` | `/api/instances/{id}/interfaces/...` | 네트워크 인터페이스 |
-| `GET`/`POST` | `/api/instances/{id}/security-groups` | 보안 그룹 |
-| `POST` | `/api/instances/{id}/ports/{pid}/security-groups` | 포트 보안 그룹 업데이트 |
-| `POST` | `/api/instances/{id}/shelve` | 인스턴스 쉘브 (리소스 해제) |
-| `POST` | `/api/instances/{id}/unshelve` | 쉘브된 인스턴스 복원 |
-| `POST` | `/api/instances/{id}/floating-ip` | Floating IP 자동 생성 + 연결 |
-| `DELETE` | `/api/instances/{id}/floating-ip` | Floating IP 해제 + 삭제 |
-
-### 키페어 `/api/keypairs`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/keypairs` | 키페어 목록 |
-| `POST` | `/api/keypairs` | 키페어 생성 |
-| `DELETE` | `/api/keypairs/{name}` | 키페어 삭제 |
-
-### 볼륨 `/api/volumes`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/volumes` | 볼륨 목록 (15초 캐시) |
-| `GET` | `/api/volumes/{id}` | 볼륨 상세 |
-| `POST` | `/api/volumes` | 볼륨 생성 |
-| `DELETE` | `/api/volumes/{id}` | 볼륨 삭제 |
-| `POST` | `/api/volumes/{id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
-| `GET` | `/api/volumes/transfers` | 볼륨 이전 목록 |
-| `POST` | `/api/volumes/{id}/transfer` | 볼륨 이전 생성 |
-| `POST` | `/api/volumes/transfer/{id}/accept` | 볼륨 이전 수락 |
-| `DELETE` | `/api/volumes/transfer/{id}` | 볼륨 이전 취소 |
-| `GET` | `/api/volumes/backups` | 백업 목록 |
-| `GET` | `/api/volumes/backups/{id}` | 백업 상세 |
-| `POST` | `/api/volumes/backups` | 백업 생성 |
-| `POST` | `/api/volumes/backups/{id}/restore` | 백업 복원 |
-| `DELETE` | `/api/volumes/backups/{id}` | 백업 삭제 |
-| `POST` | `/api/volumes/backups/auto-backup/configs` | 자동 백업 설정 목록 |
-| `GET` | `/api/volumes/backups/auto-backup/{volume_id}` | 볼륨 자동 백업 설정 조회 |
-| `POST` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 활성화 |
-| `DELETE` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 비활성화 |
-
-### 볼륨 스냅샷 `/api/volume-snapshots`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/volume-snapshots` | 스냅샷 목록 |
-| `GET` | `/api/volume-snapshots/{id}` | 스냅샷 상세 |
-| `POST` | `/api/volume-snapshots` | 스냅샷 생성 |
-| `DELETE` | `/api/volume-snapshots/{id}` | 스냅샷 삭제 |
-
-### 파일 스토리지 `/api/file-storage` (선택 서비스)
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/file-storage` | 파일 스토리지 목록 |
-| `GET` | `/api/file-storage/quota` | 쿼터 조회 |
-| `GET` | `/api/file-storage/types` | share 타입 목록 |
-| `GET` | `/api/file-storage/{id}` | 상세 |
-| `POST` | `/api/file-storage` | 생성 (분당 5회 제한) |
-| `DELETE` | `/api/file-storage/{id}` | 삭제 |
-| `GET` | `/api/file-storage/{id}/access-rules` | 접근 규칙 목록 |
-| `POST` | `/api/file-storage/{id}/access-rules` | 접근 규칙 추가 |
-| `DELETE` | `/api/file-storage/{id}/access-rules/{aid}` | 접근 규칙 삭제 |
-
-### 네트워크 `/api/networks`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/networks` | 네트워크 목록 |
-| `POST` | `/api/networks` | 네트워크 생성 |
-| `GET` | `/api/networks/topology` | 토폴로지 (30초 캐시) |
-| `GET` | `/api/networks/{id}` | 네트워크 상세 |
-| `DELETE` | `/api/networks/{id}` | 삭제 |
-| `POST` | `/api/networks/{id}/subnets` | 서브넷 생성 |
-| `PUT` | `/api/networks/subnets/{id}` | 서브넷 편집 (이름/게이트웨이/DHCP) |
-| `DELETE` | `/api/networks/subnets/{id}` | 서브넷 삭제 |
-| `GET` | `/api/networks/floating-ips` | Floating IP 목록 |
-| `POST` | `/api/networks/floating-ips` | Floating IP 생성 |
-| `POST` | `/api/networks/floating-ips/{id}/associate` | 연결 |
-| `POST` | `/api/networks/floating-ips/{id}/disassociate` | 해제 |
-| `DELETE` | `/api/networks/floating-ips/{id}` | 삭제 |
-
-### 라우터 `/api/routers`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/routers` | 목록 (30초 캐시) |
-| `POST` | `/api/routers` | 생성 |
-| `GET` | `/api/routers/{id}` | 상세 (인터페이스 포함) |
-| `DELETE` | `/api/routers/{id}` | 삭제 |
-| `POST` | `/api/routers/{id}/interfaces` | 인터페이스 추가 |
-| `DELETE` | `/api/routers/{id}/interfaces/{sid}` | 인터페이스 제거 |
-| `POST` | `/api/routers/{id}/gateway` | 게이트웨이 설정 |
-| `DELETE` | `/api/routers/{id}/gateway` | 게이트웨이 제거 |
-
-### 로드밸런서 `/api/loadbalancers`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/loadbalancers` | 목록 (30초 캐시) |
-| `POST` | `/api/loadbalancers` | 생성 |
-| `GET` | `/api/loadbalancers/{id}` | 상세 |
-| `DELETE` | `/api/loadbalancers/{id}` | 삭제 |
-| `GET` | `/api/loadbalancers/{id}/listeners` | 리스너 목록 |
-| `POST` | `/api/loadbalancers/{id}/listeners` | 리스너 생성 |
-| `DELETE` | `/api/loadbalancers/{id}/listeners/{lid}` | 리스너 삭제 |
-| `GET` | `/api/loadbalancers/{id}/pools` | 풀 목록 |
-| `POST` | `/api/loadbalancers/{id}/pools` | 풀 생성 |
-| `DELETE` | `/api/loadbalancers/{id}/pools/{pid}` | 풀 삭제 |
-| `GET` | `/api/loadbalancers/{id}/pools/{pid}/members` | 멤버 목록 |
-| `POST` | `/api/loadbalancers/{id}/pools/{pid}/members` | 멤버 추가 |
-| `DELETE` | `/api/loadbalancers/{id}/pools/{pid}/members/{mid}` | 멤버 제거 |
-| `GET` | `/api/loadbalancers/{id}/pools/{pid}/health-monitor` | 헬스 모니터 |
-| `POST` | `/api/loadbalancers/{id}/pools/{pid}/health-monitor` | 헬스 모니터 생성 |
-| `DELETE` | `/api/loadbalancers/{id}/pools/{pid}/health-monitor/{hid}` | 헬스 모니터 삭제 |
-
-### 보안 그룹 `/api/security-groups`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/security-groups` | 목록 (60초 캐시) |
-| `POST` | `/api/security-groups` | 생성 |
-| `DELETE` | `/api/security-groups/{id}` | 삭제 |
-| `POST` | `/api/security-groups/{id}/rules` | 규칙 추가 |
-| `DELETE` | `/api/security-groups/{id}/rules/{rid}` | 규칙 삭제 |
-
-### 대시보드 `/api/dashboard`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/dashboard/summary` | 리소스 요약 |
-| `GET` | `/api/dashboard/config` | 프론트엔드 설정 |
-| `GET` | `/api/dashboard/quotas` | 프로젝트 쿼터 조회 |
-| `GET` | `/api/dashboard/gpu-available` | GPU 가용량 조회 |
-| `GET` | `/api/dashboard/usage` | 프로젝트 리소스 사용량 |
-
-### 라이브러리 `/api/libraries`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/libraries` | 라이브러리 카탈로그 |
-| `GET` | `/api/libraries/shares` | 사전 빌드 share 목록 |
-| `POST` | `/api/libraries/validate` | 라이브러리 호환성 검증 |
-
-### 사이트 설정 `/api/site-config`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/site-config` | 전역 사이트 설정 |
-
-### 사용자 대시보드 `/api/user-dashboard`
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/user-dashboard` | 사용자 개인 리소스 요약 |
-
-### 컨테이너 `/api/clusters`, `/api/containers` (선택 서비스)
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/clusters` | 쿠버네티스 클러스터 목록 |
-| `POST` | `/api/clusters` | 클러스터 생성 |
-| `GET` | `/api/clusters/{id}` | 클러스터 상세 |
-| `DELETE` | `/api/clusters/{id}` | 클러스터 삭제 |
-| `GET` | `/api/containers` | Zun 컨테이너 목록 |
-| `POST` | `/api/containers` | 컨테이너 생성 |
-| `GET` | `/api/containers/{id}` | 컨테이너 상세 |
-| `DELETE` | `/api/containers/{id}` | 컨테이너 삭제 |
-| `POST` | `/api/containers/{id}/start` | 시작 |
-| `POST` | `/api/containers/{id}/stop` | 중지 |
-| `POST` | `/api/containers/{id}/restart` | 재시작 |
-
-### k3s 프로비저너 `/api/k3s/clusters` (선택 서비스)
-
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| `GET` | `/api/k3s/clusters` | 클러스터 목록 (삭제된 클러스터 포함) |
-| `GET` | `/api/k3s/clusters/{id}` | 클러스터 상세 |
-| `GET`\|`HEAD` | `/api/k3s/clusters/{id}/kubeconfig` | kubeconfig 다운로드 / 존재 확인 |
-| `POST` | `/api/k3s/clusters/async` | SSE 비동기 클러스터 생성 |
-| `PATCH` | `/api/k3s/clusters/{id}/scale` | 워커 노드 수 조정 |
-| `DELETE` | `/api/k3s/clusters/{id}` | 클러스터 삭제 (soft-delete) |
-
-### 메트릭 및 헬스 체크
-
-| 메서드 | 경로 | 인증 | 설명 |
-|--------|------|------|------|
-| `GET` | `/api/metrics` | 없음 | Prometheus 메트릭 |
-| `GET` | `/api/health` | 없음 | 서비스 헬스 체크 |
+시스템 전체 구조, 인증 흐름, VM 생성/ k3s 프로비저닝 / Union 레이어 라이프사이클 시퀀스는
+[아키텍처](architecture.md)를, 모듈 간 관계는 [클래스·workflow 다이어그램](class-diagrams/)을 참고하세요.

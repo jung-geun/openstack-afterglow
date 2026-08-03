@@ -4,11 +4,13 @@
 	interface Props {
 		onClose: () => void;
 		content?: string;
+		dataTour?: string;
+		storageKey?: string;
 	}
 
-	let { onClose, content = '테스트 내용' }: Props = $props();
+	let { onClose, content = '테스트 내용', dataTour, storageKey }: Props = $props();
 </script>
 
-<SlidePanel {onClose}>
+<SlidePanel {onClose} {dataTour} {storageKey}>
 	{content}
 </SlidePanel>

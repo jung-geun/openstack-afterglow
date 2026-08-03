@@ -15,6 +15,7 @@
 
 	const ar = createAutoRefresh(fetchTopology, {
 		storageKey: 'dashboard-topology',
+		invokeOnMount: false,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]
 	});

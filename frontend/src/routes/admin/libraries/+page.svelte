@@ -8,6 +8,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import Modal from '$lib/components/ui/Modal.svelte';
   import Alert from '$lib/components/ui/Alert.svelte';
+  import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
   // ---------------------------------------------------------------------------
   // 타입
@@ -310,33 +311,33 @@
   // API 호출
   // ---------------------------------------------------------------------------
 
-  async function loadBuilds() {
+  async function loadBuilds(refresh = false) {
     try {
-      builds = await api.get<LayerBuild[]>('/api/v1/admin/libraries/builds', token, projectId, { refresh: true });
+      builds = await api.get<LayerBuild[]>('/api/v1/admin/libraries/builds', token, projectId, { refresh });
     } catch { /* 무시 */ }
   }
 
-  async function loadConsumes() {
+  async function loadConsumes(refresh = false) {
     try {
-      consumes = await api.get<LayerConsume[]>('/api/v1/admin/libraries/consumes', token, projectId, { refresh: true });
+      consumes = await api.get<LayerConsume[]>('/api/v1/admin/libraries/consumes', token, projectId, { refresh });
     } catch { /* 무시 */ }
   }
 
-  async function loadArtifacts() {
+  async function loadArtifacts(refresh = false) {
     try {
-      artifacts = await api.get<LayerArtifact[]>('/api/v1/admin/libraries/artifacts', token, projectId, { refresh: true });
+      artifacts = await api.get<LayerArtifact[]>('/api/v1/admin/libraries/artifacts', token, projectId, { refresh });
     } catch { /* 무시 */ }
   }
 
-  async function loadProfiles() {
+  async function loadProfiles(refresh = false) {
     try {
-      profiles = await api.get<LayerProfile[]>('/api/v1/admin/libraries/profiles', token, projectId, { refresh: true });
+      profiles = await api.get<LayerProfile[]>('/api/v1/admin/libraries/profiles', token, projectId, { refresh });
     } catch { /* 무시 */ }
   }
 
-  async function loadBaseImages() {
+  async function loadBaseImages(refresh = false) {
     try {
-      baseImages = await api.get<LayerBaseImage[]>('/api/v1/admin/libraries/base-images', token, projectId, { refresh: true });
+      baseImages = await api.get<LayerBaseImage[]>('/api/v1/admin/libraries/base-images', token, projectId, { refresh });
       if (!systemForm.base_image_id && baseImages.length > 0) systemForm.base_image_id = baseImages[0].id;
       if (!nvidiaForm.base_image_id && baseImages.length > 0) nvidiaForm.base_image_id = baseImages[0].id;
       if (!importForm.base_image_id && baseImages.length > 0) importForm.base_image_id = baseImages[0].id;
@@ -345,33 +346,33 @@
     }
   }
 
-  async function loadImportJobs() {
+  async function loadImportJobs(refresh = true) {
     try {
-      importJobs = await api.get<LayerImportJob[]>('/api/v1/admin/libraries/imports', token, projectId, { refresh: true });
+      importJobs = await api.get<LayerImportJob[]>('/api/v1/admin/libraries/imports', token, projectId, { refresh });
     } catch {
       importJobs = [];
     }
   }
 
-  async function loadKeypairs() {
+  async function loadKeypairs(refresh = false) {
     try {
-      keypairs = await api.get<Keypair[]>('/api/v1/keypairs', token, projectId, { refresh: true });
+      keypairs = await api.get<Keypair[]>('/api/v1/keypairs', token, projectId, { refresh });
     } catch {
       keypairs = [];
     }
   }
 
-  async function loadAll() {
+  async function loadAll(refresh = false) {
     if (builds.length === 0 && consumes.length === 0) loading = true;
     error = '';
-    await Promise.allSettled([loadBuilds(), loadConsumes(), loadArtifacts(), loadProfiles(), loadKeypairs(), loadBaseImages(), loadImportJobs()]);
+    await Promise.allSettled([loadBuilds(refresh), loadConsumes(refresh), loadArtifacts(refresh), loadProfiles(refresh), loadKeypairs(refresh), loadBaseImages(refresh), loadImportJobs(refresh)]);
     loading = false;
   }
 
   // 활성 빌드/Import job이 있으면 10초, 없으면 30초 폴링
   $effect(() => {
     const interval = setInterval(() => {
-      void loadBuilds();
+      void loadBuilds(true);
       if (activeImportJobs.length > 0) void loadImportJobs();
     }, activeBuilds.length > 0 || activeImportJobs.length > 0 ? 10_000 : 30_000);
     return () => clearInterval(interval);
@@ -398,7 +399,7 @@
         projectId,
       );
       message = `uv 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
-      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+      await Promise.allSettled([loadBuilds(true), loadArtifacts(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -429,7 +430,7 @@
         projectId,
       );
       message = `apt system 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
-      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+      await Promise.allSettled([loadBuilds(true), loadArtifacts(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -459,7 +460,7 @@
         projectId,
       );
       message = `NVIDIA 드라이버 템플릿 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name}, branch: ${branch})`;
-      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+      await Promise.allSettled([loadBuilds(true), loadArtifacts(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -485,7 +486,7 @@
         projectId,
       );
       message = `Python runtime 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name}, 부모 ID: ${result.parent_artifact_id})`;
-      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+      await Promise.allSettled([loadBuilds(true), loadArtifacts(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -533,7 +534,7 @@
         projectId,
       );
       message = `Python 패키지 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name}, 부모 ID: ${result.parent_artifact_id})`;
-      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+      await Promise.allSettled([loadBuilds(true), loadArtifacts(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -560,7 +561,7 @@
       );
       profileMessage = `프로필 '${result.name}' 저장 완료 (레이어: ${result.layers.join(', ')})`;
       profileForm.selectedLayers = result.layers;
-      await loadProfiles();
+      await loadProfiles(true);
     } catch (e) {
       profileError = e instanceof ApiError ? `프로필 저장 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -656,7 +657,7 @@
         profileForm.selectedLayers = [];
       }
       profileMessage = `프로필 '${profile.name}' 삭제 완료`;
-      await Promise.allSettled([loadProfiles(), loadConsumes(), loadArtifacts()]);
+      await Promise.allSettled([loadProfiles(true), loadConsumes(true), loadArtifacts(true)]);
     } catch (e) {
       if (e instanceof ApiError) {
         let detailMessage = e.message;
@@ -691,7 +692,7 @@
         projectId,
       );
       profileMessage = `프로필 '${profile.name}' ${is_published ? '공개' : '비공개'} 전환 완료`;
-      await loadProfiles();
+      await loadProfiles(true);
     } catch (e) {
       profileDeleteError = e instanceof ApiError ? `공개 상태 변경 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -713,7 +714,7 @@
         projectId,
       );
       message = `artifact #${artifact.id} ${is_published ? '공개' : '비공개'} 전환 완료`;
-      await loadArtifacts();
+      await loadArtifacts(true);
     } catch (e) {
       error = e instanceof ApiError ? `공개 상태 변경 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -758,7 +759,7 @@
         ? `, SSH key=${sshSource}${consumeForm.ssh_username ? `, user=${consumeForm.ssh_username}` : ', user=기본 이미지 사용자'}`
         : '';
       message = `소비 인스턴스 생성됨 (ID: ${result.consume_id}, 서버: ${result.server_id?.slice(0, 8)}…${sshNote}). 내부 네트워크 IP는 상세에서 확인하세요.`;
-      await loadConsumes();
+      await loadConsumes(true);
     } catch (e) {
       error = e instanceof ApiError ? `소비 인스턴스 생성 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -782,7 +783,7 @@
       if (importForm.profile_name.trim()) body.profile_name = importForm.profile_name.trim();
       const result = await api.post<LayerImportJob>('/api/v1/admin/libraries/imports/dockerfile', body, token, projectId);
       message = `Dockerfile import 시작 (ID: ${result.id}, profile: ${result.profile_name})`;
-      await Promise.allSettled([loadImportJobs(), loadBuilds(), loadArtifacts(), loadProfiles()]);
+      await Promise.allSettled([loadImportJobs(true), loadBuilds(true), loadArtifacts(true), loadProfiles(true)]);
     } catch (e) {
       error = e instanceof ApiError ? `Dockerfile import 실패: ${e.message}` : '네트워크 오류';
     } finally {
@@ -822,7 +823,7 @@
     detailCancelError = '';
     try {
       await api.post(`/api/v1/admin/libraries/builds/${selectedBuildId}/cancel`, {}, token, projectId);
-      await Promise.allSettled([loadBuildDetail(), loadBuilds()]);
+      await Promise.allSettled([loadBuildDetail(), loadBuilds(true)]);
     } catch (e) {
       detailCancelError = e instanceof ApiError ? e.message : '취소 실패';
     } finally {
@@ -911,7 +912,7 @@
       message = `artifact #${deletePreview.artifact.id} (${deletePreview.artifact.name}) 삭제 완료`;
       deleteModalOpen = false;
       deletePreview = null;
-      await Promise.allSettled([loadArtifacts(), loadProfiles()]);
+      await Promise.allSettled([loadArtifacts(true), loadProfiles(true)]);
     } catch (e) {
       deleteError = e instanceof ApiError ? e.message : '삭제 실패';
     } finally {
@@ -1108,14 +1109,17 @@
 </script>
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
-  <PageHeader title="라이브러리 관리" breadcrumb="라이브러리">
+  <div data-tour="admin-library-header">
+  <PageHeader title="Palimpsest 레이어 관리" breadcrumb="Palimpsest">
     {#snippet actions()}
+      <TutorialStartButton tour="admin-library" compactOnMobile />
       <button
-        onclick={loadAll}
+        onclick={() => loadAll(true)}
         class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600"
       >새로고침</button>
     {/snippet}
   </PageHeader>
+  </div>
 
   {#if error}
     <Alert tone="danger" class="mb-4">{error}</Alert>
@@ -1127,11 +1131,11 @@
   {#if loading}
     <LoadingSkeleton rows={4} />
   {:else}
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8" data-tour="admin-library-ready">
       <!-- ------------------------------------------------------------------ -->
       <!-- System/tool 레이어 빌드                                             -->
       <!-- ------------------------------------------------------------------ -->
-      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5" data-tour="admin-library-system">
         <h2 class="text-sm font-semibold text-white mb-1">System/tool 레이어</h2>
         <p class="text-xs text-gray-400 mb-4">
           uv preset은 Python runtime 부모로 쓰는 curl-installed uv tool 레이어를 만들고,
@@ -1246,7 +1250,7 @@
       <!-- ------------------------------------------------------------------ -->
       <!-- GitHub Dockerfile import                                           -->
       <!-- ------------------------------------------------------------------ -->
-      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5" data-tour="admin-library-import">
         <h2 class="text-sm font-semibold text-white mb-1">GitHub Dockerfile import</h2>
         <p class="text-xs text-gray-400 mb-4">
           GitHub repository의 pinned commit Dockerfile을 지원되는 RUN/COPY/ADD/WORKDIR/ENV subset으로 squashfs layer chain과 profile로 가져옵니다.
@@ -1354,7 +1358,7 @@
       <!-- ------------------------------------------------------------------ -->
       <!-- Python runtime 레이어 빌드                                         -->
       <!-- ------------------------------------------------------------------ -->
-      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5" data-tour="admin-library-python">
         <h2 class="text-sm font-semibold text-white mb-1">Python runtime 레이어</h2>
         <p class="text-xs text-gray-400 mb-4">
           uv 레이어 위에 CPython runtime만 추가합니다. pip 패키지는 별도 패키지 레이어에서 설치합니다.
@@ -1654,7 +1658,7 @@
     <!-- 프로필 구성 카드                                                        -->
     <!-- ---------------------------------------------------------------------- -->
     <div class="mb-8">
-      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5" data-tour="admin-library-profile">
         <h2 class="text-sm font-semibold text-white mb-1">프로필 구성</h2>
         <p class="text-xs text-gray-400 mb-4">
           빌드된 레이어를 순서대로 묶어 named 프로필로 저장합니다.
@@ -1827,7 +1831,7 @@
     <!-- ---------------------------------------------------------------------- -->
     <!-- 아티팩트 현황 / 삭제                                                    -->
     <!-- ---------------------------------------------------------------------- -->
-    <div class="mb-6">
+    <div class="mb-6" data-tour="admin-library-artifacts">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">아티팩트 현황</h3>
       {#if artifacts.length === 0}
         <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center text-gray-500 text-sm">
@@ -1897,7 +1901,7 @@
     <!-- ---------------------------------------------------------------------- -->
     <!-- 빌드 현황 테이블                                                        -->
     <!-- ---------------------------------------------------------------------- -->
-    <div class="mb-6">
+    <div class="mb-6" data-tour="admin-library-builds">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
         빌드 현황
         {#if activeBuilds.length > 0}
@@ -1983,7 +1987,7 @@
     <!-- ---------------------------------------------------------------------- -->
     <!-- 소비 인스턴스 테이블                                                    -->
     <!-- ---------------------------------------------------------------------- -->
-    <div>
+    <div data-tour="admin-library-consumes">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">소비 인스턴스</h3>
       {#if consumes.length === 0}
         <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center text-gray-500 text-sm">

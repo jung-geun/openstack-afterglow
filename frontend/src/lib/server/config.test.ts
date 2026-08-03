@@ -105,7 +105,7 @@ describe('frontend CSP branding origins', () => {
 		expect(directives.get('connect-src')).not.toContain(githubOrigin);
 		expect([...directives.values()].flat()).not.toContain(githubOrigin);
 		expect(directives.get('img-src')).toEqual(
-			expect.arrayContaining(["'self'", 'data:', 'https://api.example.com', 'https://uploads.example.com', 'https://cdn.example.com']),
+			expect.arrayContaining(["'self'", 'data:', 'blob:', 'https://api.example.com', 'https://uploads.example.com', 'https://cdn.example.com']),
 		);
 		expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 	});

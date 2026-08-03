@@ -40,6 +40,10 @@
   } = $props();
 </script>
 
+<div data-tour="admin-system-panel">
+  {#if !loadingMap[activeTab]}
+    <span class="sr-only" data-tour="admin-system-panel-ready">서비스 목록 준비됨</span>
+  {/if}
 {#if activeTab === 'compute'}
   <ServiceTable services={computeServices} columns={COMPUTE_COLUMNS} loading={loadingMap.compute} emptyMessage="데이터 없음" />
 {:else if activeTab === 'network'}
@@ -59,3 +63,4 @@
 {:else if activeTab === 'storage_pools'}
   <StoragePoolsList pools={storagePools} loading={loadingMap.storage_pools} emptyMessage="스토리지 풀 정보를 가져올 수 없습니다" />
 {/if}
+</div>

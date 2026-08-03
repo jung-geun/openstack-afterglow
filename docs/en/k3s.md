@@ -245,7 +245,7 @@ kubectl config set-cluster default \
 
 ## Cloud Provider OpenStack Plugins
 
-k3s clusters integrate with various OpenStack services through the Cloud Provider OpenStack plugin registry. Each plugin can be independently enabled in the `config.toml [k3s]` section.
+k3s clusters integrate with various OpenStack services through the Cloud Provider OpenStack plugin registry. Each plugin can be independently enabled in the `afterglow.conf [k3s]` section.
 
 ### Supported Plugins
 
@@ -258,7 +258,7 @@ k3s clusters integrate with various OpenStack services through the Cloud Provide
 | **Keystone Auth** | `keystone_auth_enabled` | Kubernetes authentication → Keystone token integration |
 | **Barbican KMS** | `barbican_kms_enabled` | Kubernetes Secret at-rest encryption → Barbican integration |
 
-### config.toml Example
+### afterglow.conf Example
 
 ```toml
 [k3s]
@@ -305,4 +305,4 @@ When scaling down worker nodes, Kubernetes node objects are deleted before the V
 
 ### Checking kubeconfig Existence (HEAD)
 
-You can use `HEAD /api/k3s/clusters/{id}/kubeconfig` to check whether a kubeconfig file exists without downloading it. This is useful for verifying cluster readiness without transferring the full file.
+You can use `HEAD /api/v1/k3s/clusters/{id}/kubeconfig` to check whether a kubeconfig file exists without downloading it. This is useful for verifying cluster readiness without transferring the full file.

@@ -7,6 +7,7 @@
 	import MonitoringSummaryTab from '$lib/components/admin/monitoring/MonitoringSummaryTab.svelte';
 	import InstanceMetricsTab from '$lib/components/admin/monitoring/InstanceMetricsTab.svelte';
 	import type { MonitoringSummary } from '$lib/components/admin/monitoring/MonitoringSummaryTab.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -42,8 +43,10 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
+	<div data-tour="admin-monitoring-header">
 	<PageHeader breadcrumb="MONITORING" title="통합 모니터링">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-monitoring" compactOnMobile />
 			{#if tab === 'summary'}
 				<AutoRefreshControl
 					bind:active={ar.active}
@@ -63,15 +66,18 @@
 			{/if}
 		{/snippet}
 	</PageHeader>
+	</div>
 
 	<div class="flex gap-1 mb-6 border-b border-gray-800">
 		<button
 			onclick={() => (tab = 'summary')}
+			data-tour="admin-monitoring-summary-tab"
 			class="px-4 py-2 text-sm font-medium transition-colors -mb-px border-b-2
 				{tab === 'summary' ? 'text-white border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-300'}"
 		>클러스터 요약</button>
 		<button
 			onclick={() => (tab = 'instances')}
+			data-tour="admin-monitoring-instances-tab"
 			class="px-4 py-2 text-sm font-medium transition-colors -mb-px border-b-2
 				{tab === 'instances' ? 'text-white border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-300'}"
 		>인스턴스 메트릭</button>

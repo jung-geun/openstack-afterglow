@@ -23,22 +23,20 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from app.config import get_settings
-from app.services import manila, neutron, nova
-from app.services.builder_vm import _ensure_ephemeral_keypair
+from app.services import cloudinit, manila, neutron, nova
 from app.services.cloud_init_builder import render_user_data
 from app.services.k3s_cloudinit import _validate_ssh_public_key
-from app.services.keystone import get_service_project_connection
 from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
-from app.services.layer_ubuntu import (
-    layer_image_id_for_ubuntu_base,
-    normalize_ubuntu_base,
-)
+from app.services.layer_ubuntu import normalize_ubuntu_base
+from app.services.palimpsest_digest import parse_digest_sentinel
+from app.services.palimpsest_layers import resolve_digest_fields
 from app.services.recipe_blocks import (
     squashfs_nvidia_driver_layer,
     squashfs_stacked_layer,
     squashfs_system_apt_layer,
     squashfs_uv_layer,
 )
+from app.services.ssh_access import normalize_github_username
 
 _logger = logging.getLogger(__name__)
 
@@ -88,22 +86,6 @@ _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 _CONSOLE_EXCERPT_CHARS = 12000
 _DEFAULT_NVIDIA_DRIVER_BRANCH = "580"
 _NVIDIA_DRIVER_BRANCH_VALUES = {"550", "570", "575", "580"}
-_NVIDIA_DRIVER_BUILDER_FLAVOR_ID = "fe5a5a4c-a568-481d-982b-469967f64808"
-
-
-def _builder_flavor_id_for_kind(kind: str, settings) -> str:
-    """NVIDIA driver template builds need a GPU flavor; all other builds use configured CPU builder flavor."""
-    if kind == "nvidia":
-        return _NVIDIA_DRIVER_BUILDER_FLAVOR_ID
-    return settings.builder_flavor_id
-
-
-def _layer_image_id_for_ubuntu_base(settings, ubuntu_base: str | None) -> str:
-    return layer_image_id_for_ubuntu_base(settings, ubuntu_base)
-
-
-def _builder_image_id_for_ubuntu_base(settings, ubuntu_base: str | None) -> str:
-    return _layer_image_id_for_ubuntu_base(settings, ubuntu_base)
 
 
 def nvidia_driver_apt_packages(driver_branch: str | None = None) -> list[str]:
@@ -512,6 +494,7 @@ def render_layer_consume_user_data(
     mounts: list[tuple[str, str]],
     ssh_public_key: str | None = None,
     ssh_username: str | None = None,
+    github_username: str | None = None,
 ) -> str:
     """소비 VM cloud-init YAML 문자열을 반환한다 (per-layer-share 방식).
 
@@ -548,6 +531,9 @@ def render_layer_consume_user_data(
             raise ValueError(f"유효하지 않은 SSH 사용자명: {ssh_username!r}")
         if ssh_username == "root":
             raise ValueError("root SSH 사용자는 허용되지 않습니다")
+    github_username = normalize_github_username(github_username)
+    if github_username and (ssh_public_key or ssh_username):
+        raise ValueError("github_username은 ssh_public_key 또는 ssh_username과 함께 사용할 수 없습니다")
 
     activate_b64 = base64.b64encode(_LAYER_ACTIVATE_SH.encode()).decode()
 
@@ -625,6 +611,14 @@ def render_layer_consume_user_data(
         "packages:",
         *(f"  - {pkg}" for pkg in LAYER_CONSUME_IMAGE_PACKAGES),
         *ssh_lines,
+        *(
+            [
+                "ssh_import_id:",
+                f"  - {json.dumps(f'gh:{github_username}')}",
+            ]
+            if github_username
+            else []
+        ),
         "write_files:",
         "  - path: /usr/local/bin/layer-activate.sh",
         "    encoding: b64",
@@ -763,8 +757,9 @@ async def run_layer_build(
     ubuntu_base: str | None = None,
     base_image_snapshot: dict | None = None,
     source_metadata: dict | None = None,
+    resource_snapshot: dict | None = None,
 ) -> None:
-    """squashfs 레이어 빌드 백그라운드 태스크 (per-layer-share 동적 생성).
+    """squashfs layer build background task.
 
     빌드마다 Manila NFS share를 새로 생성하고, 성공 시 RW rule 회수(봉인)한다.
     부모가 있으면(parent_artifact_id ≠ None) 조상 체인을 RO 마운트해 delta만 squash하는
@@ -810,19 +805,25 @@ async def run_layer_build(
         if kind == "nvidia":
             nvidia_driver_branch = nvidia_driver_branch or _DEFAULT_NVIDIA_DRIVER_BRANCH
             apt_packages = nvidia_driver_apt_packages(nvidia_driver_branch)
-        settings = get_settings()
+        resource_snapshot = resource_snapshot or {}
+        base_image = resource_snapshot.get("base_image") or {}
+        builder_flavor = resource_snapshot.get("builder.flavor") or {}
+        builder_network = resource_snapshot.get("builder.network") or {}
+        manila_snapshot = resource_snapshot.get("manila") or {}
+        service_project = resource_snapshot.get("openstack.service_project") or {}
+        image_id = base_image.get("id")
+        flavor_id = builder_flavor.get("id")
+        network_id = builder_network.get("id")
+        share_network_id = manila_snapshot.get("share_network_id")
+        share_type = manila_snapshot.get("share_type")
+        share_size_gb = manila_snapshot.get("share_size_gb")
+        if not all(
+            (image_id, flavor_id, network_id, share_network_id, share_type, share_size_gb, service_project.get("id"))
+        ):
+            raise RuntimeError("build resource snapshot is incomplete")
+        from app.services.keystone import get_admin_connection_for_project
 
-        # ── 1. 이미지·네트워크 설정 확인 ────────────────────────────────
-        image_id = (base_image_snapshot or {}).get("base_image_id") or _builder_image_id_for_ubuntu_base(
-            settings, effective_ubuntu_base
-        )
-        flavor_id = _builder_flavor_id_for_kind(kind, settings)
-        if not flavor_id:
-            raise RuntimeError("빌드 플레이버 ID가 설정되지 않았습니다 (config.toml [builder] flavor_id 필요)")
-        network_id = settings.builder_network_id or settings.default_network_id
-        if not network_id:
-            raise RuntimeError("빌드 네트워크 ID가 설정되지 않았습니다 (config.toml [builder] network_id 필요)")
-        conn = await asyncio.to_thread(get_service_project_connection)
+        conn = await asyncio.to_thread(get_admin_connection_for_project, service_project["id"])
         build_token = uuid.uuid4().hex
         await _update_build_db(build_db_id, build_token=build_token)
 
@@ -854,10 +855,9 @@ async def run_layer_build(
             manila.create_file_storage,
             conn,
             share_name,
-            settings.builder_layer_share_size_gb,
-            settings.os_manila_share_network_id or "",
-            settings.os_manila_nfs_share_type,
-            "NFS",
+            share_size_gb,
+            share_network_id,
+            share_type,
             {
                 "afterglow_role": "union-layer",
                 "afterglow_layer_name": layer_name,
@@ -938,8 +938,6 @@ async def run_layer_build(
         )
         user_data_str = render_user_data(recipe, mount_spec, build_token)
         user_data_b64 = base64.b64encode(user_data_str.encode()).decode()
-        keypair_name = await _ensure_ephemeral_keypair(conn, settings.builder_ssh_key_path)
-
         # ── 8. Builder VM 생성 ────────────────────────────────────────
         vm_name = f"afterglow-layer-build-{layer_name}-{build_token[:8]}"
         server = await asyncio.to_thread(
@@ -949,7 +947,6 @@ async def run_layer_build(
             flavor_id=flavor_id,
             networks=[{"port": port_id}],
             user_data=user_data_b64,
-            key_name=keypair_name,
             metadata={"union_type": "layer-build", "layer_name": layer_name, "afterglow_managed": "true"},
         )
         server_id = server.id
@@ -1006,7 +1003,24 @@ async def run_layer_build(
             # LayerArtifact DB 기록
             try:
                 sqsh_filename = f"{layer_name}-latest.sqsh"
+                # Palimpsest 콘텐츠 주소화: 빌드 VM 이 mksquashfs 직후 방출한 digest sentinel 을
+                # 회수한다. 없으면 digest_state='pending' 으로 기록되고 백필이 채운다 —
+                # 빌드 성공 자체를 되돌리지 않는다.
+                digest_report = parse_digest_sentinel(console, layer_name)
+                if digest_report is None:
+                    _logger.warning("[layer_build] digest sentinel 부재 — pending 으로 기록: layer=%s", layer_name)
                 async with get_session_factory()() as _art_session:
+                    digest_fields = await resolve_digest_fields(
+                        _art_session,
+                        report=digest_report,
+                        parent_artifact_id=parent_artifact_id,
+                        name=layer_name,
+                        kind=kind,
+                        ubuntu_base=effective_ubuntu_base,
+                        python_version=python_version if kind == "python" else None,
+                        pip_packages=list(pip_packages or []),
+                        apt_packages=list(apt_packages or []),
+                    )
                     artifact = LayerArtifact(
                         name=layer_name,
                         kind=kind,
@@ -1019,11 +1033,18 @@ async def run_layer_build(
                         build_id=build_db_id,
                         parent_id=parent_artifact_id,
                         is_sealed=True,
+                        size_bytes=digest_report.size_bytes if digest_report else None,
+                        **digest_fields,
                         **_base_image_fields(base_image_snapshot),
                     )
                     _art_session.add(artifact)
                     await _art_session.commit()
-                _logger.info("[layer_build] LayerArtifact 기록: layer=%s kind=%s", layer_name, kind)
+                _logger.info(
+                    "[layer_build] LayerArtifact 기록: layer=%s kind=%s digest=%s",
+                    layer_name,
+                    kind,
+                    digest_fields.get("blob_digest") or "pending",
+                )
             except Exception:
                 _logger.warning("[layer_build] LayerArtifact 기록 실패 (빌드는 성공)", exc_info=True)
 
@@ -1085,11 +1106,45 @@ async def run_layer_build(
                     _logger.info("[layer_build] port 삭제: %s", port_id)
                 except Exception:
                     _logger.warning("[layer_build] port 삭제 실패: %s", port_id, exc_info=True)
+            try:
+                await asyncio.to_thread(conn.close)
+            except Exception:
+                _logger.warning("[layer_build] service connection close failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
 # 소비 인스턴스 생성
 # ---------------------------------------------------------------------------
+
+
+async def resolve_layer_consume_resource_snapshot(
+    conn,
+    *,
+    flavor_ref: str,
+    network_id: str | None,
+) -> dict[str, dict[str, str]]:
+    """Validate and freeze consumer placement before creating its DB row."""
+    from app.services.resource_policies import ResourcePolicyValidationError, validate_existing_selection
+    from app.services.resource_policy_store import get_policy_snapshot, resolve_policy_snapshot
+
+    try:
+        if network_id:
+            network = await validate_existing_selection(conn, "nova.default_network", network_id)
+        else:
+            network = (await resolve_policy_snapshot(conn=conn, keys=("nova.default_network",)))["nova.default_network"]
+        flavor = await asyncio.to_thread(conn.compute.find_flavor, flavor_ref)
+        if flavor is None:
+            raise ResourcePolicyValidationError(f"플레이버를 찾을 수 없습니다: {flavor_ref!r}")
+        service_project = (await get_policy_snapshot(("openstack.service_project",)))["openstack.service_project"]
+        if service_project is None:
+            raise ResourcePolicyValidationError("required resource policy is not configured: openstack.service_project")
+    except ResourcePolicyValidationError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return {
+        "network": {"id": network["id"], "name": network["name"]},
+        "flavor": {"id": str(flavor.id), "name": str(getattr(flavor, "name", flavor.id))},
+        "openstack.service_project": service_project,
+    }
 
 
 async def run_layer_consume(
@@ -1101,6 +1156,9 @@ async def run_layer_consume(
     network_id: str | None = None,
     ssh_public_key: str | None = None,
     ssh_username: str | None = None,
+    github_username: str | None = None,
+    custom_userdata: str | None = None,
+    resource_snapshot: dict | None = None,
     *,
     compute_conn=None,
     share_conn=None,
@@ -1120,15 +1178,19 @@ async def run_layer_consume(
     from app.models.db import LayerArtifact, LayerProfile
 
     settings = get_settings()
-
-    effective_network_id = network_id or settings.default_network_id or settings.builder_network_id
-    if not effective_network_id:
-        raise RuntimeError(
-            "네트워크 ID가 설정되지 않았습니다 (config.toml [nova] default_network_id 또는 [builder] network_id 필요)"
-        )
+    resource_snapshot = resource_snapshot or {}
+    network_snapshot = resource_snapshot.get("network") or {}
+    flavor_snapshot = resource_snapshot.get("flavor") or {}
+    service_project_snapshot = resource_snapshot.get("openstack.service_project") or {}
+    effective_network_id = network_snapshot.get("id")
+    resolved_flavor_id = flavor_snapshot.get("id")
+    if not all((effective_network_id, resolved_flavor_id, service_project_snapshot.get("id"))):
+        raise RuntimeError("consume resource snapshot is incomplete")
 
     owned_compute_conn = compute_conn
     owned_share_conn = share_conn
+    owns_compute_connection = compute_conn is None
+    owns_share_connection = share_conn is None
     port_id: str | None = None
     server_id: str | None = None
     consume_ro_access_ids: list[tuple[str, str]] = []
@@ -1231,7 +1293,11 @@ async def run_layer_consume(
         effective_image_id = profile_base_image_id
 
         if owned_compute_conn is None:
-            owned_compute_conn = await asyncio.to_thread(get_service_project_connection)
+            from app.services.keystone import get_admin_connection_for_project
+
+            owned_compute_conn = await asyncio.to_thread(
+                get_admin_connection_for_project, service_project_snapshot["id"]
+            )
         if owned_share_conn is None:
             owned_share_conn = owned_compute_conn
         from app.services.instance_names import ensure_unique_instance_name
@@ -1241,8 +1307,6 @@ async def run_layer_consume(
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
         await _update_consume_db(consume_db_id, server_name=server_name)
-
-        resolved_flavor_id = await asyncio.to_thread(_resolve_flavor_id, owned_compute_conn, flavor_id)
 
         token = uuid.uuid4().hex[:8]
         port_info = await asyncio.to_thread(
@@ -1277,8 +1341,12 @@ async def run_layer_consume(
             mounts_child_first,
             ssh_public_key=ssh_public_key,
             ssh_username=ssh_username,
+            github_username=github_username,
         )
-        user_data_b64 = base64.b64encode(user_data_str.encode()).decode()
+        user_data_b64 = cloudinit.compose_userdata(
+            base64.b64encode(user_data_str.encode()).decode(),
+            custom_userdata,
+        )
 
         server = await asyncio.to_thread(
             owned_compute_conn.compute.create_server,
@@ -1326,3 +1394,15 @@ async def run_layer_consume(
                 except Exception:
                     _logger.warning("[layer_consume] 실패 후 port 정리 실패", exc_info=True)
         raise
+
+    finally:
+        connections_to_close: list[object] = []
+        if owns_compute_connection and owned_compute_conn is not None:
+            connections_to_close.append(owned_compute_conn)
+        if owns_share_connection and owned_share_conn is not None and owned_share_conn is not owned_compute_conn:
+            connections_to_close.append(owned_share_conn)
+        for connection in connections_to_close:
+            try:
+                await asyncio.to_thread(connection.close)
+            except Exception:
+                _logger.warning("[layer_consume] connection close failed", exc_info=True)

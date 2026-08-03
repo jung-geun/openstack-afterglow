@@ -59,6 +59,7 @@ def test_generate_server_userdata_cluster_init():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="ha-test",
         k3s_version="v1.28.0+k3s1",
         callback_url="http://cb.test",
@@ -78,6 +79,7 @@ def test_generate_server_userdata_ha_join():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="ha-test",
         k3s_version="v1.28.0+k3s1",
         callback_url="http://cb.test",
@@ -99,6 +101,7 @@ def test_generate_server_userdata_single_master():
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
+        primary_network_id="net-primary",
         cluster_name="single",
         k3s_version="v1.28.0+k3s1",
         callback_url="http://cb.test",

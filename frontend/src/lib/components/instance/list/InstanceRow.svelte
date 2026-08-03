@@ -10,35 +10,38 @@
 	let {
 		instance,
 		isUnderutilized = false,
-		isSelected = false,
-		showCheckboxes = false,
+		selected = false,
+		selectable = true,
+		selectionDisabled = false,
 		onSelect,
 		onAction,
 		onToggleSelect,
 	}: {
 		instance: Instance;
 		isUnderutilized?: boolean;
-		isSelected?: boolean;
-		showCheckboxes?: boolean;
+		selected?: boolean;
+		selectable?: boolean;
+		selectionDisabled?: boolean;
 		onSelect: (id: string) => void;
 		onAction: (kind: 'console' | 'shelve' | 'unshelve' | 'delete', instance: Instance) => Promise<void>;
-		onToggleSelect?: () => void;
+		onToggleSelect: () => void;
 	} = $props();
 </script>
 
 <div
-	class="instance-row grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {isSelected ? 'is-selected bg-blue-900/10' : ''}"
+	class="instance-row resource-selection-surface grid grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
+	data-selected={selected}
 >
-	<!-- 체크박스 -->
-	{#if showCheckboxes}
-		<div class="selection-reveal flex items-center" class:is-selected={isSelected}>
-			<SelectionCheckbox
-				checked={isSelected}
-				onclick={() => onToggleSelect?.()}
-				ariaLabel={`${instance.name || instance.id} 선택`}
-			/>
-		</div>
-	{/if}
+	<div class="flex items-center">
+		<SelectionCheckbox
+			checked={selected}
+			disabled={!selectable || selectionDisabled}
+			unavailable={!selectable}
+			title={!selectable ? '현재 상태에서는 선택할 수 없습니다.' : undefined}
+			onclick={onToggleSelect}
+			ariaLabel={`${instance.name || instance.id} 선택`}
+		/>
+	</div>
 	<!-- 이름 -->
 	<button
 		type="button"
@@ -85,22 +88,3 @@
 	<InstanceRowActions {instance} {onAction} />
 </div>
 
-<style>
-	.selection-reveal {
-		opacity: 0;
-		pointer-events: none;
-		transform: translateX(-4px);
-		transition:
-			opacity 0.16s ease,
-			transform 0.16s ease;
-	}
-
-	.instance-row:hover .selection-reveal,
-	.instance-row:focus-within .selection-reveal,
-	.instance-row.is-selected .selection-reveal,
-	.selection-reveal.is-selected {
-		opacity: 1;
-		pointer-events: auto;
-		transform: translateX(0);
-	}
-</style>

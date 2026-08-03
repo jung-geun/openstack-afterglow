@@ -9,19 +9,20 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models.db import LayerArtifact, LayerConsume, LayerProfile
+from app.services import vm_cloud_init_library
 from app.services.cache import invalidate
 from app.services.cache import invalidation as cache_invalidation
 from app.services.k3s_cloudinit import _validate_ssh_public_key
-from app.services.keystone import get_service_project_connection
 from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
 from app.services.layer_ubuntu import normalize_ubuntu_base
+from app.services.resource_policy_store import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
@@ -41,6 +42,8 @@ class PublicLayerConsumeRequest(BaseModel):
     image_id: str | None = None
     network_id: str | None = None
     key_name: str | None = None
+    github_username: str | None = None
+    userdata: str | None = Field(default=None, max_length=65_536)
     ssh_public_key: str | None = None
     ssh_username: str | None = None
 
@@ -99,6 +102,13 @@ class PublicLayerConsumeRequest(BaseModel):
         _validate_ssh_public_key(v)
         return v
 
+    @field_validator("github_username")
+    @classmethod
+    def validate_github_username(cls, v: str | None) -> str | None:
+        from app.services.ssh_access import normalize_github_username
+
+        return normalize_github_username(v)
+
     @field_validator("ssh_username")
     @classmethod
     def validate_ssh_username(cls, v: str | None) -> str | None:
@@ -114,6 +124,8 @@ class PublicLayerConsumeRequest(BaseModel):
     def validate_source(self) -> PublicLayerConsumeRequest:
         if bool(self.profile_name) == bool(self.artifact_ids):
             raise ValueError("profile_name 또는 artifact_ids 중 정확히 하나만 지정해야 합니다")
+        if self.github_username and (self.key_name or self.ssh_public_key or self.ssh_username):
+            raise ValueError("github_username은 key_name, ssh_public_key, ssh_username과 함께 사용할 수 없습니다")
         if self.ssh_username and not (self.key_name or self.ssh_public_key):
             raise ValueError("ssh_username은 key_name 또는 ssh_public_key와 함께 사용해야 합니다")
         return self
@@ -407,8 +419,17 @@ async def consume_public_squashfs(
                 status_code=400, detail=f"선택한 키페어의 공개키를 조회할 수 없습니다: {req.key_name!r}"
             )
 
-    share_conn = await asyncio.to_thread(get_service_project_connection)
-    from app.services.layer_build import run_layer_consume
+    from app.services.layer_build import resolve_layer_consume_resource_snapshot, run_layer_consume
+
+    try:
+        resource_snapshot = await resolve_layer_consume_resource_snapshot(
+            conn,
+            flavor_ref=req.flavor_id,
+            network_id=req.network_id,
+        )
+        share_conn = await get_service_project_connection()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async with factory() as session:
         row = LayerConsume(
@@ -416,7 +437,8 @@ async def consume_public_squashfs(
             project_id=project_id,
             artifact_ids=[row.id for row in artifacts],
             server_name=req.server_name,
-            share_id=get_settings().union_layer_store_ro_share_id or "squashfs-public",
+            share_id=artifacts[0].share_id,
+            resource_snapshot=resource_snapshot,
             status="creating",
         )
         session.add(row)
@@ -434,13 +456,20 @@ async def consume_public_squashfs(
             network_id=req.network_id,
             ssh_public_key=ssh_public_key,
             ssh_username=req.ssh_username,
+            github_username=req.github_username,
+            custom_userdata=req.userdata,
             compute_conn=conn,
             share_conn=share_conn,
             artifact_ids=[row.id for row in artifacts],
             resolved_artifacts=resolved,
+            resource_snapshot=resource_snapshot,
         )
         await invalidate(f"afterglow:nova:{project_id}:instances")
         await cache_invalidation.invalidate_mutation_count("nova", project_id)
+        try:
+            await vm_cloud_init_library.record_history(user_id=token_info["user_id"], content=req.userdata)
+        except Exception:
+            _logger.warning("cloud-init 실행 이력 저장 실패", extra={"user_id": token_info.get("user_id")})
         return {"consume_id": consume_id, "server_id": server_id, "status": "active"}
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -449,3 +478,8 @@ async def consume_public_squashfs(
     except Exception as exc:
         _logger.exception("[layer_public] public squashfs consume failed")
         raise HTTPException(status_code=500, detail="squashfs consume 생성 실패") from exc
+    finally:
+        try:
+            await asyncio.to_thread(share_conn.close)
+        except Exception:
+            _logger.warning("[layer_public] service share connection close failed", exc_info=True)

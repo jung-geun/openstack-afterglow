@@ -14,6 +14,8 @@ class ImageInfo(BaseModel):
     id: str
     name: str
     status: str
+    repository: str = ""
+    tag: str = "latest"
     size: int | None = None
     min_disk: int = 0
     min_ram: int = 0
@@ -92,6 +94,7 @@ class CreateInstanceRequest(BaseModel):
     scheduling: Literal["standard", "ha"] = "standard"
     network_id: str | None = None
     key_name: str | None = None
+    github_username: str | None = None
     admin_pass: str | None = Field(None, min_length=8, max_length=128)
     availability_zone: str | None = None
     security_groups: list[str] = []
@@ -112,6 +115,8 @@ class CreateInstanceRequest(BaseModel):
             raise ValueError("image_id와 boot_volume_id를 동시에 지정할 수 없습니다")
         if not has_image and not has_volume:
             raise ValueError("image_id 또는 boot_volume_id 중 하나는 반드시 지정해야 합니다")
+        if self.github_username and self.key_name:
+            raise ValueError("github_username과 key_name은 함께 사용할 수 없습니다")
         return self
 
     @field_validator("name")
@@ -120,6 +125,13 @@ class CreateInstanceRequest(BaseModel):
         from app.services.instance_names import normalize_requested_instance_name
 
         return normalize_requested_instance_name(v)
+
+    @field_validator("github_username")
+    @classmethod
+    def validate_github_username(cls, v: str | None) -> str | None:
+        from app.services.ssh_access import normalize_github_username
+
+        return normalize_github_username(v)
 
 
 class NewVolumeRequest(BaseModel):
@@ -140,6 +152,25 @@ class NewVolumeRequest(BaseModel):
         if v < 1 or v > 16384:
             raise ValueError("볼륨 크기는 1~16384 GB 범위여야 합니다")
         return v
+
+
+class CloudInitSnippetInfo(BaseModel):
+    id: int
+    kind: Literal["history", "preset"]
+    name: str | None = None
+    content: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class CloudInitSnippetLibrary(BaseModel):
+    history: list[CloudInitSnippetInfo]
+    presets: list[CloudInitSnippetInfo]
+
+
+class CreateCloudInitPresetRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=65536)
 
 
 _ALLOWED_MOUNT_PREFIXES = ("/mnt/", "/data/", "/srv/", "/home/")

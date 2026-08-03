@@ -16,7 +16,7 @@
 	} = $props();
 </script>
 
-<SlidePanel {onClose} width="w-full md:w-[50vw] max-w-2xl">
+<SlidePanel {onClose} width="w-full md:w-[50vw] max-w-2xl" dataTour="admin-storage-detail">
 	{#await import('$lib/components/AdminVolumeDetailPanel.svelte') then { default: Panel }}
 		<Panel {volumeId} {onClose} {onRefresh} {token} {projectId} />
 	{:catch}

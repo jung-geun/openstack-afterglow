@@ -1,5 +1,9 @@
 # squashfs/NFS 레이어 파이프라인
 
+> **이 파이프라인이 Palimpsest 코어다 (2026-07-27 통합).**
+> 도메인 정의·용어·digest 규칙은 **[`palimpsest.md`](palimpsest.md)** 를 먼저 읽는다.
+> 이 문서는 그 코어의 **빌드/소비 흐름·DB 모델·버그 이력**을 다룬다.
+
 afterglow의 squashfs + OverlayFS + Manila NFS 레이어 시스템.  
 레이어마다 전용 Manila NFS share를 동적 생성해 `.sqsh`를 저장하고, 빌드 후 RO로 봉인(sealed)한다.  
 소비 VM은 체인의 N개 share를 마운트해 OverlayFS로 합성하고 즉시 사용한다.
@@ -221,7 +225,7 @@ class LayerBuild(Base):
 
 ---
 
-## 설정 (`config.toml`)
+## 설정 (`afterglow.conf`)
 
 ```toml
 [builder]

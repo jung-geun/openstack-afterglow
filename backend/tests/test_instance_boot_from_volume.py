@@ -10,6 +10,19 @@ from app.models.storage import VolumeInfo
 from app.services.cinder import _vol_to_info
 
 
+@pytest.fixture(autouse=True)
+def _resolve_default_placement_policies(monkeypatch):
+    """Keep boot-volume tests focused on volume behavior, not policy persistence."""
+
+    async def resolve_zones(_conn, _requested_zone):
+        return "", ""
+
+    monkeypatch.setattr(
+        "app.api.compute.instances.instance_orch.resolve_availability_zones",
+        resolve_zones,
+    )
+
+
 def test_vol_to_info_reads_bootable_via_sdk_alias():
     """openstacksdk는 Python alias `is_bootable`을 씀 — to_dict(original_names=True)로 API 필드 `bootable`을 읽는지 검증."""
     vol = Volume.new(

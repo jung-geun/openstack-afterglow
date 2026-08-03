@@ -15,7 +15,20 @@ from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.models.db import UserTutorialStatus
 
 # 프론트엔드 TourId 와 동기화(frontend/src/lib/tutorial/tours.ts).
-TOUR_IDS: tuple[str, ...] = ("vm-create", "volume", "drover")
+TOUR_IDS: tuple[str, ...] = (
+    "vm-create",
+    "volume",
+    "drover",
+    "admin-compute",
+    "admin-storage",
+    "admin-library",
+    "admin-network",
+    "admin-containers",
+    "admin-key-manager",
+    "admin-monitoring",
+    "admin-system",
+    "admin-identity",
+)
 STATUSES: tuple[str, ...] = ("completed", "dismissed")
 
 

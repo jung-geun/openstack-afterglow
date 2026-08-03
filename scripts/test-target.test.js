@@ -15,6 +15,8 @@ const logFile = process.env.TEST_TARGET_LOG_FILE
 const delayMs = Number(process.env.TEST_TARGET_DELAY_MS || "150")
 const failStep = process.env.TEST_TARGET_FAIL_STEP || ""
 const failCode = Number(process.env.TEST_TARGET_FAIL_CODE || "7")
+const startBarrierCount = Number(process.env.TEST_TARGET_START_BARRIER_COUNT || "0")
+const startBarrierTimeoutMs = Number(process.env.TEST_TARGET_START_BARRIER_TIMEOUT_MS || "2000")
 
 function append(event) {
 	fs.appendFileSync(logFile, JSON.stringify(event) + "\\n")
@@ -41,12 +43,36 @@ function getStepLabel() {
 	return lane + ":" + args.join(" ")
 }
 
+function finishAfterDelay() {
+	setTimeout(() => {
+		append({ type: "end", step, at: Date.now(), pid: process.pid })
+		process.exit(step === failStep ? failCode : 0)
+	}, delayMs)
+}
+
+function waitForStartBarrier() {
+	if (startBarrierCount === 0) {
+		finishAfterDelay()
+		return
+	}
+
+	const deadline = Date.now() + startBarrierTimeoutMs
+	const check = () => {
+		const starts = fs.existsSync(logFile)
+			? (fs.readFileSync(logFile, "utf8").match(/"type":"start"/g) || []).length
+			: 0
+		if (starts >= startBarrierCount || Date.now() >= deadline) {
+			finishAfterDelay()
+			return
+		}
+		setTimeout(check, 5)
+	}
+	check()
+}
+
 const step = getStepLabel()
 append({ type: "start", step, at: Date.now(), pid: process.pid })
-setTimeout(() => {
-	append({ type: "end", step, at: Date.now(), pid: process.pid })
-	process.exit(step === failStep ? failCode : 0)
-}, delayMs)
+waitForStartBarrier()
 `
 
 function makeTempDir() {
@@ -129,7 +155,10 @@ async function runCli(args, options = {}) {
 		...process.env,
 		PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
 		TEST_TARGET_LOG_FILE: logFile,
-		TEST_TARGET_DELAY_MS: String(options.delayMs || 150)
+		TEST_TARGET_DELAY_MS: String(options.delayMs || 150),
+		...(options.startBarrierCount
+			? { TEST_TARGET_START_BARRIER_COUNT: String(options.startBarrierCount) }
+			: {})
 	}
 	if (options.failStep) {
 		env.TEST_TARGET_FAIL_STEP = options.failStep
@@ -190,7 +219,7 @@ test("default mode keeps the original fully serial step order", async () => {
 })
 
 test("--parallel runs exactly two lanes instead of starting every step at once", async () => {
-	const result = await runCli(["--parallel", "auth", "config"])
+	const result = await runCli(["--parallel", "auth", "config"], { startBarrierCount: 2 })
 	try {
 		assert.equal(result.signal, null)
 		assert.equal(result.code, 0, result.stderr || result.stdout)
@@ -206,7 +235,7 @@ test("--parallel runs exactly two lanes instead of starting every step at once",
 })
 
 test("--parallel lets backend and frontend overlap while preserving in-lane order", async () => {
-	const result = await runCli(["--parallel", "auth", "config"])
+	const result = await runCli(["--parallel", "auth", "config"], { startBarrierCount: 2 })
 	try {
 		assert.equal(result.signal, null)
 		assert.equal(result.code, 0, result.stderr || result.stdout)
@@ -245,3 +274,14 @@ test("--parallel returns a non-zero exit code when one lane fails", async () => 
 		cleanupRun(result)
 	}
 })
+
+test("--validate checks the complete target catalog", async () => {
+	const result = await runCli(["--validate"]);
+	try {
+		assert.equal(result.signal, null);
+		assert.equal(result.code, 0, result.stderr || result.stdout);
+		assert.deepEqual(result.events, []);
+	} finally {
+		cleanupRun(result);
+	}
+});

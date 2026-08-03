@@ -343,7 +343,7 @@ def get_service_project_connection() -> openstack.connection.Connection:
     if not settings.os_service_project_id:
         raise RuntimeError(
             "os_service_project_id 설정이 없습니다. "
-            "config.toml [openstack] service_project_id 또는 OS_SERVICE_PROJECT_ID 환경변수를 설정하세요."
+            "afterglow.conf [openstack] service_project_id 또는 OS_SERVICE_PROJECT_ID 환경변수를 설정하세요."
         )
     return get_admin_connection_for_project(settings.os_service_project_id)
 

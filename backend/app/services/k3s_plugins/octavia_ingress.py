@@ -63,7 +63,7 @@ class OctaviaIngressPlugin:
             app_credential_id=app_credential["id"],
             app_credential_secret=app_credential["secret"],
             subnet_id=subnet_id,
-            floating_network_id=floating_network_id or settings.k3s_octavia_ingress_floating_network_id or "",
+            floating_network_id=floating_network_id or settings.resource_id("k3s.octavia_ingress_floating_network"),
         )
 
     def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:

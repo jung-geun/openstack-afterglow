@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { auth, authReady } from '$lib/stores/auth';
+	import { api } from '$lib/api/client';
 	import { createK3sProgress } from '$lib/stores/k3sProgress.svelte';
 	import { createK3sClusterListController } from '$lib/stores/k3sClusterListController.svelte';
 	import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
@@ -22,6 +23,15 @@
 		projectId: () => $auth.projectId ?? undefined,
 		progress,
 	});
+
+	function prefetchCreateDependencies() {
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		void api.prefetch('/api/v1/flavors', token, projectId);
+		void api.prefetch('/api/v1/networks', token, projectId);
+		void api.prefetch('/api/v1/keypairs', token, projectId);
+		void api.prefetch('/api/v1/k3s/cluster-templates', token, projectId);
+	}
 
 	const ar = createAutoRefresh(() => ctrl.fetchClusters(), {
 		storageKey: 'dashboard-drover',
@@ -72,6 +82,7 @@
 		onForceRefresh={ctrl.forceRefresh}
 		onOpenCreate={() => { ctrl.showModal = true; }}
 		onToggleDeleted={ctrl.toggleDeleted}
+		onOpenCreateIntent={prefetchCreateDependencies}
 	/>
 
 	<p class="text-sm text-gray-500 mb-6">Nova VM + cloud-init으로 k3s Kubernetes 클러스터를 프로비저닝합니다.</p>
@@ -88,5 +99,6 @@
 		onDownloadKubeconfig={ctrl.downloadKubeconfig}
 		onDelete={ctrl.deleteCluster}
 		onOpenCreate={() => { ctrl.showModal = true; }}
+		onOpenCreateIntent={prefetchCreateDependencies}
 	/>
 </div>

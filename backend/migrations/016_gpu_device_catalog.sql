@@ -1,4 +1,4 @@
--- 016: GPU PCI 장치 카탈로그 (관리자 추가 alias, 내장 기본값/config.toml 위에 overlay)
+-- 016: GPU PCI 장치 카탈로그 (관리자 추가 alias, 내장 기본값/afterglow.conf 위에 overlay)
 
 CREATE TABLE IF NOT EXISTS gpu_device_catalog (
     id INT AUTO_INCREMENT PRIMARY KEY,

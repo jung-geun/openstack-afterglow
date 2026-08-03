@@ -1,9 +1,11 @@
 <script lang="ts">
-	import { SectionHeader } from '$lib/components/ui';
-	import LibreChatEmbed from '$lib/components/LibreChatEmbed.svelte';
+	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
+
+	let {
+		data
+	}: {
+		data: { workspaceId: number | null; initialSettingsSection: 'usage' | 'mcp' };
+	} = $props();
 </script>
 
-<div class="space-y-4">
-	<SectionHeader title="AI 채팅" meta="LibreChat 기반 LLM 채팅 서비스" />
-	<LibreChatEmbed />
-</div>
+<ChatPanel initialWorkspaceId={data.workspaceId} initialSettingsSection={data.initialSettingsSection} />

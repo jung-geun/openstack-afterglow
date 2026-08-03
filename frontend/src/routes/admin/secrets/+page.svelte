@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -11,6 +12,7 @@
 	import { untrack } from 'svelte';
 	import { betaFeatures } from '$lib/stores/betaFeatures';
 	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	interface ProjectQuota {
 		project_id: string;
@@ -35,7 +37,9 @@
 	let editOrders = $state<number | null>(null);
 	let editContainers = $state<number | null>(null);
 	let submitting = $state(false);
-	const keyManagerEnabled = $derived($betaFeatures.keyManager);
+	const keyManagerEnabled = $derived(
+		$betaFeatures.keyManager || ($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin'),
+	);
 
 	function clearKeyManagerState() {
 		quotas = [];
@@ -162,8 +166,10 @@
 </FormModal>
 
 <div class="p-4 md:p-8">
+	<div data-tour="admin-key-manager-header">
 	<PageHeader breadcrumb="ADMIN / KEY MANAGER" title="Key Manager 쿼터">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-key-manager" compactOnMobile />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -173,18 +179,20 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
 	{#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
+	<div data-tour="admin-key-manager-table">
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={4} />
 	{:else if quotas.length === 0}
-		<div class="text-center py-16 text-gray-500">
+		<div class="text-center py-16 text-gray-500" data-tour="admin-key-manager-ready">
 			<div class="text-4xl mb-3">📊</div>
 			<p class="text-sm">설정된 프로젝트 쿼터가 없습니다. (모두 기본값 사용 중)</p>
 		</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" data-tour="admin-key-manager-ready">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="text-left text-gray-400 border-b border-gray-700">
@@ -196,13 +204,13 @@
 					</tr>
 				</thead>
 				<tbody class="divide-y divide-gray-800">
-					{#each quotas as q}
+					{#each quotas as q, index}
 						<tr class="hover:bg-gray-800/30">
 							<td class="py-3 pr-4 font-mono text-xs text-gray-300">{q.project_id}</td>
 							<td class="py-3 pr-4 text-gray-300">{q.project_quotas.secrets ?? -1}</td>
 							<td class="py-3 pr-4 text-gray-300">{q.project_quotas.orders ?? -1}</td>
 							<td class="py-3 pr-4 text-gray-300">{q.project_quotas.containers ?? -1}</td>
-							<td class="py-3 flex gap-3">
+							<td class="py-3 flex gap-3" data-tour={index === 0 ? 'admin-key-manager-actions' : undefined}>
 								<button onclick={() => openEdit(q)} class="text-xs text-blue-400 hover:text-blue-300">설정</button>
 								<button onclick={() => handleResetQuota(q.project_id)} class="text-xs text-gray-400 hover:text-gray-200">초기화</button>
 							</td>
@@ -212,5 +220,6 @@
 			</table>
 		</div>
 	{/if}
+	</div>
 </div>
 {/if}

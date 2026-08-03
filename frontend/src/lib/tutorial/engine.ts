@@ -1,5 +1,6 @@
 import { goto } from '$app/navigation';
 import type { Driver } from 'driver.js';
+import { tick } from 'svelte';
 import { getTour, TOUR_STORAGE_KEY, type TourDefinition, type TourId } from './tours';
 
 export interface PersistedTourState {
@@ -51,6 +52,7 @@ let currentTour: TourDefinition | null = null;
 let currentIndex = 0;
 let stopping = false;
 let clickCleanup: (() => void) | null = null;
+let wizardStepCleanup: (() => void) | null = null;
 let resizeCleanup: (() => void) | null = null;
 // 동시에 여러 showStep이 진행되지 않도록 최신 호출만 유효화한다.
 let showSerial = 0;
@@ -79,6 +81,8 @@ export async function startTour(tourId: TourId, fromStep = 0): Promise<boolean> 
 		animate: true,
 		overlayOpacity: 0.65,
 		stagePadding: 6,
+		// 튜토리얼 중에도 페이지/패널 스크롤을 허용한다(driver가 body에 driver-no-scroll(overflow:hidden)을 걸지 않도록).
+		allowScroll: true,
 		// 하이라이트 밖(dim 영역) 클릭으로 투어가 사라지지 않게 한다. ESC/× 버튼으로만 종료.
 		allowClose: false,
 		disableActiveInteraction: false,
@@ -124,7 +128,41 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 	cleanupClickListener();
 	const step = tour.steps[index];
 
-	// 조건부 step: 현재 화면 상태에 해당 단계가 없으면 진행 방향을 유지한 채 건너뛴다
+	currentIndex = index;
+	persistTour(tour.id, index);
+
+	if (step.route && window.location.pathname !== step.route) {
+		try {
+			await goto(step.route);
+		} catch {
+			// mockup 레이어의 beforeNavigate가 쿼리를 붙여 재시도할 수 있음 — 요소 대기로 흡수
+		}
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	const timeout = step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000);
+
+	// 숨겨진 탭 내부가 settlement anchor인 경우 먼저 탭을 연다.
+	if (step.beforeReady) {
+		await tick();
+		await step.beforeReady();
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// 재개된 optional step은 부모 목록의 로딩/빈/오류 상태가 확정된 뒤 skipIf를 평가한다.
+	if (step.skipReadyElement) {
+		await waitForElement(step.skipReadyElement, timeout);
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// route 이동과 settlement 대기가 플러시된 뒤 transient UI를 복원한다.
+	if (step.prepare) {
+		await tick();
+		await step.prepare();
+		if (d !== driverInstance || currentTour !== tour || serial !== showSerial) return;
+	}
+
+	// 조건부 step: 현재 화면 상태에 해당 단계가 없으면 진행 방향을 유지한 채 건너뛴다.
 	if (step.skipIf?.()) {
 		const next = index + direction;
 		if (next < 0) return;
@@ -138,18 +176,6 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 		return;
 	}
 
-	currentIndex = index;
-	persistTour(tour.id, index);
-
-	if (step.route && window.location.pathname !== step.route) {
-		try {
-			await goto(step.route);
-		} catch {
-			// mockup 레이어의 beforeNavigate가 쿼리를 붙여 재시도할 수 있음 — 요소 대기로 흡수
-		}
-	}
-
-	const timeout = step.waitTimeoutMs ?? (index === 0 ? 8000 : 3000);
 	let el = await waitForElement(step.element, timeout);
 	// 로딩 스피너 등이 걷히고 실제 콘텐츠가 나타난 뒤에 하이라이트한다
 	if (el && step.readyElement) {
@@ -170,6 +196,7 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 
 	const isLast = index === tour.steps.length - 1;
 	const clickDriven = step.advanceOn === 'click';
+	const wizardDriven = step.advanceOn === 'wizard';
 
 	if (clickDriven || step.backElement || step.cancelElement) {
 		// 진행/후진/취소 트리거는 하이라이트 요소와 다를 수 있다(예: 폼 전체 하이라이트 + 생성/이전/취소 버튼).
@@ -194,16 +221,33 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 		clickCleanup = () => document.removeEventListener('click', handler, { capture: true });
 	}
 
+	if (step.wizardStep != null) {
+		const onWizardStep = (event: Event) => {
+			const detail = (event as CustomEvent<{ step: number }>).detail;
+			if (!detail) return;
+			const mappedIndex = tour.steps.findIndex((st) => st.wizardStep === detail.step);
+			if (mappedIndex >= 0 && mappedIndex !== currentIndex) {
+				void moveTo(mappedIndex);
+			}
+		};
+		window.addEventListener('afterglow:wizard-step', onWizardStep);
+		wizardStepCleanup = () => window.removeEventListener('afterglow:wizard-step', onWizardStep);
+	}
+
 	d.highlight({
 		element: step.element,
 		popover: {
 			title: `${step.title} (${index + 1}/${tour.steps.length})`,
 			description: step.description,
 			showButtons: clickDriven
-				? ['close']
-				: index === 0
-					? ['next', 'close']
-					: ['next', 'previous', 'close'],
+				? step.showPrevious && index > 0
+					? ['previous', 'close']
+					: ['close']
+				: wizardDriven
+					? ['close']
+					: index === 0
+						? ['next', 'close']
+						: ['next', 'previous', 'close'],
 			nextBtnText: isLast ? '완료' : '다음',
 		},
 	});
@@ -239,6 +283,8 @@ async function showStep(index: number, direction: 1 | -1 = 1): Promise<void> {
 function cleanupClickListener(): void {
 	clickCleanup?.();
 	clickCleanup = null;
+	wizardStepCleanup?.();
+	wizardStepCleanup = null;
 	resizeCleanup?.();
 	resizeCleanup = null;
 }

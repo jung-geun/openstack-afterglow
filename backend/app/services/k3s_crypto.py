@@ -31,6 +31,10 @@ _DOMAIN_NODE_TOKEN = b"node_token"
 _DOMAIN_NOTION = b"notion_config"
 _DOMAIN_MANAGER_PW = b"manager_password"
 _DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
+_DOMAIN_WG_AGENT_TOKEN = b"wg_agent_token"
+_DOMAIN_LLM_PROVIDER_KEY = b"llm_provider_key"
+_DOMAIN_CHAT_CONTENT = b"chat_content"
+_DOMAIN_VM_CLOUD_INIT = b"vm_cloud_init"
 
 _LEGACY_WARNED: set[str] = set()
 
@@ -67,6 +71,14 @@ def _derive_subkey(master: bytes, domain: bytes) -> bytes:
         salt=None,
         info=b"afterglow-k3s/" + domain,
     ).derive(master)
+
+
+def derive_encryption_subkey(domain: bytes) -> bytes:
+    """Return an AES-256 sub-key for a non-empty application encryption domain."""
+
+    if not domain:
+        raise ValueError("encryption domain must not be empty")
+    return _derive_subkey(_get_key(), domain)
 
 
 def _warn_legacy_once(domain: bytes, version: str) -> None:
@@ -164,3 +176,63 @@ def encrypt_wg_client_key(plaintext: str) -> str:
 def decrypt_wg_client_key(ciphertext_b64: str) -> str:
     """Decrypt WireGuard 클라이언트 private/preshared key — v3/v2/legacy 모두 처리."""
     return _aes_decrypt(_get_key(), _DOMAIN_WG_CLIENT_KEY, ciphertext_b64)
+
+
+def encrypt_wg_agent_token(plaintext: str) -> str:
+    """Encrypt Waygate 에이전트 reconcile 베어러 토큰 (v3).
+
+    이 토큰은 VM 에이전트가 무기한 사용하는 영구 제어채널 자격증명이므로 Redis(휘발성)가
+    아니라 waygate_servers 행에 암호화 저장해 durable 하게 보관한다. 마스터키는 기존
+    k3s_kubeconfig_encryption_key 를 재사용하고, 도메인 분리로 다른 ciphertext 와 교차
+    복호화되지 않는다.
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_WG_AGENT_TOKEN, plaintext)
+
+
+def decrypt_wg_agent_token(ciphertext_b64: str) -> str:
+    """Decrypt Waygate 에이전트 reconcile 베어러 토큰 — v3/v2/legacy 모두 처리."""
+    return _aes_decrypt(_get_key(), _DOMAIN_WG_AGENT_TOKEN, ciphertext_b64)
+
+
+def encrypt_llm_provider_key(plaintext: str) -> str:
+    """Encrypt 빌트인 AI 채팅 LLM 프로바이더 API 키 (v3).
+
+    마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
+    도메인 분리로 kubeconfig/node_token 등 다른 도메인 ciphertext와 교차 복호화되지 않는다.
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, plaintext)
+
+
+def decrypt_llm_provider_key(ciphertext_b64: str) -> str:
+    """Decrypt LLM 프로바이더 API 키 — v3/v2/legacy 모두 처리."""
+    return _aes_decrypt(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, ciphertext_b64)
+
+
+def encrypt_chat_content(plaintext: str) -> str:
+    """Encrypt 빌트인 AI 채팅 메시지/툴 기록/제목 (v3).
+
+    마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
+    """
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_CHAT_CONTENT, plaintext)
+
+
+def decrypt_chat_content(ciphertext_b64: str) -> str:
+    """Decrypt 채팅 콘텐츠 — v3 만 복호화, prefix 없으면 암호화 이전 평문으로 간주해 그대로 반환.
+
+    ⚠️ 채팅 콘텐츠는 legacy(prefix 없는) *암호문* 시대가 없다(암호화 도입 = v3 부터). 따라서
+    prefix 없는 값은 암호화 도입 전에 저장된 *평문*이며, generic _aes_decrypt 의 legacy 경로로
+    보내면 평문을 base64/AES-GCM 복호화하려다 깨진다. 평문 passthrough 로 하위호환한다.
+    """
+    if not ciphertext_b64.startswith(_V3_PREFIX):
+        return ciphertext_b64
+    return _aes_decrypt(_get_key(), _DOMAIN_CHAT_CONTENT, ciphertext_b64)
+
+
+def encrypt_vm_cloud_init(plaintext: str) -> str:
+    """Encrypt a user's reusable VM cloud-init snippet with a dedicated sub-key."""
+    return _aes_encrypt_v3(_get_key(), _DOMAIN_VM_CLOUD_INIT, plaintext)
+
+
+def decrypt_vm_cloud_init(ciphertext_b64: str) -> str:
+    """Decrypt a user's reusable VM cloud-init snippet."""
+    return _aes_decrypt(_get_key(), _DOMAIN_VM_CLOUD_INIT, ciphertext_b64)

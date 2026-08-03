@@ -17,6 +17,38 @@ const PUBLIC_PATHS = ['/', '/login', '/auth/gitlab/callback'];
 // 정적 파일로 판단할 확장자 패턴
 const STATIC_EXT = /\.(js|css|svg|png|jpg|jpeg|ico|woff2?|ttf|eot|map|webp|gif)$/;
 
+// 인그레스에서 백엔드로 포워딩되는 접두. 프론트가 받을 일은 없지만 SPA 폴백에서 방어적으로 제외.
+const BACKEND_PREFIXES = ['/api', '/v1'];
+
+// SPA 폴백 대상 판단 — 로그인 상태의 "문서 내비게이션 404" 만.
+// 정적 자산·데이터 요청(__data.json)·SvelteKit 내부·백엔드 경로는 제외해 원래 404를 유지한다.
+function shouldSpaFallback(event: Parameters<Handle>[0]['event'], response: Response): boolean {
+	if (response.status !== 404) return false;
+	const path = event.url.pathname;
+	if (STATIC_EXT.test(path) || path.startsWith('/_app/') || path.includes('__data.json')) return false;
+	if (BACKEND_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return false;
+	const accept = event.request.headers.get('accept') ?? '';
+	return accept.includes('text/html');
+}
+
+// 홈 라우트 SSR HTML(앱 셸)을 받아 200으로 반환 — 브라우저 URL은 유지되므로 클라이언트 라우터가
+// 요청 경로를 렌더한다. 실패 시 null(호출부가 원래 404 응답을 그대로 사용).
+async function serveAppShell(
+	event: Parameters<Handle>[0]['event'],
+	securityHeaders: Record<string, string>,
+): Promise<Response | null> {
+	try {
+		const home = await event.fetch('/');
+		if (!home.ok) return null;
+		const body = await home.text();
+		const headers = new Headers({ 'content-type': 'text/html; charset=utf-8' });
+		for (const [key, value] of Object.entries(securityHeaders)) headers.set(key, value);
+		return new Response(body, { status: 200, headers });
+	} catch {
+		return null;
+	}
+}
+
 // connect-src에 API + S3 URL 추가 (presigned PUT 허용)
 function buildConnectSrc(siteConfig: PublicSiteConfig): string {
 	const parts = ["'self'"];
@@ -40,7 +72,7 @@ function addOrigin(parts: Set<string>, raw: string): void {
 }
 
 function buildImgSrc(siteConfig: PublicSiteConfig): string {
-	const parts = new Set(["'self'", 'data:']);
+	const parts = new Set(["'self'", 'data:', 'blob:']);
 	for (const raw of [
 		siteConfig.runtime.api_base,
 		siteConfig.logo_path,
@@ -160,6 +192,16 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const response = await resolve(event);
+
+	// SPA 폴백: 로그인 상태에서 문서 내비게이션이 404면 앱 셸(홈 SSR)을 200으로 내려
+	// 클라이언트 라우터가 요청 경로를 렌더하게 한다(요청 URL 유지, 리다이렉트 아님).
+	// SSR 시점엔 localStorage 토큰·클라 전용 데이터가 없어 유효 라우트도 404로 끝날 수 있으나,
+	// 클라이언트에서는 정상 렌더되므로 딥링크·새로고침이 동작한다.
+	if (shouldSpaFallback(event, response)) {
+		const shell = await serveAppShell(event, securityHeaders);
+		if (shell) return shell;
+	}
+
 	for (const [key, value] of Object.entries(securityHeaders)) {
 		response.headers.set(key, value);
 	}

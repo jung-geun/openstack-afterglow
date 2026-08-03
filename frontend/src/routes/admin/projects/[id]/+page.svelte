@@ -16,23 +16,53 @@
 	let members = $state<Member[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+	let membersLoading = $state(true);
+	let membersError = $state('');
+	let loadGeneration = 0;
 	let tab = $state<'overview' | 'members' | 'activity'>('overview');
 
 	$effect(() => {
-		if (!projectId) return;
+		const requestProjectId = projectId;
+		const requestToken = token;
+		const requestAdminProjectId = adminProjectId;
+		if (!requestProjectId) return;
+		const generation = ++loadGeneration;
 		loading = true;
-		Promise.all([
-			api.get<Project>(`/api/v1/admin/projects/${projectId}`, token, adminProjectId),
-			api.get<Member[]>(`/api/v1/admin/projects/${projectId}/members`, token, adminProjectId),
-		]).then(([p, m]) => {
-			project = p;
-			members = m;
-			error = '';
-		}).catch((e) => {
-			error = e instanceof ApiError ? e.message : '프로젝트 조회 실패';
+		membersLoading = true;
+		error = '';
+		membersError = '';
+		const projectPromise = api.get<Project>(
+			`/api/v1/admin/projects/${requestProjectId}`,
+			requestToken,
+			requestAdminProjectId,
+		);
+		const membersPromise = api.get<Member[]>(
+			`/api/v1/admin/projects/${requestProjectId}/members`,
+			requestToken,
+			requestAdminProjectId,
+		).then((value) => {
+			if (generation === loadGeneration && projectId === requestProjectId) members = value;
+		}).catch((memberError) => {
+			if (generation === loadGeneration && projectId === requestProjectId) {
+				members = [];
+				membersError = memberError instanceof ApiError ? memberError.message : '멤버 조회 실패';
+			}
 		}).finally(() => {
-			loading = false;
+			if (generation === loadGeneration && projectId === requestProjectId) membersLoading = false;
 		});
+		void projectPromise.then((value) => {
+			if (generation !== loadGeneration || projectId !== requestProjectId) return;
+			project = value;
+			error = '';
+		}).catch((loadError) => {
+			if (generation === loadGeneration && projectId === requestProjectId) {
+				project = null;
+				error = loadError instanceof ApiError ? loadError.message : '프로젝트 조회 실패';
+			}
+		}).finally(() => {
+			if (generation === loadGeneration && projectId === requestProjectId) loading = false;
+		});
+		void membersPromise;
 	});
 </script>
 
@@ -105,7 +135,11 @@
 		<!-- 멤버 탭 -->
 		{#if tab === 'members'}
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-				{#if members.length === 0}
+				{#if membersLoading}
+					<div class="text-[var(--color-ink-3)] text-sm py-8 text-center">멤버를 불러오는 중...</div>
+				{:else if membersError}
+					<div class="text-[var(--color-state-danger)] text-sm py-8 text-center">{membersError}</div>
+				{:else if members.length === 0}
 					<div class="text-gray-500 text-sm py-8 text-center">멤버 없음</div>
 				{:else}
 					<table class="w-full text-sm">

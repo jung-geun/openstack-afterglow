@@ -5,10 +5,14 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import { apiMut } from '$lib/api/mutations';
+  import BulkSelectionOverlay, { type BulkSelectionAction } from '$lib/components/ui/BulkSelectionOverlay.svelte';
+  import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
+  import { executeBulkMutations } from '$lib/utils/bulkActions';
   import type { Cluster, ClusterTemplate, CreateClusterForm } from '$lib/types/cluster';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { toast } from '$lib/stores/toast';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import K3sClusterListTable from '$lib/components/k3s/K3sClusterListTable.svelte';
   import K3sClusterCreateModal from '$lib/components/k3s/K3sClusterCreateModal.svelte';
@@ -20,10 +24,13 @@
   let serviceUnavailable = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
-
+  const selection = createResourceSelection();
+  let bulkBusy = $state(false);
+  const selectableIds = $derived(new Set(clusters.map((cluster) => cluster.id)));
   async function fetchClusters() {
     try {
       clusters = await api.get<Cluster[]>('/api/v1/clusters', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      selection.retain(clusters.map((cluster) => cluster.id));
       error = '';
       serviceUnavailable = false;
     } catch (e) {
@@ -44,6 +51,15 @@
     } catch {
       templates = [];
     }
+  }
+
+  function prefetchTemplates() {
+    void api.prefetch('/api/v1/clusters/templates', $auth.token ?? undefined, $auth.projectId ?? undefined);
+  }
+
+  function openCreate() {
+    showModal = true;
+    void fetchTemplates();
   }
 
   async function createCluster(form: CreateClusterForm): Promise<string | true> {
@@ -75,24 +91,50 @@
       deleting = null;
     }
   }
+  async function runBulkDelete() {
+    const snapshot = [...selection.ids];
+    if (snapshot.length === 0) return;
+    if (!await confirmDialog(`선택한 클러스터 ${snapshot.length}개를 삭제하시겠습니까?`)) return;
+    const tokenSnapshot = $auth.token ?? undefined;
+    const projectSnapshot = $auth.projectId ?? undefined;
+    bulkBusy = true;
+    try {
+      const results = await executeBulkMutations(snapshot, (id) => api.delete(`/api/v1/clusters/${id}`, tokenSnapshot, projectSnapshot));
+      const successful = results.filter((result) => result.ok).map((result) => result.id);
+      const failed = results.length - successful.length;
+      if (successful.length > 0) toast.success(`${successful.length}개 삭제 요청을 완료했습니다.`);
+      if (failed > 0) toast.error(`${failed}개 삭제에 실패했습니다.`);
+      if ($auth.projectId === projectSnapshot) {
+        selection.remove(successful);
+        await fetchClusters();
+      }
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  const bulkActions: BulkSelectionAction[] = [
+    { key: 'delete', label: '삭제', tone: 'danger', onAction: runBulkDelete },
+  ];
 
   const ar = createAutoRefresh(() => fetchClusters(), {
     storageKey: 'dashboard-k3s-clusters',
+    invokeOnMount: false,
     defaultActive: true,
     defaultInterval: 30,
     intervalOptions: [10, 15, 30, 60],
   });
-
   $effect(() => {
     if (!$auth.projectId) return;
+    selection.clear();
     loading = true;
-    untrack(() => { fetchClusters(); fetchTemplates(); });
+    untrack(() => { fetchClusters(); });
   });
 </script>
 
 <K3sClusterCreateModal bind:open={showModal} {templates} onCreate={createCluster} />
 
-<div class="p-4 md:p-8">
+<div class="bulk-selection-page p-4 md:p-8">
   <PageHeader breadcrumb="CONTAINERS / K8S CLUSTERS" title="K8s 클러스터">
     {#snippet actions()}
       <AutoRefreshControl
@@ -102,7 +144,7 @@
         refreshing={loading}
         onManualRefresh={() => fetchClusters()}
       />
-      <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
+      <button onclick={openCreate} onpointerenter={prefetchTemplates} onfocus={prefetchTemplates} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
     {/snippet}
   </PageHeader>
 
@@ -125,8 +167,14 @@
     <K3sClusterListTable
       {clusters}
       {deleting}
+      selectedIds={selection.ids}
+      selectableIds={selectableIds}
+      selectionDisabled={bulkBusy}
+      onToggleSelect={(id) => selection.toggle(id)}
+      onToggleAll={() => selection.toggleAll(selectableIds)}
       onDelete={deleteCluster}
       onNavigate={(id) => goto(`/dashboard/containers/clusters/${id}`)}
     />
+    <BulkSelectionOverlay count={selection.count} ariaLabel="선택한 클러스터 일괄 작업" actions={bulkActions} busy={bulkBusy} onClear={() => selection.clear()} />
   {/if}
 </div>

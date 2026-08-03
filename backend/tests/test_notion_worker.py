@@ -8,6 +8,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _enable_global_notion_sync(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.resource_policy_store.get_runtime_setting",
+        AsyncMock(return_value=True),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. 기본값 30분 검증
 # ---------------------------------------------------------------------------
@@ -279,3 +288,18 @@ def test_worker_imports_are_fastapi_free():
         f"워커 import 경로에 FastAPI/starlette/uvicorn가 포함됨:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert result.stdout.strip() == "OK"
+
+
+@pytest.mark.asyncio
+async def test_worker_cycle_skips_all_external_work_when_global_gate_is_disabled(monkeypatch):
+    from app.notion_worker import _run_sync_cycle
+
+    get_setting = AsyncMock(return_value=False)
+    list_targets = AsyncMock()
+    monkeypatch.setattr("app.services.resource_policy_store.get_runtime_setting", get_setting)
+    monkeypatch.setattr("app.services.notion_sync.list_notion_targets", list_targets)
+
+    await _run_sync_cycle()
+
+    get_setting.assert_awaited_once_with("notion.sync_enabled")
+    list_targets.assert_not_awaited()

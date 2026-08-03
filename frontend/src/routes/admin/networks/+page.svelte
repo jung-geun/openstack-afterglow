@@ -87,7 +87,7 @@
 
 	const ar = createAutoRefresh(
 		() => { loadNetworks(); loadTimeseries(tsRange, { background: true }); },
-		{ storageKey: 'admin-networks', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+		{ storageKey: 'admin-networks', defaultInterval: 30, intervalOptions: [15, 30, 60], invokeOnMount: false }
 	);
 
 	onMount(() => { loadNetworks(); loadTimeseries(tsRange); });

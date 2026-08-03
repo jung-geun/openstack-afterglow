@@ -1,6 +1,6 @@
 """GPU PCI 장치 카탈로그 DB CRUD + CSV 일괄 import.
 
-DB 항목은 내장 기본값(_DEFAULT_PCI_DEVICE_MAP) + config.toml [[gpu.devices]] 위에
+DB 항목은 내장 기본값(_DEFAULT_PCI_DEVICE_MAP) + afterglow.conf [[gpu.devices]] 위에
 overlay되어 PCI_DEVICE_MAP에 반영된다 (gpu_inventory.apply_db_overlay).
 DB가 초기화되어 있어야 동작 (is_db_available() 확인 후 호출).
 """

@@ -274,6 +274,7 @@ def _render_callback_script(k3s_version: str = "v1.31.0+k3s1") -> str:
         needs_external_cloud_provider=False,
         cloud_conf=None,
         plugins=[],
+        pin_script="#!/bin/bash\nexit 1",
     )
     # callback.sh 본문만 추출 (path: /opt/k3s/callback.sh 이후 runcmd 이전)
     start = rendered.find("path: /opt/k3s/callback.sh")

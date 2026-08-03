@@ -105,7 +105,7 @@ describe('dashboard overview loading', () => {
 		await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(5));
 		const paths = mocks.apiGet.mock.calls.map(([path]) => path);
 		expect(paths).toEqual(expect.arrayContaining([
-			'/api/v1/dashboard/summary?view=overview',
+			'/api/v1/dashboard/summary?view=overview&recent_limit=12',
 			'/api/v1/dashboard/quotas?view=overview',
 			'/api/v1/dashboard/k3s-stats',
 			'/api/v1/dashboard/metrics/trend?range=14d&include_network=false',
@@ -115,7 +115,7 @@ describe('dashboard overview loading', () => {
 		expect(paths.join(' ')).not.toContain('/api/v1/dashboard/notifications');
 		expect(paths.join(' ')).not.toContain('/api/v1/k3s/clusters');
 
-		requests.get('/api/v1/dashboard/summary?view=overview')!.resolve(summary);
+		requests.get('/api/v1/dashboard/summary?view=overview&recent_limit=12')!.resolve(summary);
 		await screen.findByText('newest');
 		expect(screen.getByText('일부 동기화', { exact: false })).toBeTruthy();
 

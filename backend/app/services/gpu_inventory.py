@@ -90,7 +90,7 @@ _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
 
 
 def _load_device_map() -> dict[str, dict[str, dict]]:
-    """config.toml의 [[gpu.devices]] 항목으로 기본 맵을 확장하여 반환."""
+    """afterglow.conf의 [[gpu.devices]] 항목으로 기본 맵을 확장하여 반환."""
     device_map = copy.deepcopy(_DEFAULT_PCI_DEVICE_MAP)
     try:
         raw = load_raw_toml()
@@ -107,7 +107,7 @@ def _load_device_map() -> dict[str, dict[str, dict]]:
                     "aliases": aliases,
                 }
     except Exception:
-        _logger.warning("config.toml gpu.devices 로드 실패 — 기본 맵 사용", exc_info=True)
+        _logger.warning("afterglow.conf gpu.devices 로드 실패 — 기본 맵 사용", exc_info=True)
     return device_map
 
 
@@ -135,7 +135,7 @@ PCI_DEVICE_MAP = _load_device_map()
 
 
 def apply_db_overlay(db_entries: list[dict]) -> None:
-    """DB 카탈로그 항목을 base map(내장 기본값 + config.toml) 위에 overlay.
+    """DB 카탈로그 항목을 base map(내장 기본값 + afterglow.conf) 위에 overlay.
 
     PCI_DEVICE_MAP을 in-place로 갱신하므로 이 dict를 import한 모듈
     (admin_gpu, gpu_quota, openstack_inventory, notion_worker)에 즉시 반영된다.

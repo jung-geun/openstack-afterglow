@@ -26,7 +26,7 @@
 </script>
 
 <!-- 모바일: 전체화면 오버레이 / 데스크톱: 인라인 -->
-<div class="fixed inset-0 z-50 bg-gray-950 overflow-y-auto p-4 sm:static sm:inset-auto sm:z-auto sm:bg-gray-900 sm:border sm:border-gray-800 sm:rounded-2xl sm:p-5 sm:overflow-visible">
+<div class="security-group-rules fixed inset-0 z-50 bg-gray-950 overflow-y-auto p-4 sm:static sm:inset-auto sm:z-auto sm:bg-gray-900 sm:border sm:border-gray-800 sm:rounded-2xl sm:p-5 sm:overflow-visible">
 	<div class="flex items-center mb-3.5">
 		<button onclick={onCloseMobile} class="sm:hidden mr-2 text-gray-400 hover:text-white p-1">
 			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
@@ -98,3 +98,15 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	@media (min-width: 640px) {
+		.security-group-rules {
+			position: static;
+			inset: auto;
+			z-index: auto;
+			overflow: visible;
+			min-width: 0;
+		}
+	}
+</style>

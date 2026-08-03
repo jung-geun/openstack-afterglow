@@ -38,4 +38,24 @@ describe('Button', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Click' }));
 		expect(onclick).toHaveBeenCalledTimes(1);
 	});
+
+	it('emits intent on pointer entry without firing click', async () => {
+		const onintent = vi.fn();
+		const onclick = vi.fn();
+		render(Button, { onintent, onclick, children: textSnippet('Warm') });
+		await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Warm' }));
+		expect(onintent).toHaveBeenCalledOnce();
+		expect(onclick).not.toHaveBeenCalled();
+	});
+
+	it('emits intent on keyboard focus and ignores disabled controls', async () => {
+		const onintent = vi.fn();
+		const { rerender } = render(Button, { onintent, children: textSnippet('Focus') });
+		await fireEvent.focus(screen.getByRole('button', { name: 'Focus' }));
+		expect(onintent).toHaveBeenCalledOnce();
+
+		await rerender({ onintent, disabled: true, children: textSnippet('Focus') });
+		await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Focus' }));
+		expect(onintent).toHaveBeenCalledOnce();
+	});
 });

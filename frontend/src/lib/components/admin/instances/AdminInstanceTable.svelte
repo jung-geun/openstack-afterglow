@@ -11,9 +11,12 @@
 		nextMarker,
 		refreshing,
 		selectedIds,
+		selectableIds = new Set(instances.map((instance) => instance.id)),
+		selectionDisabled = false,
 		onOpen,
 		onPrev,
 		onNext,
+		onintent,
 		onRecover,
 		onToggleSelect,
 		onToggleAll,
@@ -22,21 +25,23 @@
 		markerStack: string[];
 		nextMarker: string | null;
 		refreshing: boolean;
-		selectedIds?: Set<string>;
+		selectedIds: ReadonlySet<string>;
+		selectableIds?: ReadonlySet<string>;
+		selectionDisabled?: boolean;
 		onOpen: (inst: AdminInstance) => void;
 		onPrev: () => void;
 		onNext: () => void;
+		onintent?: () => void;
 		onRecover?: (inst: AdminInstance) => void;
-		onToggleSelect?: (id: string) => void;
-		onToggleAll?: () => void;
+		onToggleSelect: (id: string) => void;
+		onToggleAll: () => void;
 	} = $props();
 
-	const showCheckboxes = $derived(!!onToggleSelect);
 	const allSelected = $derived(
-		showCheckboxes && instances.length > 0 && instances.every(i => selectedIds?.has(i.id))
+		selectableIds.size > 0 && [...selectableIds].every((id) => selectedIds.has(id))
 	);
-	const hasSelection = $derived(showCheckboxes && instances.some(i => selectedIds?.has(i.id)));
-	const partiallySelected = $derived(hasSelection && !allSelected);
+	const hasSelection = $derived(selectedIds.size > 0);
+	const partiallySelected = $derived(selectableIds.size > 0 && hasSelection && !allSelected);
 
 	let expandedError = $state<string | null>(null);
 	let copiedProjectId = $state<string | null>(null);
@@ -50,21 +55,18 @@
 </script>
 
 <div class="overflow-x-auto">
-	<table class="selection-table w-full text-sm" class:has-selection={hasSelection}>
+	<table class="selection-table w-full text-sm">
 		<thead>
 			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-				{#if showCheckboxes}
-					<th class="py-2 pr-2 w-8">
-						<div class="selection-header-reveal" class:is-selected={hasSelection}>
-							<SelectionCheckbox
-								checked={allSelected}
-								indeterminate={partiallySelected}
-								onclick={() => onToggleAll?.()}
-								ariaLabel="전체 선택"
-							/>
-						</div>
-					</th>
-				{/if}
+				<th class="py-2 pr-2 w-8">
+					<SelectionCheckbox
+						checked={allSelected}
+						indeterminate={partiallySelected}
+						disabled={selectionDisabled || selectableIds.size === 0}
+						onclick={onToggleAll}
+						ariaLabel="전체 선택"
+					/>
+				</th>
 				<th class="text-left py-2 pr-4">이름</th>
 				<th class="text-left py-2 pr-4">상태</th>
 				<th class="text-left py-2 pr-4">Flavor</th>
@@ -74,23 +76,24 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each instances as s (s.id)}
+			{#each instances as s, index (s.id)}
 				<tr
-					class="instance-admin-row border-b border-gray-800/50 text-xs transition-colors {selectedIds?.has(s.id) ? 'is-selected bg-blue-900/10' : ''}"
+					class="resource-selection-surface instance-admin-row border-b border-gray-800/50 text-xs transition-colors {selectedIds.has(s.id) ? 'is-selected bg-blue-900/10' : ''}"
+					data-selected={selectedIds.has(s.id)}
+					data-tour={index === 0 ? 'admin-compute-row' : undefined}
 				>
-					{#if showCheckboxes}
-						<td class="py-2 pr-2">
-							<div class="selection-reveal" class:is-selected={selectedIds?.has(s.id) ?? false}>
-								<SelectionCheckbox
-									checked={selectedIds?.has(s.id) ?? false}
-									onclick={() => onToggleSelect?.(s.id)}
-									ariaLabel={`${s.name || s.id} 선택`}
-								/>
-							</div>
-						</td>
-					{/if}
+					<td class="py-2 pr-2">
+						<SelectionCheckbox
+							checked={selectedIds.has(s.id)}
+							disabled={selectionDisabled || !selectableIds.has(s.id)}
+							unavailable={!selectableIds.has(s.id)}
+							title={!selectableIds.has(s.id) ? '현재 상태에서는 선택할 수 없습니다.' : undefined}
+							onclick={() => onToggleSelect(s.id)}
+							ariaLabel={`${s.name || s.id} 선택`}
+						/>
+					</td>
 					<td class="p-0">
-						<button type="button" onclick={() => onOpen(s)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={s.name || s.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{s.name || s.id.slice(0, 8)}</span></button>
+						<button type="button" data-tour={index === 0 ? 'admin-compute-row-open' : undefined} onclick={() => onOpen(s)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={s.name || s.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{s.name || s.id.slice(0, 8)}</span></button>
 					</td>
 					<td class="py-2 pr-4">
 						<div class="flex items-center gap-1.5">
@@ -144,29 +147,5 @@
 	hasNext={!!nextMarker}
 	{onPrev}
 	{onNext}
+	{onintent}
 />
-
-<style>
-	.selection-header-reveal,
-	.selection-reveal {
-		opacity: 0;
-		pointer-events: none;
-		transform: translateX(-4px);
-		transition:
-			opacity 0.16s ease,
-			transform 0.16s ease;
-	}
-
-	.selection-table:hover .selection-header-reveal,
-	.selection-table:focus-within .selection-header-reveal,
-	.selection-table.has-selection .selection-header-reveal,
-	.selection-header-reveal.is-selected,
-	.instance-admin-row:hover .selection-reveal,
-	.instance-admin-row:focus-within .selection-reveal,
-	.instance-admin-row.is-selected .selection-reveal,
-	.selection-reveal.is-selected {
-		opacity: 1;
-		pointer-events: auto;
-		transform: translateX(0);
-	}
-</style>

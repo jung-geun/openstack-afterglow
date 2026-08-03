@@ -1,10 +1,13 @@
 """cloudinit.generate_userdata() 헬스체크 주입 테스트."""
 
 import base64
+from email import policy
+from email.parser import BytesParser
 
 import pytest
+import yaml
 
-from app.services.cloudinit import generate_userdata
+from app.services.cloudinit import compose_userdata, generate_github_ssh_userdata, generate_userdata
 
 _COMMON_ARGS = dict(
     libraries=[],
@@ -398,3 +401,36 @@ def test_valid_ceph_inputs_pass():
     )
     yaml_str = _decode_userdata(encoded)
     assert "builder-abc" in yaml_str
+
+
+def test_github_ssh_userdata_is_base64_string_with_structured_import() -> None:
+    encoded = generate_github_ssh_userdata("octocat")
+    assert isinstance(encoded, str)
+    assert yaml.safe_load(_decode_userdata(encoded)) == {"ssh_import_id": ["gh:octocat"]}
+
+
+def test_generated_userdata_includes_github_ssh_import() -> None:
+    encoded = generate_userdata(**_COMMON_ARGS, github_username="octocat")
+    assert isinstance(encoded, str)
+    assert yaml.safe_load(_decode_userdata(encoded))["ssh_import_id"] == ["gh:octocat"]
+
+
+def test_github_ssh_import_preserves_custom_cloud_config_as_multipart() -> None:
+    encoded = compose_userdata(
+        None,
+        "#cloud-config\nruncmd:\n  - echo hello\n",
+        "octocat",
+    )
+    assert isinstance(encoded, str)
+    message = BytesParser(policy=policy.default).parsebytes(base64.b64decode(encoded))
+    assert message.is_multipart()
+    parts = list(message.iter_parts())
+    assert yaml.safe_load(parts[0].get_content()) == {"ssh_import_id": ["gh:octocat"]}
+    assert yaml.safe_load(parts[1].get_content()) == {"runcmd": ["echo hello"]}
+
+
+def test_custom_shell_userdata_is_base64_encoded_without_managed_feature() -> None:
+    script = "#!/bin/sh\necho hello\n"
+    encoded = compose_userdata(None, script)
+    assert isinstance(encoded, str)
+    assert base64.b64decode(encoded).decode() == script

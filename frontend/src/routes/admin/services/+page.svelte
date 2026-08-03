@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -8,6 +7,7 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import ServiceTabs from '$lib/components/admin/services/ServiceTabs.svelte';
 	import ServiceTabPanel from '$lib/components/admin/services/ServiceTabPanel.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 	import type { Service, NetworkAgent, EndpointGroup, StoragePool, TabKey } from '$lib/types/adminServices';
 
 	let computeServices = $state<Service[]>([]);
@@ -28,8 +28,11 @@
 		container: 'zun',
 	};
 
-	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
+	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, false])) as Record<TabKey, boolean>);
+	let loadedMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, false])) as Record<TabKey, boolean>);
+	let categoryGeneration = $state<Record<TabKey, number>>(Object.fromEntries(allCategories.map(c => [c, 0])) as Record<TabKey, number>);
 	let activeTab = $state<TabKey>('compute');
+	let loadScopeKey = $state('');
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -63,10 +66,22 @@
 	);
 
 	async function loadCategory(cat: TabKey, isRefresh = false) {
-		if (!isRefresh) loadingMap[cat] = true;
+		const requestToken = token;
+		const requestProjectId = projectId;
+		const generation = ++categoryGeneration[cat];
+		loadingMap[cat] = true;
 		try {
-			const url = isRefresh ? `/api/v1/admin/services?category=${cat}&refresh=true` : `/api/v1/admin/services?category=${cat}`;
-			const res = await api.get<Record<string, unknown>>(url, token, projectId);
+			const res = await api.get<Record<string, unknown>>(
+				`/api/v1/admin/services?category=${cat}`,
+				requestToken,
+				requestProjectId,
+				{ refresh: isRefresh },
+			);
+			if (
+				generation !== categoryGeneration[cat]
+				|| token !== requestToken
+				|| projectId !== requestProjectId
+			) return;
 			switch (cat) {
 				case 'compute': computeServices = (res.compute as Service[]) || []; break;
 				case 'block_storage': blockStorageServices = (res.block_storage as Service[]) || []; break;
@@ -78,35 +93,65 @@
 				case 'endpoints': endpoints = (res.endpoints as EndpointGroup[]) || []; break;
 				case 'storage_pools': storagePools = (res.storage_pools as StoragePool[]) || []; break;
 			}
+			loadedMap[cat] = true;
 		} catch {
-			// 조회 실패 시 빈 배열 유지
+			if (
+				generation === categoryGeneration[cat]
+				&& token === requestToken
+				&& projectId === requestProjectId
+			) loadedMap[cat] = false;
 		} finally {
-			loadingMap[cat] = false;
+			if (
+				generation === categoryGeneration[cat]
+				&& token === requestToken
+				&& projectId === requestProjectId
+			) loadingMap[cat] = false;
 		}
 	}
 
-	function loadAll(isRefresh = false) { activeCategories.forEach(cat => loadCategory(cat, isRefresh)); }
-	function refresh() { loadAll(true); }
+	function ensureCategory(cat: TabKey) {
+		if (!activeCategories.includes(cat) || loadingMap[cat] || loadedMap[cat]) return;
+		void loadCategory(cat);
+	}
+
+	function refresh() {
+		void loadCategory(activeTab, true);
+	}
 
 	$effect(() => {
 		if (visibleTabs.length > 0 && !visibleTabs.find(t => t.key === activeTab)) {
 			activeTab = visibleTabs[0].key;
 		}
+		const nextScopeKey = JSON.stringify([token ?? null, projectId ?? null]);
+		if (loadScopeKey !== nextScopeKey) {
+			loadScopeKey = nextScopeKey;
+			for (const category of allCategories) {
+				categoryGeneration[category] += 1;
+				loadingMap[category] = false;
+				loadedMap[category] = false;
+			}
+		}
+		const requestedTab = activeTab;
+		token;
+		projectId;
+		ensureCategory(requestedTab);
 	});
 
-	const ar = createAutoRefresh(() => { loadAll(true); }, {
+	const ar = createAutoRefresh(() => loadCategory(activeTab, true), {
 		storageKey: 'admin-services',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],
 	});
 
-	onMount(() => { loadAll(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
+	<div data-tour="admin-system-header">
 	<PageHeader breadcrumb="SYSTEM / SERVICES" title="서비스 상태">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-system" compactOnMobile />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -115,11 +160,14 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
 	<ServiceTabs
 		tabs={visibleTabs.map(t => ({ key: t.key, label: t.label, count: t.count() }))}
 		bind:activeTab
 		{loadingMap}
+		{loadedMap}
+		onIntent={ensureCategory}
 	/>
 
 	<ServiceTabPanel

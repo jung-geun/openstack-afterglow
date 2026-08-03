@@ -14,6 +14,8 @@
 	let announcements = $state<AnnouncementUser[]>([]);
 	let quotaAlerts = $state<DashboardAlert[]>([]);
 	let loading = $state(true);
+	let quotaLoading = $state(true);
+	let loadGeneration = 0;
 	let error = $state('');
 	let expandedId = $state<number | null>(null);
 	let initialized = false;
@@ -61,33 +63,49 @@
 	}
 
 	async function load() {
+		const generation = ++loadGeneration;
 		loading = true;
+		quotaLoading = true;
 		error = '';
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
+		const quotaPromise = api
+			.get<DashboardOverviewQuotas>('/api/v1/dashboard/quotas?view=overview', token, projectId)
+			.then((quotas) => {
+				if (generation === loadGeneration && ($auth.projectId ?? undefined) === projectId) {
+					quotaAlerts = quotas.alerts ?? [];
+				}
+			})
+			.catch(() => {
+				if (generation === loadGeneration && ($auth.projectId ?? undefined) === projectId) quotaAlerts = [];
+			})
+			.finally(() => {
+				if (generation === loadGeneration && ($auth.projectId ?? undefined) === projectId) quotaLoading = false;
+			});
 		try {
-			const [items, quotas] = await Promise.all([
-				api.get<AnnouncementUser[]>('/api/v1/announcements', token, projectId),
-				api
-					.get<DashboardOverviewQuotas>('/api/v1/dashboard/quotas?view=overview', token, projectId)
-					.catch(() => null),
-			]);
-			announcements = items;
-			quotaAlerts = quotas?.alerts ?? [];
-
-			// 알림함 진입 시 미읽음 공지를 읽음 처리 (best-effort — 실패해도 목록 표시는 진행)
-			const unread = items.filter((a) => !a.is_read);
+			const items = await api.get<AnnouncementUser[]>('/api/v1/announcements', token, projectId);
+			if (generation !== loadGeneration || ($auth.projectId ?? undefined) !== projectId) return;
+			const unread = items.filter((announcement) => !announcement.is_read);
+			announcements = items.map((announcement) => (
+				unread.some((item) => item.id === announcement.id)
+					? { ...announcement, is_read: true }
+					: announcement
+			));
 			if (unread.length > 0) {
-				await Promise.allSettled(
-					unread.map((a) => api.post(`/api/v1/announcements/${a.id}/read`, {}, token, projectId)),
+				void Promise.allSettled(
+					unread.map((announcement) =>
+						api.post(`/api/v1/announcements/${announcement.id}/read`, {}, token, projectId)
+					),
 				);
-				announcements = announcements.map((a) => ({ ...a, is_read: true }));
 			}
 		} catch (e) {
-			error = e instanceof ApiError ? e.message : '알림을 불러오지 못했습니다';
+			if (generation === loadGeneration && ($auth.projectId ?? undefined) === projectId) {
+				error = e instanceof ApiError ? e.message : '알림을 불러오지 못했습니다';
+			}
 		} finally {
-			loading = false;
+			if (generation === loadGeneration && ($auth.projectId ?? undefined) === projectId) loading = false;
 		}
+		void quotaPromise;
 	}
 
 </script>
@@ -109,25 +127,30 @@
 		<Alert tone="danger" class="mb-4">{error}</Alert>
 	{/if}
 
+	{#if quotaLoading}
+		<Card padding="lg" class="mb-4">
+			<p class="text-xs text-[var(--color-ink-3)]">쿼터 경고를 불러오는 중...</p>
+		</Card>
+	{:else if quotaAlerts.length > 0}
+		<Card padding="lg" class="mb-4">
+			<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">현재 쿼터 경고</p>
+			<ul class="flex flex-col gap-2">
+				{#each quotaAlerts as alert}
+					<li class="flex items-start gap-2.5 text-sm">
+						<span class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style="background: {severityDotColor(alert.severity)};"></span>
+						<span class="flex-1 text-[var(--color-ink-0)] text-xs leading-snug">{alert.message}</span>
+						{#if alert.count > 1}
+							<span class="text-[10px] text-[var(--color-ink-3)] tabular-nums flex-shrink-0">×{alert.count}</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</Card>
+	{/if}
+
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		{#if quotaAlerts.length > 0}
-			<Card padding="lg" class="mb-4">
-				<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">현재 쿼터 경고</p>
-				<ul class="flex flex-col gap-2">
-					{#each quotaAlerts as alert}
-						<li class="flex items-start gap-2.5 text-sm">
-							<span class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style="background: {severityDotColor(alert.severity)};"></span>
-							<span class="flex-1 text-[var(--color-ink-0)] text-xs leading-snug">{alert.message}</span>
-							{#if alert.count > 1}
-								<span class="text-[10px] text-[var(--color-ink-3)] tabular-nums flex-shrink-0">×{alert.count}</span>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			</Card>
-		{/if}
 
 		<Card padding="lg">
 			<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">공지 히스토리</p>

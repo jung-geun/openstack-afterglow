@@ -17,6 +17,17 @@ _logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _require_notion_sync_enabled() -> None:
+    from app.services.resource_policy_store import ResourcePolicyStorageUnavailable, get_runtime_setting
+
+    try:
+        enabled = await get_runtime_setting("notion.sync_enabled")
+    except ResourcePolicyStorageUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Notion runtime setting storage is unavailable") from exc
+    if enabled is not True:
+        raise HTTPException(status_code=409, detail="Notion synchronization is disabled by the global runtime setting")
+
+
 class NotionConfigRequest(BaseModel):
     api_key: str
     database_id: str
@@ -156,6 +167,8 @@ async def delete_notion_config():
 async def test_notion_sync(conn=Depends(get_os_conn)):
     """수동 Notion 동기화 1회 실행."""
     from datetime import datetime
+
+    await _require_notion_sync_enabled()
 
     config = await notion_sync.get_notion_config()
     if not config:
@@ -377,6 +390,8 @@ async def delete_notion_target(target_id: int):
 async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
     """특정 연동 대상에 대해 수동 동기화 1회 실행."""
     from datetime import datetime
+
+    await _require_notion_sync_enabled()
 
     target = await notion_sync.get_notion_target(target_id, include_api_key=True)
     if not target:

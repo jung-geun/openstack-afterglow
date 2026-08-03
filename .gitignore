@@ -263,4 +263,4 @@ test.ipynb
 .agents/
 .codex/
 .playwright-mcp/
-AGENTS.md
+.playwright-cli/

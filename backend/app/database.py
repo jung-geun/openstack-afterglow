@@ -1,10 +1,11 @@
 """SQLAlchemy async 데이터베이스 연결 관리.
 
-설정: afterglow.conf/config.toml [database] 섹션 또는 DATABASE_URL 환경변수.
+설정: afterglow.conf [database] 섹션 또는 DATABASE_URL 환경변수.
 url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 """
 
 import logging
+import sys
 import time
 from collections.abc import AsyncGenerator
 
@@ -78,15 +79,41 @@ def is_db_configured() -> bool:
     return _engine is not None
 
 
-def mark_db_unhealthy(seconds: int | None = None) -> None:
-    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환.
+_CONNECTION_ERROR_CODES = frozenset({2003, 2006, 2013, 2014, 2055})
 
-    seconds=None이면 init_db에서 설정한 기본값(_default_unhealthy_seconds) 사용.
+
+def is_connection_error(error: BaseException | None) -> bool:
+    """Return True only for DBAPI transport/protocol failures.
+
+    Query/schema failures such as MySQL 1054 must fail that request without
+    opening the process-wide availability breaker.
     """
+    if error is None:
+        return False
+    current: BaseException | None = error
+    while current is not None:
+        args = getattr(current, "args", ())
+        if args and isinstance(args[0], int) and args[0] in _CONNECTION_ERROR_CODES:
+            return True
+        current = getattr(current, "orig", None) or getattr(current, "__cause__", None)
+    return False
+
+
+def mark_db_unhealthy(error: BaseException | None = None, seconds: int | None = None) -> bool:
+    """Open the breaker only for confirmed database connection failures.
+
+    When called from an exception handler, ``sys.exception()`` supplies the
+    caught DBAPI error so legacy call sites remain safe during the cutover.
+    """
+    error = error if error is not None else sys.exception()
+    if not is_connection_error(error):
+        _logger.info("DB query failure did not open circuit breaker", exc_info=error is not None)
+        return False
     global _db_unhealthy_until
     duration = seconds if seconds is not None else _default_unhealthy_seconds
     _db_unhealthy_until = time.time() + duration
     _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", duration)
+    return True
 
 
 async def create_tables() -> None:
@@ -206,84 +233,10 @@ async def create_tables() -> None:
         except Exception:
             pass  # 이미 존재하면 무시
 
-        # Union Mount 레이어 시스템 테이블 (없는 경우에만)
-        # union_layers: 부모 자기참조 FK가 있어 먼저 생성
-        try:
-            await conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS union_layers ("
-                "id VARCHAR(71) NOT NULL PRIMARY KEY,"
-                "name VARCHAR(128) NOT NULL,"
-                "version VARCHAR(64) NOT NULL,"
-                "created_at DATETIME(6) NOT NULL,"
-                "created_by VARCHAR(128) NOT NULL,"
-                "sealed BOOLEAN NOT NULL DEFAULT FALSE,"
-                "parent_id VARCHAR(71) DEFAULT NULL,"
-                "ubuntu_base VARCHAR(255) DEFAULT NULL,"
-                "build_recipe JSON NOT NULL,"
-                "installed_packages JSON NOT NULL,"
-                "content_hash VARCHAR(71) NOT NULL,"
-                "size_bytes BIGINT DEFAULT NULL,"
-                "file_count INT DEFAULT NULL,"
-                "KEY idx_union_layers_name_version (name, version),"
-                "KEY idx_union_layers_parent (parent_id),"
-                "CONSTRAINT fk_union_layers_parent FOREIGN KEY (parent_id)"
-                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-            )
-        except Exception:
-            pass  # 이미 존재하면 무시
-
-        # union_layers 컬럼 마이그레이션 (신규 컬럼 추가)
-        for _col_sql in [
-            "ALTER TABLE union_layers ADD COLUMN project_id VARCHAR(64) DEFAULT NULL",
-            "ALTER TABLE union_layers ADD COLUMN sealed_at DATETIME(6) DEFAULT NULL",
-            "ALTER TABLE union_layers ADD INDEX idx_union_layers_project (project_id)",
-            "ALTER TABLE union_layers ADD COLUMN license_type VARCHAR(64) DEFAULT NULL",
-            "ALTER TABLE union_layers ADD COLUMN max_concurrent_mounts INT DEFAULT NULL",
-            "ALTER TABLE union_layers ADD COLUMN parent_ids JSON DEFAULT NULL",
-        ]:
-            try:
-                await conn.exec_driver_sql(_col_sql)
-            except Exception:
-                pass  # 이미 존재하면 무시
-
-        try:
-            await conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS union_templates ("
-                "name VARCHAR(128) NOT NULL,"
-                "version INT NOT NULL,"
-                "created_at DATETIME(6) NOT NULL,"
-                "created_by VARCHAR(128) NOT NULL,"
-                "parent_version INT DEFAULT NULL,"
-                "ubuntu_base VARCHAR(255) NOT NULL,"
-                "leaf_layer_id VARCHAR(71) NOT NULL,"
-                "note TEXT DEFAULT NULL,"
-                "PRIMARY KEY (name, version),"
-                "KEY idx_union_templates_leaf (leaf_layer_id),"
-                "CONSTRAINT fk_union_templates_leaf FOREIGN KEY (leaf_layer_id)"
-                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-            )
-        except Exception:
-            pass
-
-        try:
-            await conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS union_user_mounts ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "user_id VARCHAR(128) NOT NULL,"
-                "vm_hostname VARCHAR(255) NOT NULL,"
-                "leaf_layer_id VARCHAR(71) NOT NULL,"
-                "mounted_at DATETIME(6) NOT NULL,"
-                "unmounted_at DATETIME(6) DEFAULT NULL,"
-                "KEY idx_union_user_mounts_user (user_id),"
-                "KEY idx_union_user_mounts_leaf (leaf_layer_id),"
-                "CONSTRAINT fk_union_user_mounts_leaf FOREIGN KEY (leaf_layer_id)"
-                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-            )
-        except Exception:
-            pass
+        # (폐기) 2세대 union 테이블 DDL — union_layers / union_templates / union_user_mounts.
+        # Palimpsest 통합 시 ORM·API 와 함께 제거했다. 신규 배포는 이 테이블을 만들지 않고,
+        # 기존 배포의 테이블은 데이터 보존을 위해 그대로 둔다(DROP 마이그레이션 없음).
+        # 레이어 정체성은 이제 layer_artifacts.blob_digest 다 — docs/palimpsest.md §3.
 
         # library_builds 에 ephemeral 빌드 컬럼 추가 (없는 경우에만)
         for _col_sql in [

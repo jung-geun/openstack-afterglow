@@ -51,7 +51,7 @@ async def test_list_admin_images_search_substring_case_insensitive(admin_client,
     assert resp.status_code == 200
     body = resp.json()
     names = {item["name"] for item in body["items"]}
-    assert names == {"ubuntu-24.04", "Windows-Update-2024"}
+    assert names == {"ubuntu-24.04:latest", "Windows-Update-2024:latest"}
 
 
 @pytest.mark.asyncio
@@ -136,6 +136,30 @@ async def test_get_admin_image_requires_admin(non_admin_client):
 async def test_patch_admin_image_requires_admin(non_admin_client):
     resp = await non_admin_client.patch("/api/v1/admin/images/img-1", json={"name": "new"})
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patch_admin_image_normalizes_latest_and_explicit_tag(admin_client):
+    from unittest.mock import patch
+
+    updated = _make_image("img-1", "ubuntu:24.04")
+    with patch("app.api.identity.admin_images.glance.update_image_metadata", return_value=updated) as update:
+        resp = await admin_client.patch("/api/v1/admin/images/img-1", json={"name": "ubuntu:24.04"})
+    assert resp.status_code == 200
+    assert update.call_args.args[2] == "ubuntu:24.04"
+
+    with patch(
+        "app.api.identity.admin_images.glance.update_image_metadata", return_value=_make_image("img-1", "ubuntu:latest")
+    ) as update:
+        resp = await admin_client.patch("/api/v1/admin/images/img-1", json={"name": "ubuntu"})
+    assert resp.status_code == 200
+    assert update.call_args.args[2] == "ubuntu:latest"
+
+
+@pytest.mark.asyncio
+async def test_patch_admin_image_rejects_invalid_reference(admin_client):
+    resp = await admin_client.patch("/api/v1/admin/images/img-1", json={"name": "Ubuntu 24.04"})
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

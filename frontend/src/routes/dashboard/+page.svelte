@@ -281,7 +281,7 @@
 		await loadResource(
 			'summary',
 			summaryState,
-			'/api/v1/dashboard/summary?view=overview',
+			'/api/v1/dashboard/summary?view=overview&recent_limit=12',
 			batch,
 		);
 	}
@@ -500,7 +500,7 @@
 				{:else if alertsCompleteEmpty}
 					<p class="text-sm text-[var(--color-ink-3)] mt-4">알림 없음</p>
 				{:else}
-					<ul class="mt-3 flex flex-col gap-2">
+					<ul class="system-alert-list mt-3 flex flex-col gap-2">
 						{#each alerts as alert}
 							<li class="flex items-start gap-2.5 text-sm">
 								<span
@@ -546,3 +546,25 @@
 	</div>
 </div>
 {/key}
+
+<style>
+	@media (min-width: 1024px) {
+		.system-alert-list {
+			max-block-size: clamp(5.5rem, 14vh, 12rem);
+			overflow-y: auto;
+			scrollbar-gutter: stable;
+		}
+	}
+
+	@media (min-width: 1024px) and (min-height: 840px) {
+		.system-alert-list {
+			max-block-size: clamp(8rem, 19vh, 18rem);
+		}
+	}
+
+	@media (min-width: 1024px) and (min-height: 1080px) {
+		.system-alert-list {
+			max-block-size: clamp(10rem, 24vh, 24rem);
+		}
+	}
+</style>

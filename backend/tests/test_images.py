@@ -38,10 +38,23 @@ async def test_list_images(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_update_image_metadata(client, mock_conn):
+async def test_update_image_metadata_defaults_latest_and_invalidates_cache(client, mock_conn):
     updated = make_image()
-    updated.name = "ubuntu-22.04-updated"
-    with patch("app.api.compute.images.glance.update_image_metadata", return_value=updated):
-        resp = await client.patch("/api/v1/images/img-1", json={"name": "ubuntu-22.04-updated"})
+    updated.name = "ubuntu:latest"
+    updated.repository = "ubuntu"
+    updated.tag = "latest"
+    with patch("app.api.compute.images.glance.update_image_metadata", return_value=updated) as update:
+        with patch("app.api.compute.images.invalidate") as invalidate:
+            resp = await client.patch("/api/v1/images/img-1", json={"name": "ubuntu"})
     assert resp.status_code == 200
-    assert resp.json()["name"] == "ubuntu-22.04-updated"
+    assert resp.json()["name"] == "ubuntu:latest"
+    assert resp.json()["repository"] == "ubuntu"
+    assert resp.json()["tag"] == "latest"
+    assert update.call_args.args[2] == "ubuntu:latest"
+    invalidate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_image_metadata_rejects_invalid_reference(client, mock_conn):
+    resp = await client.patch("/api/v1/images/img-1", json={"name": "Ubuntu 24.04"})
+    assert resp.status_code == 400

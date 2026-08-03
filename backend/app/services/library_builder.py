@@ -64,6 +64,7 @@ async def cancel_build(build_db_id: int) -> dict:
         server_id = row.server_id
         port_id = row.port_id
         is_ephemeral = bool(row.build_token)
+        resource_snapshot = row.resource_snapshot or {}
 
         row.status = "cancelled"
         row.cloud_init_status = "failure" if is_ephemeral else row.cloud_init_status
@@ -74,7 +75,12 @@ async def cancel_build(build_db_id: int) -> dict:
 
     _active_builds.pop(library_id, None)
 
-    conn = await asyncio.to_thread(get_service_project_connection)
+    from app.services.keystone import get_admin_connection_for_project
+
+    service_project = resource_snapshot.get("openstack.service_project") or {}
+    if not service_project.get("id"):
+        raise RuntimeError("library build resource snapshot is incomplete")
+    conn = await asyncio.to_thread(get_admin_connection_for_project, service_project["id"])
 
     if is_ephemeral:
         # ephemeral 경로: server → port → access rule 정리
@@ -108,6 +114,11 @@ async def cancel_build(build_db_id: int) -> dict:
         except Exception:
             _logger.warning("[builder] 취소 — RW rule 정리 실패: share=%s", share_id, exc_info=True)
 
+    try:
+        await asyncio.to_thread(conn.close)
+    except Exception:
+        _logger.warning("[builder] cancel: service connection close failed", exc_info=True)
+
     return {"cancelled": True, "library_id": library_id}
 
 
@@ -131,6 +142,43 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
 
     # library_id 유효성 검사 (알 수 없는 ID면 여기서 예외)
     lib_svc.get_by_id(library_id)
+    from app.services import library_recipes
+    from app.services.resource_policy_store import (
+        get_policy_snapshot,
+        get_service_project_connection,
+        resolve_policy_snapshot,
+    )
+
+    recipe = await library_recipes.get_recipe(library_id)
+    if recipe is None or not recipe.base_image_id:
+        raise ValueError("library builds require an explicit recipe base image")
+    proto = (recipe.share_proto or "NFS").upper()
+    policy_keys = ["builder.flavor", "builder.network"]
+    policy_keys.append("manila.nfs_share_type" if proto == "NFS" else "manila.cephfs_share_type")
+    if proto == "NFS":
+        policy_keys.append("manila.share_network")
+    service_conn = await get_service_project_connection()
+    try:
+        policies = await resolve_policy_snapshot(conn=service_conn, keys=tuple(policy_keys))
+        image = await asyncio.to_thread(service_conn.image.get_image, recipe.base_image_id)
+        if image is None:
+            raise ValueError(f"library recipe base image was not found: {recipe.base_image_id}")
+        service_project = (await get_policy_snapshot(("openstack.service_project",)))["openstack.service_project"]
+        if service_project is None:
+            raise ValueError("service project policy is not configured")
+    finally:
+        await asyncio.to_thread(service_conn.close)
+    resource_snapshot = {
+        "openstack.service_project": service_project,
+        "base_image": {"id": recipe.base_image_id, "name": getattr(image, "name", recipe.base_image_id)},
+        **policies,
+        "manila": {
+            "share_proto": proto,
+            "share_type": policies["manila.nfs_share_type" if proto == "NFS" else "manila.cephfs_share_type"]["name"],
+            "share_network_id": policies["manila.share_network"]["id"] if proto == "NFS" else "",
+            "share_size_gb": recipe.share_size_gb,
+        },
+    }
 
     build_db_id: int | None = None
     initial_share_id = existing_share_id or ""
@@ -144,6 +192,7 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
                 build_row = LibraryBuild(
                     library_id=library_id,
                     file_storage_id=initial_share_id,  # 기존 share 있으면 미리 기록
+                    resource_snapshot=resource_snapshot,
                     status="queued",
                     cloud_init_status="queued",
                     progress_step="빌드 대기",
@@ -165,7 +214,12 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
     }
 
     task = asyncio.create_task(
-        _ephemeral_build_task(library_id=library_id, build_db_id=build_db_id, existing_share_id=existing_share_id)
+        _ephemeral_build_task(
+            library_id=library_id,
+            build_db_id=build_db_id,
+            existing_share_id=existing_share_id,
+            resource_snapshot=resource_snapshot,
+        )
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -173,20 +227,24 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
     return {"file_storage_id": initial_share_id, "status": "queued", "library": library_id, "build_id": build_db_id}
 
 
-async def _ephemeral_build_task(library_id: str, build_db_id: int | None, existing_share_id: str | None = None) -> None:
-    """백그라운드 ephemeral 빌드 래퍼 — 완료 시 _active_builds에서 제거한다."""
+async def _ephemeral_build_task(
+    library_id: str,
+    build_db_id: int | None,
+    existing_share_id: str | None = None,
+    resource_snapshot: dict | None = None,
+) -> None:
+    """Run one durable, pre-snapshotted library build."""
     try:
-        if build_db_id is None:
-            _logger.warning(
-                "[builder] DB 레코드 없이 ephemeral 빌드 진행 (DB 비가용 모드): %s. "
-                "진행 상태는 share 메타데이터(union_status)로만 추적됩니다.",
-                library_id,
-            )
         from app.services.ephemeral_build import run_ephemeral_build
 
-        await run_ephemeral_build(library_id, build_db_id, existing_share_id=existing_share_id)
+        await run_ephemeral_build(
+            library_id,
+            build_db_id,
+            existing_share_id=existing_share_id,
+            resource_snapshot=resource_snapshot,
+        )
     except Exception:
-        _logger.error("[builder] ephemeral 빌드 태스크 예외: %s", library_id, exc_info=True)
+        _logger.error("[builder] ephemeral build task failed: %s", library_id, exc_info=True)
     finally:
         _active_builds.pop(library_id, None)
 

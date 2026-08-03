@@ -52,10 +52,10 @@
 					<div>IP</div>
 					<div class="hidden sm:block">FLAVOR</div>
 				</div>
-				<div class="border border-[var(--color-line)] rounded-b-[10px] overflow-hidden">
+				<div class="recent-instance-list border border-[var(--color-line)] rounded-b-[10px] overflow-hidden">
 					{#each instances as instance, i}
 						<a href="/dashboard/compute/instances"
-							class="grid grid-cols-[1.7fr_100px_130px_0px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-[var(--color-surface-sunken)] transition-colors {i < instances.length - 1 ? 'border-b border-[var(--color-line)]' : ''}">
+							class="recent-instance-row grid grid-cols-[1.7fr_100px_130px_0px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-[var(--color-surface-sunken)] transition-colors {i < instances.length - 1 ? 'border-b border-[var(--color-line)]' : ''}">
 							<div class="text-[var(--color-ink-0)] font-medium truncate">{instance.name}</div>
 							<div><StatusChip status={instance.status} /></div>
 							<div class="text-[var(--color-ink-1)] font-mono text-xs">{getFirstIp(instance)}</div>
@@ -67,3 +67,35 @@
 		</div>
 	{/if}
 </Card>
+
+<style>
+	.recent-instance-row:nth-child(n + 6) {
+		display: none;
+	}
+
+	@media (min-height: 840px) {
+		.recent-instance-row:nth-child(n) {
+			display: grid;
+		}
+
+		.recent-instance-row:nth-child(n + 9) {
+			display: none;
+		}
+	}
+
+	@media (min-height: 980px) {
+		.recent-instance-row:nth-child(n) {
+			display: grid;
+		}
+
+		.recent-instance-row:nth-child(n + 11) {
+			display: none;
+		}
+	}
+
+	@media (min-height: 1180px) {
+		.recent-instance-row:nth-child(n) {
+			display: grid;
+		}
+	}
+</style>

@@ -3,6 +3,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import { formatStorage, formatDate, shortContentType } from '$lib/utils/format';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	const s = useObjectBrowser();
 	let tableRef = $state<HTMLTableElement | null>(null);
@@ -37,11 +38,12 @@
 			<thead>
 				<tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
 					<th class="py-3 px-4 w-10">
-						<input
-							type="checkbox"
-							checked={s.selectedCount > 0 && s.selectedCount === s.treeRows.length}
-							onchange={s.toggleSelectAll}
-							class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 accent-indigo-500 cursor-pointer"
+						<SelectionCheckbox
+							checked={s.visibleSelectedCount > 0 && s.visibleSelectedCount === s.visibleObjectCount}
+							indeterminate={s.visibleSelectedCount > 0 && s.visibleSelectedCount < s.visibleObjectCount}
+							disabled={s.bulkDeleting || s.bulkMoving}
+							ariaLabel="표시된 오브젝트 전체 선택"
+							onclick={s.toggleSelectAll}
 						/>
 					</th>
 					<th class="text-left py-3 px-4 font-medium relative">
@@ -69,7 +71,8 @@
 					{@const isDir = row.isDir}
 					{@const rowLabel = row.fullPath ? obj.name : (s.baseName(obj.name) || obj.name)}
 					<tr
-						class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer {s.selected.has(obj.name) ? 'bg-indigo-950/20' : ''}"
+						class="resource-selection-surface group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
+						data-selected={s.selected.has(obj.name)}
 						onclick={(e) => {
 							const t = e.target as HTMLElement;
 							if (t.closest('button, input, a, label')) return;
@@ -78,7 +81,12 @@
 						}}
 					>
 						<td class="py-3 px-4">
-							<input type="checkbox" checked={s.selected.has(obj.name)} onchange={() => s.toggleSelect(obj.name)} class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 accent-indigo-500 cursor-pointer" />
+							<SelectionCheckbox
+								checked={s.selected.has(obj.name)}
+								disabled={s.bulkDeleting || s.bulkMoving}
+								ariaLabel={`${rowLabel} 선택`}
+								onclick={() => s.toggleSelect(obj.name)}
+							/>
 						</td>
 						<td class="py-3 px-4">
 							<div class="flex items-center gap-2.5" style="padding-left: {row.depth * 16}px">

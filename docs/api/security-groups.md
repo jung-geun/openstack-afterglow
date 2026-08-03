@@ -1,7 +1,13 @@
+---
+title: 보안 그룹 (Security Groups)
+parent: API 레퍼런스
+nav_order: 53
+---
+
 # 보안 그룹 (Security Groups) API
 
 > 태그: `security-groups`  
-> 기본 경로: `/api/security-groups`
+> 기본 경로: `/api/v1/security-groups`
 
 Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크 트래픽 접근 제어에 사용됩니다.
 
@@ -11,8 +17,8 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 
 | 헤더 | 설명 |
 |------|------|
-| `X-Auth-Token` | Keystone 인증 토큰 |
-| `X-Project-Id` | OpenStack 프로젝트 UUID |
+| `Authorization` | `Bearer <access_token>` (로그인 응답의 access JWT) |
+| `X-Project-Id` | (선택) 프로젝트 UUID — 생략 시 토큰의 프로젝트로 처리, 다른 값이면 rescope |
 
 ---
 
@@ -29,11 +35,11 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/security-groups` | 보안 그룹 목록 (60초 캐시) |
-| `POST` | `/api/security-groups` | 보안 그룹 생성 |
-| `DELETE` | `/api/security-groups/{sg_id}` | 보안 그룹 삭제 |
+| `GET` | `/api/v1/security-groups` | 보안 그룹 목록 (60초 캐시) |
+| `POST` | `/api/v1/security-groups` | 보안 그룹 생성 |
+| `DELETE` | `/api/v1/security-groups/{sg_id}` | 보안 그룹 삭제 |
 
-### GET /api/security-groups
+### GET /api/v1/security-groups
 
 프로젝트의 보안 그룹 목록을 반환합니다. 응답은 60초간 캐시됩니다.
 
@@ -60,7 +66,7 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 ]
 ```
 
-### POST /api/security-groups
+### POST /api/v1/security-groups
 
 새 보안 그룹을 생성합니다.
 
@@ -80,7 +86,7 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 
 **응답 (201 Created)**
 
-### DELETE /api/security-groups/{sg_id}
+### DELETE /api/v1/security-groups/{sg_id}
 
 보안 그룹을 삭제합니다. 기본 보안 그룹은 삭제할 수 없습니다.
 
@@ -101,10 +107,10 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `POST` | `/api/security-groups/{sg_id}/rules` | 보안 그룹 규칙 추가 |
-| `DELETE` | `/api/security-groups/{sg_id}/rules/{rule_id}` | 보안 그룹 규칙 삭제 |
+| `POST` | `/api/v1/security-groups/{sg_id}/rules` | 보안 그룹 규칙 추가 |
+| `DELETE` | `/api/v1/security-groups/{sg_id}/rules/{rule_id}` | 보안 그룹 규칙 삭제 |
 
-### POST /api/security-groups/{sg_id}/rules
+### POST /api/v1/security-groups/{sg_id}/rules
 
 보안 그룹에 새 규칙을 추가합니다.
 
@@ -157,7 +163,7 @@ Neutron 보안 그룹과 규칙을 관리합니다. 인스턴스의 네트워크
 }
 ```
 
-### DELETE /api/security-groups/{sg_id}/rules/{rule_id}
+### DELETE /api/v1/security-groups/{sg_id}/rules/{rule_id}
 
 보안 그룹 규칙을 삭제합니다.
 

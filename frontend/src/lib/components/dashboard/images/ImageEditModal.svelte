@@ -2,6 +2,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import type { ImageInfo } from '$lib/types/compute';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	let {
 		target,
@@ -61,38 +62,39 @@
 	     onclick={() => { onClose(); }}
 	     role="dialog" aria-modal="true" tabindex="-1"
 	     onkeydown={(e) => e.key === 'Escape' && onClose()}>
-		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
+		<div class="bg-[var(--color-surface-raised)] border border-[var(--color-line)] rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
 		     onclick={(e) => e.stopPropagation()}
 		     role="none" onkeydown={(e) => e.stopPropagation()}>
-			<h2 class="text-lg font-semibold text-white mb-5">이미지 메타데이터 편집</h2>
+			<h2 class="text-lg font-semibold text-[var(--color-ink-0)] mb-5">이미지 메타데이터 편집</h2>
 			<div class="space-y-4">
 				<div>
-					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름
-						<input bind:value={form.name} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+					<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">이름
+						<input bind:value={form.name} type="text" class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)] mt-1.5" />
+						<span class="block text-[11px] text-[var(--color-ink-3)] mt-1">repository:tag 형식이며 tag를 생략하면 latest가 사용됩니다.</span>
 					</label>
 				</div>
 				<div>
-					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS Distro
-						<input bind:value={form.os_distro} type="text" placeholder="ubuntu, centos, rocky..." class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+					<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">OS Distro
+						<input bind:value={form.os_distro} type="text" placeholder="ubuntu, centos, rocky..." class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)] mt-1.5" />
 					</label>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div>
-						<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 디스크 (GB)
-							<input bind:value={form.min_disk} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+						<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">최소 디스크 (GB)
+							<input bind:value={form.min_disk} type="number" min="0" class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)] mt-1.5" />
 						</label>
 					</div>
 					<div>
-						<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 RAM (MB)
-							<input bind:value={form.min_ram} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+						<label class="block text-xs text-[var(--color-ink-2)] mb-1.5 uppercase tracking-wide">최소 RAM (MB)
+							<input bind:value={form.min_ram} type="number" min="0" class="w-full bg-[var(--color-surface-sunken)] border border-[var(--color-line-2)] rounded-lg px-3 py-2 text-[var(--color-ink-0)] text-sm focus:outline-none focus:border-[var(--color-accent)] mt-1.5" />
 						</label>
 					</div>
 				</div>
 			</div>
-			{#if saveError}<div class="mt-3 text-red-400 text-xs">{saveError}</div>{/if}
+			{#if saveError}<div class="mt-3 text-[var(--color-state-danger)] text-xs">{saveError}</div>{/if}
 			<div class="flex justify-end gap-3 mt-6">
-				<button onclick={() => { onClose(); }} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-				<button onclick={save} disabled={saving} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">{saving ? '저장 중...' : '저장'}</button>
+				<Button variant="ghost" size="md" onclick={onClose}>취소</Button>
+				<Button variant="accent" size="md" onclick={save} disabled={saving}>{saving ? '저장 중...' : '저장'}</Button>
 			</div>
 		</div>
 	</div>

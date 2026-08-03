@@ -6,6 +6,8 @@
 		placeholder?: string;
 		disabled?: boolean;
 		required?: boolean;
+		maxlength?: number;
+		element?: HTMLInputElement | null;
 		class?: string;
 		oninput?: (event: Event) => void;
 		onkeydown?: (event: KeyboardEvent) => void;
@@ -18,6 +20,8 @@
 		placeholder,
 		disabled = false,
 		required = false,
+		maxlength,
+		element = $bindable(null),
 		class: className = '',
 		oninput,
 		onkeydown,
@@ -25,12 +29,14 @@
 </script>
 
 <input
+	bind:this={element}
 	{id}
 	{type}
 	bind:value
 	{placeholder}
 	{disabled}
 	{required}
+	{maxlength}
 	{oninput}
 	{onkeydown}
 	class="control text-input {className}"
@@ -46,7 +52,7 @@
 		padding: 0.5rem 0.75rem;
 		font-size: 0.875rem;
 		line-height: 1.4;
-		transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+		transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard);
 	}
 	.control::placeholder { color: var(--color-ink-3); }
 	.control:focus {

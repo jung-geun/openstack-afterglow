@@ -73,7 +73,8 @@
 {:else if !summary}
 	<div class="text-red-400 text-sm">모니터링 데이터를 불러올 수 없습니다.</div>
 {:else}
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6" data-tour="admin-monitoring-summary">
+		<span class="sr-only" data-tour="admin-monitoring-summary-ready">모니터링 요약 준비됨</span>
 		<!-- Compute -->
 		<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
 			<div class="flex items-center justify-between mb-4">

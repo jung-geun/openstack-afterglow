@@ -26,6 +26,8 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
   let gpuDefaultLoading = $state(false);
   let gpuDefaultError = $state('');
   let gpuDefaultSuccess = $state('');
+  let gpuQuotaGeneration = 0;
+  let quotaGeneration = 0;
 
   const gpuQuotaMap = $derived(Object.fromEntries(gpuQuotas.map(q => [q.gpu_type, q])));
   const gpuDefaultMap = $derived(Object.fromEntries(gpuDefaults.map(q => [q.gpu_type, q.limit])));
@@ -79,25 +81,51 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
   }
 
   async function loadQuotas() {
-    if (!selectedProjectId) { quotas = null; return; }
+    const targetProjectId = selectedProjectId;
+    const requestToken = tok();
+    const requestProjectId = pid();
+    const generation = ++quotaGeneration;
+    const owns = () => generation === quotaGeneration
+      && selectedProjectId === targetProjectId
+      && tok() === requestToken
+      && pid() === requestProjectId;
+    if (!targetProjectId) { quotas = null; quotaLoading = false; return; }
     quotaLoading = true; saveError = ''; saveSuccess = '';
+    const quotaPromise = api.get<Quotas>(`/api/v1/admin/quotas/${targetProjectId}`, requestToken, requestProjectId);
+    const gpuPromise = loadGpuQuotas();
     try {
-      quotas = await api.get<Quotas>(`/api/v1/admin/quotas/${selectedProjectId}`, tok(), pid());
-    } catch { quotas = null; }
-    finally { quotaLoading = false; }
-    await loadGpuQuotas();
+      const loadedQuotas = await quotaPromise;
+      if (owns()) quotas = loadedQuotas;
+    } catch {
+      if (owns()) quotas = null;
+    } finally {
+      if (owns()) quotaLoading = false;
+    }
+    await gpuPromise;
   }
 
   async function loadGpuQuotas(opts?: { background?: boolean }) {
-    if (!selectedProjectId) { gpuQuotas = []; return; }
+    const targetProjectId = selectedProjectId;
+    const requestToken = tok();
+    const requestProjectId = pid();
+    const generation = ++gpuQuotaGeneration;
+    const owns = () => generation === gpuQuotaGeneration
+      && selectedProjectId === targetProjectId
+      && tok() === requestToken
+      && pid() === requestProjectId;
+    if (!targetProjectId) { gpuQuotas = []; gpuQuotaLoading = false; return; }
     if (!opts?.background) { gpuQuotaLoading = true; }
     gpuQuotaError = '';
     try {
-      gpuQuotas = await api.get<GpuQuota[]>(`/api/v1/admin/gpu-quotas/${selectedProjectId}`, tok(), pid());
+      const loaded = await api.get<GpuQuota[]>(`/api/v1/admin/gpu-quotas/${targetProjectId}`, requestToken, requestProjectId);
+      if (owns()) gpuQuotas = loaded;
     } catch (e) {
+      if (!owns()) return;
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 조회 실패';
       gpuQuotas = [];
-    } finally { if (!opts?.background) gpuQuotaLoading = false; }
+    } finally {
+      if (owns()) gpuQuotaLoading = false;
+    }
   }
 
   async function setGpuQuota(gpuType: string, limit: number) {

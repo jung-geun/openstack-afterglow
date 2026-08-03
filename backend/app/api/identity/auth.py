@@ -1,23 +1,40 @@
 import asyncio
+import hmac
 import logging
+import os
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import (
+    CacheMode,
     _check_session_timeout,
+    cache_mode,
     get_token_info,
     invalidate_token_cache,
 )
 from app.config import get_settings
 from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
 from app.rate_limit import limiter
-from app.services import jwt_service, keystone, login_guard, session_store
-from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+from app.services import cache, jwt_service, keystone, login_guard, session_store
+from app.services.cache import cached_call, keys, ttl_fast, ttl_normal, ttl_static
 from app.services.recent_projects import get_recent_project_ids, record_project_access
 
 _logger = logging.getLogger(__name__)
+_PROJECTS_TTL = 120  # 프로젝트 목록 캐시 2분
+
+_GITLAB_OIDC_STATE_COOKIE = "afterglow_gitlab_oidc_state"
+_GITLAB_OIDC_STATE_COOKIE_PATH = "/api/v1/auth/gitlab/callback"
+_GITLAB_OIDC_STATE_TTL_SECONDS = 600
+
+
+def _gitlab_oidc_cookie_secure(settings) -> bool:
+    return (
+        os.environ.get("AFTERGLOW_ENV", "development").strip().lower() == "production"
+        or urlsplit(getattr(settings, "public_api_base", "")).scheme == "https"
+    )
 
 
 class GroupInfo(BaseModel):
@@ -107,21 +124,24 @@ async def _prewarm_dashboard(token: str, project_id: str):
     except Exception:
         pass  # best-effort: 실패해도 로그인에는 영향 없음
 
-    # Default 네트워크 확인/생성 (프로젝트 최초 로드 시 1회)
+    # Default network provisioning remains best-effort for login latency, but
+    # never substitutes an arbitrary external network or deployment selector.
     settings = get_settings()
     if settings.default_network_enabled:
         try:
             from app.services.default_network import ensure_default_network
+            from app.services.resource_policy_store import resolve_policies
 
             conn2 = keystone.get_openstack_connection(token, project_id)
+            policies = await resolve_policies(conn=conn2, keys=("nova.default_external_network",))
             await ensure_default_network(
                 conn2,
                 project_id,
-                external_network_id=settings.default_network_external_id or None,
+                external_network_id=policies["nova.default_external_network"],
                 cidr=settings.default_network_cidr,
             )
         except Exception:
-            pass  # best-effort: 실패해도 로그인에는 영향 없음
+            _logger.warning("default network prewarm failed", exc_info=True)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -197,22 +217,28 @@ async def me(token_info: dict = Depends(get_token_info)):
 
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
-    """로그아웃: refresh 세션 삭제 + Keystone 토큰 폐기 + 검증/세션 캐시 invalidate."""
+    """Delete the refresh session, then revoke its Keystone token when one exists."""
     token = token_info["token"]
     pid = token_info.get("project_id") or "noscope"
-
-    # JWT 경로: refresh 세션 삭제
     refresh_jti = token_info.get("refresh_jti")
+    keystone_token = token if not refresh_jti else None
+
     if refresh_jti:
         try:
+            session = await session_store.get_session(refresh_jti)
+            if session and session.get("user_id") == token_info["user_id"]:
+                keystone_token = session.get("keystone_token") or None
+            elif session:
+                _logger.warning("logout session ownership mismatch (jti=%s)", refresh_jti)
             await session_store.delete_session(refresh_jti)
         except Exception:
             _logger.warning("refresh 세션 삭제 실패 (jti=%s)", refresh_jti, exc_info=True)
 
-    try:
-        await asyncio.to_thread(keystone.revoke_token, token)
-    except Exception:
-        _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
+    if keystone_token:
+        try:
+            await asyncio.to_thread(keystone.revoke_token, keystone_token)
+        except Exception:
+            _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
     await invalidate_token_cache(token, pid)
     return {"message": "로그아웃 완료"}
 
@@ -376,11 +402,22 @@ async def list_my_groups(token_info: dict = Depends(get_token_info)):
 
 
 @router.get("/projects", response_model=list[ProjectInfo])
-async def list_projects(token_info: dict = Depends(get_token_info)):
+async def list_projects(
+    token_info: dict = Depends(get_token_info),
+    cm: CacheMode = Depends(cache_mode),
+):
     """사용자가 접근 가능한 프로젝트 목록 반환."""
+    user_id = token_info["user_id"]
+    key = keys.user_key(user_id, "projects")
     try:
-        projects = keystone.list_projects(token_info["token"])
-        return [ProjectInfo(**p) for p in projects]
+        data = await cache.cached_call(
+            key,
+            _PROJECTS_TTL,
+            lambda: keystone.list_projects(token_info["token"]),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
+        )
+        return [ProjectInfo(**p) for p in data]
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 
@@ -428,27 +465,41 @@ async def gitlab_enabled():
 
 
 @gitlab_router.get("/gitlab/authorize")
-async def gitlab_authorize():
-    """GitLab OAuth2 인증 URL 반환."""
+async def gitlab_authorize(response: Response):
+    """GitLab OAuth2 authorization URL and browser-bound state cookie."""
     settings = get_settings()
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
-    from app.services.gitlab_oidc import get_authorize_url
+    from app.services.gitlab_oidc import create_authorization_request
 
     try:
-        url = await get_authorize_url()
+        authorization = await create_authorization_request()
     except Exception:
         raise HTTPException(status_code=500, detail="GitLab 인증 URL 생성 실패")
-    return {"authorize_url": url}
+    response.set_cookie(
+        key=_GITLAB_OIDC_STATE_COOKIE,
+        value=authorization.state,
+        max_age=_GITLAB_OIDC_STATE_TTL_SECONDS,
+        httponly=True,
+        secure=_gitlab_oidc_cookie_secure(settings),
+        samesite="lax",
+        path=_GITLAB_OIDC_STATE_COOKIE_PATH,
+    )
+    return {"authorize_url": authorization.url}
 
 
 @gitlab_router.post("/gitlab/callback", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def gitlab_callback(request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
-    """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""
+async def gitlab_callback(
+    request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks, response: Response
+):
+    """GitLab OAuth2 콜백: browser-bound authorization code로 Keystone 토큰 발급."""
     settings = get_settings()
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
+    browser_state = request.cookies.get(_GITLAB_OIDC_STATE_COOKIE, "")
+    if not browser_state or not hmac.compare_digest(browser_state, req.state):
+        raise HTTPException(status_code=401, detail="GitLab 인증 상태가 현재 브라우저와 일치하지 않습니다")
     from app.services.gitlab_oidc import exchange_code
 
     try:
@@ -461,7 +512,7 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
     background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
-    return await _build_token_response(
+    token_response = await _build_token_response(
         keystone_token=data["token"],
         project_id=data["project_id"],
         project_name=data["project_name"],
@@ -472,3 +523,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         auth_method="federated",
         default_project_id=data.get("default_project_id", "") or "",
     )
+    response.delete_cookie(key=_GITLAB_OIDC_STATE_COOKIE, path=_GITLAB_OIDC_STATE_COOKIE_PATH)
+    return token_response

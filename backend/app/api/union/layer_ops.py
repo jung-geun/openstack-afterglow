@@ -453,25 +453,14 @@ async def _validate_profile_publication(session, profile) -> None:
 
 
 async def _artifact_lineage_rows(session, row) -> list[object]:
-    """직계 부모 row부터 parent_id 체인을 따라 artifact lineage를 반환한다."""
-    from app.models.db import LayerArtifact
+    """직계 부모 row부터 parent_id 체인을 따라 artifact lineage를 반환한다(child-first).
 
-    lineage: list[object] = []
-    seen_ids: set[int] = set()
-    current = row
-    while current is not None:
-        artifact_id = getattr(current, "id", None)
-        if not isinstance(artifact_id, int) or artifact_id in seen_ids:
-            break
-        lineage.append(current)
-        seen_ids.add(artifact_id)
-        parent_id = getattr(current, "parent_id", None)
-        if parent_id is None:
-            break
-        if not isinstance(parent_id, int):
-            break
-        current = await session.get(LayerArtifact, parent_id)
-    return lineage
+    구현은 `palimpsest_layers.load_lineage` 하나로 통일한다 — 허브 번들과 chain_id 계산이
+    같은 순회를 쓰므로 계보 해석이 두 벌 존재하면 안 된다.
+    """
+    from app.services.palimpsest_layers import load_lineage
+
+    return await load_lineage(session, row)
 
 
 def _validate_build_parent_contract(req: LayerBuildRequest, parent_row, lineage: list[object]) -> None:
@@ -829,13 +818,12 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
         req.flavor_id,
     )
 
-    from app.config import get_settings
     from app.database import get_session_factory
     from app.models.db import LayerConsume
-    from app.services.layer_build import run_layer_consume
-
-    settings = get_settings()
-    ro_share_id = settings.union_layer_store_ro_share_id or ""
+    from app.services.layer_build import (
+        resolve_layer_consume_resource_snapshot,
+        run_layer_consume,
+    )
 
     try:
         ssh_public_key: str | None = req.ssh_public_key or None
@@ -851,6 +839,11 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
             ssh_public_key = getattr(kp, "public_key", None) or ""
             if not ssh_public_key:
                 raise RuntimeError(f"선택한 키페어의 공개키를 조회할 수 없습니다: {req.key_name!r}")
+        resource_snapshot = await resolve_layer_consume_resource_snapshot(
+            conn,
+            flavor_ref=req.flavor_id,
+            network_id=req.network_id,
+        )
 
         # DB 레코드 생성
         consume_db_id: int | None = None
@@ -860,7 +853,8 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
                 row = LayerConsume(
                     profile_name=req.profile_name,
                     server_name=req.server_name,
-                    share_id=ro_share_id,
+                    artifact_ids=None,
+                    resource_snapshot=resource_snapshot,
                     status="creating",
                 )
                 session.add(row)
@@ -877,6 +871,7 @@ async def trigger_layer_consume(req: LayerConsumeRequest, conn=Depends(get_os_co
             network_id=req.network_id,
             ssh_public_key=ssh_public_key,
             ssh_username=req.ssh_username,
+            resource_snapshot=resource_snapshot,
         )
         return {"consume_id": consume_db_id, "server_id": server_id, "status": "active"}
     except RuntimeError as e:

@@ -25,14 +25,15 @@
 		class: className = '',
 	}: Props = $props();
 
+	const rawPercent = $derived(percent ?? (max && max > 0 && value != null ? (value / max) * 100 : 0));
 	const pct = $derived(
-		Math.max(
-			0,
-			Math.min(100, Math.round(percent ?? (max && max > 0 && value != null ? (value / max) * 100 : 0))),
-		),
+		Number.isFinite(rawPercent)
+			? Math.max(0, Math.min(100, Math.round(rawPercent)))
+			: 0,
 	);
 	const tone = $derived(usageTone(pct, thresholds));
-	const valueText = $derived(value == null ? `${pct}%` : unit ? `${value}${unit}` : `${value}`);
+	const isUnlimited = $derived(max === -1);
+	const valueText = $derived(value == null ? '' : unit ? `${value}${unit}` : `${value}`);
 	const maxText = $derived(max === -1 ? '무제한' : max == null ? '' : unit ? `${max}${unit}` : `${max}`);
 </script>
 
@@ -44,14 +45,22 @@
 			{/if}
 			{#if showValue}
 				<span class="usage-value">
-					<span class="usage-current">{valueText}</span>{#if maxText} / {maxText}{/if}
-					<span class="usage-percent">{pct}%</span>
+					{#if value != null}
+						<span class="usage-current">{valueText}</span>{#if maxText} / {maxText}{/if}
+					{:else if isUnlimited}
+						<span class="usage-current">무제한</span>
+					{/if}
+					{#if !isUnlimited}
+						<span class="usage-percent">{pct}%</span>
+					{/if}
 				</span>
 			{/if}
 		</div>
 	{/if}
-	<div class="usage-track">
-		<div class="usage-fill usage-fill-{tone}" style={`width: ${pct}%`}></div>
+	<div class="usage-track" class:usage-track-unlimited={isUnlimited}>
+		{#if !isUnlimited}
+			<div class="usage-fill usage-fill-{tone}" style={`width: ${pct}%`}></div>
+		{/if}
 	</div>
 </div>
 
@@ -90,13 +99,17 @@
 		border-radius: 999px;
 		background: var(--color-surface-sunken);
 	}
+	.usage-track-unlimited {
+		border: 1px dashed var(--color-line-2);
+		background: var(--color-surface-base);
+	}
 	.usage-size-xs .usage-track { height: 0.25rem; }
 	.usage-size-sm .usage-track { height: 0.375rem; }
 	.usage-size-md .usage-track { height: 0.5rem; }
 	.usage-fill {
 		height: 100%;
 		border-radius: inherit;
-		transition: width 0.2s ease;
+		transition: width var(--motion-duration-base) var(--motion-ease-standard);
 	}
 	.usage-fill-accent { --usage-tone: var(--color-accent); background: var(--gradient-usage); }
 	.usage-fill-warning { --usage-tone: var(--color-state-warning); background: var(--gradient-usage-warning); }

@@ -8,6 +8,19 @@ import pytest
 from app.models.compute import InstanceInfo
 
 
+@pytest.fixture(autouse=True)
+def _resolve_default_placement_policies(monkeypatch):
+    """Keep no-library flow tests independent of placement policy storage."""
+
+    async def resolve_zones(_conn, _requested_zone):
+        return "", ""
+
+    monkeypatch.setattr(
+        "app.api.compute.instances.instance_orch.resolve_availability_zones",
+        resolve_zones,
+    )
+
+
 def _make_flavor(is_gpu: bool = False):
     f = MagicMock()
     f.id = "flavor-1"

@@ -106,7 +106,7 @@
     border-radius: 1rem;
     background: var(--color-surface-raised);
     padding: 1.125rem;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard);
   }
   :global(a:hover) > .stat-tile,
   :global(a:focus-visible) > .stat-tile {
@@ -189,7 +189,7 @@
   .progress-bar {
     height: 0.25rem;
     border-radius: 999px;
-    transition: width 0.2s ease;
+    transition: width var(--motion-duration-base) var(--motion-ease-standard);
   }
   .icon-chip {
     width: 2.5rem;

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.layer_ubuntu import layer_image_id_for_ubuntu_base, normalize_ubuntu_base
+from app.services.layer_ubuntu import normalize_ubuntu_base
 
 IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _NAME_UBUNTU_RE = re.compile(r"ubuntu[^0-9]*(18\.04|20\.04|22\.04|24\.04)", re.IGNORECASE)
@@ -135,18 +135,9 @@ def resolve_base_image_snapshot(conn: Any, base_image_id: str, expected_ubuntu_b
 
 
 def legacy_snapshot_for_ubuntu_base(settings: Any, ubuntu_base: str | None) -> dict:
-    """Infer legacy base image metadata for rows created before base_image_id existed."""
+    """Reject legacy rows until the one-time importer records their exact image."""
     base = normalize_ubuntu_base(ubuntu_base)
-    image_id = layer_image_id_for_ubuntu_base(settings, base)
-    return {
-        "base_image_id": image_id,
-        "base_image_name": None,
-        "base_image_checksum": None,
-        "base_image_os_hash_algo": None,
-        "base_image_os_hash_value": None,
-        "base_image_min_disk": None,
-        "base_image_visibility": None,
-        "base_image_owner": None,
-        "ubuntu_base": base,
-        "source_metadata": {"inferred_legacy_base_image": True},
-    }
+    raise RuntimeError(
+        f"legacy layer artifact for {base} has no base-image snapshot; "
+        "run import_runtime_infrastructure_settings.py --legacy-base-image before consuming it"
+    )

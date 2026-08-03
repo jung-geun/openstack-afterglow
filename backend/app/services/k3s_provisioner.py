@@ -37,20 +37,26 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
         return
 
     s = get_settings()
-    agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
-    if not agent_flavor_id:
-        _logger.error("k3s agent provision: agent_flavor_id not configured")
-        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", "에이전트 플레이버 미설정")
-        return
+    resource_snapshot = cluster.get("resource_policy_snapshot") or {}
+    from app.services import k3s_plugins
 
-    network_id = cluster.get("network_id") or s.default_network_id
+    plugin_settings = k3s_plugins.with_resource_policy_snapshot(s, resource_snapshot)
+    agent_flavor_id = cluster.get("agent_flavor_id") or ""
+    network_id = cluster.get("network_id") or ""
     ssh_public_key = cluster.get("ssh_public_key") or None
     cluster_name = cluster.get("name") or cluster_id
-    k3s_version = cluster.get("k3s_version") or s.k3s_version
+    k3s_version = cluster.get("k3s_version") or ""
     os_type = cluster.get("os_type") or "ubuntu"
-    image_id = s.k3s_fcos_image_id if os_type == "fcos" else s.k3s_server_image_id
+    image_id = (resource_snapshot.get("effective_agent_image") or {}).get("id") or cluster.get("server_image_id") or ""
+    volume_availability_zone = (resource_snapshot.get("cinder.default_volume_availability_zone") or {}).get("id") or ""
     boot_volume_size = s.k3s_boot_volume_size_gb
     sg_id = cluster.get("security_group_id") or None
+    if not all((agent_flavor_id, network_id, k3s_version, image_id, volume_availability_zone)):
+        _logger.error("k3s agent provision: creation-time resource snapshot is incomplete")
+        await k3s_cluster.update_cluster_status(
+            project_id, cluster_id, "ERROR", "생성 시점 리소스 스냅샷이 불완전합니다"
+        )
+        return
 
     try:
         conn = keystone.get_admin_connection_for_project(project_id)
@@ -67,11 +73,15 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
         agent_name = f"{cluster_name}-{_rand_suffix()}"
         try:
             vol = await asyncio.to_thread(
-                cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
+                cinder.create_volume_from_image,
+                conn,
+                f"{agent_name}-boot",
+                image_id,
+                boot_volume_size,
+                volume_availability_zone,
             )
-            from app.services import k3s_plugins
+            _agent_args = k3s_plugins.aggregate_agent_args(plugin_settings)
 
-            _agent_args = k3s_plugins.aggregate_agent_args(s)
             if not _agent_args and cluster.get("occm_enabled"):
                 _agent_args = ["--kubelet-arg=cloud-provider=external"]
             agent_userdata = k3s_cloudinit.generate_agent_userdata(
@@ -80,6 +90,7 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
                 server_ip=server_ip,
                 node_token=node_token,
                 ssh_public_key=ssh_public_key,
+                primary_network_id=network_id,
                 extra_agent_args=_agent_args,
                 os_type=os_type,
             )
@@ -140,7 +151,7 @@ async def bootstrap_ha_servers(
     각 서버는 콜백 토큰을 통해 조인을 신고하고, 마지막 서버 콜백 후 provision_agents가 실행된다.
     """
     from app.config import get_settings
-    from app.services import cinder, k3s_cloudinit, keystone, nova, octavia
+    from app.services import cinder, k3s_cloudinit, k3s_plugins, keystone, nova, octavia
 
     s = get_settings()
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
@@ -148,16 +159,22 @@ async def bootstrap_ha_servers(
         _logger.error("HA bootstrap: cluster %s not found", cluster_id)
         return
 
+    resource_snapshot = cluster.get("resource_policy_snapshot") or {}
+    plugin_settings = k3s_plugins.with_resource_policy_snapshot(s, resource_snapshot)
     cluster_name = cluster.get("name") or cluster_id
-    k3s_version = cluster.get("k3s_version") or s.k3s_version
+    k3s_version = cluster.get("k3s_version") or ""
     os_type = cluster.get("os_type") or "ubuntu"
-    image_id = s.k3s_fcos_image_id if os_type == "fcos" else s.k3s_server_image_id
+    image_id = cluster.get("server_image_id") or ""
     boot_volume_size = s.k3s_boot_volume_size_gb
-    server_flavor_id = cluster.get("server_flavor_id") or s.k3s_server_flavor_id
-    network_id = cluster.get("network_id") or s.default_network_id
+    server_flavor_id = cluster.get("server_flavor_id") or ""
+    network_id = cluster.get("network_id") or ""
+    volume_availability_zone = (resource_snapshot.get("cinder.default_volume_availability_zone") or {}).get("id") or ""
     sg_id = cluster.get("security_group_id") or None
     key_name = cluster.get("key_name") or None
     callback_url = s.k3s_callback_base_url.rstrip("/")
+    if not all((k3s_version, image_id, server_flavor_id, network_id, volume_availability_zone)):
+        _logger.error("HA bootstrap: creation-time resource snapshot is incomplete")
+        return
 
     # HA 조인 URL: LB FIP 우선, 없으면 server#1 IP
     join_url = f"https://{lb_fip_address or server_ip}:6443"
@@ -187,11 +204,9 @@ async def bootstrap_ha_servers(
         _logger.warning("HA: failed to add server#1 to LB pool: %s", e)
 
     # server#2, server#3 생성
-    from app.services import k3s_plugins
-
-    cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
-    extra_server_args = k3s_plugins.aggregate_server_args(s)
-    extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, cluster_name, s)
+    cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, plugin_settings)
+    extra_server_args = k3s_plugins.aggregate_server_args(plugin_settings)
+    extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, cluster_name, plugin_settings)
 
     for idx in range(2, master_count + 1):
         server_suffix = _rand_suffix()
@@ -207,6 +222,7 @@ async def bootstrap_ha_servers(
                 f"{server_vm_name}-boot",
                 image_id,
                 boot_volume_size,
+                volume_availability_zone,
             )
 
             userdata_result = k3s_cloudinit.generate_server_userdata(
@@ -214,6 +230,7 @@ async def bootstrap_ha_servers(
                 k3s_version=k3s_version,
                 callback_url=callback_url,
                 callback_token=ha_token,
+                primary_network_id=network_id,
                 cloud_conf=cloud_conf,
                 extra_server_args=extra_server_args,
                 extra_write_files=extra_write_files,

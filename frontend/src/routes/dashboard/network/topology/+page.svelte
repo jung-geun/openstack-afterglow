@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -23,14 +23,44 @@
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
 	let selectedLB = $state<TopologyLoadBalancer | null>(null);
+	let intentTimer: ReturnType<typeof setTimeout> | null = null;
+	let intentController: AbortController | null = null;
 
 	// 토폴로지 선택 상태를 부모에서 파생 (패널 닫을 때 자동 highlight 해제)
 	const topologySelectedId = $derived(
 		selectedInstanceId ?? selectedRouterId ?? selectedLB?.id ?? null
 	);
 
+	function cancelIntent() {
+		clearTimeout(intentTimer ?? undefined);
+		intentTimer = null;
+		intentController?.abort();
+		intentController = null;
+	}
+
+	function scheduleIntent(path: string) {
+		cancelIntent();
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		intentTimer = setTimeout(() => {
+			intentTimer = null;
+			const controller = new AbortController();
+			intentController = controller;
+			void api.prefetch(path, token, projectId, { signal: controller.signal });
+		}, 150);
+	}
+
+	function onIntentInstance(id: string) {
+		scheduleIntent(`/api/v1/instances/${id}`);
+	}
+
+	function onIntentRouter(id: string) {
+		scheduleIntent(`/api/v1/routers/${id}`);
+	}
+
 	const ar = createAutoRefresh(() => fetchTopology(), {
 		storageKey: 'dashboard-network-topology',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],
@@ -56,6 +86,7 @@
 
 	$effect(() => {
 		if (!$auth.token || !$auth.projectId) return;
+		cancelIntent();
 		untrack(() => fetchTopology());
 	});
 
@@ -86,6 +117,7 @@
 			refreshing = false;
 		}
 	}
+	onDestroy(cancelIntent);
 </script>
 
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
@@ -130,6 +162,9 @@
 					if (selectedLB?.id === lb.id) { selectedLB = null; }
 					else { selectedLB = lb; selectedInstanceId = null; selectedRouterId = null; }
 				}}
+				{onIntentInstance}
+				{onIntentRouter}
+				onCancelIntent={cancelIntent}
 			/>
 		</div>
 

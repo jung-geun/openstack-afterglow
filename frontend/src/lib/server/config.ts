@@ -10,7 +10,8 @@ const DEFAULTS: PublicSiteConfig = {
 	logo_light_path: '/logo-dark.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
-	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false, waygate: false, chat: false, mcp: false },
+	mcp_url: '',
 	runtime: {
 		api_base: 'http://localhost:8000',
 		s3_base: '',
@@ -74,6 +75,20 @@ export function deriveBrowserApiBase(app: Record<string, unknown>, env: Record<s
 	return `http://localhost:${backendPort}`;
 }
 
+
+function mcpPublicUrl(value: unknown): string {
+	const raw = stringOrEmpty(value);
+	if (!raw) return '';
+	try {
+		const url = new URL(raw);
+		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return '';
+		url.pathname = url.pathname.replace(/\/+$/, '') || '/api/v1/mcp';
+		return url.toString().replace(/\/+$/, '');
+	} catch {
+		return '';
+	}
+}
+
 let _cached: PublicSiteConfig | null = null;
 
 export function loadPublicSiteConfig(): PublicSiteConfig {
@@ -99,6 +114,7 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 		const monitoring = (toml.monitoring ?? {}) as Record<string, unknown>;
 		const chat = (toml.chat ?? {}) as Record<string, unknown>;
 		const gitlabOidc = (toml.gitlab_oidc ?? {}) as Record<string, unknown>;
+		const mcp = (toml.mcp ?? {}) as Record<string, unknown>;
 
 		_cached = {
 			site_name: String(app.site_name ?? DEFAULTS.site_name),
@@ -108,6 +124,7 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 			logo_light_path: String(app.logo_light_path ?? DEFAULTS.logo_light_path),
 			favicon_path: String(app.favicon_path ?? DEFAULTS.favicon_path),
 			refresh_interval_ms: Number(app.refresh_interval_ms ?? DEFAULTS.refresh_interval_ms),
+			mcp_url: mcpPublicUrl(mcp.public_url),
 			services: {
 				magnum: Boolean(services.magnum ?? false),
 				manila: Boolean(services.manila ?? false),
@@ -116,6 +133,9 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 				trove: Boolean(services.trove ?? false),
 				swift: Boolean(services.swift ?? false),
 				barbican: Boolean(services.barbican ?? false),
+				waygate: Boolean(services.waygate ?? false),
+				chat: Boolean(services.chat ?? false),
+				mcp: Boolean(services.mcp ?? false),
 			},
 			runtime: {
 				api_base: deriveBrowserApiBase(app),

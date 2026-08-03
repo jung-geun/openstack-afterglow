@@ -9,13 +9,17 @@ OverlayFS 구조: /opt/layers/{lower,upper,work,merged}
 """
 
 import base64
+import json
 import re
 import shlex
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from app.services import libraries as lib_svc
+from app.services.ssh_access import normalize_github_username
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
@@ -76,6 +80,44 @@ def _validate_cloudinit_inputs(file_storages: list[dict], ceph_monitors: str) ->
         raise ValueError(f"유효하지 않은 ceph_monitors 형식: {ceph_monitors!r}")
 
 
+def _encode_cloud_config(raw: str) -> str:
+    return base64.b64encode(raw.encode()).decode()
+
+
+def generate_github_ssh_userdata(github_username: str) -> str:
+    """Return base64 cloud-config importing a GitHub user's public keys."""
+    username = normalize_github_username(github_username)
+    if username is None:
+        raise ValueError("github_username이 필요합니다")
+    return _encode_cloud_config(f"#cloud-config\nssh_import_id:\n  - {json.dumps(f'gh:{username}')}\n")
+
+
+def _cloud_init_mime_part(userdata: str) -> MIMEText:
+    subtype = "x-shellscript" if userdata.lstrip().startswith("#!") else "cloud-config"
+    return MIMEText(userdata, _subtype=subtype, _charset="utf-8")
+
+
+def compose_userdata(
+    managed_userdata: str | None,
+    custom_userdata: str | None,
+    github_username: str | None = None,
+) -> str | None:
+    """Preserve arbitrary user-data; use multipart only when managed data coexists."""
+    username = normalize_github_username(github_username)
+    if managed_userdata is None and username:
+        managed_userdata = generate_github_ssh_userdata(username)
+
+    if not custom_userdata:
+        return managed_userdata
+    if managed_userdata is None:
+        return base64.b64encode(custom_userdata.encode()).decode()
+
+    multipart = MIMEMultipart()
+    multipart.attach(_cloud_init_mime_part(base64.b64decode(managed_userdata).decode()))
+    multipart.attach(_cloud_init_mime_part(custom_userdata))
+    return base64.b64encode(multipart.as_bytes()).decode()
+
+
 def generate_userdata(
     libraries: list[str],
     strategy: str,
@@ -90,6 +132,7 @@ def generate_userdata(
     union_manifest_share_export: str | None = None,
     union_cephx_rotate_hours: int = 0,
     data_mounts: list[dict] | None = None,
+    github_username: str | None = None,
 ) -> str:
     """
     cloud-init userdata 문자열(YAML) 생성.
@@ -118,6 +161,12 @@ def generate_userdata(
                 raise ValueError(f"data_mounts: 유효하지 않은 cephx_id 형식: {cephx_id!r}")
             if cephx_key and not _CEPHX_KEY_RE.match(cephx_key):
                 raise ValueError("data_mounts: 유효하지 않은 cephx_key 형식 (base64 문자만 허용)")
+
+    github_ssh_import_id = (
+        f"gh:{normalized_github_username}"
+        if (normalized_github_username := normalize_github_username(github_username))
+        else ""
+    )
 
     resolved_libs = lib_svc.resolve_with_deps(libraries)
 
@@ -200,6 +249,7 @@ def generate_userdata(
         dcgm_exporter_version=_DCGM_EXPORTER_VERSION,
         data_mounts=_data_mounts,
         data_mounts_script=data_mounts_script,
+        github_ssh_import_id=github_ssh_import_id,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

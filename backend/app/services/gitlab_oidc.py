@@ -12,9 +12,12 @@ GitLab OIDC 인증 서비스.
 """
 
 import asyncio
+import base64
+import json as _json
 import logging
 import secrets
 import urllib.parse
+from dataclasses import dataclass
 
 import httpx
 
@@ -37,8 +40,14 @@ async def _get_redis():
     return await _cache_redis()
 
 
-async def get_authorize_url() -> str:
-    """GitLab OAuth2 authorize URL을 생성하고 state(값=nonce)를 Redis에 저장."""
+@dataclass(frozen=True)
+class AuthorizationRequest:
+    url: str
+    state: str
+
+
+async def create_authorization_request() -> AuthorizationRequest:
+    """Create an OIDC authorization request and retain its browser-bound state."""
     settings = get_settings()
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -72,7 +81,12 @@ async def get_authorize_url() -> str:
         "nonce": nonce,
     }
     query = urllib.parse.urlencode(params)
-    return f"{settings.gitlab_oidc_gitlab_url}/oauth/authorize?{query}"
+    return AuthorizationRequest(url=f"{settings.gitlab_oidc_gitlab_url}/oauth/authorize?{query}", state=state)
+
+
+async def get_authorize_url() -> str:
+    """Return the authorization URL for legacy callers."""
+    return (await create_authorization_request()).url
 
 
 async def _validate_state(state: str) -> str:
@@ -228,28 +242,23 @@ async def exchange_code(code: str, state: str) -> dict:
     해당 프로젝트로 scope, 그렇지 않으면 첫 번째 프로젝트로 fallback.
     프로젝트 목록 조회와 default_project_id 조회를 병렬로 수행한다.
     """
-    import base64
-    import json as _json
-
     expected_nonce = await _validate_state(state)
 
     tokens = await _exchange_gitlab_code(code)
 
-    # id_token nonce 검증 (replay 공격 방지)
+    # id_token nonce 검증 (replay 공격 방지). OIDC 로그인에는 서명된 JWT가 필수다.
     id_token = tokens["id_token"]
     parts = id_token.split(".")
-    if len(parts) >= 2:
-        payload_b64 = parts[1] + "=="
-        try:
-            token_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
-            token_nonce = token_payload.get("nonce")
-            if expected_nonce and token_nonce != expected_nonce:
-                raise ValueError("OIDC nonce 불일치 — 토큰 재생 공격 의심")
-        except (ValueError, KeyError):
-            raise
-        except Exception:
-            logger.warning("id_token nonce 검증 실패 (파싱 오류)", exc_info=True)
-
+    if len(parts) != 3:
+        raise ValueError("OIDC id_token 형식이 유효하지 않습니다")
+    try:
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        token_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception as exc:
+        raise ValueError("OIDC id_token nonce를 검증할 수 없습니다") from exc
+    token_nonce = token_payload.get("nonce") if isinstance(token_payload, dict) else None
+    if not isinstance(token_nonce, str) or not secrets.compare_digest(token_nonce, expected_nonce):
+        raise ValueError("OIDC nonce 불일치 — 토큰 재생 공격 의심")
     fed = await _federated_auth(id_token)
     unscoped_token = fed["token"]
     user_id = fed.get("user", {}).get("id", "")

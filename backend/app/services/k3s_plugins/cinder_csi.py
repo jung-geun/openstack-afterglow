@@ -38,7 +38,7 @@ class CinderCsiPlugin:
         return tmpl.render(
             cinder_csi_image=settings.k3s_cinder_csi_image,
             cluster_name=cluster_name,
-            default_az=settings.k3s_cinder_csi_default_az,
+            default_az=settings.resource_id("cinder.default_volume_availability_zone"),
         )
 
     def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:

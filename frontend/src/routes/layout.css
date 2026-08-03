@@ -47,6 +47,8 @@
   --color-surface-base: #0b0f17;
   --color-surface-raised: #10141d;
   --color-surface-sunken: #161b27;
+  --color-surface-scrim: rgb(0 0 0 / 60%);
+  --color-surface-scrim-soft: rgb(0 0 0 / 50%);
   /* Ink */
   --color-ink-0: #f4f6fb;
   --color-ink-1: #c8cfdc;
@@ -108,6 +110,38 @@
   --color-topology-internal: #3b82f6;
   --color-topology-router: #64748b;
   --color-topology-link: #334155;
+  /* Chat message */
+  --chat-message-gap: 0.32rem;
+  --chat-message-meta-gap: 0.35rem;
+  --chat-message-meta-inset: 0.35rem;
+  --chat-message-meta-size: 0.68rem;
+  --chat-message-radius: 1rem;
+  --chat-message-directional-corner: 0.3rem;
+  --chat-message-padding-block: 0.75rem;
+  --chat-message-padding-inline: 1rem;
+  --chat-message-assistant-max-inline: 52rem;
+  --chat-message-user-max-inline: 42rem;
+  /* Scrollbar */
+  --scrollbar-size: 0.625rem;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: color-mix(in oklab, var(--color-ink-3) 58%, var(--color-surface-base));
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--color-ink-2) 72%, var(--color-surface-base));
+  /* Overlay stacking */
+  --z-sidebar: 30;
+  --z-panel: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-command: 200;
+  --z-popover: 210;
+  /* Motion */
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-panel: 300ms;
+  --motion-duration-data: 500ms;
+  --motion-duration-status-pulse: 1400ms;
+  --motion-ease-standard: ease;
+  --motion-ease-out: ease-out;
+  --motion-ease-in-out: ease-in-out;
 }
 
 /* Design system utility classes */
@@ -140,6 +174,8 @@ body {
   --color-state-danger: #dc2626;
   --color-state-info: #2563eb;
   --color-state-neutral: #64748b;
+  --color-surface-scrim: rgb(0 0 0 / 25%);
+  --color-surface-scrim-soft: rgb(0 0 0 / 20%);
   --warm-soft: color-mix(in oklab, var(--color-warm) 10%, transparent);
   --warm-ring: color-mix(in oklab, var(--color-warm) 35%, transparent);
   --color-action-on-accent: #ffffff;
@@ -216,9 +252,29 @@ body {
   color: #0f172a;
 }
 
-/* 스크롤바 (라이트 모드) */
-:root.light ::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
-:root.light ::-webkit-scrollbar-track { background-color: #f1f5f9; }
+/* Scrollbars */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+}
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid var(--scrollbar-track);
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
 
 /* ============================================================
    라이트 모드 - 상태 배지 색상 (다크 배경 의존 → 라이트 전환)
@@ -558,3 +614,45 @@ body {
 .plate-graphic .ps-accent { stroke: var(--color-accent); }
 .plate-graphic .ps-violet { stroke: var(--color-accent-2); }
 .plate-graphic .ps-green { stroke: var(--color-state-success); }
+
+/* Shared selectable resource treatment. */
+.resource-selection-surface[data-selected='true'] {
+  background-color: var(--accent-soft);
+}
+
+/* Keeps content reachable above the fixed bulk-selection overlay. */
+.bulk-selection-page {
+  padding-bottom: max(7rem, calc(7rem + env(safe-area-inset-bottom)));
+}
+
+@media (min-width: 768px) {
+  .bulk-selection-page {
+    padding-bottom: max(8rem, calc(8rem + env(safe-area-inset-bottom)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0.01ms;
+    --motion-duration-base: 0.01ms;
+    --motion-duration-panel: 0.01ms;
+    --motion-duration-data: 0.01ms;
+    --motion-duration-status-pulse: 0.01ms;
+    --default-transition-duration: 0.01ms;
+    --default-animation-duration: 0.01ms;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}

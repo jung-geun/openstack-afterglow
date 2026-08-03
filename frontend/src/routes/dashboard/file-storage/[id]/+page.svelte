@@ -7,6 +7,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createCoalescedRefresh } from '$lib/utils/coalescedRefresh';
 	import type { FileStorage, AccessRule } from '$lib/types/fileStorage';
 	import FileStorageHeader from '$lib/components/dashboard/file-storage/[id]/FileStorageHeader.svelte';
 	import FileStorageInfoCard from '$lib/components/dashboard/file-storage/[id]/FileStorageInfoCard.svelte';
@@ -25,30 +26,48 @@
 	let ruleError = $state('');
 	let revokingId = $state<string | null>(null);
 
+	const refresh = createCoalescedRefresh(async (force) => {
+		const id = $page.params.id ?? '';
+		if (!id) return;
+		await Promise.allSettled([
+			fetchFileStorage(id, force ? { refresh: true } : undefined),
+			fetchAccessRules(id, force ? { refresh: true } : undefined),
+		]);
+	});
 	const ar = createAutoRefresh(
-		async () => { const id = $page.params.id ?? ''; await Promise.all([fetchFileStorage(id), fetchAccessRules(id)]); },
-		{ storageKey: 'dashboard-file-storage-detail', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
+		() => refresh.run(false),
+		{ storageKey: 'dashboard-file-storage-detail', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60], invokeOnMount: false }
 	);
 
 	$effect(() => {
 		const id = $page.params.id;
 		if (!id || !$auth.token) return;
-		untrack(() => { fetchFileStorage(id); fetchAccessRules(id); });
+		untrack(() => void refresh.run(false));
 	});
 
-	async function fetchFileStorage(id: string) {
+	async function fetchFileStorage(id: string, opts?: { refresh?: boolean }) {
 		loading = true; error = '';
 		try {
-			fileStorage = await api.get<FileStorage>(`/api/v1/file-storage/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			fileStorage = await api.get<FileStorage>(
+				`/api/v1/file-storage/${id}`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined,
+				opts
+			);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally { loading = false; }
 	}
 
-	async function fetchAccessRules(id: string) {
+	async function fetchAccessRules(id: string, opts?: { refresh?: boolean }) {
 		accessLoading = true;
 		try {
-			accessRules = await api.get<AccessRule[]>(`/api/v1/file-storage/${id}/access-rules`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			accessRules = await api.get<AccessRule[]>(
+				`/api/v1/file-storage/${id}/access-rules`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined,
+				opts
+			);
 		} catch { accessRules = []; } finally { accessLoading = false; }
 	}
 
@@ -60,7 +79,7 @@
 			await api.post(`/api/v1/file-storage/${fileStorage.id}/access-rules`,
 				{ access_to: form.access_to.trim(), access_level: form.access_level, access_type },
 				$auth.token ?? undefined, $auth.projectId ?? undefined);
-			await fetchAccessRules(fileStorage.id);
+			await refresh.invalidate();
 			return true;
 		} catch (e) { ruleError = e instanceof ApiError ? e.message : '생성 실패'; return false; }
 		finally { addingRule = false; }
@@ -71,7 +90,7 @@
 		revokingId = accessId;
 		try {
 			await api.delete(`/api/v1/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
-			await fetchAccessRules(fileStorage.id);
+			await refresh.invalidate();
 		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { revokingId = null; }
 	}
@@ -102,7 +121,7 @@
 			bind:arActive={ar.active}
 			bind:arInterval={ar.intervalSeconds}
 			arIntervalOptions={ar.intervalOptions}
-			onManualRefresh={() => { const id = $page.params.id ?? ''; fetchFileStorage(id); fetchAccessRules(id); }}
+			onManualRefresh={() => refresh.run(true)}
 			onDelete={deleteFileStorage}
 		/>
 		<FileStorageInfoCard {fileStorage} />

@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _get_settings():
-    """config.toml + 환경변수에서 설정 로드."""
+    """afterglow.conf + 환경변수에서 설정 로드."""
     from app.config import get_settings
 
     return get_settings()

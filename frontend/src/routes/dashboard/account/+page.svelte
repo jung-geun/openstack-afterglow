@@ -6,6 +6,7 @@
   import ActivitySection from '$lib/components/account/ActivitySection.svelte';
   import SecuritySection from '$lib/components/account/SecuritySection.svelte';
   import BetaFeaturesSection from '$lib/components/account/BetaFeaturesSection.svelte';
+  import McpAccessSection from '$lib/components/account/McpAccessSection.svelte';
 </script>
 
 <div class="p-4 md:p-8 max-w-5xl">
@@ -37,6 +38,9 @@
     </div>
     <div class="lg:col-span-2">
       <KeypairsSection />
+    </div>
+    <div class="lg:col-span-2">
+      <McpAccessSection />
     </div>
     <div class="lg:col-span-2">
       <ActivitySection />

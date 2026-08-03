@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import openstack
 
 from app.models.compute import FlavorInfo, InstanceInfo, IpAddress
+from app.services.image_refs import image_reference_fields
 
 _logger = logging.getLogger(__name__)
 
@@ -496,7 +497,7 @@ def get_server_image_meta(conn: openstack.connection.Connection, server_id: str)
                             "qga_enabled": str(meta.get("hw_qemu_guest_agent", "")).lower() in ("yes", "true", "1"),
                             "os_admin_user": meta.get("os_admin_user"),
                             "image_id": meta.get("image_id"),
-                            "image_name": meta.get("image_name"),
+                            "image_name": image_reference_fields(meta.get("image_name"))[0] or None,
                         }
         except Exception:
             pass
@@ -511,7 +512,7 @@ def get_server_image_meta(conn: openstack.connection.Connection, server_id: str)
             "qga_enabled": str(qga or "").lower() in ("yes", "true", "1"),
             "os_admin_user": admin_user,
             "image_id": image_id,
-            "image_name": getattr(img, "name", None),
+            "image_name": image_reference_fields(getattr(img, "name", None))[0] or None,
         }
     except Exception:
         _logger.warning("이미지 메타 조회 실패 server=%s image=%s", server_id, image_id, exc_info=True)
@@ -758,8 +759,12 @@ def _server_to_info(s) -> InstanceInfo:
         metadata=meta,
         union_libraries=meta.get("union_libraries", "").split(",") if meta.get("union_libraries") else [],
         union_strategy=meta.get("union_strategy"),
-        union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
-        union_upper_volume_id=meta.get("union_upper_volume_id"),
+        union_share_ids=[
+            share_id for share_id in meta.get("union_share_ids", "").split(",") if share_id and share_id != "none"
+        ],
+        union_upper_volume_id=(
+            meta.get("union_upper_volume_id") if meta.get("union_upper_volume_id") not in {None, "", "none"} else None
+        ),
         scheduling=meta.get("scheduling"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),

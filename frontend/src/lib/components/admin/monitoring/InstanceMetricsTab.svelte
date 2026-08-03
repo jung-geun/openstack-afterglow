@@ -73,7 +73,7 @@
 
 <div class="flex flex-col md:flex-row gap-4 h-[calc(100vh-180px)] overflow-hidden">
 	<!-- 왼쪽: 인스턴스 목록 -->
-	<div class="w-full md:w-72 flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col
+	<div data-tour="admin-monitoring-list" class="w-full md:w-72 flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col
 		{selectedInst ? 'hidden md:flex' : 'flex'}">
 		<div class="p-3 border-b border-gray-800">
 			<input
@@ -88,15 +88,17 @@
 			{#if loadingInstances && instanceList.length === 0}
 				<div class="p-4 text-gray-600 text-sm text-center">인스턴스 목록 로딩 중...</div>
 			{:else if filtered.length === 0}
-				<div class="p-4 text-gray-600 text-sm text-center">
+				<div class="p-4 text-gray-600 text-sm text-center" data-tour="admin-monitoring-list-ready">
 					{search ? '검색 결과 없음' : '인스턴스 없음'}
 				</div>
 			{:else}
-				{#each filtered as inst (inst.id)}
+				<div data-tour="admin-monitoring-list-ready"></div>
+				{#each filtered as inst, index (inst.id)}
 					<button
 						onclick={() => (selectedInst = inst)}
 						class="w-full text-left px-3 py-2.5 border-b border-gray-800 hover:bg-gray-800 transition-colors
 							{selectedInst?.id === inst.id ? 'bg-gray-800 border-l-2 border-l-blue-500 pl-2.5' : ''}"
+						data-tour={index === 0 ? 'admin-monitoring-row' : undefined}
 					>
 						<div class="flex items-center gap-2">
 							<div class="w-1.5 h-1.5 rounded-full flex-shrink-0
@@ -136,6 +138,7 @@
 				<button
 					onclick={() => (selectedInst = null)}
 					class="md:hidden mb-3 text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+					data-tour="admin-monitoring-back"
 				>
 					← 목록으로
 				</button>
@@ -151,10 +154,12 @@
 						<span class="text-xs text-gray-500">{selectedInst.flavor}</span>
 					{/if}
 				</div>
-				<MetricsPanel
-					instanceId={selectedInst.id}
-					isGpu={selectedInst.flavor.toLowerCase().startsWith('gpu.')}
-				/>
+				<div data-tour="admin-monitoring-metrics">
+					<MetricsPanel
+						instanceId={selectedInst.id}
+						isGpu={selectedInst.flavor.toLowerCase().startsWith('gpu.')}
+					/>
+				</div>
 			</div>
 		{:else}
 			<div class="flex items-center justify-center h-64 bg-gray-900 border border-gray-800 rounded-xl">

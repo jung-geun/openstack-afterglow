@@ -9,9 +9,10 @@
 		instNetBps: Map<string, { rx_bps: number; tx_bps: number }>;
 		selected: boolean;
 		onSelect: () => void;
+		dataTour?: string;
 	}
 
-	let { row = null, lbItem = null, netColors, instNetBps, selected, onSelect }: Props = $props();
+	let { row = null, lbItem = null, netColors, instNetBps, selected, onSelect, dataTour }: Props = $props();
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -56,6 +57,7 @@
 <button
 	type="button"
 	class="w-full text-left rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 relative"
+	data-tour={dataTour}
 	class:shadow-lg={selected}
 	style="
 		border-color: {selected

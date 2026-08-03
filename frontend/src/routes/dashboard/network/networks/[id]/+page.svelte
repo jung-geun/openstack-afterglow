@@ -26,6 +26,7 @@
 
 	const ar = createAutoRefresh(() => fetchNetwork($page.params.id), {
 		storageKey: 'dashboard-network-network-detail',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],

@@ -15,22 +15,53 @@ async def resolve_default_network(
     conn: openstack.connection.Connection,
     settings,
 ) -> str | None:
-    """settings 기반 default network ID를 반환. 설정 없거나 실패 시 None."""
-    if settings.default_network_enabled:
-        try:
-            from app.services.default_network import ensure_default_network as _ensure_net
+    """Apply explicit project-network precedence without selector fallbacks.
 
-            default_net = await _ensure_net(
-                conn,
-                conn._afterglow_project_id,
-                external_network_id=settings.default_network_external_id or None,
-                cidr=settings.default_network_cidr,
-            )
-            return default_net.id
-        except Exception:
-            logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
-            return settings.default_network_id or None
-    return settings.default_network_id or None
+    Callers invoke this only after an explicit request network has been checked.
+    A persisted project default wins. Automatic provisioning requires the
+    administrator-selected external network; when automatic provisioning is
+    disabled, the validated shared policy is the final fallback.
+    """
+    from app.services.default_network import ensure_default_network, get_default_network_id
+    from app.services.resource_policy_store import resolve_policies
+
+    project_id = conn._afterglow_project_id
+    project_network_id = await get_default_network_id(project_id)
+    if project_network_id:
+        network = await asyncio.to_thread(conn.network.get_network, project_network_id)
+        if network is None:
+            raise RuntimeError("project default network is unavailable")
+        return project_network_id
+
+    if settings.default_network_enabled:
+        policies = await resolve_policies(conn=conn, keys=("nova.default_external_network",))
+        default_net = await ensure_default_network(
+            conn,
+            project_id,
+            external_network_id=policies["nova.default_external_network"],
+            cidr=settings.default_network_cidr,
+        )
+        return default_net.id
+
+    policies = await resolve_policies(conn=conn, keys=("nova.default_network",))
+    return policies["nova.default_network"]
+
+
+async def resolve_availability_zones(
+    conn: openstack.connection.Connection,
+    requested_zone: str | None,
+) -> tuple[str, str]:
+    """Resolve compute and volume placement independently before side effects."""
+    if requested_zone:
+        return requested_zone, requested_zone
+
+    from app.services.resource_policy_store import resolve_policies
+
+    policies = await resolve_policies(
+        conn=conn,
+        keys=("nova.default_compute_availability_zone", "cinder.default_volume_availability_zone"),
+    )
+    return policies["nova.default_compute_availability_zone"], policies["cinder.default_volume_availability_zone"]
 
 
 async def compute_effective_security_groups(

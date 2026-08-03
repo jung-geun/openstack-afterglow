@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { wizard } from '$lib/stores/wizard';
 	import { useVmCreate } from '$lib/stores/vmCreateStore.svelte';
+	import { normalizeGithubUsername, normalizeRequestedInstanceName } from '$lib/utils/instanceCreate';
 
 	const s = useVmCreate();
 	const reviewFlavor = $derived(s.flavors.find((f: any) => f.id === $wizard.flavorId));
@@ -14,6 +15,12 @@
 			return `${e.slice(0, idx).trim()} × ${parseInt(e.slice(idx + 1)) || 1}`;
 		}).join(', ');
 	});
+	const reviewInstanceName = $derived(normalizeRequestedInstanceName($wizard.instanceName));
+	const reviewSshAccess = $derived(
+		$wizard.sshAccessMode === 'github'
+			? `GitHub: ${normalizeGithubUsername($wizard.githubUsername)}`
+			: $wizard.keyName ?? '없음',
+	);
 </script>
 
 <h2 class="text-lg font-semibold text-white mb-4">최종 확인</h2>
@@ -22,7 +29,7 @@
 	<!-- 이름 -->
 	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
 		<span class="text-xs text-gray-400 font-medium">이름</span>
-		<span class="text-sm text-white font-semibold font-mono">{$wizard.instanceName || '자동 생성'}</span>
+		<span class="text-sm text-white font-semibold font-mono">{reviewInstanceName ?? '자동 생성'}</span>
 		<button onclick={() => s.goTo(5)} class="review-edit-btn">✎ 수정</button>
 	</div>
 	<!-- 이미지 / 볼륨 -->
@@ -79,10 +86,10 @@
 		<button onclick={() => s.goTo(3)} class="review-edit-btn">✎ 수정</button>
 	</div>
 	{/if}
-	<!-- 키페어 -->
+	<!-- SSH 접근 -->
 	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
-		<span class="text-xs text-gray-400 font-medium">키페어</span>
-		<span class="text-sm text-white font-mono">{$wizard.keyName ?? '없음'}</span>
+		<span class="text-xs text-gray-400 font-medium">SSH 접근</span>
+		<span class="text-sm text-white font-mono">{reviewSshAccess}</span>
 		<button onclick={() => s.goTo(5)} class="review-edit-btn">✎ 수정</button>
 	</div>
 	{#if s.visibleStepIds.includes(4)}
@@ -168,17 +175,17 @@
 <style>
   .review-edit-btn {
     font-size: 11.5px;
-    color: rgb(156 163 175);
+    color: var(--color-ink-2);
     padding: 2px 10px;
     border-radius: 6px;
-    border: 1px solid rgb(55 65 81);
+    border: 1px solid var(--color-line-2);
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
   }
   .review-edit-btn:hover {
-    color: rgb(96 165 250);
-    border-color: rgb(29 78 216 / 0.7);
-    background: rgb(23 37 84 / 0.3);
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   }
 </style>

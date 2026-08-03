@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ from app.services import manila
 from app.services.keystone import get_service_project_connection
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[LibraryConfig])
@@ -42,6 +44,7 @@ async def list_libraries(
         )
         prebuilt_map = {s.library_name: s.id for s in prebuilt_file_storages if s.library_name}
     except Exception:
+        _logger.warning("prebuilt file-storage 목록을 조회할 수 없습니다", exc_info=True)
         prebuilt_map = {}
 
     result = []
@@ -65,13 +68,17 @@ async def list_prebuilt_file_storages(token_info: dict = Depends(get_token_info)
     """사전 빌드된 라이브러리 파일 스토리지 목록.
     service conn + include_public=True로 조회해 인증된 사용자라면 누구나 조회 가능하게 한다.
     """
-    svc_conn = await asyncio.to_thread(get_service_project_connection)
-    return await asyncio.to_thread(
-        manila.list_file_storages,
-        svc_conn,
-        {"union_type": "prebuilt"},
-        include_public=True,
-    )
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+        return await asyncio.to_thread(
+            manila.list_file_storages,
+            svc_conn,
+            {"union_type": "prebuilt"},
+            include_public=True,
+        )
+    except Exception:
+        _logger.warning("prebuilt file-storage 목록을 조회할 수 없습니다", exc_info=True)
+        return []
 
 
 class ValidateLibrariesRequest(BaseModel):

@@ -36,6 +36,8 @@ from app.models.compute import (
     AdminPasswordRequest,
     AttachInterfaceRequest,
     AttachVolumeRequest,
+    CloudInitSnippetLibrary,
+    CreateCloudInitPresetRequest,
     CreateInstanceRequest,
     InstanceInfo,
     StorageAttachRequest,
@@ -44,7 +46,7 @@ from app.models.compute import (
 )
 from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
-from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova
+from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova, vm_cloud_init_library
 from app.services import instance_orchestration as instance_orch
 from app.services import libraries as lib_svc
 from app.services.cache import (
@@ -58,6 +60,15 @@ from app.services.cache import (
 from app.services.cache import invalidation as cache_invalidation
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_cloud_init_history_best_effort(token_info: dict, userdata: str | None) -> None:
+    try:
+        await vm_cloud_init_library.record_history(user_id=token_info["user_id"], content=userdata)
+    except Exception:
+        logger.warning("cloud-init 실행 이력 저장 실패", extra={"user_id": token_info.get("user_id")})
+
+
 router = APIRouter()
 
 
@@ -142,6 +153,47 @@ async def list_availability_zones(
         raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
 
 
+@router.get("/cloud-init/library", response_model=CloudInitSnippetLibrary)
+async def list_cloud_init_library(token_info: dict = Depends(get_token_info)):
+    try:
+        return await vm_cloud_init_library.list_snippets(token_info["user_id"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/cloud-init/presets", status_code=201)
+async def save_cloud_init_preset(
+    req: CreateCloudInitPresetRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        preset = await vm_cloud_init_library.create_preset(
+            user_id=token_info["user_id"],
+            name=req.name,
+            content=req.content,
+        )
+        await invalidate(f"afterglow:vm_cloud_init:{token_info['user_id']}")
+        await cache_invalidation.invalidate_mutation_count("nova", token_info["project_id"])
+        return preset
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422 if isinstance(exc, ValueError) else 503, detail=str(exc)) from exc
+
+
+@router.delete("/cloud-init/library/{snippet_id}", status_code=204)
+async def delete_cloud_init_snippet(
+    snippet_id: int,
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        await vm_cloud_init_library.delete_snippet(user_id=token_info["user_id"], snippet_id=snippet_id)
+        await invalidate(f"afterglow:vm_cloud_init:{token_info['user_id']}")
+        await cache_invalidation.invalidate_mutation_count("nova", token_info["project_id"])
+    except vm_cloud_init_library.CloudInitSnippetNotFound as exc:
+        raise HTTPException(status_code=404, detail="cloud-init 항목을 찾을 수 없습니다") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/{instance_id}", response_model=InstanceInfo)
 async def get_instance(
     instance_id: str,
@@ -188,6 +240,10 @@ async def create_instance(
         resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
         if resolved_net_id:
             req = req.model_copy(update={"network_id": resolved_net_id})
+
+    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+        conn, req.availability_zone
+    )
 
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
@@ -250,7 +306,7 @@ async def create_instance(
                 f"{req.name}-boot",
                 req.image_id,
                 req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                req.availability_zone or settings.default_availability_zone,
+                volume_availability_zone,
             )
             boot_volume_id = boot_vol.id
             await asyncio.to_thread(
@@ -276,7 +332,7 @@ async def create_instance(
                     conn,
                     f"union-upper-{req.name}",
                     settings.upper_volume_size_gb,
-                    req.availability_zone or settings.default_availability_zone,
+                    volume_availability_zone,
                 )
                 upper_volume_id = upper_vol.id
                 created_upper = True
@@ -315,7 +371,10 @@ async def create_instance(
                 report_url=_report_url if _health_token else "",
                 report_token=_health_token,
                 data_mounts=data_mounts_info,
+                github_username=req.github_username,
             )
+
+        userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
@@ -354,7 +413,7 @@ async def create_instance(
             userdata=userdata,
             key_name=req.key_name,
             admin_pass=req.admin_pass,
-            availability_zone=req.availability_zone or settings.default_availability_zone,
+            availability_zone=compute_availability_zone,
             metadata=meta,
             delete_boot_volume_on_termination=(
                 False if boot_volume_was_provided else req.delete_boot_volume_on_termination
@@ -382,6 +441,7 @@ async def create_instance(
                     floating_ip_id = fip.id
                     await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
 
+        await _record_cloud_init_history_best_effort(token_info, req.userdata)
         await rec(
             token_info,
             conn,
@@ -472,6 +532,10 @@ async def create_instance_async(
         if resolved_net_id:
             req = req.model_copy(update={"network_id": resolved_net_id})
 
+    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+        conn, req.availability_zone
+    )
+
     async def progress_generator():
         import time
 
@@ -558,7 +622,7 @@ async def create_instance_async(
                     name=f"{req.name}-boot",
                     image_id=req.image_id,
                     size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                    availability_zone=volume_availability_zone,
                 )
                 boot_volume_id = boot_vol.id
                 await asyncio.to_thread(
@@ -585,7 +649,7 @@ async def create_instance_async(
                         conn,
                         name=f"union-upper-{req.name}",
                         size_gb=settings.upper_volume_size_gb,
-                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                        availability_zone=volume_availability_zone,
                     )
                     upper_volume_id = upper_vol.id
                     created_upper = True
@@ -614,8 +678,11 @@ async def create_instance_async(
                     report_url=_sse_report_url if _sse_health_token else "",
                     report_token=_sse_health_token,
                     data_mounts=data_mounts_info,
+                    github_username=req.github_username,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
+
+            userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
@@ -651,7 +718,7 @@ async def create_instance_async(
                 userdata=userdata,
                 key_name=req.key_name,
                 admin_pass=req.admin_pass,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
+                availability_zone=compute_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=(
                     False if boot_volume_was_provided else req.delete_boot_volume_on_termination
@@ -708,6 +775,7 @@ async def create_instance_async(
                         )
 
             # Completed
+            await _record_cloud_init_history_best_effort(token_info, req.userdata)
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
             await rec(
                 token_info,
@@ -1597,18 +1665,24 @@ async def _prepare_dynamic_file_storage(
 
     share_proto에 따라 CephFS 또는 NFS share를 생성한다.
     """
-    # 프로토콜에 따른 share type 선택
+    from app.services.resource_policy_store import resolve_policy_snapshot
+
+    policy_key = "manila.nfs_share_type" if share_proto.upper() == "NFS" else "manila.cephfs_share_type"
+    policies = await resolve_policy_snapshot(conn=conn, keys=(policy_key,))
+    share_type = policies[policy_key]["name"]
+    share_network_id = ""
     if share_proto.upper() == "NFS":
-        share_type = settings.os_manila_nfs_share_type
-    else:
-        share_type = settings.os_manila_share_type
+        raise HTTPException(
+            status_code=422,
+            detail="NFS dynamic shares require a tenant-visible share network selected by the request",
+        )
 
     file_storage = await asyncio.to_thread(
         manila.create_file_storage,
         conn,
         f"union-dyn-{instance_name}",
         settings.upper_volume_size_gb,
-        settings.os_manila_share_network_id,
+        share_network_id,
         share_type,
         share_proto,
         {

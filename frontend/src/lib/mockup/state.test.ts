@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMockupState } from './state';
+import { getMockupRevision, getMockupState, resetMockupState } from './state';
 
 describe('mockup fixture privacy', () => {
 	it('contains no production-looking identities or infrastructure values', () => {
@@ -46,5 +46,57 @@ describe('mockup fixture privacy', () => {
 		const state = getMockupState();
 		expect(state.volumes.some((volume) => volume.status === 'in-use' && volume.attachments.length > 0)).toBe(true);
 		expect(state.volumes.some((volume) => volume.status === 'available' && volume.attachments.length === 0)).toBe(true);
+	});
+
+	it('seeds complete, deterministic administrator tour relationships', () => {
+		const { admin, tutorialStatuses } = getMockupState();
+
+		expect(admin.instances.map(({ status }) => status)).toEqual(['ACTIVE', 'SHUTOFF', 'ERROR']);
+		expect(new Set(admin.instances.map(({ project_id }) => project_id)).size).toBe(3);
+		expect(admin.instances.every(({ host }) => Boolean(host))).toBe(true);
+		expect(admin.instanceTimeseries).toHaveLength(7);
+		expect(admin.volumes.map(({ status }) => status)).toEqual(['available', 'in-use', 'error']);
+		expect(Object.keys(admin.volumeDetails)).toEqual(admin.volumes.map(({ id }) => id));
+		expect(admin.volumeTimeseries).toHaveLength(7);
+
+		const artifacts = admin.library.artifacts as Array<{
+			id: number;
+			kind: string;
+			parent_id: number | null;
+			base_image_id: string;
+			lineage: Array<{ id: number }>;
+		}>;
+		expect(artifacts.map(({ kind }) => kind)).toEqual(['uv', 'python', 'pip']);
+		expect(artifacts.map(({ parent_id }) => parent_id)).toEqual([null, 101, 102]);
+		expect(artifacts[2]?.lineage.map(({ id }) => id)).toEqual([101, 102]);
+		expect(new Set(artifacts.map(({ base_image_id }) => base_image_id)).size).toBe(1);
+		expect(admin.library.profiles[0]).toMatchObject({ is_published: true });
+		expect(admin.library.builds[0]).toMatchObject({ status: 'complete' });
+		expect(admin.library.imports[0]).toMatchObject({ status: 'complete' });
+		expect(admin.library.consumes[0]).toMatchObject({ status: 'deleted', server_id: null });
+
+		expect(admin.containers.map(({ status }) => status)).toEqual(['Running', 'Stopped']);
+		expect(Object.keys(admin.containerDetails)).toEqual(admin.containers.map(({ uuid }) => uuid));
+		expect(admin.keyManagerQuotas).toHaveLength(2);
+		expect(admin.monitoringSummary.compute.instance_stats.total).toBeGreaterThan(0);
+		expect(Object.keys(admin.services)).toHaveLength(9);
+		expect(admin.services.compute[0]).toMatchObject({ binary: 'nova-compute', state: 'up' });
+		expect(admin.services.network[0]).toMatchObject({ agent_type: 'Open vSwitch agent', alive: true });
+		expect(admin.services.endpoints).toHaveLength(1);
+		expect(admin.services.storage_pools).toHaveLength(1);
+		expect(admin.users.filter(({ enabled }) => enabled)).toHaveLength(2);
+		expect(admin.users.filter(({ enabled }) => !enabled)).toHaveLength(1);
+		expect(admin.userActivity.length).toBeGreaterThanOrEqual(2);
+		expect(tutorialStatuses).toEqual({});
+	});
+});
+
+describe('mockup revision', () => {
+	it('increments every time fixture state resets', () => {
+		const before = getMockupRevision();
+		resetMockupState();
+		expect(getMockupRevision()).toBe(before + 1);
+		resetMockupState();
+		expect(getMockupRevision()).toBe(before + 2);
 	});
 });

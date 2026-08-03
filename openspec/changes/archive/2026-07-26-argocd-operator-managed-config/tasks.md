@@ -1,0 +1,5 @@
+- [x] Add ConfigMap and Secret ignoreDifferences to generated Helm Applications
+- [x] Support environment-specific dev and prod configuration profiles
+- [x] Remove obsolete Kustomize Application manifests and update deployment documentation
+- [x] Verify direct ConfigMap and Secret values survive forced ArgoCD sync in both namespaces
+- [x] Run full test and backend lint gates in an isolated worktree

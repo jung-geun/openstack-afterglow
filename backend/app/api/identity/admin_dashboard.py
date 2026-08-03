@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.services.cache import cached_call, ttl_fast, ttl_normal
+from app.services.image_refs import normalize_image_reference
 
 _logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -331,7 +332,7 @@ def _apply_action(
     elif action == "hard-reboot":
         conn.compute.reboot_server(server, reboot_type="HARD")
     elif action == "snapshot":
-        name = snapshot_name or f"snapshot-{instance_id[:8]}"
+        name = normalize_image_reference(snapshot_name or f"snapshot-{instance_id[:8]}")
         conn.compute.create_server_image(server, name=name)
     else:
         raise ValueError(f"알 수 없는 action: {action}")

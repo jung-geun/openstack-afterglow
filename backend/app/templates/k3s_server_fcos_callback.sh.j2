@@ -4,6 +4,16 @@ set -e
 export PATH="/usr/local/bin:$PATH"
 CALLBACK_URL="{{ callback_url }}"
 CALLBACK_TOKEN="{{ callback_token }}"
+PIN_ENV="/etc/rancher/k3s/afterglow-primary-network.env"
+if [ ! -r "${PIN_ENV}" ] || ! . "${PIN_ENV}" 2>/dev/null || \
+    [[ ! "${AFTERGLOW_K3S_NODE_IP:-}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || \
+    [[ ! "${AFTERGLOW_K3S_PRIMARY_IFACE:-}" =~ ^[A-Za-z0-9_.:-]{1,15}$ ]]; then
+  echo "[k3s-callback] ERROR: primary network pin missing" | tee -a /var/log/k3s-callback.log
+  curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"primary network pin missing\"}" || true
+  exit 1
+fi
 
 log() { echo "[k3s-callback] $*" | tee -a /var/log/k3s-callback.log; }
 
@@ -93,8 +103,7 @@ else
 fi
 
 {% endfor %}
-SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); break}}')
-[ -z "${SERVER_IP}" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP="${AFTERGLOW_K3S_NODE_IP}"
 KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
 # 127.0.0.1 → 실제 서버 IP로 치환
 KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")

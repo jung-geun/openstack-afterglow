@@ -1,8 +1,20 @@
+import { browser } from '$app/environment';
 import { get } from 'svelte/store';
 import { siteConfig } from '$lib/config/site';
-import { logoutInProgress } from '$lib/stores/auth';
+import { auth, logoutInProgress } from '$lib/stores/auth';
 import { ApiError } from '$lib/api/errors';
-import { maybeMockBlob, maybeMockJson, maybeMockK3sStream, symbolNoMatch } from '$lib/mockup/transport';
+import {
+	getActiveMockupProfile,
+	maybeMockBlob,
+	maybeMockJson,
+	maybeMockK3sStream,
+	symbolNoMatch,
+} from '$lib/mockup/transport';
+import {
+	getMockupRevision,
+	onMockupRevisionChange,
+} from '$lib/mockup/state';
+import type { MockupProfileId } from '$lib/mockup/contracts';
 export { ApiError } from '$lib/api/errors';
 
 function stripTrailingSlash(value: string): string {
@@ -230,9 +242,10 @@ async function request<T>(
 	token?: string,
 	projectId?: string,
 	// Fix 3: caller가 401을 직접 처리하는 경우 전역 로그아웃 리다이렉트를 억제할 수 있음
-	reqOpts?: { suppressAuthRedirect?: boolean }
+	reqOpts?: { suppressAuthRedirect?: boolean; baseUrl?: string }
 ): Promise<T> {
 	const method = (options.method ?? 'GET').toString().toUpperCase();
+	const requestBaseUrl = reqOpts?.baseUrl ?? getBaseUrl();
 	let requestBody: unknown = options.body;
 	if (typeof options.body === 'string') {
 		try { requestBody = JSON.parse(options.body); } catch { /* non-JSON body */ }
@@ -245,9 +258,10 @@ async function request<T>(
 
 	const headers = _buildHeaders(token, projectId, options.headers as Record<string, string>);
 
-	const res = await fetch(`${getBaseUrl()}${path}`, {
+	const res = await fetch(`${requestBaseUrl}${path}`, {
 		...options,
 		headers,
+		credentials: options.credentials ?? 'include',
 		signal: options.signal ?? AbortSignal.timeout(30_000),
 	});
 
@@ -257,9 +271,10 @@ async function request<T>(
 		const newToken = await tryRefresh({ allowDuringRevocation });
 		if (newToken && newToken !== token) {
 			const retryHeaders = _buildHeaders(newToken, projectId, options.headers as Record<string, string>);
-			const retry = await fetch(`${getBaseUrl()}${path}`, {
+			const retry = await fetch(`${requestBaseUrl}${path}`, {
 				...options,
 				headers: retryHeaders,
+				credentials: options.credentials ?? 'include',
 				signal: options.signal ?? AbortSignal.timeout(30_000),
 			});
 			if (retry.ok) {
@@ -302,62 +317,508 @@ async function request<T>(
 // 브라우저 세션 내 인메모리 캐시 (SWR용)
 export const memoryCache = new Map<string, { data: unknown; timestamp: number }>();
 
+export interface PrefetchOptions {
+	ttlMs?: number;
+	signal?: AbortSignal;
+	suppressAuthRedirect?: boolean;
+}
+
+export interface PrefetchInvalidation {
+	token?: string;
+	projectId?: string;
+	path?: string;
+}
+
+interface RequestScope {
+	baseUrl: string;
+	token: string | undefined;
+	projectId: string | undefined;
+	mockProfile: MockupProfileId | null;
+	mockRevision: number;
+	key: string;
+}
+
+interface FamilyMetadata {
+	scope: RequestScope;
+	logicalUrl: string;
+}
+
+interface WarmEntry {
+	snapshot: unknown;
+	expiresAt: number;
+}
+
+interface OrdinaryPending {
+	raw: Promise<unknown>;
+	joined: boolean;
+	snapshotReady: boolean;
+	snapshot: unknown;
+	cloneFailed: boolean;
+	retry: () => Promise<unknown>;
+}
+
+const MAX_WARM_ENTRIES = 64;
+const MAX_SPECULATIVE_LEADERS = 64;
+const DEFAULT_PREFETCH_TTL_MS = 30_000;
+
+const warmEntries = browser ? new Map<string, WarmEntry>() : null;
+const ordinaryPending = browser ? new Map<string, OrdinaryPending>() : null;
+const sharedSpeculativePending = browser ? new Map<string, Promise<void>>() : null;
+const activeSpeculativeLeaders = browser ? new Set<Promise<void>>() : null;
+const familyEpochs = browser ? new Map<string, number>() : null;
+const familyMetadata = browser ? new Map<string, FamilyMetadata>() : null;
+const familyActiveCounts = browser ? new Map<string, number>() : null;
+
+function captureRequestScope(token?: string, projectId?: string): RequestScope {
+	const baseUrl = getBaseUrl();
+	const mockProfile = getActiveMockupProfile();
+	const mockRevision = getMockupRevision();
+	return {
+		baseUrl,
+		token,
+		projectId,
+		mockProfile,
+		mockRevision,
+		key: JSON.stringify([baseUrl, token ?? null, projectId ?? null, mockProfile, mockRevision]),
+	};
+}
+
+function normalizeGetPath(
+	path: string,
+	scope: RequestScope,
+	forceRefresh = false,
+): { logicalUrl: string; requestPath: string; refresh: boolean } {
+	const url = new URL(path, `${scope.baseUrl}/`);
+	const refresh = forceRefresh || url.searchParams.getAll('refresh').includes('true');
+	url.searchParams.delete('cache');
+	url.searchParams.delete('refresh');
+	const logicalQuery = url.searchParams.toString();
+	const logicalUrl = `${url.origin}${url.pathname}${logicalQuery ? `?${logicalQuery}` : ''}`;
+	url.searchParams.append(refresh ? 'refresh' : 'cache', 'true');
+	return {
+		logicalUrl,
+		requestPath: `${url.pathname}${url.search}`,
+		refresh,
+	};
+}
+
+function registerFamily(scope: RequestScope, logicalUrl: string): string {
+	const familyKey = JSON.stringify([scope.key, logicalUrl]);
+	familyMetadata?.set(familyKey, { scope, logicalUrl });
+	return familyKey;
+}
+
+function advanceFamilyEpoch(familyKey: string): number {
+	if (!familyEpochs) return 0;
+	const next = (familyEpochs.get(familyKey) ?? 0) + 1;
+	familyEpochs.set(familyKey, next);
+	return next;
+}
+
+function pruneFamily(familyKey: string): void {
+	if ((familyActiveCounts?.get(familyKey) ?? 0) > 0 || warmEntries?.has(familyKey)) return;
+	familyActiveCounts?.delete(familyKey);
+	familyEpochs?.delete(familyKey);
+	familyMetadata?.delete(familyKey);
+}
+
+function retainFamily(familyKey: string): void {
+	if (!familyActiveCounts) return;
+	familyActiveCounts.set(familyKey, (familyActiveCounts.get(familyKey) ?? 0) + 1);
+}
+
+function releaseFamily(familyKey: string): void {
+	if (!familyActiveCounts) return;
+	const remaining = (familyActiveCounts.get(familyKey) ?? 1) - 1;
+	if (remaining > 0) familyActiveCounts.set(familyKey, remaining);
+	else familyActiveCounts.delete(familyKey);
+	pruneFamily(familyKey);
+}
+
+function trackFamilyDispatch<T>(familyKey: string, promise: Promise<T>): Promise<T> {
+	retainFamily(familyKey);
+	return promise.finally(() => releaseFamily(familyKey));
+}
+
+function invalidateExactScope(scope: RequestScope): void {
+	if (!familyMetadata) return;
+	for (const [familyKey, metadata] of familyMetadata) {
+		if (metadata.scope.key !== scope.key) continue;
+		warmEntries?.delete(familyKey);
+		advanceFamilyEpoch(familyKey);
+		pruneFamily(familyKey);
+	}
+}
+
+export function clearPrefetchCache(opts: PrefetchInvalidation = {}): void {
+	if (!familyMetadata) return;
+	const hasToken = Object.prototype.hasOwnProperty.call(opts, 'token');
+	const hasProject = Object.prototype.hasOwnProperty.call(opts, 'projectId');
+	const pathLogicalUrl = opts.path
+		? normalizeGetPath(opts.path, captureRequestScope(), false).logicalUrl
+		: null;
+	for (const [familyKey, metadata] of familyMetadata) {
+		if (hasToken && metadata.scope.token !== opts.token) continue;
+		if (hasProject && metadata.scope.projectId !== opts.projectId) continue;
+		if (pathLogicalUrl !== null && metadata.logicalUrl !== pathLogicalUrl) continue;
+		warmEntries?.delete(familyKey);
+		advanceFamilyEpoch(familyKey);
+		pruneFamily(familyKey);
+	}
+}
+
+function validWarmEntry(familyKey: string): WarmEntry | null {
+	const entry = warmEntries?.get(familyKey);
+	if (!entry) return null;
+	if (entry.expiresAt <= Date.now()) {
+		warmEntries?.delete(familyKey);
+		return null;
+	}
+	warmEntries?.delete(familyKey);
+	warmEntries?.set(familyKey, entry);
+	return entry;
+}
+
+function publishWarmEntry(familyKey: string, snapshot: unknown, expiresAt: number): void {
+	if (!warmEntries) return;
+	warmEntries.delete(familyKey);
+	warmEntries.set(familyKey, { snapshot, expiresAt });
+	while (warmEntries.size > MAX_WARM_ENTRIES) {
+		const oldestKey = warmEntries.keys().next().value as string | undefined;
+		if (oldestKey === undefined) break;
+		warmEntries.delete(oldestKey);
+		pruneFamily(oldestKey);
+	}
+}
+
+function dispatchJsonGet<T>(
+	requestPath: string,
+	baseUrl: string,
+	token: string | undefined,
+	projectId: string | undefined,
+	signal: AbortSignal | undefined,
+	suppressAuthRedirect: boolean,
+): Promise<T> {
+	const requestSignal = signal
+		? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+		: undefined;
+	return request<T>(
+		requestPath,
+		{ method: 'GET', signal: requestSignal },
+		token,
+		projectId,
+		{ suppressAuthRedirect, baseUrl },
+	);
+}
+
+function dispatchIndependentOrdinary<T>(
+	familyKey: string,
+	requestPath: string,
+	baseUrl: string,
+	token: string | undefined,
+	projectId: string | undefined,
+	suppressAuthRedirect: boolean,
+): Promise<T> {
+	advanceFamilyEpoch(familyKey);
+	return trackFamilyDispatch(
+		familyKey,
+		dispatchJsonGet<T>(requestPath, baseUrl, token, projectId, undefined, suppressAuthRedirect),
+	);
+}
+
+async function resolveOrdinaryLeader<T>(entry: OrdinaryPending): Promise<T> {
+	const value = await entry.raw as T;
+	if (!entry.joined) return value;
+	try {
+		if (!entry.snapshotReady) {
+			entry.snapshot = structuredClone(value);
+			entry.snapshotReady = true;
+		}
+		return structuredClone(entry.snapshot) as T;
+	} catch {
+		entry.cloneFailed = true;
+		return value;
+	}
+}
+
+async function resolveOrdinaryWaiter<T>(entry: OrdinaryPending): Promise<T> {
+	const value = await entry.raw;
+	try {
+		if (entry.cloneFailed) throw new DOMException('Result is not cloneable', 'DataCloneError');
+		if (!entry.snapshotReady) {
+			entry.snapshot = structuredClone(value);
+			entry.snapshotReady = true;
+		}
+		return structuredClone(entry.snapshot) as T;
+	} catch {
+		return entry.retry() as Promise<T>;
+	}
+}
+
+function getOrdinary<T>(
+	familyKey: string,
+	requestPath: string,
+	baseUrl: string,
+	token: string | undefined,
+	projectId: string | undefined,
+	signal: AbortSignal | undefined,
+	suppressAuthRedirect: boolean,
+): Promise<T> {
+	if (signal?.aborted) {
+		return Promise.reject(new DOMException('The operation was aborted', 'AbortError'));
+	}
+
+	if (browser) {
+		const warm = validWarmEntry(familyKey);
+		if (warm) {
+			try {
+				return Promise.resolve(structuredClone(warm.snapshot) as T);
+			} catch {
+				warmEntries?.delete(familyKey);
+			}
+		}
+	}
+
+	if (!browser || signal) {
+		advanceFamilyEpoch(familyKey);
+		return trackFamilyDispatch(
+			familyKey,
+			dispatchJsonGet<T>(requestPath, baseUrl, token, projectId, signal, suppressAuthRedirect),
+		);
+	}
+
+	const pendingKey = JSON.stringify([familyKey, suppressAuthRedirect]);
+	const pending = ordinaryPending?.get(pendingKey);
+	if (pending) {
+		pending.joined = true;
+		return resolveOrdinaryWaiter<T>(pending);
+	}
+	const retryMetadata = familyMetadata?.get(familyKey);
+
+	advanceFamilyEpoch(familyKey);
+	const entry: OrdinaryPending = {
+		raw: trackFamilyDispatch(
+			familyKey,
+			dispatchJsonGet<unknown>(requestPath, baseUrl, token, projectId, undefined, suppressAuthRedirect),
+		),
+		joined: false,
+		snapshotReady: false,
+		snapshot: undefined,
+		cloneFailed: false,
+		retry: () => {
+			if (retryMetadata) familyMetadata?.set(familyKey, retryMetadata);
+			return dispatchIndependentOrdinary(
+				familyKey,
+				requestPath,
+				baseUrl,
+				token,
+				projectId,
+				suppressAuthRedirect,
+			);
+		},
+	};
+	ordinaryPending?.set(pendingKey, entry);
+	void entry.raw.finally(() => {
+		if (ordinaryPending?.get(pendingKey) === entry) ordinaryPending.delete(pendingKey);
+	}).catch(() => undefined);
+	return resolveOrdinaryLeader<T>(entry);
+}
+
+async function prefetchJson<T>(
+	path: string,
+	token?: string,
+	projectId?: string,
+	opts: PrefetchOptions = {},
+): Promise<void> {
+	if (!browser || opts.signal?.aborted) return;
+	const scope = captureRequestScope(token, projectId);
+	const normalized = normalizeGetPath(path, scope, false);
+	if (normalized.refresh) return;
+	const familyKey = registerFamily(scope, normalized.logicalUrl);
+	if (validWarmEntry(familyKey)) return;
+
+	const ttlMs = opts.ttlMs === undefined || !Number.isFinite(opts.ttlMs)
+		? DEFAULT_PREFETCH_TTL_MS
+		: Math.max(0, opts.ttlMs);
+	const suppressAuthRedirect = opts.suppressAuthRedirect ?? true;
+	const canShare = !opts.signal && ttlMs > 0;
+	const pendingKey = canShare
+		? JSON.stringify([familyKey, suppressAuthRedirect, ttlMs])
+		: null;
+	if (pendingKey) {
+		const pending = sharedSpeculativePending?.get(pendingKey);
+		if (pending) return pending;
+	}
+	if ((activeSpeculativeLeaders?.size ?? 0) >= MAX_SPECULATIVE_LEADERS) {
+		pruneFamily(familyKey);
+		return;
+	}
+
+	const publicationEpoch = advanceFamilyEpoch(familyKey);
+	retainFamily(familyKey);
+	let leader!: Promise<void>;
+	leader = dispatchJsonGet<T>(
+		normalized.requestPath,
+		scope.baseUrl,
+		token,
+		projectId,
+		opts.signal,
+		suppressAuthRedirect,
+	).then((value) => {
+		if (opts.signal?.aborted || ttlMs === 0 || familyEpochs?.get(familyKey) !== publicationEpoch) return;
+		try {
+			publishWarmEntry(familyKey, structuredClone(value), Date.now() + ttlMs);
+		} catch {
+			// Speculative values that cannot be isolated are not reusable.
+		}
+	}).catch(() => {
+		// Speculation never redirects by default and never surfaces failures.
+	}).finally(() => {
+		activeSpeculativeLeaders?.delete(leader);
+		if (pendingKey && sharedSpeculativePending?.get(pendingKey) === leader) {
+			sharedSpeculativePending.delete(pendingKey);
+		}
+		releaseFamily(familyKey);
+	});
+	activeSpeculativeLeaders?.add(leader);
+	if (pendingKey) sharedSpeculativePending?.set(pendingKey, leader);
+	return leader;
+}
+
+export function beginMutationCacheFence(
+	token?: string,
+	projectId?: string,
+): { baseUrl: string; finish: () => void } {
+	const scope = captureRequestScope(token, projectId);
+	invalidateExactScope(scope);
+	return {
+		baseUrl: scope.baseUrl,
+		finish: () => invalidateExactScope(scope),
+	};
+}
+
+async function withMutationInvalidation<T>(
+	scope: RequestScope,
+	mutation: () => Promise<T>,
+): Promise<T> {
+	invalidateExactScope(scope);
+	try {
+		return await mutation();
+	} finally {
+		invalidateExactScope(scope);
+	}
+}
+
+if (browser) {
+	let observedScope: RequestScope | null = null;
+	let observedToken: string | undefined;
+	let observedProjectId: string | undefined;
+	const syncObservedScope = () => {
+		const next = captureRequestScope(observedToken, observedProjectId);
+		if (observedScope && observedScope.key !== next.key) invalidateExactScope(observedScope);
+		observedScope = next;
+	};
+	auth.subscribe((state) => {
+		observedToken = state.token ?? undefined;
+		observedProjectId = state.projectId ?? undefined;
+		syncObservedScope();
+	});
+	siteConfig.subscribe(syncObservedScope);
+	onMockupRevisionChange(syncObservedScope);
+}
+
 export const api = {
 	get: <T>(
 		path: string,
 		token?: string,
 		projectId?: string,
-		// Fix 3: suppressAuthRedirect=true 시 401에서 전역 로그아웃을 억제함
 		opts?: { refresh?: boolean; signal?: AbortSignal; suppressAuthRedirect?: boolean }
-	) => {
-		let url: string;
-		if (opts?.refresh) {
-			// 수동 새로고침: origin 직행 + 재저장 (`?refresh=true`)
-			url = `${path}${path.includes('?') ? '&' : '?'}refresh=true`;
-		} else if (path.includes('refresh=true')) {
-			// URL에 이미 refresh=true 포함 — 무변경 (수동 조립된 3개 경로 보존)
-			url = path;
-		} else {
-			// 기본: 백엔드 캐시 opt-in (`?cache=true`)
-			url = `${path}${path.includes('?') ? '&' : '?'}cache=true`;
+	): Promise<T> => {
+		if (opts?.signal?.aborted) {
+			return Promise.reject(new DOMException('The operation was aborted', 'AbortError'));
 		}
-		const signal = opts?.signal
-			? AbortSignal.any([opts.signal, AbortSignal.timeout(30_000)])
-			: undefined;
-		return request<T>(url, { method: 'GET', signal }, token, projectId, { suppressAuthRedirect: opts?.suppressAuthRedirect });
+		const scope = captureRequestScope(token, projectId);
+		const normalized = normalizeGetPath(path, scope, opts?.refresh);
+		const familyKey = registerFamily(scope, normalized.logicalUrl);
+		const suppressAuthRedirect = opts?.suppressAuthRedirect ?? false;
+		if (normalized.refresh) {
+			warmEntries?.delete(familyKey);
+			advanceFamilyEpoch(familyKey);
+			return trackFamilyDispatch(
+				familyKey,
+				dispatchJsonGet(
+					normalized.requestPath,
+					scope.baseUrl,
+					token,
+					projectId,
+					opts?.signal,
+					suppressAuthRedirect,
+				),
+			);
+		}
+		return getOrdinary(
+			familyKey,
+			normalized.requestPath,
+			scope.baseUrl,
+			token,
+			projectId,
+			opts?.signal,
+			suppressAuthRedirect,
+		);
 	},
-	post: <T>(path: string, body: unknown, token?: string, projectId?: string) =>
-		request<T>(path, { method: 'POST', body: JSON.stringify(body) }, token, projectId),
-	put: <T>(path: string, body: unknown, token?: string, projectId?: string) =>
-		request<T>(path, { method: 'PUT', body: JSON.stringify(body) }, token, projectId),
-	patch: <T>(path: string, body: unknown, token?: string, projectId?: string) =>
-		request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }, token, projectId),
-	delete: <T>(path: string, token?: string, projectId?: string) =>
-		request<T>(path, { method: 'DELETE' }, token, projectId),
+	prefetch: prefetchJson,
+	clearPrefetchCache,
+	post: <T>(path: string, body: unknown, token?: string, projectId?: string) => {
+		const scope = captureRequestScope(token, projectId);
+		return withMutationInvalidation(scope, () =>
+			request<T>(path, { method: 'POST', body: JSON.stringify(body) }, token, projectId, { baseUrl: scope.baseUrl })
+		);
+	},
+	put: <T>(path: string, body: unknown, token?: string, projectId?: string) => {
+		const scope = captureRequestScope(token, projectId);
+		return withMutationInvalidation(scope, () =>
+			request<T>(path, { method: 'PUT', body: JSON.stringify(body) }, token, projectId, { baseUrl: scope.baseUrl })
+		);
+	},
+	patch: <T>(path: string, body: unknown, token?: string, projectId?: string) => {
+		const scope = captureRequestScope(token, projectId);
+		return withMutationInvalidation(scope, () =>
+			request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }, token, projectId, { baseUrl: scope.baseUrl })
+		);
+	},
+	delete: <T>(path: string, token?: string, projectId?: string) => {
+		const scope = captureRequestScope(token, projectId);
+		return withMutationInvalidation(scope, () =>
+			request<T>(path, { method: 'DELETE' }, token, projectId, { baseUrl: scope.baseUrl })
+		);
+	},
 
-	upload: async <T>(path: string, formData: FormData, token?: string, projectId?: string): Promise<T> => {
-		const headers: Record<string, string> = {};
-		if (token) headers['Authorization'] = `Bearer ${token}`;
-		if (projectId) headers['X-Project-Id'] = projectId;
-		const res = await fetch(`${getBaseUrl()}${path}`, {
-			method: 'POST',
-			headers,
-			body: formData,
-			signal: AbortSignal.timeout(300_000),
-		});
-		if (!res.ok) {
-			let detail = res.statusText;
-			try {
-				const body = await res.json();
-				detail = formatErrorDetail(body, res.statusText);
-			} catch {
-				detail = await res.text().catch(() => res.statusText);
+	upload: <T>(path: string, formData: FormData, token?: string, projectId?: string): Promise<T> => {
+		const scope = captureRequestScope(token, projectId);
+		return withMutationInvalidation(scope, async () => {
+			const headers: Record<string, string> = {};
+			if (token) headers['Authorization'] = `Bearer ${token}`;
+			if (projectId) headers['X-Project-Id'] = projectId;
+			const res = await fetch(`${scope.baseUrl}${path}`, {
+				method: 'POST',
+				headers,
+				body: formData,
+				signal: AbortSignal.timeout(300_000),
+			});
+			if (!res.ok) {
+				let detail = res.statusText;
+				try {
+					const body = await res.json();
+					detail = formatErrorDetail(body, res.statusText);
+				} catch {
+					detail = await res.text().catch(() => res.statusText);
+				}
+				if (res.status === 401) void handleUnauthorized();
+				throw new ApiError(res.status, detail);
 			}
-			if (res.status === 401) void handleUnauthorized();
-			throw new ApiError(res.status, detail);
-		}
-		if (res.status === 204) return undefined as T;
-		return res.json();
+			if (res.status === 204) return undefined as T;
+			return res.json();
+		});
 	},
 
 	uploadWithProgress: <T>(
@@ -367,9 +828,11 @@ export const api = {
 		token?: string,
 		projectId?: string,
 	): { promise: Promise<T>; abort: () => void } => {
+		const scope = captureRequestScope(token, projectId);
+		invalidateExactScope(scope);
 		const xhr = new XMLHttpRequest();
 		const promise = new Promise<T>((resolve, reject) => {
-			xhr.open('POST', `${getBaseUrl()}${path}`);
+			xhr.open('POST', `${scope.baseUrl}${path}`);
 			if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 			if (projectId) xhr.setRequestHeader('X-Project-Id', projectId);
 			xhr.timeout = 0; // 타임아웃 없음 (서버 측에서 관리)
@@ -394,7 +857,7 @@ export const api = {
 			xhr.onerror = () => reject(new Error('네트워크 오류가 발생했습니다'));
 			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
 			xhr.send(formData);
-		});
+		}).finally(() => invalidateExactScope(scope));
 		return { promise, abort: () => xhr.abort() };
 	},
 
@@ -406,9 +869,11 @@ export const api = {
 		token?: string,
 		projectId?: string,
 	): { promise: Promise<T>; abort: () => void } => {
+		const scope = captureRequestScope(token, projectId);
+		invalidateExactScope(scope);
 		const xhr = new XMLHttpRequest();
 		const promise = new Promise<T>((resolve, reject) => {
-			xhr.open('PUT', `${getBaseUrl()}${path}`);
+			xhr.open('PUT', `${scope.baseUrl}${path}`);
 			if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 			if (projectId) xhr.setRequestHeader('X-Project-Id', projectId);
 			xhr.setRequestHeader('Content-Type', contentType || 'application/octet-stream');
@@ -432,7 +897,7 @@ export const api = {
 			xhr.onerror = () => reject(new Error('네트워크 오류가 발생했습니다'));
 			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
 			xhr.send(blob);
-		});
+		}).finally(() => invalidateExactScope(scope));
 		return { promise, abort: () => xhr.abort() };
 	},
 
@@ -445,7 +910,13 @@ export const api = {
 		onProgress: (p: { loaded: number; total: number }) => void,
 		signal?: AbortSignal,
 	): Promise<{ etag: string }> {
-		return new Promise((resolve, reject) => {
+		const currentAuth = get(auth);
+		const scope = captureRequestScope(
+			currentAuth.token ?? undefined,
+			currentAuth.projectId ?? undefined,
+		);
+		invalidateExactScope(scope);
+		return new Promise<{ etag: string }>((resolve, reject) => {
 			const xhr = new XMLHttpRequest();
 			xhr.open('PUT', url, true);
 			xhr.upload.onprogress = (e) => {
@@ -471,7 +942,7 @@ export const api = {
 			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
 			signal?.addEventListener('abort', () => xhr.abort());
 			xhr.send(body);
-		});
+		}).finally(() => invalidateExactScope(scope));
 	},
 
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
@@ -515,6 +986,8 @@ export const api = {
 		onMessage?: (data: T) => void,
 		onError?: (error: Error) => void
 	): void => {
+		const scope = captureRequestScope(token, projectId);
+		invalidateExactScope(scope);
 		const mockStream = maybeMockK3sStream(path, body, token, projectId);
 		if (mockStream) {
 			(async () => {
@@ -523,11 +996,13 @@ export const api = {
 				} catch (err) {
 					onError?.(err instanceof Error ? err : new Error(String(err)));
 				}
+				finally {
+					invalidateExactScope(scope);
+				}
 			})();
 			return;
 		}
-		const baseUrl = getBaseUrl();
-		const url = new URL(`${baseUrl}${path}`);
+		const url = new URL(`${scope.baseUrl}${path}`);
 
 		// POST 요청을 SSE로 처리하기 위해 fetch 사용 후 EventSource로 전환
 		// 하지만 EventSource는 POST를 지원하지 않으므로, fetch로 SSE 스트림을 처리
@@ -576,7 +1051,9 @@ export const api = {
 				}
 			}
 		}).catch((err) => {
-			onError?.(err);
+			onError?.(err instanceof Error ? err : new Error(String(err)));
+		}).finally(() => {
+			invalidateExactScope(scope);
 		});
 	}
 };

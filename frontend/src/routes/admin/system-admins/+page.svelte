@@ -4,6 +4,7 @@
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import Alert from '$lib/components/ui/Alert.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import SystemAdminTable from '$lib/components/admin/system-admins/SystemAdminTable.svelte';
@@ -28,6 +29,10 @@
 	let policy = $state<SecurityPolicy | null>(null);
 	let loading = $state(true);
 	let refreshing = $state(false);
+	let policyLoading = $state(true);
+	let adminsError = $state('');
+	let policyError = $state('');
+	let loadGeneration = 0;
 	let showGrant = $state(false);
 	let showMigrate = $state(false);
 
@@ -35,23 +40,49 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
+		const requestToken = token;
+		const requestProjectId = projectId;
+		const generation = ++loadGeneration;
 		if (admins.length === 0) loading = true;
 		else refreshing = true;
+		policyLoading = true;
+		adminsError = '';
+		policyError = '';
+		const adminsPromise = api.get<SystemAdmin[]>('/api/v1/admin/identity/system-roles', requestToken, requestProjectId);
+		const policyPromise = api.get<SecurityPolicy>('/api/v1/admin/identity/security-policy', requestToken, requestProjectId)
+			.then((value) => {
+				if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) policy = value;
+				if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) policyError = '';
+			})
+			.catch((loadError) => {
+				if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) {
+					policy = null;
+					policyError = loadError instanceof Error ? loadError.message : '보안 정책 조회 실패';
+				}
+			})
+			.finally(() => {
+				if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) policyLoading = false;
+			});
 		try {
-			[admins, policy] = await Promise.all([
-				api.get<SystemAdmin[]>('/api/v1/admin/identity/system-roles', token, projectId),
-				api.get<SecurityPolicy>('/api/v1/admin/identity/security-policy', token, projectId),
-			]);
-		} catch {
-			admins = [];
+			const value = await adminsPromise;
+			if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) admins = value;
+		} catch (loadError) {
+			if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) {
+				admins = [];
+				adminsError = loadError instanceof Error ? loadError.message : '시스템 관리자 조회 실패';
+			}
 		} finally {
-			loading = false;
-			refreshing = false;
+			if (generation === loadGeneration && token === requestToken && projectId === requestProjectId) {
+				loading = false;
+				refreshing = false;
+			}
 		}
+		void policyPromise;
 	}
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-system-admins',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 60,
 		intervalOptions: [30, 60],
@@ -82,10 +113,17 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-			{#if policy}
+			{#if policyLoading}
+				<Alert tone="neutral" class="mb-3">보안 정책을 불러오는 중...</Alert>
+			{:else if policyError}
+				<Alert tone="danger" class="mb-3" title="보안 정책 조회 실패">{policyError}</Alert>
+			{:else if policy}
 				<SecurityPolicyBanner {policy} onMigrate={() => (showMigrate = true)} />
 			{/if}
 
+			{#if adminsError}
+				<Alert tone="danger" class="mb-3" title="시스템 관리자 조회 실패">{adminsError}</Alert>
+			{/if}
 			{#if admins.length === 0}
 				<div class="text-gray-500 text-sm py-12 text-center">
 					등록된 system admin이 없습니다.

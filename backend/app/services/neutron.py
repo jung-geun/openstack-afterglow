@@ -919,20 +919,16 @@ def _find_existing_router_for_subnet(
 def provision_default_network(
     conn: openstack.connection.Connection,
     project_id: str,
-    external_network_id: str | None = None,
+    external_network_id: str,
     cidr: str = "192.168.0.0/24",
 ) -> tuple[str, str | None, str | None, bool]:
-    """Neutron에서 "Default" 네트워크를 찾거나 새로 생성한다 (동기).
+    """Find or create a project's Default network using an explicit external network.
 
-    - 외부 네트워크 미지정 시 자동 감지
-    - 기존 네트워크에 라우터가 없으면 자동 생성하여 연결
-
-    Returns:
-        (network_id, subnet_id, router_id, newly_created)
+    The selected external network is required. Provisioning must never guess the
+    first external network because that can connect a tenant to the wrong edge.
     """
-    # 외부 네트워크 자동 감지 (미설정 시)
     if not external_network_id:
-        external_network_id = _find_external_network(conn)
+        raise ValueError("an external network selection is required for default network provisioning")
 
     # ── Neutron 검색 ─────────────────────────────────────────────────────────
     try:

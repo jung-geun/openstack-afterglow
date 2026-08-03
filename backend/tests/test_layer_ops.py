@@ -987,56 +987,44 @@ async def test_trigger_consume_invalid_profile_name(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_trigger_consume_missing_share_id(admin_client):
-    """layer_store_ro_share_id 미설정 시 RuntimeError → HTTP 400."""
-    # get_settings / get_session_factory 는 함수 내부에서 lazy import되므로
-    # 원본 모듈 경로를 패치한다.
+async def test_trigger_consume_propagates_runner_errors(admin_client):
+    snapshot = {
+        "network": {"id": "net-1", "name": "network"},
+        "flavor": {"id": "flavor-1", "name": "m1.small"},
+        "openstack.service_project": {"id": "service-project", "name": "service"},
+    }
     with (
-        patch("app.config.get_settings") as mock_settings,
-        patch("app.database.get_session_factory") as mock_factory,
+        patch(
+            "app.services.layer_build.resolve_layer_consume_resource_snapshot",
+            new_callable=AsyncMock,
+            return_value=snapshot,
+        ),
+        patch("app.database.get_session_factory", return_value=None),
         patch(
             "app.services.layer_build.run_layer_consume",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("union_layer_store_ro_share_id가 설정되지 않았습니다"),
+            side_effect=RuntimeError("consume resource snapshot is incomplete"),
         ),
     ):
-        mock_settings.return_value = MagicMock(union_layer_store_ro_share_id="")
-        mock_factory.return_value = None  # DB 없이 진행
-
         resp = await admin_client.post(
             f"{BASE}/consume",
-            json={
-                "profile_name": "default",
-                "server_name": "consumer-01",
-                "flavor_id": "m1.small",
-            },
+            json={"profile_name": "default", "server_name": "consumer-01", "flavor_id": "m1.small"},
         )
 
     assert resp.status_code == 400
+    assert "resource snapshot" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
 async def test_trigger_consume_unknown_flavor_returns_400(admin_client):
-    """알 수 없는 flavor name/UUID는 HTTP 400으로 surfaced 된다."""
-    with (
-        patch("app.config.get_settings") as mock_settings,
-        patch("app.database.get_session_factory") as mock_factory,
-        patch(
-            "app.services.layer_build.run_layer_consume",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("플레이버를 찾을 수 없습니다: 'cpu.4c_8g'"),
-        ),
+    with patch(
+        "app.services.layer_build.resolve_layer_consume_resource_snapshot",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("플레이버를 찾을 수 없습니다: 'cpu.4c_8g'"),
     ):
-        mock_settings.return_value = MagicMock(union_layer_store_ro_share_id="share-ro-1")
-        mock_factory.return_value = None
-
         resp = await admin_client.post(
             f"{BASE}/consume",
-            json={
-                "profile_name": "default",
-                "server_name": "consumer-01",
-                "flavor_id": "cpu.4c_8g",
-            },
+            json={"profile_name": "default", "server_name": "consumer-01", "flavor_id": "cpu.4c_8g"},
         )
 
     assert resp.status_code == 400
@@ -1045,24 +1033,28 @@ async def test_trigger_consume_unknown_flavor_returns_400(admin_client):
 
 @pytest.mark.asyncio
 async def test_trigger_consume_selected_keypair_injects_public_key(admin_client, mock_conn):
-    """선택한 keypair의 public key를 resolve해 service-project consume에 전달한다."""
     mock_conn.compute.get_keypair.side_effect = Exception("not visible")
     mock_conn.compute.find_keypair.return_value = MagicMock(
         public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest consume@test"
     )
-
+    snapshot = {
+        "network": {"id": "net-1", "name": "network"},
+        "flavor": {"id": "flavor-1", "name": "flavor"},
+        "openstack.service_project": {"id": "service", "name": "service"},
+    }
     with (
-        patch("app.config.get_settings") as mock_settings,
-        patch("app.database.get_session_factory") as mock_factory,
+        patch(
+            "app.services.layer_build.resolve_layer_consume_resource_snapshot",
+            new_callable=AsyncMock,
+            return_value=snapshot,
+        ),
+        patch("app.database.get_session_factory", return_value=None),
         patch(
             "app.services.layer_build.run_layer_consume",
             new_callable=AsyncMock,
             return_value="server-12345678",
         ) as mock_consume,
     ):
-        mock_settings.return_value = MagicMock(union_layer_store_ro_share_id="share-ro-1")
-        mock_factory.return_value = None
-
         resp = await admin_client.post(
             f"{BASE}/consume",
             json={
@@ -1076,27 +1068,31 @@ async def test_trigger_consume_selected_keypair_injects_public_key(admin_client,
 
     assert resp.status_code == 200
     assert mock_consume.await_args.kwargs["ssh_public_key"].startswith("ssh-ed25519 ")
-    assert mock_consume.await_args.kwargs["ssh_username"] == "ubuntu"
+    assert mock_consume.await_args.kwargs["resource_snapshot"] == snapshot
 
 
 @pytest.mark.asyncio
 async def test_trigger_consume_manual_public_key_bypasses_keypair_lookup(admin_client, mock_conn):
-    """직접 입력 공개키가 있으면 keypair lookup 없이 consume에 전달한다."""
     mock_conn.compute.get_keypair.side_effect = AssertionError("should not query keypair")
     mock_conn.compute.find_keypair.side_effect = AssertionError("should not query keypair")
-
+    snapshot = {
+        "network": {"id": "net-1", "name": "network"},
+        "flavor": {"id": "flavor-1", "name": "flavor"},
+        "openstack.service_project": {"id": "service", "name": "service"},
+    }
     with (
-        patch("app.config.get_settings") as mock_settings,
-        patch("app.database.get_session_factory") as mock_factory,
+        patch(
+            "app.services.layer_build.resolve_layer_consume_resource_snapshot",
+            new_callable=AsyncMock,
+            return_value=snapshot,
+        ),
+        patch("app.database.get_session_factory", return_value=None),
         patch(
             "app.services.layer_build.run_layer_consume",
             new_callable=AsyncMock,
             return_value="server-87654321",
         ) as mock_consume,
     ):
-        mock_settings.return_value = MagicMock(union_layer_store_ro_share_id="share-ro-1")
-        mock_factory.return_value = None
-
         resp = await admin_client.post(
             f"{BASE}/consume",
             json={
@@ -1110,7 +1106,7 @@ async def test_trigger_consume_manual_public_key_bypasses_keypair_lookup(admin_c
 
     assert resp.status_code == 200
     assert mock_consume.await_args.kwargs["ssh_public_key"].endswith("#note")
-    assert mock_consume.await_args.kwargs["ssh_username"] == "ubuntu"
+    assert mock_consume.await_args.kwargs["resource_snapshot"] == snapshot
 
 
 @pytest.mark.asyncio

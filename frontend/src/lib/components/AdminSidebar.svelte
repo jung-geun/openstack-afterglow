@@ -7,6 +7,7 @@
 	import RingMark from '$lib/components/ui/RingMark.svelte';
 	import { palette } from '$lib/stores/palette';
 	import { betaFeatures, type BetaFeatures } from '$lib/stores/betaFeatures';
+	import { isMockupPathAllowed } from '$lib/mockup/contracts';
 
 	type BetaFeatureKey = keyof BetaFeatures;
 	const mockupAdminActive = $derived($page.data.mockup?.active === true && $page.data.mockup.profile === 'admin');
@@ -38,12 +39,12 @@
 			],
 		},
 		{
-			label: '라이브러리',
+			label: 'Palimpsest',
 			prefix: '/admin/libraries',
 			icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
 			open: false,
 			items: [
-				{ label: '라이브러리 관리', href: '/admin/libraries', service: null },
+				{ label: '레이어 관리', href: '/admin/libraries', service: null },
 			],
 		},
 		{
@@ -114,6 +115,19 @@
 			],
 		},
 		{
+			label: 'AI 채팅',
+			prefix: '/admin/chat',
+			icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+			open: false,
+			service: 'chat' as const,
+			items: [
+				{ label: '채팅 통계', href: '/admin/chat/stats', service: 'chat' as const },
+				{ label: '프로바이더 설정', href: '/admin/chat', service: 'chat' as const },
+				{ label: '모델 설정', href: '/admin/chat/models', service: 'chat' as const },
+				{ label: '도구 설정', href: '/admin/chat/tools', service: 'chat' as const },
+			],
+		},
+		{
 			label: 'Identity',
 			prefix: '/admin/users',
 			icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
@@ -145,18 +159,19 @@
 	});
 
 	function isBetaVisible(beta?: BetaFeatureKey): boolean {
-		return !beta || Boolean($betaFeatures[beta]);
+		return mockupAdminActive || !beta || Boolean($betaFeatures[beta]);
 	}
 
-	function isItemVisible(item: { beta?: BetaFeatureKey; service?: string | null }): boolean {
+	function isItemVisible(item: { href: string; beta?: BetaFeatureKey; service?: string | null }): boolean {
+		if (mockupAdminActive) return isMockupPathAllowed('admin', item.href);
 		if (!isBetaVisible(item.beta)) return false;
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!item.service) return true;
 		return svcs?.[item.service] ?? false;
 	}
 
-	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
-		if (mockupAdminActive) return false;
+	function isSectionVisible(section: { beta?: BetaFeatureKey; service?: string | null; items: { href: string; beta?: BetaFeatureKey; service?: string | null }[] }): boolean {
+		if (mockupAdminActive) return section.items.some(item => isItemVisible(item));
 		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!isBetaVisible(section.beta)) return false;
 		if (section.service && !(svcs?.[section.service] ?? false)) return false;
@@ -167,13 +182,13 @@
 <!-- 오버레이 배경 (모바일만) -->
 {#if $sidebarOpen}
 	<button
-		class="fixed inset-0 z-30 bg-black/50 md:hidden"
+		class="fixed inset-0 z-[var(--z-sidebar)] bg-surface-scrim-soft md:hidden"
 		onclick={() => sidebarOpen.close()}
 		aria-label="메뉴 닫기"
 	></button>
 {/if}
 
-<aside class="fixed top-0 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-0 left-0 bottom-0 z-[var(--z-sidebar)] w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- 로고 헤더 with Admin badge -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
 		<RingMark size={26} />
@@ -196,7 +211,7 @@
 		</button>
 	</div>
 
-	<nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+	<nav class="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-0.5">
 		<!-- 개요 -->
 		<a
 			href="/admin"
@@ -253,10 +268,11 @@
 		</div>
 
 		<!-- 모바일 전용 -->
-		<div class="p-3 sm:hidden">
+		<div class="p-3 lg:hidden">
 			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
 			<ProjectSelector />
 		</div>
+		{#if !mockupAdminActive}
 		<div class="p-3 pt-0 lg:hidden">
 			<a href="/dashboard"
 				class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors">
@@ -264,6 +280,7 @@
 				사용자 모드
 			</a>
 		</div>
+		{/if}
 		<div class="p-3 pt-0 md:hidden border-t border-gray-800">
 			<div class="px-3 text-xs text-gray-500">{$auth.username}</div>
 		</div>

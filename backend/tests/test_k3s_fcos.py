@@ -28,6 +28,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test-cluster",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -43,6 +44,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="my-cluster",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -60,6 +62,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="my-cluster",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -76,6 +79,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -94,6 +98,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -120,6 +125,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -137,6 +143,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -154,6 +161,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -171,6 +179,7 @@ class TestFCOSServerUserdata:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="mycluster",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -189,6 +198,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -204,6 +214,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -220,6 +231,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -236,6 +248,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -254,6 +267,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -268,6 +282,7 @@ class TestFCOSAgentUserdata:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="192.168.1.100",
@@ -282,13 +297,13 @@ class TestFCOSAgentUserdata:
 
 
 class TestFCOSAgentNodeIp:
-    """A2: FCOS 에이전트 join 스크립트의 --node-ip 수정 검증."""
+    """FCOS 에이전트 join 스크립트의 persisted pin 계약 검증."""
 
-    def test_fcos_agent_join_contains_node_ip_flag(self):
-        """FCOS 에이전트 join 스크립트에 --node-ip 플래그가 포함되어야 한다."""
+    def test_fcos_agent_join_contains_pin_contract(self):
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -298,45 +313,17 @@ class TestFCOSAgentNodeIp:
         ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
-        assert "--node-ip" in join_content
+        assert "/opt/k3s/pin-primary-network.sh" in join_content
+        assert 'NODE_IP="${AFTERGLOW_K3S_NODE_IP}"' in join_content
+        assert '_EXEC_ARGS="agent"' in join_content
+        assert "--node-ip" not in join_content
+        assert "ip route get 8.8.8.8" not in join_content
 
-    def test_fcos_agent_join_uses_ip_route_for_node_ip(self):
-        """FCOS 에이전트 join 스크립트가 ip route로 NODE_IP를 산출해야 한다."""
+    def test_fcos_agent_join_extra_args_preserved_without_node_ip(self):
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
-            cluster_name="test",
-            k3s_version="v1.31.4+k3s1",
-            server_ip="10.0.0.1",
-            node_token="tok",
-            os_type="fcos",
-        )
-        ign = _decode_userdata(result.data)
-        files = {f["path"]: f for f in ign["storage"]["files"]}
-        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
-        assert "ip route get 8.8.8.8" in join_content
-
-    def test_fcos_agent_join_exec_contains_agent_subcommand(self):
-        """FCOS 에이전트 INSTALL_K3S_EXEC에 'agent --node-ip'가 포함되어야 한다."""
-        from app.services.k3s_cloudinit import generate_agent_userdata
-
-        result = generate_agent_userdata(
-            cluster_name="test",
-            k3s_version="v1.31.4+k3s1",
-            server_ip="10.0.0.1",
-            node_token="tok",
-            os_type="fcos",
-        )
-        ign = _decode_userdata(result.data)
-        files = {f["path"]: f for f in ign["storage"]["files"]}
-        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
-        assert "agent --node-ip" in join_content
-
-    def test_fcos_agent_join_extra_args_preserved_with_node_ip(self):
-        """extra_agent_args가 --node-ip와 함께 유지되어야 한다."""
-        from app.services.k3s_cloudinit import generate_agent_userdata
-
-        result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -347,8 +334,8 @@ class TestFCOSAgentNodeIp:
         ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
-        assert "--node-ip" in join_content
-        assert "cloud-provider=external" in join_content
+        assert "agent --kubelet-arg=cloud-provider=external" in join_content
+        assert "--node-ip" not in join_content
 
 
 class TestFCOSOsTypeValidation:
@@ -397,7 +384,7 @@ class TestFCOSCallbackScript:
             os_type="fcos",
         )
         defaults.update(kwargs)
-        result = generate_server_userdata(**defaults)
+        result = generate_server_userdata(primary_network_id="net-primary", **defaults)
         ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         return _decode_file_content(files["/opt/k3s/callback.sh"])
@@ -446,8 +433,10 @@ class TestFCOSCallbackScript:
         assert "SECRET_CLOUD_CONFIG_STATUS" in cb
         assert "secret_cloud_config_status" in cb
 
-    def test_fcos_callback_server_ip_via_ip_route(self):
-        """FCOS callback.sh의 SERVER_IP 산출이 ip route get 8.8.8.8을 사용해야 한다."""
+    def test_fcos_callback_server_ip_uses_persisted_pin(self):
+        """FCOS callback.sh는 route discovery 없이 persisted IP를 사용해야 한다."""
         cb = self._get_callback_content()
-        assert "ip route get 8.8.8.8" in cb
-        assert "SERVER_IP" in cb
+        assert 'SERVER_IP="${AFTERGLOW_K3S_NODE_IP}"' in cb
+        assert "ip route get 8.8.8.8" not in cb
+        assert "hostname -I" not in cb
+        assert "primary network pin missing" in cb

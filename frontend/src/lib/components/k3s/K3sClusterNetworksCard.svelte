@@ -52,6 +52,7 @@
   });
 
   const currentIfaces = $derived(selectedVmId ? (s.interfaces[selectedVmId] ?? null) : null);
+  const availableNetworks = $derived(s.networks.filter((net) => !(currentIfaces ?? []).some((iface) => iface.net_id === net.id)));
 
   async function handleAttach() {
     if (!selectedVmId || !selectedNetId) return;
@@ -78,12 +79,14 @@
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mt-3">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-xs text-gray-500 uppercase tracking-wide">노드 네트워크</h3>
-    <button
-      onclick={() => { showAttachForm = !showAttachForm; selectedNetId = ''; attachError = ''; }}
-      class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-    >
-      {showAttachForm ? '닫기' : '+ 네트워크 연결'}
-    </button>
+    {#if s.isActive}
+      <button
+        onclick={() => { showAttachForm = !showAttachForm; selectedNetId = ''; attachError = ''; }}
+        class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+      >
+        {showAttachForm ? '닫기' : '+ 네트워크 연결'}
+      </button>
+    {/if}
   </div>
 
   {#if nodeOptions.length === 0}
@@ -112,8 +115,7 @@
       <div class="text-xs text-gray-500 py-2">인터페이스 없음</div>
     {:else}
       <div class="space-y-2">
-        {#each currentIfaces as iface, idx}
-          {@const isFirst = idx === 0}
+        {#each currentIfaces as iface}
           {@const detachingKey = `${selectedVmId}:${iface.port_id}`}
           <div class="bg-gray-800/50 rounded-lg p-3 flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -121,7 +123,7 @@
                 <span class="text-xs px-1.5 py-0.5 rounded {iface.node_role === 'server' ? 'bg-purple-900/40 text-purple-400 border border-purple-800' : 'bg-blue-900/40 text-blue-400 border border-blue-800'}">
                   {iface.node_role}
                 </span>
-                {#if isFirst}
+                {#if iface.is_primary}
                   <span class="text-xs text-gray-600">기본 인터페이스</span>
                 {/if}
               </div>
@@ -140,8 +142,8 @@
             </div>
             <button
               onclick={() => handleDetach(selectedVmId, iface.port_id)}
-              disabled={isFirst || s.interfaceActioning === detachingKey}
-              title={isFirst ? '기본 인터페이스는 제거할 수 없습니다' : '인터페이스 제거'}
+              disabled={iface.is_primary || s.interfaceActioning === detachingKey}
+              title={iface.is_primary ? '기본 인터페이스는 제거할 수 없습니다' : '인터페이스 제거'}
               class="shrink-0 text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 disabled:cursor-not-allowed"
             >
               {s.interfaceActioning === detachingKey ? '제거 중...' : '제거'}
@@ -155,8 +157,7 @@
       <p class="text-xs text-red-400 mt-2">{attachError}</p>
     {/if}
 
-    <!-- 네트워크 연결 폼 -->
-    {#if showAttachForm}
+    {#if showAttachForm && s.isActive}
       <div class="mt-3 bg-gray-800 rounded-lg p-3">
         <p class="text-xs text-gray-400 mb-2">연결할 네트워크 선택</p>
         <div class="flex gap-2">
@@ -165,7 +166,7 @@
             class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
           >
             <option value="">네트워크 선택...</option>
-            {#each s.networks as net}
+            {#each availableNetworks as net}
               <option value={net.id}>{net.name || net.id.slice(0, 12)}</option>
             {/each}
           </select>

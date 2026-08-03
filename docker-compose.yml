@@ -37,11 +37,12 @@ services:
       - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+      - palimpsest-hub:/var/lib/afterglow/palimpsest
     env_file:
       - path: .env
         required: false
-    # environment:
-    #   - AFTERGLOW_ALLOW_INSECURE=1
+    environment:
+      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -57,6 +58,53 @@ services:
       timeout: 10s
       retries: 5
       start_period: 10s
+
+  chat-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    image: ghcr.io/openstack-afterglow/afterglow-api:dev
+    volumes:
+      - ./afterglow.conf:/app/afterglow.conf:ro
+      - ./config.gpu.toml:/app/config.gpu.toml:ro
+      - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    command: python -m app.chat_worker
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  palimpsest-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    image: ghcr.io/openstack-afterglow/afterglow-api:dev
+    command: python -m app.palimpsest_worker
+    volumes:
+      - ./afterglow.conf:/app/afterglow.conf:ro
+      - ./config.gpu.toml:/app/config.gpu.toml:ro
+      - ./logs:/app/logs
+      - palimpsest-hub:/var/lib/afterglow/palimpsest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
+    depends_on:
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   frontend:
     build:
@@ -171,6 +219,47 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  postgres:
+    image: postgres:16
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_DB: afterglow_checkpoints
+      POSTGRES_USER: afterglow
+      POSTGRES_PASSWORD: dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afterglow -d afterglow_checkpoints"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 채팅 의미 메모리 테스트 프로필 (pgvector) ────────────────────────────
+  pgvector:
+    image: pgvector/pgvector:pg16
+    profiles: ["chat-memory"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: afterglow_memory_test
+      POSTGRES_USER: afterglow
+      POSTGRES_PASSWORD: dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afterglow -d afterglow_memory_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ── 프록시 프로필 (docker compose --profile proxy up) ──────────────────────
   # 80 → HTTPS 리다이렉트, 443 SSL termination
   # /api/ → backend, 나머지 → frontend
@@ -275,3 +364,4 @@ volumes:
   prom-data:
   grafana-data:
   haproxy-certs:
+  palimpsest-hub:

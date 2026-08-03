@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -8,6 +8,7 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createIntentPrefetchScheduler } from '$lib/utils/intentPrefetch';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import AdminImagesFilters from '$lib/components/admin/images/AdminImagesFilters.svelte';
 	import AdminImagesTable from '$lib/components/admin/images/AdminImagesTable.svelte';
@@ -22,24 +23,67 @@
 	let selectedImageId = $state<string | null>(null);
 	let editTarget = $state<AdminImage | null>(null), editForm = $state({ name: '', os_distro: '', visibility: 'private' });
 	let editing = $state(false), editError = $state(''), togglingId = $state<string | null>(null);
+	let loadGeneration = 0;
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 	const curMarker = $derived(markerStack[markerStack.length - 1]);
+	const nextPrefetch = createIntentPrefetchScheduler();
+	function listPath(marker?: string): string {
+		const params = new URLSearchParams({ limit: String(pageSize) });
+		if (marker) params.set('marker', marker);
+		if (searchFilter) params.set('search', searchFilter);
+		if (visibilityFilter) params.set('visibility', visibilityFilter);
+		return `/api/v1/admin/images?${params}`;
+	}
+	function prefetchNext() {
+		if (!nextMarker) return;
+		const path = listPath(nextMarker);
+		const key = JSON.stringify([path, token ?? null, projectId ?? null]);
+		nextPrefetch.intent(key, (signal) => api.prefetch(path, token, projectId, { signal }));
+	}
 
 	async function load(marker?: string, forceRefresh = false) {
+		const generation = ++loadGeneration;
+		const requestToken = $auth.token ?? undefined;
+		const requestProjectId = $auth.projectId ?? undefined;
+		const requestPageSize = pageSize;
+		const requestSearchFilter = searchFilter;
+		const requestVisibilityFilter = visibilityFilter;
+		const requestPath = listPath(marker);
+		const owns = () => generation === loadGeneration
+			&& ($auth.token ?? undefined) === requestToken
+			&& ($auth.projectId ?? undefined) === requestProjectId
+			&& pageSize === requestPageSize
+			&& searchFilter === requestSearchFilter
+			&& visibilityFilter === requestVisibilityFilter
+			&& listPath(marker) === requestPath;
+		nextPrefetch.cancel();
 		if (images.length === 0) loading = true; else refreshing = true;
 		error = '';
 		try {
-			let url = `/api/v1/admin/images?limit=${pageSize}`;
-			if (marker) url += `&marker=${marker}`;
-			if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
-			if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
-			if (forceRefresh) url += `&refresh=true`;
-			const res = await api.get<PagedResponse<AdminImage>>(url, token, projectId);
-			images = res.items || []; nextMarker = res.next_marker;
-		} catch (e) { error = e instanceof ApiError ? e.message : '이미지 목록 조회 실패'; images = []; }
-		finally { loading = false; refreshing = false; }
+			const res = await api.get<PagedResponse<AdminImage>>(
+				requestPath,
+				requestToken,
+				requestProjectId,
+				{ refresh: forceRefresh },
+			);
+			if (!owns()) return;
+			images = res.items || [];
+			nextMarker = res.next_marker;
+			const path = nextMarker ? listPath(nextMarker) : null;
+			const key = path ? JSON.stringify([path, requestToken ?? null, requestProjectId ?? null]) : null;
+			nextPrefetch.schedule(key, (signal) => path ? api.prefetch(path, requestToken, requestProjectId, { signal }) : undefined);
+		} catch (e) {
+			if (!owns()) return;
+			error = e instanceof ApiError ? e.message : '이미지 목록 조회 실패';
+			images = [];
+		} finally {
+			if (owns()) {
+				loading = false;
+				refreshing = false;
+			}
+		}
 	}
 
 	function openEdit(img: AdminImage) {
@@ -76,7 +120,7 @@
 	}
 
 	const ar = createAutoRefresh(() => { load(curMarker); },
-		{ storageKey: 'admin-images', defaultInterval: 30, intervalOptions: [15, 30, 60] });
+		{ storageKey: 'admin-images', defaultInterval: 30, intervalOptions: [15, 30, 60], invokeOnMount: false });
 	async function forceRefresh() { markerStack = []; nextMarker = null; await load(undefined, true); }
 
 	onMount(() => {
@@ -84,6 +128,8 @@
 		load();
 		projectNames.load(token, projectId);
 	});
+
+	onDestroy(() => { loadGeneration += 1; nextPrefetch.cancel(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -121,6 +167,7 @@
 			onEdit={openEdit} onToggleActivation={toggleActivation} onDelete={deleteImage}
 			onPrev={() => { const prev = markerStack.slice(0,-1); markerStack = prev; load(prev[prev.length-1]); }}
 			onNext={() => { if (!nextMarker) return; markerStack = [...markerStack, nextMarker]; load(nextMarker); }}
+			onintent={prefetchNext}
 		/>
 	{/if}
 </div>

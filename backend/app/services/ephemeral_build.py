@@ -15,10 +15,8 @@ from datetime import UTC, datetime
 
 import httpx
 
-from app.config import get_settings
 from app.services import ephemeral_mount, library_recipes, manila, neutron, nova
 from app.services import libraries as lib_svc
-from app.services.builder_vm import _ensure_ephemeral_keypair
 from app.services.cloud_init_builder import render_user_data
 from app.services.keystone import get_service_project_connection
 
@@ -151,6 +149,7 @@ async def run_ephemeral_build(
     library_id: str,
     build_db_id: int | None,
     existing_share_id: str | None = None,
+    resource_snapshot: dict | None = None,
 ) -> None:
     """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다.
 
@@ -162,8 +161,26 @@ async def run_ephemeral_build(
                            프로젝트 conn으로 동작하므로, 이 share가 service conn에서
                            조회 가능해야 한다(service 프로젝트 소유 또는 공개 share).
     """
-    settings = get_settings()
-    conn = await asyncio.to_thread(get_service_project_connection)
+    resource_snapshot = resource_snapshot or {}
+    service_project = resource_snapshot.get("openstack.service_project") or {}
+    base_image = resource_snapshot.get("base_image") or {}
+    builder_flavor = resource_snapshot.get("builder.flavor") or {}
+    builder_network = resource_snapshot.get("builder.network") or {}
+    manila_snapshot = resource_snapshot.get("manila") or {}
+    if not all(
+        (
+            service_project.get("id"),
+            base_image.get("id"),
+            builder_flavor.get("id"),
+            builder_network.get("id"),
+            manila_snapshot.get("share_type"),
+            manila_snapshot.get("share_size_gb"),
+        )
+    ):
+        raise RuntimeError("library build resource snapshot is incomplete")
+    from app.services.keystone import get_admin_connection_for_project
+
+    conn = await asyncio.to_thread(get_admin_connection_for_project, service_project["id"])
 
     build_token = uuid.uuid4().hex
     await _update_db(build_db_id, build_token=build_token)
@@ -183,11 +200,8 @@ async def run_ephemeral_build(
         lib = lib_svc.get_by_id(library_id)
         library_version: str = lib.version
 
-        proto = (recipe.share_proto or "NFS").upper()
-        image_id = recipe.base_image_id or settings.builder_image_id
-        if not image_id:
-            raise RuntimeError("빌드 이미지 ID가 설정되지 않았습니다 (config.toml [builder] image_id 필요)")
-
+        proto = manila_snapshot["share_proto"]
+        image_id = base_image["id"]
         # ── 2. Manila share 생성 or 기존 share 사용 ─────────────────────────
         if existing_share_id:
             # 저수준 경로: 사전 생성된 share를 빌드 대상으로 사용
@@ -220,8 +234,10 @@ async def run_ephemeral_build(
             share_id = await ephemeral_mount.create_builder_share(
                 conn,
                 name=f"union-prebuilt-{library_id}-{build_token[:8]}",
-                size_gb=recipe.share_size_gb,
+                size_gb=manila_snapshot["share_size_gb"],
                 share_proto=proto,
+                share_type=manila_snapshot["share_type"],
+                share_network_id=manila_snapshot.get("share_network_id", ""),
                 metadata={
                     "union_library": library_id,
                     "union_version": library_version,
@@ -229,10 +245,7 @@ async def run_ephemeral_build(
             )
         await _update_db(build_db_id, file_storage_id=share_id)
 
-        # ── 3. Neutron port 사전 생성 (IP 예약) ───────────────────────────
-        network_id = settings.builder_network_id or settings.default_network_id
-        if not network_id:
-            raise RuntimeError("빌드 네트워크 ID가 설정되지 않았습니다 (config.toml [builder] network_id 필요)")
+        network_id = builder_network["id"]
 
         port_info = await asyncio.to_thread(
             neutron.create_port,
@@ -305,17 +318,15 @@ async def run_ephemeral_build(
         user_data_str = render_user_data(recipe, mount_spec, build_token)
         user_data_b64 = base64.b64encode(user_data_str.encode()).decode()
 
-        keypair_name = await _ensure_ephemeral_keypair(conn, settings.builder_ssh_key_path)
-
         vm_name = f"afterglow-build-{library_id}-{build_token[:8]}"
+
         server = await asyncio.to_thread(
             conn.compute.create_server,
             name=vm_name,
             image_id=image_id,
-            flavor_id=settings.builder_flavor_id,
+            flavor_id=builder_flavor["id"],
             networks=[{"port": port_id}],
             user_data=user_data_b64,
-            key_name=keypair_name,
             metadata={
                 "union_type": "ephemeral-build",
                 "union_library": library_id,
@@ -417,6 +428,10 @@ async def run_ephemeral_build(
                 _logger.info("[ephemeral_build] port 삭제: %s", port_id)
             except Exception:
                 _logger.warning("[ephemeral_build] port 삭제 실패: %s", port_id, exc_info=True)
+        try:
+            await asyncio.to_thread(conn.close)
+        except Exception:
+            _logger.warning("[ephemeral_build] service connection close failed", exc_info=True)
 
 
 async def _handle_success(

@@ -30,7 +30,7 @@
 <div class="flex items-start justify-between mb-6 gap-4 {className}">
   <div class="min-w-0 flex-1">
     <div class="flex items-center gap-2 flex-wrap">
-      <h2 class="{titleClass} font-bold text-white truncate">{title}</h2>
+      <h2 class="{titleClass} font-bold text-ink-0 truncate">{title}</h2>
       {#if status}<StatusChip {status} />{/if}
       {#if secondaryStatus}<StatusChip status={secondaryStatus} />{/if}
     </div>

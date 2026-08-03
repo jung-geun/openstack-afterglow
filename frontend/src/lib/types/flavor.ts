@@ -11,6 +11,10 @@ export interface Flavor {
 	gpu_count: number;
 }
 
+export type FlavorOption = Pick<Flavor, 'id' | 'name' | 'vcpus' | 'ram' | 'disk' | 'is_public'> & {
+	extra_specs?: Record<string, string>;
+};
+
 export interface PagedResponse<T> {
 	items: T[];
 	next_marker: string | null;

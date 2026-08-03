@@ -16,9 +16,10 @@ from app.api.common.activity_recorder import rec
 from app.api.deps import get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
+from app.models import compute as compute_models
 from app.models.compute import CreateInstanceRequest
 from app.models.progress import ProgressMessage, ProgressStep
-from app.services import cinder, cloudinit, keystone, neutron, nova
+from app.services import cinder, cloudinit, keystone, neutron, nova, vm_cloud_init_library
 from app.services import libraries as lib_svc
 from app.services.instance_names import ensure_unique_instance_name
 
@@ -30,6 +31,11 @@ class AdminCreateInstanceRequest(CreateInstanceRequest):
     """CreateInstanceRequest + 대상 프로젝트 ID."""
 
     project_id: str
+
+
+# pydantic 2.11+ 는 크로스모듈 서브클래스의 forward ref(부모의 list["NewVolumeRequest"]·["DataMountSpec"] 등)를
+# 서브클래스 모듈 네임스페이스에서 재해석한다. 부모가 정의된 compute 모듈 네임스페이스를 주입해 해소한다.
+AdminCreateInstanceRequest.model_rebuild(_types_namespace=vars(compute_models))
 
 
 def _make_admin_conn(project_id: str, user_id: str) -> openstack.connection.Connection:
@@ -118,17 +124,22 @@ async def admin_create_instance_async(
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
-    # admin 모드: target project에서 default network 자동 생성은 하지 않음
-    # (비의도적 리소스 생성 방지). 설정값 폴백만 허용.
-    if not req.network_id and settings.default_network_id:
-        req = req.model_copy(update={"network_id": settings.default_network_id})
-
     conn = await asyncio.to_thread(_make_admin_conn, req.project_id, token_info.get("user_id", ""))
     try:
         req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
     except ValueError as exc:
         await asyncio.to_thread(conn.close)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        if not req.network_id:
+            req = req.model_copy(update={"network_id": await instance_orch.resolve_default_network(conn, settings)})
+        compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
+            conn, req.availability_zone
+        )
+    except Exception:
+        await asyncio.to_thread(conn.close)
+        raise
 
     async def progress_generator():
         import time
@@ -206,7 +217,7 @@ async def admin_create_instance_async(
                     name=f"{req.name}-boot",
                     image_id=req.image_id,
                     size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                    availability_zone=volume_availability_zone,
                 )
                 boot_volume_id = boot_vol.id
                 await asyncio.to_thread(
@@ -232,7 +243,7 @@ async def admin_create_instance_async(
                         conn,
                         name=f"union-upper-{req.name}",
                         size_gb=settings.upper_volume_size_gb,
-                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                        availability_zone=volume_availability_zone,
                     )
                     upper_volume_id = upper_vol.id
                     created_upper = True
@@ -264,10 +275,13 @@ async def admin_create_instance_async(
                     instance_id=_sse_health_id if _sse_health_token else "",
                     report_url=_sse_report_url if _sse_health_token else "",
                     report_token=_sse_health_token,
+                    github_username=req.github_username,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
             else:
                 userdata = None
+
+            userdata = cloudinit.compose_userdata(userdata, req.userdata, req.github_username)
 
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
             _sse_effective_sgs: list[str] | None = list(req.security_groups) if req.security_groups else None
@@ -298,7 +312,7 @@ async def admin_create_instance_async(
                 userdata=userdata,
                 key_name=req.key_name or None,
                 admin_pass=req.admin_pass,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
+                availability_zone=compute_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=(
                     False if boot_volume_was_provided else req.delete_boot_volume_on_termination
@@ -339,6 +353,11 @@ async def admin_create_instance_async(
                         floating_ip_id = fip.id
                         await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
                         yield send_progress(ProgressStep.FLOATING_IP_CREATING, 100, "Floating IP 할당 완료")
+
+            try:
+                await vm_cloud_init_library.record_history(user_id=token_info["user_id"], content=req.userdata)
+            except Exception:
+                logger.warning("cloud-init 실행 이력 저장 실패", extra={"user_id": token_info.get("user_id")})
 
             note = " (키페어 없음 — 콘솔 비밀번호 사용)" if not req.key_name else ""
             yield send_progress(

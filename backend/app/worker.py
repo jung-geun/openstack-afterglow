@@ -82,7 +82,14 @@ async def main() -> None:
 
         s = get_settings()
         db_url = s.database_url or os.environ.get("DATABASE_URL", "")
-        init_db(db_url)  # db_url이 비어있으면 내부에서 Redis 폴백 로그만 출력
+        init_db(
+            db_url,
+            pool_size=s.database_pool_size,
+            max_overflow=s.database_max_overflow,
+            connect_timeout=s.database_connect_timeout,
+            pool_timeout=s.database_pool_timeout,
+            unhealthy_seconds=s.database_unhealthy_seconds,
+        )
         if db_url:
             _logger.info("Drover: DB 초기화 완료")
         else:

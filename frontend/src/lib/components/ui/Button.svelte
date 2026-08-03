@@ -20,6 +20,7 @@
 		type?: 'button' | 'submit' | 'reset';
 		disabled?: boolean;
 		onclick?: (e: MouseEvent) => void;
+		onintent?: () => void;
 		href?: string;
 		ariaLabel?: string;
 		title?: string;
@@ -33,6 +34,7 @@
 		type = 'button',
 		disabled = false,
 		onclick,
+		onintent,
 		href,
 		ariaLabel,
 		title,
@@ -48,6 +50,10 @@
 		}
 		onclick?.(event);
 	}
+
+	function handleIntent() {
+		if (!disabled) onintent?.();
+	}
 </script>
 
 {#if href}
@@ -57,12 +63,14 @@
 		aria-disabled={disabled}
 		{title}
 		onclick={handleAnchorClick}
+		onpointerenter={handleIntent}
+		onfocus={handleIntent}
 		class="btn btn-{variant} btn-{size} {className}"
 	>
 		{@render children()}
 	</a>
 {:else}
-	<button {type} {disabled} aria-label={ariaLabel} {title} {onclick} class="btn btn-{variant} btn-{size} {className}">
+	<button {type} {disabled} aria-label={ariaLabel} {title} {onclick} onpointerenter={handleIntent} onfocus={handleIntent} class="btn btn-{variant} btn-{size} {className}">
 		{@render children()}
 	</button>
 {/if}
@@ -77,11 +85,11 @@
 		font-weight: 500;
 		line-height: 1.2;
 		transition:
-			background 0.15s,
-			border-color 0.15s,
-			box-shadow 0.15s,
-			color 0.15s,
-			filter 0.15s;
+			background var(--motion-duration-fast) var(--motion-ease-standard),
+			border-color var(--motion-duration-fast) var(--motion-ease-standard),
+			box-shadow var(--motion-duration-fast) var(--motion-ease-standard),
+			color var(--motion-duration-fast) var(--motion-ease-standard),
+			filter var(--motion-duration-fast) var(--motion-ease-standard);
 		border: 1px solid transparent;
 		cursor: pointer;
 		white-space: nowrap;

@@ -57,7 +57,7 @@ The existing `docs/k3s.md` and `docs/en/k3s.md` describe that goal as follows.
 Section 8 of `docs/architecture.md` makes the planned flow more concrete.
 
 ```text
-client -> POST /api/k3s/clusters (SSE)
+client -> POST /api/v1/k3s/clusters/async (SSE)
   -> create security group
   -> create boot volume (Cinder)
   -> aggregate plugin registry (cloud.conf + manifests + server args)

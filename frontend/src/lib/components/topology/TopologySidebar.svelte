@@ -15,6 +15,8 @@
 		onSelectRow,
 		onSelectLb,
 		onScheduleMeasure,
+		onIntentRow,
+		onCancelIntent,
 	}: {
 		routerRows: ItemRow[];
 		filteredLbItems: LBItem[];
@@ -28,6 +30,8 @@
 		onSelectRow: (row: ItemRow) => void;
 		onSelectLb: (lb: TopologyLoadBalancer) => void;
 		onScheduleMeasure: () => void;
+		onIntentRow?: (row: ItemRow) => void;
+		onCancelIntent?: () => void;
 	} = $props();
 </script>
 
@@ -42,11 +46,13 @@
 		라우터 ({routerRows.length})
 	</button>
 	{#if !groupCollapsed.router}
-		{#each routerRows as row (row.id)}
+		{#each routerRows as row, index (row.id)}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				onmouseenter={() => { hoveredId = row.id; }}
-				onmouseleave={() => { hoveredId = null; }}
+				onmouseenter={() => { hoveredId = row.id; onIntentRow?.(row); }}
+				onmouseleave={() => { hoveredId = null; onCancelIntent?.(); }}
+				onfocusin={() => onIntentRow?.(row)}
+				onfocusout={onCancelIntent}
 			>
 				<ResourceCard
 					{row}
@@ -54,6 +60,7 @@
 					{instNetBps}
 					selected={selectedId === row.id}
 					onSelect={() => onSelectRow(row)}
+					dataTour={index === 0 ? 'admin-network-resource' : undefined}
 				/>
 			</div>
 		{/each}
@@ -103,8 +110,10 @@
 		{#each instanceRows as row (row.id)}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				onmouseenter={() => { hoveredId = row.id; }}
-				onmouseleave={() => { hoveredId = null; }}
+				onmouseenter={() => { hoveredId = row.id; onIntentRow?.(row); }}
+				onmouseleave={() => { hoveredId = null; onCancelIntent?.(); }}
+				onfocusin={() => onIntentRow?.(row)}
+				onfocusout={onCancelIntent}
 			>
 				<ResourceCard
 					{row}

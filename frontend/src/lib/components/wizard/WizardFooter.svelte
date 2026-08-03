@@ -19,9 +19,9 @@
 	const isLast = $derived(step === totalSteps);
 </script>
 
-<div class="flex items-center justify-between flex-wrap gap-3 pt-4 border-t border-gray-800">
+<div class="wizard-footer sticky bottom-0 z-20 flex flex-none items-center justify-between flex-wrap gap-3 px-4 py-3 md:px-8 md:py-4 bg-[var(--color-surface-base)] border-t border-[var(--color-line)]">
 	<!-- selection chips strip -->
-	<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 min-w-0">
+	<div class="hidden md:flex flex-wrap items-center gap-2 text-xs text-gray-500 min-w-0">
 		{#if imageDisplay}
 			<span class="pick">이미지: <b class="text-gray-300 font-mono font-medium">{imageDisplay}</b></span>
 		{/if}
@@ -34,23 +34,23 @@
 	</div>
 
 	<!-- nav buttons -->
-	<div class="flex items-center gap-2 ml-auto flex-shrink-0" data-tour="wizard-nav">
+	<div class="flex items-center justify-end gap-2 w-full md:w-auto md:ml-auto flex-shrink-0" data-tour="wizard-nav">
 		<button
 			data-tour="wizard-cancel"
 			onclick={onCancel}
-			class="px-4 py-2 text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-900/60 hover:bg-red-950/20 rounded-lg transition-all"
+			class="wizard-cancel order-2 md:order-none px-4 py-2 text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-900/60 hover:bg-red-950/20 rounded-lg transition-all"
 		>취소</button>
 		{#if canPrev}
 			<button
 				data-tour="wizard-prev"
 				onclick={onPrev}
-				class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+				class="wizard-prev order-1 md:order-none px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
 			>← 이전</button>
 		{/if}
 		{#if !isLast}
-			<span data-tour="wizard-next"><Button onclick={onNext} disabled={!canNext}>다음 →</Button></span>
+			<span class="order-3 md:order-none" data-tour="wizard-next"><Button onclick={onNext} disabled={!canNext}>다음 →</Button></span>
 		{:else}
-			<span data-tour="wizard-next"><Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button></span>
+			<span class="order-3 md:order-none" data-tour="wizard-next"><Button onclick={onDeploy} disabled={!canNext}>VM 생성</Button></span>
 		{/if}
 	</div>
 </div>
@@ -62,7 +62,15 @@
     gap: 4px;
     padding: 3px 10px;
     border-radius: 6px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgb(55 65 81 / 0.8);
+    background: var(--color-surface-sunken);
+    border: 1px solid var(--color-line);
   }
+	.wizard-footer {
+		padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+	}
+	@media (min-width: 768px) {
+		.wizard-footer {
+			padding-bottom: max(1rem, env(safe-area-inset-bottom));
+		}
+	}
 </style>

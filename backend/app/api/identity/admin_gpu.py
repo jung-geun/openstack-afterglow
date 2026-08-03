@@ -148,7 +148,7 @@ def _require_db():
 
 
 async def _merged_devices() -> list[dict]:
-    """내장 기본값 + config.toml + DB 병합 카탈로그 목록 (source 표시).
+    """내장 기본값 + afterglow.conf + DB 병합 카탈로그 목록 (source 표시).
 
     카탈로그는 **DB를 권위 소스로** 한다: in-process PCI_DEVICE_MAP(각 pod의 lazy
     overlay)에 아직 반영되지 않은 DB 항목도 포함시킨다. 다중 replica 환경에서 업로드를
@@ -213,9 +213,9 @@ async def _merged_devices() -> list[dict]:
 
 @router.get("/gpu-devices", dependencies=[Depends(require_admin)])
 async def list_gpu_devices():
-    """병합된 GPU 장치 카탈로그 목록 (내장 기본값 + config.toml + DB overlay).
+    """병합된 GPU 장치 카탈로그 목록 (내장 기본값 + afterglow.conf + DB overlay).
 
-    각 항목의 source: "builtin"(코드 내장) | "config"(config.toml) | "db"(관리자 추가).
+    각 항목의 source: "builtin"(코드 내장) | "config"(afterglow.conf) | "db"(관리자 추가).
     db 항목만 삭제 가능하다.
     """
     return {"devices": await _merged_devices()}
@@ -278,7 +278,7 @@ async def delete_gpu_device(vendor_id: str, device_id: str):
         vendor_key = vendor_id.upper()
         device_key = device_id.upper()
         if device_key in PCI_DEVICE_MAP.get(vendor_key, {}):
-            raise HTTPException(status_code=409, detail="내장 기본값/config.toml 항목은 삭제할 수 없습니다")
+            raise HTTPException(status_code=409, detail="내장 기본값/afterglow.conf 항목은 삭제할 수 없습니다")
         raise HTTPException(status_code=404, detail="해당 GPU 장치가 카탈로그에 없습니다")
     await refresh_device_map_from_db()
 

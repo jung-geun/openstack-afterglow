@@ -1,31 +1,47 @@
-"""LibreChat 토큰 사용량 읽기 전용 미러링 엔드포인트.
+"""빌트인 AI 채팅 사용량 조회 엔드포인트 (사용자 본인).
 
-기존에 운영 중인 LibreChat 인스턴스의 MongoDB를 조회해 현재 로그인 사용자 본인의
-토큰 사용량만 노출한다. Afterglow는 이 데이터에 쓰기를 수행하지 않는다.
-
-신원 조인: Afterglow token_info의 username(Keystone, GitLab federation 매핑)을
-LibreChat username과 매칭한다. 두 시스템 사용자명이 어긋나면 조회 실패로 취급한다.
+- GET /usage           : 누적/월 요약 + 접근경로(web/api) 분해.
+- GET /usage/timeseries: 시간버킷(hour/day/month) × source 시계열(본인).
+- GET /usage/keys      : API 키별 사용량(본인).
+모두 chat_usage_logs 원장에서 user_id 기준 집계. 저장소 장애 시에도 안전(빈/found=False) 200.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_token_info
-from app.services.librechat_mongo import get_usage_for_username
+from app.services.chat import stats as stats_service
+from app.services.chat.usage import user_usage_summary
 
 router = APIRouter()
+
+_RANGES = ("30d", "90d", "1y", "all")
+_BUCKETS = ("hour", "day", "month")
 
 
 @router.get("/usage")
 async def get_chat_usage(token_info: dict = Depends(get_token_info)):
-    """로그인 사용자 본인의 LibreChat 토큰 사용량 집계.
+    """로그인 사용자 본인의 빌트인 채팅 사용량 요약. 데이터/DB 없으면 found=False 로 200 반환."""
+    return await user_usage_summary(token_info.get("user_id", ""), token_info.get("project_id", ""))
 
-    LibreChat 미설정이거나 매칭되는 사용자가 없으면 found=False로 200 반환
-    (Grafana 대시보드 엔드포인트와 동일하게 항상 200 — 프론트엔드가 빈 상태로 판단).
-    """
-    username = token_info.get("username", "")
-    usage = await get_usage_for_username(username) if username else None
 
-    if usage is None:
-        return {"found": False, "total_raw_amount": 0.0, "total_token_value": 0.0, "transaction_count": 0}
+@router.get("/usage/timeseries")
+async def get_usage_timeseries(
+    bucket: str = Query(default="day"),
+    range: str = Query(default="30d"),
+    token_info: dict = Depends(get_token_info),
+):
+    """본인 사용량 시계열 — 시간/일/월 버킷 × source(web/api). 시스템 부담 제외."""
+    b = bucket if bucket in _BUCKETS else "day"
+    rng = range if range in _RANGES else "30d"
+    series = await stats_service.timeseries(b, rng, None, user_id=token_info.get("user_id", ""), include_system=False)
+    return {"bucket": b, "range": rng, "series": series}
 
-    return {"found": True, **usage}
+
+@router.get("/usage/keys")
+async def get_usage_keys(
+    range: str = Query(default="all"),
+    token_info: dict = Depends(get_token_info),
+):
+    """본인 API 키별 사용량(source="api")."""
+    rng = range if range in _RANGES else "all"
+    return {"keys": await stats_service.by_api_key(rng, None, user_id=token_info.get("user_id", ""))}

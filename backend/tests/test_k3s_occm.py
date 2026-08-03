@@ -10,8 +10,6 @@ def _make_settings(**overrides):
     defaults = {
         "k3s_occm_enabled": True,
         "k3s_occm_image": "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0",
-        "k3s_occm_floating_network_id": "ext-net-id",
-        "k3s_occm_public_network_name": "external",
         "os_auth_url": "https://keystone.example.com:5000/v3",
         "os_region_name": "RegionOne",
         "os_username": "admin",
@@ -24,6 +22,13 @@ def _make_settings(**overrides):
     mock = MagicMock()
     for k, v in defaults.items():
         setattr(mock, k, v)
+    resource_ids = {
+        "k3s.occm_floating_network": overrides.get("floating_network_id", "ext-net-id"),
+        "k3s.lb_subnet": overrides.get("lb_subnet_id", ""),
+    }
+    resource_names = {"k3s.occm_public_network": overrides.get("public_network_name", "external")}
+    mock.resource_id.side_effect = lambda key: resource_ids.get(key, "")
+    mock.resource_name.side_effect = lambda key: resource_names.get(key, "")
     return mock
 
 
@@ -68,13 +73,13 @@ class TestGenerateCloudConf:
     def test_no_floating_network(self):
         from app.services.k3s_occm import generate_cloud_conf
 
-        result = generate_cloud_conf("proj-123", _make_settings(k3s_occm_floating_network_id=""))
+        result = generate_cloud_conf("proj-123", _make_settings(floating_network_id=""))
         assert "floating-network-id" not in result
 
     def test_no_public_network_name(self):
         from app.services.k3s_occm import generate_cloud_conf
 
-        result = generate_cloud_conf("proj-123", _make_settings(k3s_occm_public_network_name=""))
+        result = generate_cloud_conf("proj-123", _make_settings(public_network_name=""))
         assert "public-network-name" not in result
 
     def test_ca_file_included_when_not_insecure(self):
@@ -127,6 +132,7 @@ class TestCloudInitIntegration:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -142,6 +148,7 @@ class TestCloudInitIntegration:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -163,6 +170,7 @@ class TestCloudInitIntegration:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -177,6 +185,7 @@ class TestCloudInitIntegration:
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
@@ -192,6 +201,7 @@ class TestCloudInitIntegration:
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
@@ -202,38 +212,53 @@ class TestCloudInitIntegration:
         assert "optional: true" in decoded
 
     def test_server_userdata_node_ip_deterministic(self):
-        """SERVER_IP를 ip route get 8.8.8.8 기반으로 결정 + --node-ip 포함 확인."""
+        """서버가 저장된 primary network pin drop-in을 사용해야 한다."""
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             callback_url="http://api.example.com",
             callback_token="tok-123",
         )
         decoded = gzip.decompress(base64.b64decode(result.data)).decode()
-        assert "ip route get 8.8.8.8" in decoded
-        assert "--node-ip" in decoded
+        assert "PRIMARY_NETWORK_ID=net-primary" in decoded
+        assert 'node-ip: "${AFTERGLOW_K3S_NODE_IP}"' in decoded
+        assert 'flannel-iface: "${AFTERGLOW_K3S_PRIMARY_IFACE}"' in decoded
+        assert 'advertise-address: "${AFTERGLOW_K3S_NODE_IP}"' in decoded
+        install_block = decoded[decoded.index("# k3s 서버 설치") :]
+        assert ". /etc/rancher/k3s/afterglow-primary-network.env" in install_block
+        assert install_block.index(". /etc/rancher/k3s/afterglow-primary-network.env") < install_block.index(
+            'SERVER_IP="${AFTERGLOW_K3S_NODE_IP}"'
+        )
+        assert "ip route get 8.8.8.8" not in decoded
+        assert "--node-ip" not in decoded
 
     def test_agent_userdata_node_ip_injected(self):
-        """에이전트 cloud-init에 --node-ip와 ip route get 8.8.8.8 포함 확인."""
+        """에이전트가 저장된 primary network pin을 사용해야 한다."""
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",
             node_token="token-abc",
         )
         decoded = gzip.decompress(base64.b64decode(result.data)).decode()
-        assert "ip route get 8.8.8.8" in decoded
-        assert "--node-ip" in decoded
+        assert "PRIMARY_NETWORK_ID=net-primary" in decoded
+        assert '_EXEC_ARGS="agent"' in decoded
+        assert "ip route get 8.8.8.8" not in decoded
+        assert "--node-ip" not in decoded
+        assert "advertise-address:" not in decoded
 
     def test_agent_userdata_secondary_nic_no_default_route(self):
         """에이전트 netplan에도 use-routes: false 포함 확인."""
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
+            primary_network_id="net-primary",
             cluster_name="test",
             k3s_version="v1.31.4+k3s1",
             server_ip="10.0.0.1",

@@ -30,6 +30,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-roles',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 60,
 		intervalOptions: [30, 60]

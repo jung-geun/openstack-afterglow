@@ -5,6 +5,7 @@
 	import { apiMut } from '$lib/api/mutations';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { createCoalescedRefresh } from '$lib/utils/coalescedRefresh';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -115,7 +116,10 @@
 		await Promise.allSettled([fetchFileStorage(opts), fetchAccessRules(opts)]);
 	}
 
-	const ar = createAutoRefresh(() => untrack(() => fetchAll()), {
+	const refresh = createCoalescedRefresh((force) =>
+		untrack(() => fetchAll(force ? { refresh: true } : undefined))
+	);
+	const ar = createAutoRefresh(() => refresh.run(false), {
 		storageKey: 'admin-file-storage-detail',
 		defaultActive: true,
 		defaultInterval: 15,
@@ -124,7 +128,7 @@
 	});
 
 	$effect(() => {
-		if (fileStorageId && $auth.token) untrack(() => void fetchAll());
+		if (fileStorageId && $auth.token) void refresh.run(false);
 	});
 
 	async function deleteFileStorage() {
@@ -204,7 +208,7 @@
 			bind:intervalSeconds={ar.intervalSeconds}
 			intervalOptions={ar.intervalOptions}
 			refreshing={loading || accessLoading}
-			onManualRefresh={() => fetchAll({ refresh: true })}
+			onManualRefresh={() => refresh.run(true)}
 		/>
 	</div>
 
@@ -215,7 +219,7 @@
 	{:else if fileStorage}
 		<DetailHeader title={fileStorage.name || fileStorage.id} status={fileStorage.status}>
 			{#snippet meta()}
-				<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">{fileStorage.share_proto}</span>
+				<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">{fileStorage!.share_proto}</span>
 			{/snippet}
 			{#snippet actions()}
 				<button

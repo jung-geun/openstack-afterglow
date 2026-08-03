@@ -152,7 +152,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
-from app.api.identity import admin_router, auth_router, gitlab_auth_router
+from app.api.identity import admin_router, auth_router, gitlab_auth_router, mcp_access_router
 from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_announcements import router as admin_announcements_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
@@ -163,6 +163,7 @@ from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
+from app.api.identity.admin_resource_policies import router as admin_resource_policies_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.admin_worker_runtime import router as admin_worker_runtime_router
@@ -170,8 +171,17 @@ from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
+from app.api.mcp import auth_router as mcp_oauth_router
+from app.api.mcp import root_router as mcp_root_router
+from app.api.mcp import router as mcp_router
 from app.api.union.layer_ops import router as admin_libraries_router
 from app.api.union.layer_public import router as squashfs_libraries_router
+from app.services.mcp_control_plane.transport import (
+    install_mcp_route,
+    mcp_paths,
+    start_mcp_transport,
+    stop_mcp_transport,
+)
 
 _mark("api.identity")
 
@@ -245,6 +255,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+install_mcp_route(app)
 
 
 @app.exception_handler(HTTPException)
@@ -333,6 +344,26 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # 긴 prefix 를 먼저 두어 longest-prefix 매칭이 단순 순회로 동작하도록 정렬.
 # 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
 _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
+    ("/api/v1/chat/admin/providers", "llm_provider"),
+    ("/api/v1/chat/admin/title-model", "llm_model"),
+    ("/api/v1/chat/admin/memory-model", "llm_model"),
+    ("/api/v1/chat/admin/models", "llm_model"),
+    ("/api/v1/chat/admin/mcp-servers", "chat_mcp_server"),
+    ("/api/v1/chat/admin/custom-tools", "chat_custom_tool"),
+    ("/api/v1/chat/code-workspaces", "chat_code_workspace"),
+    ("/api/v1/chat/git-credentials", "chat_git_credential"),
+    ("/api/v1/chat/agents", "chat_agent"),
+    ("/api/v1/chat/workspaces", "chat_workspace"),
+    ("/api/v1/chat/memories", "chat_memory"),
+    ("/api/v1/chat/conversations", "chat_conversation"),
+    ("/api/v1/chat/mcp-servers", "chat_mcp_server"),
+    ("/api/v1/chat/custom-tools", "chat_custom_tool"),
+    ("/api/v1/chat/api-keys", "chat_api_key"),
+    ("/api/v1/chat/runs", "chat_run"),
+    ("/api/v1/chat/assets", "chat_asset"),
+    ("/api/v1/chat/temp-threads", "chat_temp_thread"),
+    ("/api/v1/auth/mcp-oauth/grants", "mcp_grant"),
+    ("/api/v1/auth/mcp-tokens", "mcp_grant"),
     ("/api/v1/volumes/backups", "volume_backup"),
     ("/api/v1/admin/announcements", "announcement"),
     ("/api/v1/volume-snapshots", "volume_snapshot"),
@@ -344,16 +375,20 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/secret-orders", "secret_order"),
     ("/api/v1/database-instances", "database"),
     ("/api/v1/admin/worker-runtime", "worker_runtime"),
+    ("/api/v1/admin/resource-policies", "resource_policy"),
     ("/api/v1/admin/libraries", "union_layer"),
     ("/api/v1/libraries/squashfs", "union_layer"),
+    ("/api/v1/admin/palimpsest", "palimpsest_layer"),
+    ("/api/v1/palimpsest", "palimpsest_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
-    ("/api/v1/vpn/servers", "vpn_server"),
+    ("/api/v1/waygate/servers", "waygate_server"),
     ("/api/v1/loadbalancers", "load_balancer"),
     ("/api/v1/k3s/clusters", "container_cluster"),
     ("/api/v1/file-storage", "file_storage"),
     ("/api/v1/object-storage", "object_storage"),
     ("/api/v1/invitations", "invitation"),
+    ("/api/v1/instances/cloud-init", "cloud_init_snippet"),
     ("/api/v1/instances", "instance"),
     ("/api/v1/keypairs", "keypair"),
     ("/api/v1/networks", "network"),
@@ -363,7 +398,6 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/routers", "router"),
     ("/api/v1/secrets", "secret"),
     ("/api/v1/images", "image"),
-    ("/api/v1/union", "union_layer"),
     ("/api/v1/clusters", "container_cluster"),
 ]
 
@@ -394,7 +428,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     return response
@@ -421,8 +455,12 @@ async def request_logging_middleware(request: Request, call_next):
     return response
 
 
-_CORS_ALLOW_HEADERS = "Content-Type, X-Project-Id, Authorization"
+_CORS_ALLOW_HEADERS = "Content-Type, X-Project-Id, Authorization, Idempotency-Key, Last-Event-ID"
 _CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+
+
+def _is_mcp_no_cors_path(path: str) -> bool:
+    return any(path == resource_path or path.startswith(f"{resource_path}/oauth/") for resource_path in mcp_paths())
 
 
 def _get_allowed_origins() -> set[str]:
@@ -434,6 +472,8 @@ def _get_allowed_origins() -> set[str]:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
+    if _is_mcp_no_cors_path(request.url.path):
+        return await call_next(request)
     if request.method == "OPTIONS":
         if origin not in _get_allowed_origins():
             return JSONResponse(content="Forbidden", status_code=403)
@@ -508,6 +548,10 @@ async def activity_audit_middleware(request: Request, call_next):
 
 # Identity
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(mcp_access_router, prefix="/api/v1/auth", tags=["mcp-access"])
+app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+app.include_router(mcp_root_router, tags=["mcp"])
+app.include_router(mcp_oauth_router, prefix="/api/v1/auth", tags=["mcp-oauth"])
 # OIDC/OAuth API routes follow the project-wide /api/v1 mount rule.
 app.include_router(gitlab_auth_router, prefix="/api/v1/auth", tags=["auth-oidc"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
@@ -521,6 +565,7 @@ app.include_router(admin_gpu_router, prefix="/api/v1/admin", tags=["admin-gpu"])
 app.include_router(admin_libraries_router, prefix="/api/v1/admin/libraries", tags=["admin-libraries"])
 app.include_router(admin_notion_router, prefix="/api/v1/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/v1/admin", tags=["admin-images"])
+app.include_router(admin_resource_policies_router, prefix="/api/v1/admin", tags=["admin-resource-policies"])
 app.include_router(profile_router, prefix="/api/v1/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/v1/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/v1/admin", tags=["admin-activity"])
@@ -548,7 +593,7 @@ app.include_router(networks_router, prefix="/api/v1/networks", tags=["networks"]
 app.include_router(routers_router, prefix="/api/v1/routers", tags=["routers"])
 app.include_router(loadbalancers_router, prefix="/api/v1/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups_router, prefix="/api/v1/security-groups", tags=["security-groups"])
-# Optional services — afterglow.conf/config.toml [services] 섹션에서 활성화
+# Optional services — afterglow.conf [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
 _svc_cfg = _get_cfg()
@@ -581,10 +626,22 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_nodegroups_router, prefix="/api/v1/k3s/clusters", tags=["k3s-nodegroups"])
     app.include_router(k3s_certificates_router, prefix="/api/v1/k3s/clusters", tags=["k3s-certificates"])
 
-# Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
-from app.api.union import router as union_router  # noqa: E402
+# Palimpsest (레이어드 VM) — docs/palimpsest.md
+#
+# 2세대 union 표면(`/api/v1/union`)은 폐기됐다 — 인프라(중앙 Manila share, CephX keyring,
+# Builder VM)가 배포된 적이 없고 프론트 호출자도 nav 에서 도달 불가능한 고립 페이지뿐이었다.
+# `union_layers`/`union_templates`/`union_user_mounts` 테이블은 데이터 보존을 위해 남긴다.
+from app.api.palimpsest import (  # noqa: E402
+    palimpsest_admin_router,
+    palimpsest_builds_router,
+    palimpsest_hub_router,
+    palimpsest_layers_router,
+)
 
-app.include_router(union_router, prefix="/api/v1/union", tags=["union"])
+app.include_router(palimpsest_layers_router, prefix="/api/v1/palimpsest", tags=["palimpsest"])
+app.include_router(palimpsest_hub_router, prefix="/api/v1/palimpsest/hub", tags=["palimpsest-hub"])
+app.include_router(palimpsest_builds_router, prefix="/api/v1/palimpsest/builds", tags=["palimpsest-builds"])
+app.include_router(palimpsest_admin_router, prefix="/api/v1/admin/palimpsest", tags=["palimpsest-admin"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 
@@ -602,18 +659,75 @@ if _svc_cfg.service_barbican_enabled:
     app.include_router(containers_router, prefix="/api/v1/secret-containers", tags=["secret-containers"])
     app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
     app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
-if _svc_cfg.service_vpn_enabled:
-    from app.api.vpn import vpn_agent_router, vpn_clients_router, vpn_servers_router
+if _svc_cfg.service_waygate_enabled:
+    from app.api.waygate import (
+        waygate_agent_router,
+        waygate_attachments_router,
+        waygate_clients_router,
+        waygate_migration_router,
+        waygate_servers_router,
+    )
 
-    # VPN — servers/clients(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
-    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/agent/register 등) 충돌 없음.
-    app.include_router(vpn_servers_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
-    app.include_router(vpn_clients_router, prefix="/api/v1/vpn/servers", tags=["vpn"])
-    app.include_router(vpn_agent_router, prefix="/api/v1/vpn/servers", tags=["vpn-agent"])
+    # Waygate — servers/clients/networks/migration(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
+    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/networks, POST /{id}/export, POST /{id}/agent/register 등) 충돌 없음.
+    app.include_router(waygate_servers_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_clients_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_attachments_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_migration_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    app.include_router(waygate_agent_router, prefix="/api/v1/waygate/servers", tags=["waygate-agent"])
 if _svc_cfg.service_chat_enabled:
-    from app.api.chat import chat_usage_router
+    from app.api.chat import (
+        chat_admin_router,
+        chat_agents_router,
+        chat_api_keys_router,
+        chat_assets_router,
+        chat_code_workspaces_router,
+        chat_completions_router,
+        chat_conversations_router,
+        chat_extensions_admin_router,
+        chat_extensions_user_router,
+        chat_mcp_oauth_router,
+        chat_memory_router,
+        chat_stats_router,
+        chat_usage_router,
+        chat_workspaces_router,
+    )
 
+    # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
+    app.include_router(chat_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 관리자 사용량 통계 (require_admin, GET 전용) — /admin/stats
+    app.include_router(chat_stats_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 관리자 MCP/커스텀툴 (require_admin, global) — /admin/mcp-servers, /admin/custom-tools
+    app.include_router(chat_extensions_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
+    # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)
+    app.include_router(chat_conversations_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
+    # Canonical scanned assets use configured S3 + ClamAV.
+    app.include_router(chat_assets_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
+    app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
+    # Browser callback is state-bound and intentionally has no browser bearer dependency.
+    app.include_router(chat_mcp_oauth_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone
+    app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
+    # 사용자 프로젝트(workspace, 대화 그룹+공통 지침) + 장기 메모리 — /workspaces, /memories
+    app.include_router(chat_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_code_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(chat_memory_router, prefix="/api/v1/chat", tags=["chat"])
     app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
+    # 외부 API 키 관리 (본인 스코프, 웹 인증) — /api-keys
+    app.include_router(chat_api_keys_router, prefix="/api/v1/chat", tags=["chat"])
+
+    # 외부 OpenAI/Anthropic 호환 API — API 키 인증, stateless.
+    # ⚠️ 최상위 /v1 마운트는 "모든 라우터 /api/v1 단독" 규정의 명시적 예외(외부 SDK 표준 경로 호환).
+    # require_chat_api_host: 전용 서브도메인(chat_api_hosts)에서만 노출 — 기본 URL에선 404(충돌·오용 방지).
+    from app.api.ai_compat import ai_discovery_router, anthropic_compat_router, openai_compat_router
+    from app.api.deps import require_chat_api_host
+
+    _v1_gate = [Depends(require_chat_api_host)]
+    app.include_router(ai_discovery_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
+    app.include_router(openai_compat_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
+    app.include_router(anthropic_compat_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
 app.include_router(tutorial_status_router, prefix="/api/v1/tutorials", tags=["tutorials"])
@@ -765,11 +879,14 @@ async def _collect_snapshot() -> None:
                 factory = get_session_factory()
                 if factory:
                     async with factory() as db:
+                        # Palimpsest 활성 레이어 소비 집계.
+                        # 이전에는 2세대 `union_user_mounts` 를 세었으나 그 테이블은 채워진 적이
+                        # 없다(인프라 미배포) — 실제 사용 중인 스택은 `layer_consumes` 다.
                         result = await db.execute(
                             text(
-                                "SELECT ul.name, COUNT(*) as cnt FROM union_user_mounts uum "
-                                "JOIN union_layers ul ON ul.id = uum.leaf_layer_id "
-                                "WHERE uum.unmounted_at IS NULL GROUP BY ul.name"
+                                "SELECT profile_name, COUNT(*) AS cnt FROM layer_consumes "
+                                "WHERE status = 'active' AND server_id IS NOT NULL "
+                                "GROUP BY profile_name"
                             )
                         )
                         for row in result:
@@ -830,6 +947,22 @@ async def _k3s_cleanup_loop() -> None:
             await _k3s.check_stale_clusters(timeout_minutes=30)
         except Exception:
             _logger.warning("k3s stale cluster check failed", exc_info=True)
+        await asyncio.sleep(300)
+
+
+async def _mcp_cleanup_loop() -> None:
+    """Sweep expired delegated-authority state; Keystone cleanup stays owner-scoped."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            from app.database import get_session_factory
+            from app.services.mcp_control_plane.cleanup import sweep_delegated_authority
+
+            session_factory = get_session_factory()
+            if session_factory is not None:
+                await sweep_delegated_authority(session_factory)
+        except Exception:
+            _logger.warning("MCP delegated-authority cleanup failed", exc_info=True)
         await asyncio.sleep(300)
 
 
@@ -1092,6 +1225,9 @@ async def start_background_workers():
             _db_cfg.database_url,
             pool_size=_db_cfg.database_pool_size,
             max_overflow=_db_cfg.database_max_overflow,
+            connect_timeout=_db_cfg.database_connect_timeout,
+            pool_timeout=_db_cfg.database_pool_timeout,
+            unhealthy_seconds=_db_cfg.database_unhealthy_seconds,
         )
         if _db_cfg.database_auto_create_tables:
             # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
@@ -1100,12 +1236,27 @@ async def start_background_workers():
         else:
             asyncio.create_task(_deferred_load_gpu_catalog())
 
+    if _db_cfg.chat_checkpointer_postgres_url:
+        from app.services.chat.checkpointer import chat_checkpointer
+
+        await chat_checkpointer.start(_db_cfg.chat_checkpointer_postgres_url)
+    if _db_cfg.chat_semantic_memory_enabled:
+        from app.services.chat.semantic_memory import setup_semantic_memory
+
+        try:
+            await setup_semantic_memory()
+        except Exception:
+            _logger.warning("semantic memory is unavailable; keeping manual memory active", exc_info=True)
+
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
+    if _svc_cfg.service_mcp_enabled:
+        await start_mcp_transport()
+        asyncio.create_task(_mcp_cleanup_loop())
 
     if _db_cfg.worker_runtime_mode != "static" and _db_cfg.worker_runtime_reconcile_interval > 0:
         from app.services.worker_runtime import reconcile_loop
@@ -1122,6 +1273,9 @@ async def start_background_workers():
 async def shutdown_event():
     from app.database import close_db
     from app.services import prom_query
+    from app.services.chat.checkpointer import chat_checkpointer
 
+    await stop_mcp_transport()
+    await chat_checkpointer.close()
     await close_db()
     await prom_query.aclose_client()

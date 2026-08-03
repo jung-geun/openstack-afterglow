@@ -9,6 +9,7 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import TutorialStartButton from '$lib/tutorial/TutorialStartButton.svelte';
 
 	interface AdminContainer {
 		uuid: string;
@@ -45,6 +46,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-containers',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60]
@@ -54,8 +56,10 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
+	<div data-tour="admin-containers-header">
 	<PageHeader breadcrumb="CONTAINERS" title="전체 컨테이너">
 		{#snippet actions()}
+			<TutorialStartButton tour="admin-containers" compactOnMobile />
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -65,13 +69,15 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	</div>
 
+	<div data-tour="admin-containers-list">
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if containers.length === 0}
-		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
+		<div class="text-gray-600 text-sm" data-tour="admin-containers-ready">컨테이너가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" data-tour="admin-containers-ready">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
@@ -85,13 +91,14 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each containers as c (c.uuid)}
+					{#each containers as c, index (c.uuid)}
 						<tr
 							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedContainerId === c.uuid ? 'bg-gray-800/50' : ''}"
 							onclick={() => (selectedContainerId = c.uuid)}
 							onkeydown={(e) => e.key === 'Enter' && (selectedContainerId = c.uuid)}
 							role="button"
 							tabindex="0"
+							data-tour={index === 0 ? 'admin-containers-row' : undefined}
 						>
 							<td class="py-2 pr-4 text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={c.name || c.uuid}>{c.name || c.uuid.slice(0, 8)}</span></td>
 							<td class="py-2 pr-4"><StatusChip status={c.status} /></td>
@@ -106,10 +113,11 @@
 			</table>
 		</div>
 	{/if}
+	</div>
 </div>
 
 {#if selectedContainerId}
-	<SlidePanel onClose={() => (selectedContainerId = null)} width="w-full md:w-[480px]">
+	<SlidePanel onClose={() => (selectedContainerId = null)} width="w-full md:w-[480px]" dataTour="admin-containers-detail">
 		<ContainerDetailPanel
 			containerId={selectedContainerId}
 			onClose={() => (selectedContainerId = null)}

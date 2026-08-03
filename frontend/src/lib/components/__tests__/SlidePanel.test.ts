@@ -20,6 +20,7 @@ beforeEach(() => {
 		removeEventListener: vi.fn(),
 		dispatchEvent: vi.fn(),
 	}));
+	localStorage.clear();
 });
 
 describe('SlidePanel', () => {
@@ -34,6 +35,13 @@ describe('SlidePanel', () => {
 		render(SlidePanelWrapper, { onClose: vi.fn(), content: '패널 내용' });
 		flushSync();
 		expect(screen.getByText('패널 내용')).toBeTruthy();
+	});
+
+	it('dataTour를 스크롤 컨테이너의 data-tour 속성으로 전달', () => {
+		const { container } = render(SlidePanelWrapper, { onClose: vi.fn(), dataTour: 'wizard-panel' });
+		flushSync();
+		const scrollContainer = container.querySelector('.overflow-y-auto');
+		expect(scrollContainer?.getAttribute('data-tour')).toBe('wizard-panel');
 	});
 
 	it('backdrop 버튼이 "패널 닫기" aria-label을 가짐', () => {
@@ -59,5 +67,32 @@ describe('SlidePanel', () => {
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.keyDown(dialog, { key: 'Escape' });
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('viewport가 축소되면 저장된 폭을 sidebar 우측 가용 폭으로 자동 축소한다', async () => {
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+		window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+			matches: true,
+			media: query,
+			onchange: null,
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+			dispatchEvent: vi.fn(),
+		}));
+		localStorage.setItem('slide-panel-test', '1000');
+
+		const { container } = render(SlidePanelWrapper, { onClose: vi.fn(), storageKey: 'slide-panel-test' });
+		flushSync();
+		const panel = container.querySelector('.overflow-y-auto') as HTMLElement;
+		expect(panel.style.width).toBe('1000px');
+
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 });
+		window.dispatchEvent(new Event('resize'));
+		flushSync();
+
+		expect(panel.style.width).toBe('560px');
+		expect(localStorage.getItem('slide-panel-test')).toBe('1000');
 	});
 });

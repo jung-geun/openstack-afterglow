@@ -1,200 +1,208 @@
+---
+title: 관리자 (Admin)
+parent: API 레퍼런스
+nav_order: 20
+---
+
 # 관리자 (Admin) API
 
-> 태그: `admin`, `admin-services`, `admin-flavors`, `admin-identity`, `admin-gpu`  
-> 기본 경로: `/api/admin`
+> 태그: `admin`, `admin-instances`, `admin-services`, `admin-worker-runtime`, `admin-flavors`, `admin-identity`, `admin-gpu`, `admin-libraries`, `admin-notion`, `admin-images`, `admin-activity`, `admin-orphans`, `admin-dashboard`, `admin-announcements`, `admin-key-manager`
+> 기본 경로: `/api/v1/admin`
 
-모든 관리자 API는 관리자 권한이 필요합니다. 인증 헤더와 함께 관리자 역할이 부여된 토큰을 사용해야 합니다.
+관리자 API는 클러스터 전체(모든 프로젝트)를 대상으로 하는 **시스템 스코프** 관리 기능입니다. 하이퍼바이저·리소스 집계, 전체 리소스 조회, VM 마이그레이션, 볼륨/네트워크 관리, 사용자·프로젝트·쿼터·역할, GPU·이미지·Notion 연동, 고아 리소스 정리, 워커 런타임, 공지, k3s 클러스터 관리 등을 포함합니다.
+
+## 인증 및 권한
+
+| 헤더 | 설명 |
+|------|------|
+| `Authorization` | `Bearer <access_token>` — 관리자(system admin) 권한 계정의 access JWT |
+| `X-Project-Id` | (선택) 프로젝트 UUID — 생략 시 토큰의 프로젝트로 처리, 다른 값이면 rescope |
+
+**모든 관리자 엔드포인트에는 `Depends(require_admin)`가 적용**됩니다(개별 데코레이터 또는 라우터 레벨 의존성으로 선언). 관리자가 아닌 사용자는 `403 Forbidden`을 받습니다. 아래 표에서는 이 사항을 매 행마다 반복하지 않습니다.
+
+- 대부분의 라우터는 `/api/v1/admin` prefix에 마운트됩니다.
+- 예외: 라이브러리 관리(`/api/v1/admin/libraries`), 공지(`/api/v1/admin/announcements`).
+- 캐시 기반 조회 엔드포인트는 대부분 `refresh` (query, boolean, 기본 `false`) 파라미터로 캐시 무시 재조회를 지원합니다.
+- 목록 조회는 대체로 `limit`(1~100, 기본 20) + `marker` 커서 페이지네이션을 사용하며 `{ "items": [...], "next_marker": ..., "count": N }` 형태로 응답합니다.
 
 ![관리자 개요](../../assets/admin-page.png)
 *관리자 개요 페이지 — 클러스터 전체 vCPU·RAM·Disk 사용률, 총 VM/하이퍼바이저 수, 프로젝트별 리소스 할당량을 한 화면에서 조회*
 
 ---
 
-## 인증 및 권한
+## 클러스터 개요·모니터링
 
-| 헤더 | 설명 |
-|------|------|
-| `X-Auth-Token` | 관리자 권한이 있는 Keystone 토큰 |
-| `X-Project-Id` | OpenStack 프로젝트 UUID |
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/overview` | 하이퍼바이저·인스턴스·vCPU/RAM/Disk 사용량·GPU 인스턴스 수 등 클러스터 개요 |
+| `GET` | `/api/v1/admin/overview/projects` | 프로젝트별 컴퓨트/스토리지 쿼터·사용량·GPU 인스턴스 수 |
+| `GET` | `/api/v1/admin/monitoring/summary` | 서비스 상태·리소스·알림을 종합한 모니터링 요약 |
+| `GET` | `/api/v1/admin/notifications` | 관리자 알림(이상 상태·경고) 목록 |
+| `GET` | `/api/v1/admin/topology` | 전체 프로젝트 네트워크/라우터/인스턴스 토폴로지 (`TopologyData`) |
+| `GET` | `/api/v1/admin/timeseries/{resource_type}` | 리소스 유형별 시계열 스냅샷 (1시간 간격) |
+| `GET` | `/api/v1/admin/version` | 백엔드/배포 버전 정보 |
 
-모든 엔드포인트에 `require_admin` 의존성이 적용되어 있어, 관리자가 아닌 사용자는 `403 Forbidden` 응답을 받습니다.
-
----
-
-## 목차
-
-1. [개요 및 리소스 집계](#1-개요-및-리소스-집계)
-2. [파일 스토리지 관리](#2-파일-스토리지-관리)
-3. [라이브러리 관리 (squashfs 레이어)](#3-라이브러리-관리-squashfs-레이어)
-4. [인스턴스/볼륨/네트워크 전체 조회](#4-인스턴스볼륨네트워크-전체-조회)
-5. [토폴로지 및 시계열](#5-토폴로지-및-시계열)
-6. [볼륨 관리](#6-볼륨-관리)
-7. [네트워크 관리](#7-네트워크-관리)
-8. [서비스 상태 모니터링](#8-서비스-상태-모니터링)
-9. [Flavor 관리](#9-flavor-관리)
-10. [사용자 관리](#10-사용자-관리)
-11. [프로젝트 관리](#11-프로젝트-관리)
-12. [쿼터 관리](#12-쿼터-관리)
-13. [그룹 관리](#13-그룹-관리)
-14. [역할 관리](#14-역할-관리)
-15. [GPU 호스트 모니터링](#15-gpu-호스트-모니터링)
-16. [GPU Quota 관리](#16-gpu-quota-관리)
-17. [하이퍼바이저 상세](#17-하이퍼바이저-상세)
-18. [파일 스토리지 빌드](#18-파일-스토리지-빌드)
-19. [모니터링 요약](#19-모니터링-요약)
-
----
-
-## 1. 개요 및 리소스 집계
-
-### GET /api/admin/overview
-
-하이퍼바이저, 인스턴스, 컴퓨트/스토리지 리소스 사용량, GPU 인스턴스 수 등 전체 클러스터 개요를 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | `true` 시 캐시 무시하고 새로 조회 |
-
-**응답 (200 OK)**
+`GET /overview` 응답 예시:
 
 ```json
 {
   "hypervisor_count": 5,
   "running_vms": 42,
   "gpu_instances": 3,
-  "instance_stats": {
-    "total": 42,
-    "active": 38,
-    "shutoff": 2,
-    "error": 1,
-    "other": 1
-  },
-  "vcpus": {
-    "total": 160,
-    "allowed": 320,
-    "used": 85
-  },
-  "ram_gb": {
-    "total": 512.0,
-    "used": 256.5
-  },
-  "disk_gb": {
-    "total": 10000,
-    "used": 3500
-  },
+  "instance_stats": {"total": 42, "active": 38, "shutoff": 2, "error": 1, "other": 1},
+  "vcpus": {"total": 160, "allowed": 320, "used": 85},
+  "ram_gb": {"total": 512.0, "used": 256.5},
+  "disk_gb": {"total": 10000, "used": 3500},
   "containers_count": 0,
   "file_storage_count": 12
 }
 ```
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `hypervisor_count` | integer | 하이퍼바이저(호스트) 수 |
-| `running_vms` | integer | 실행 중인 VM 총 수 |
-| `gpu_instances` | integer | GPU 플레이버를 사용하는 인스턴스 수 |
-| `instance_stats` | object | 상태별 인스턴스 집계 |
-| `vcpus` | object | vCPU 물리/허용/사용량 |
-| `ram_gb` | object | RAM 총/사용량 (GB) |
-| `disk_gb` | object | 디스크 총/사용량 (GB) |
-| `containers_count` | integer | Zun 컨테이너 수 |
-| `file_storage_count` | integer | Manila 파일 스토리지 수 |
+**timeseries 제한**: `resource_type`은 `instances` / `volumes` / `file_storage` / `networks` 중 하나여야 하며, 그 외 값은 `400`. `range` (query)는 `1d` / `2d` / `7d` / `30d` (기본 `7d`).
 
-### GET /api/admin/hypervisors
+---
+
+## 하이퍼바이저·컴퓨트 호스트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/hypervisors` | 컴퓨트 하이퍼바이저 상세 목록(호스트별 vCPU/RAM/디스크/VM 수) |
+| `GET` | `/api/v1/admin/hypervisors/{hypervisor_id}` | 특정 하이퍼바이저 상세 |
+| `GET` | `/api/v1/admin/compute-hosts` | 마이그레이션 대상 선택용 컴퓨트 호스트 목록 |
 
 ![하이퍼바이저 목록](../../assets/admin-hv-list.png)
 *호스트별 VM 수, vCPU 사용률, RAM 사용량, 로컬 디스크 현황을 테이블로 일괄 조회*
 
-컴퓨트 하이퍼바이저 상세 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)** — 배열
-
-```json
-[
-  {
-    "id": "1",
-    "name": "compute01",
-    "state": "up",
-    "status": "enabled",
-    "hypervisor_type": "QEMU",
-    "vcpus": 32,
-    "vcpus_used": 16,
-    "memory_size_mb": 131072,
-    "memory_used_mb": 65536,
-    "local_disk_gb": 500,
-    "local_disk_used_gb": 200,
-    "running_vms": 8
-  }
-]
-```
-
-### GET /api/admin/overview/projects
-
-프로젝트별 컴퓨트/스토리지 쿼터 및 사용량, GPU 인스턴스 수를 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)** — 배열
-
-```json
-[
-  {
-    "project_id": "uuid-string",
-    "project_name": "project-name",
-    "cpu": {"used": 8, "quota": 40},
-    "ram_mb": {"used": 16384, "quota": 81920},
-    "instances": {"used": 5, "quota": 20},
-    "disk_gb": {"used": 200, "quota": 1000},
-    "gpu_instances": 1
-  }
-]
-```
-
 ---
 
-## 2. 파일 스토리지 관리
+## 전체 리소스 조회 (all-*)
 
-### GET /api/admin/file-storage
+전체 프로젝트를 가로지르는 조회 엔드포인트입니다. `all-instances` / `all-volumes`는 `limit`+`marker` 페이지네이션(`project_id` 필터 지원), 나머지는 `refresh` 파라미터를 사용합니다.
 
-모든 Afterglow 관련 파일 스토리지(Manila share) 목록을 반환합니다. prebuilt + dynamic 모두 포함.
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/all-instances` | 전체 인스턴스 목록 (페이지네이션, `project_id` 필터) |
+| `GET` | `/api/v1/admin/all-volumes` | 전체 볼륨 목록 (페이지네이션) |
+| `GET` | `/api/v1/admin/all-containers` | 전체 Zun 컨테이너 목록 (Zun 활성화 시) |
+| `GET` | `/api/v1/admin/all-file-storages` | 전체 Manila 파일 스토리지 목록 (Manila 활성화 시) |
+| `GET` | `/api/v1/admin/all-networks` | 전체 네트워크 목록 |
+| `GET` | `/api/v1/admin/all-loadbalancers` | 전체 로드밸런서 목록 (Octavia 활성화 시) |
+| `GET` | `/api/v1/admin/all-floating-ips` | 전체 Floating IP 목록 |
+| `GET` | `/api/v1/admin/all-routers` | 전체 라우터 목록 |
+| `GET` | `/api/v1/admin/all-ports` | 전체 포트 목록 |
 
-**응답 (200 OK)** — `FileStorageInfo[]` 배열
-
-### POST /api/admin/file-storage/build
-
-사전 빌드 파일 스토리지 share 생성을 트리거합니다. 실제 빌드는 별도 백그라운드 프로세스에서 수행됩니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `library_id` | query | string | 예 | 라이브러리 ID (예: `python311`) |
-
-**응답 (202 Accepted)**
+`GET /all-instances` 응답 예시:
 
 ```json
 {
-  "file_storage_id": "uuid-string",
-  "status": "building",
-  "library": "python311"
+  "items": [
+    {"id": "uuid", "name": "vm", "status": "ACTIVE", "project_id": "uuid",
+     "user_id": "uuid", "flavor": "m1.small", "host": "compute01",
+     "created_at": "2024-01-01T00:00:00Z", "fault": null}
+  ],
+  "next_marker": "uuid-or-null",
+  "count": 20
 }
 ```
 
-| 오류 | 설명 |
-|------|------|
-| `404` | 알 수 없는 library_id |
-| `409` | 이미 존재하는 사전 빌드 파일 스토리지 |
+---
+
+## VM 마이그레이션·복구
+
+인스턴스를 다른 호스트로 이동하거나 상태 전이/복구를 수행하는 **파괴적·상태전이** 엔드포인트입니다. 대상 인스턴스의 현재 상태가 전제 조건을 만족해야 하며(예: resize는 `VERIFY_RESIZE`를 거쳐 confirm/revert 필요), 진행 중 작업은 되돌리기 어려우므로 대상 검증이 필수입니다.
+
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `POST` | `/api/v1/admin/instances/{server_id}/live-migrate` | 라이브 마이그레이션 시작 | `host` (선택), `block_migration` (선택) |
+| `POST` | `/api/v1/admin/instances/{server_id}/live-migrate/abort` | 진행 중 라이브 마이그레이션 중단 | - |
+| `POST` | `/api/v1/admin/instances/{server_id}/live-migrate/force-complete` | 라이브 마이그레이션 강제 완료 | - |
+| `POST` | `/api/v1/admin/instances/{server_id}/cold-migrate` | 콜드 마이그레이션 (`host` 지정 시 해당 호스트로) | `host` (선택) |
+| `POST` | `/api/v1/admin/instances/{server_id}/evacuate` | 다운된 호스트에서 인스턴스 대피 | `host` (선택) |
+| `GET` | `/api/v1/admin/instances/{server_id}/migration-status` | 마이그레이션 진행 상태 조회 | - |
+| `POST` | `/api/v1/admin/instances/{server_id}/resize` | 인스턴스 리사이즈 시작 (`VERIFY_RESIZE`로 전이) | `new_flavor` |
+| `POST` | `/api/v1/admin/instances/{server_id}/confirm-resize` | 리사이즈 확정 | - |
+| `POST` | `/api/v1/admin/instances/{server_id}/revert-resize` | 리사이즈 되돌리기 | - |
+| `GET` | `/api/v1/admin/instances/{server_id}/recovery-analysis` | 오류/멈춤 인스턴스 복구 분석 | - |
+| `POST` | `/api/v1/admin/instances/{server_id}/recover` | 분석 결과 기반 인스턴스 복구 수행 | - |
+| `GET` | `/api/v1/admin/instances/health` | 전체 인스턴스 헬스 스냅샷 | - |
+| `POST` | `/api/v1/admin/instances/bulk-action` | 다수 인스턴스 일괄 제어 | `instance_ids[]`, `action`, `snapshot_name` (선택) |
+
+**bulk-action 제한**: `action`은 시작/정지/재부팅/스냅샷 등 허용된 값이어야 하며, 각 인스턴스별 결과가 개별 집계됩니다. 일부 실패해도 나머지는 계속 진행됩니다.
+
+### 관리자 인스턴스 생성 (대리 프로비저닝)
+
+관리자가 특정 프로젝트를 대신하여 인스턴스를 생성할 때 사용하는 헬퍼입니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/instances/networks-for-project` | 대상 프로젝트에서 선택 가능한 네트워크 |
+| `GET` | `/api/v1/admin/instances/security-groups-for-project` | 대상 프로젝트의 보안 그룹 |
+| `GET` | `/api/v1/admin/instances/volumes-for-project` | 대상 프로젝트의 볼륨 |
+| `POST` | `/api/v1/admin/instances/async` | 대상 프로젝트에 인스턴스 비동기 생성 |
 
 ---
 
-## 3. 라이브러리 관리 (squashfs 레이어)
+## 볼륨 관리
 
-관리자 라이브러리 관리 화면은 squashfs 레이어 워크플로우를 사용합니다. 기존 prebuilt 라이브러리 카탈로그 관리 API가 아니라, 레이어 artifact·프로필·소비 인스턴스를 관리합니다.
+![전체 볼륨 관리](../../assets/admin-volume.png)
+*전체 프로젝트의 볼륨을 시계열 차트와 함께 일괄 조회 — 상태·크기·프로젝트별 필터링, 수정·삭제 지원*
 
-모든 엔드포인트는 `Depends(require_admin)`가 필요하며 prefix는 `/api/v1/admin/libraries`입니다. `/api/v1/admin/layers` backend alias는 제공하지 않습니다.
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/volumes/status-summary` | 상태별 볼륨 수 집계 | - |
+| `GET` | `/api/v1/admin/volumes/{volume_id}` | 볼륨 상세 조회 | - |
+| `PATCH` | `/api/v1/admin/volumes/{volume_id}` | 이름/설명 수정 | `name`, `description` (모두 선택) |
+| `DELETE` | `/api/v1/admin/volumes/{volume_id}` | 볼륨 삭제 (`204`) | - |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/force-delete` | 강제 삭제 (`204`) | - |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/extend` | 용량 확장 | `new_size` (현재보다 커야 함) |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/reset-status` | 상태 강제 초기화 | `status` (기본 `available`) |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/transfer` | 다른 프로젝트로 볼륨 이관 | 대상 프로젝트 지정 |
+| `GET` | `/api/v1/admin/volumes/{volume_id}/delete-diagnostics` | 삭제 실패 원인 진단 | - |
+| `POST` | `/api/v1/admin/volumes/{volume_id}/recover-delete` | 삭제 실패 복구 시도 | - |
+
+**제한**: `force-delete` / `reset-status`는 Cinder의 정상 상태 전이를 우회하므로 데이터 정합성 위험이 있습니다. 오류 상태 복구 용도로만 사용하고, `extend`는 축소가 불가능합니다.
+
+---
+
+## 네트워크·라우터·포트·Floating IP
+
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/networks/{network_id}` | 네트워크 상세 | - |
+| `POST` | `/api/v1/admin/networks` | 네트워크 생성 (`201`) | `name`(필수), `is_external`, `is_shared`, `cidr`, `enable_dhcp` |
+| `PUT` | `/api/v1/admin/networks/{network_id}` | 네트워크 수정 | `name`, `is_shared` (선택) |
+| `DELETE` | `/api/v1/admin/networks/{network_id}` | 네트워크 삭제 (`204`) | - |
+| `POST` | `/api/v1/admin/floating-ips` | Floating IP 생성 (`201`) | `floating_network_id` (필수) |
+| `DELETE` | `/api/v1/admin/floating-ips/{fip_id}` | Floating IP 삭제 (`204`) | - |
+| `GET` | `/api/v1/admin/floating-ips/pool-stats` | Floating IP 풀 사용 통계 | - |
+| `POST` | `/api/v1/admin/routers` | 라우터 생성 (`201`) | `name`(필수), `external_network_id` (선택) |
+| `PUT` | `/api/v1/admin/routers/{router_id}` | 라우터 수정 (`null`이면 게이트웨이 제거) | `name`, `external_network_id` (선택) |
+| `DELETE` | `/api/v1/admin/routers/{router_id}` | 라우터 삭제 (`204`) | - |
+| `POST` | `/api/v1/admin/ports` | 포트 생성 (`201`) | 네트워크/고정 IP 지정 |
+| `PUT` | `/api/v1/admin/ports/{port_id}` | 포트 이름 수정 | `name` (선택) |
+| `DELETE` | `/api/v1/admin/ports/{port_id}` | 포트 삭제 (`204`) | - |
+
+`cidr`을 지정하면 네트워크와 함께 서브넷도 생성됩니다.
+
+---
+
+## 파일 스토리지 관리
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/file-storage` | 전체 Afterglow 파일 스토리지(Manila share) 목록 (prebuilt + dynamic) |
+| `POST` | `/api/v1/admin/file-storage/build` | 사전 빌드 share 생성 트리거 (`202`) — `library_id` (query, 필수) |
+| `GET` | `/api/v1/admin/file-storage/builds` | 진행 중/대기 중 빌드 목록 |
+| `GET` | `/api/v1/admin/file-storage/{file_storage_id}/delete-diagnostics` | share 삭제 실패 진단 |
+| `POST` | `/api/v1/admin/file-storage/{file_storage_id}/force-delete` | share 강제 삭제 (`202`) |
+
+**build 오류**: `404` 알 수 없는 `library_id`, `409` 이미 존재하는 사전 빌드 스토리지.
+
+---
+
+## 라이브러리 관리 (squashfs 레이어)
+
+관리자 라이브러리 화면은 squashfs 레이어 워크플로우(레이어 artifact·프로필·소비 인스턴스)를 관리합니다. prefix는 `/api/v1/admin/libraries`이며 `/api/v1/admin/layers` alias는 제공하지 않습니다.
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
@@ -212,1275 +220,307 @@
 
 ---
 
-## 4. 인스턴스/볼륨/네트워크 전체 조회
+## Zun 컨테이너 관리
 
-### GET /api/admin/all-instances
+Zun 서비스 활성화 시에만 사용 가능합니다.
 
-전체 프로젝트의 인스턴스 목록을 페이지네이션으로 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `limit` | query | integer | 20 | 페이지 크기 (1~100) |
-| `marker` | query | string | - | 이전 페이지 마지막 항목 ID |
-| `project_id` | query | string | - | 특정 프로젝트로 필터 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "items": [
-    {
-      "id": "uuid-string",
-      "name": "vm-name",
-      "status": "ACTIVE",
-      "project_id": "uuid-string",
-      "user_id": "uuid-string",
-      "flavor": "m1.small",
-      "host": "compute01",
-      "created_at": "2024-01-01T00:00:00Z",
-      "fault": null
-    }
-  ],
-  "next_marker": "uuid-string-or-null",
-  "count": 20
-}
-```
-
-### GET /api/admin/all-volumes
-
-전체 프로젝트의 볼륨 목록을 페이지네이션으로 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `limit` | query | integer | 20 | 페이지 크기 (1~100) |
-| `marker` | query | string | - | 이전 페이지 마지막 항목 ID |
-
-**응답 (200 OK)**
-
-```json
-{
-  "items": [
-    {
-      "id": "uuid-string",
-      "name": "volume-name",
-      "status": "in-use",
-      "size": 50,
-      "project_id": "uuid-string",
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "next_marker": "uuid-string-or-null",
-  "count": 20
-}
-```
-
-### GET /api/admin/all-containers
-
-전체 프로젝트의 Zun 컨테이너 목록을 반환합니다. (Zun 서비스 활성화 시에만 사용 가능)
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-### GET /api/admin/all-file-storages
-
-전체 프로젝트의 Manila 파일 스토리지 목록을 반환합니다. (Manila 서비스 활성화 시에만 사용 가능)
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-### GET /api/admin/all-networks
-
-전체 프로젝트의 네트워크 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-### GET /api/admin/all-floating-ips
-
-전체 프로젝트의 Floating IP 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-### GET /api/admin/all-routers
-
-전체 프로젝트의 라우터 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-### GET /api/admin/all-ports
-
-전체 프로젝트의 포트 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 항목**
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `id` | string | 포트 UUID |
-| `name` | string | 포트 이름 |
-| `status` | string | 상태 |
-| `network_id` | string | 네트워크 UUID |
-| `device_owner` | string | 디바이스 소유자 |
-| `device_id` | string | 디바이스 UUID |
-| `mac_address` | string | MAC 주소 |
-| `fixed_ips` | array | 고정 IP 목록 |
-| `project_id` | string | 프로젝트 UUID |
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/containers/{container_id}` | 컨테이너 상세 |
+| `GET` | `/api/v1/admin/containers/{container_id}/logs` | 컨테이너 로그 |
+| `POST` | `/api/v1/admin/containers/{container_id}/start` | 컨테이너 시작 |
+| `POST` | `/api/v1/admin/containers/{container_id}/stop` | 컨테이너 정지 |
+| `DELETE` | `/api/v1/admin/containers/{container_id}` | 컨테이너 삭제 (`204`) |
 
 ---
 
-## 5. 토폴로지 및 시계열
+## 사용자 관리
 
-### GET /api/admin/topology
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/users` | 사용자 목록 (페이지네이션) | - |
+| `GET` | `/api/v1/admin/users/stats` | 사용자 통계(총계·활성 등) | - |
+| `GET` | `/api/v1/admin/users/activity` | 사용자 활동 집계 | - |
+| `POST` | `/api/v1/admin/users` | 사용자 생성 (`201`) | `name`(필수), `email`, `password`, `enabled`, `domain_id` |
+| `PATCH` | `/api/v1/admin/users/{user_id}` | 사용자 수정 | `name`, `email`, `enabled`, `password` (선택) |
+| `POST` | `/api/v1/admin/users/{user_id}/revoke-sessions` | 사용자 세션 전체 무효화 | - |
+| `GET` | `/api/v1/admin/users/{user_id}/sessions` | 사용자의 활성 세션 목록 | - |
+| `POST` | `/api/v1/admin/users/unlock-account` | 로그인 실패로 잠긴 계정 잠금 해제 | 대상 사용자 지정 |
+| `GET` | `/api/v1/admin/users/lock-status` | 계정 잠금 상태 조회 | - |
 
-전체 프로젝트의 네트워크/라우터/인스턴스 토폴로지를 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)** — `TopologyData`
-
-```json
-{
-  "networks": [],
-  "routers": [],
-  "instances": [
-    {
-      "id": "uuid-string",
-      "name": "vm-name",
-      "status": "ACTIVE",
-      "network_names": ["private-net"],
-      "ip_addresses": [
-        {"addr": "10.0.0.5", "type": "fixed", "network_name": "private-net"}
-      ]
-    }
-  ]
-}
-```
-
-### GET /api/admin/timeseries/{resource_type}
-
-리소스 유형별 시계열 스냅샷을 반환합니다. 1시간 간격으로 수집된 데이터입니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `resource_type` | path | string | 예 | `instances`, `volumes`, `file_storage`, `networks` 중 하나 |
-| `range` | query | string | `7d` | 조회 범위: `1d`, `2d`, `7d`, `30d` |
-
-**오류 응답**
-
-| 상태 코드 | 설명 |
-|-----------|------|
-| `400` | 유효하지 않은 resource_type |
+**주의**: `revoke-sessions`는 해당 사용자의 토큰/세션 캐시를 즉시 무효화합니다.
 
 ---
 
-## 6. 볼륨 관리
+## 프로젝트 관리
 
-![전체 볼륨 관리](../../assets/admin-volume.png)
-*전체 프로젝트의 볼륨을 시계열 차트와 함께 일괄 조회 — 상태·크기·프로젝트별 필터링, 수정·삭제 지원*
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/projects` | 프로젝트 목록 (페이지네이션) | - |
+| `GET` | `/api/v1/admin/projects/names` | 전체 프로젝트 id/name 목록 (페이지네이션 없음) | - |
+| `POST` | `/api/v1/admin/projects` | 프로젝트 생성 (`201`) | `name`(필수), `description`, `domain_id`, `enabled` |
+| `GET` | `/api/v1/admin/projects/{project_id}` | 프로젝트 상세 | - |
+| `PATCH` | `/api/v1/admin/projects/{project_id}` | 프로젝트 수정 | `name`, `description`, `enabled` (선택) |
+| `DELETE` | `/api/v1/admin/projects/{project_id}` | 프로젝트 삭제 (`204`) | - |
+| `GET` | `/api/v1/admin/projects/{project_id}/members` | 사용자·그룹 역할 할당 목록 | - |
+| `GET` | `/api/v1/admin/projects/{project_id}/activity` | 프로젝트 활동 로그 | - |
+| `POST` | `/api/v1/admin/projects/{project_id}/sync-monitoring-sg` | 모니터링용 보안 그룹 동기화 | - |
 
-### PATCH /api/admin/volumes/{volume_id}
-
-볼륨 이름/설명을 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "description": "string (선택)"
-}
-```
-
-**응답 (200 OK)**
-
-```json
-{
-  "id": "uuid-string",
-  "name": "new-name",
-  "status": "in-use",
-  "size": 50
-}
-```
-
-### DELETE /api/admin/volumes/{volume_id}
-
-볼륨을 삭제합니다.
-
-**응답**: `204 No Content`
-
-### POST /api/admin/volumes/{volume_id}/extend
-
-볼륨 용량을 확장합니다.
-
-**요청 본문**
-
-```json
-{
-  "new_size": 100
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `new_size` | integer | 예 | 새 크기 (GB). 현재 크기보다 커야 함 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "status": "extending"
-}
-```
-
-### POST /api/admin/volumes/{volume_id}/reset-status
-
-볼륨 상태를 강제 초기화합니다. 오류 상태의 볼륨을 복구할 때 사용합니다.
-
-**요청 본문**
-
-```json
-{
-  "status": "available"
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `status` | string | 예 | 설정할 상태 (기본값: `available`) |
+`GET /projects/{project_id}/members` 응답에는 사용자 할당과 그룹 할당(`type: "group"`, `group_id` 포함)이 함께 반환됩니다.
 
 ---
 
-## 7. 네트워크 관리
+## 쿼터 관리
 
-### POST /api/admin/networks
-
-네트워크를 생성합니다. 선택적으로 서브넷을 함께 생성할 수 있습니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "is_external": false,
-  "is_shared": false,
-  "cidr": "192.168.1.0/24 (선택 — 지정하면 서브넷도 함께 생성)",
-  "enable_dhcp": true
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `name` | string | 예 | 네트워크 이름 |
-| `is_external` | boolean | 아니오 | 외부 네트워크 여부 (기본값: `false`) |
-| `is_shared` | boolean | 아니오 | 공유 네트워크 여부 (기본값: `false`) |
-| `cidr` | string | 아니오 | 서브넷 CIDR. 지정하면 서브넷도 함께 생성됨 |
-| `enable_dhcp` | boolean | 아니오 | DHCP 활성화 여부 (기본값: `true`) |
-
-**응답 (201 Created)**
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/quotas/{project_id}` | 프로젝트 컴퓨트/볼륨 쿼터·사용량 조회 | - |
+| `PUT` | `/api/v1/admin/quotas/{project_id}` | 프로젝트 쿼터 수정 | `instances`, `cores`, `ram`(MB), `volumes`, `gigabytes` (모두 선택) |
 
 ```json
 {
-  "id": "uuid-string",
-  "name": "network-name",
-  "status": "ACTIVE",
-  "is_external": false,
-  "is_shared": false,
-  "subnets": ["uuid-string"]
-}
-```
-
-### PUT /api/admin/networks/{network_id}
-
-네트워크를 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "is_shared": true
-}
-```
-
-### DELETE /api/admin/networks/{network_id}
-
-네트워크를 삭제합니다.
-
-**응답**: `204 No Content`
-
-### POST /api/admin/floating-ips
-
-Floating IP를 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "floating_network_id": "uuid-string (필수)"
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `floating_network_id` | string | 예 | 외부 네트워크 UUID |
-
-**응답 (201 Created)**
-
-```json
-{
-  "id": "uuid-string",
-  "floating_ip_address": "203.0.113.10",
-  "fixed_ip_address": null,
-  "status": "ACTIVE",
-  "port_id": null,
-  "project_id": "uuid-string"
-}
-```
-
-### DELETE /api/admin/floating-ips/{fip_id}
-
-Floating IP를 삭제합니다.
-
-**응답**: `204 No Content`
-
-### POST /api/admin/routers
-
-라우터를 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "external_network_id": "uuid-string (선택)"
-}
-```
-
-**응답 (201 Created)**
-
-```json
-{
-  "id": "uuid-string",
-  "name": "router-name",
-  "status": "ACTIVE",
-  "external_gateway_network_id": "uuid-string",
-  "project_id": "uuid-string"
-}
-```
-
-### PUT /api/admin/routers/{router_id}
-
-라우터를 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "external_network_id": "uuid-string (선택, null이면 게이트웨이 제거)"
-}
-```
-
-### DELETE /api/admin/routers/{router_id}
-
-라우터를 삭제합니다.
-
-**응답**: `204 No Content`
-
-### PUT /api/admin/ports/{port_id}
-
-포트 이름을 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)"
-}
-```
-
-### DELETE /api/admin/ports/{port_id}
-
-포트를 삭제합니다.
-
-**응답**: `204 No Content`
-
----
-
-## 8. 서비스 상태 모니터링
-
-> 태그: `admin-services`
-
-### GET /api/admin/services
-
-Nova, Cinder, Neutron, Manila, Heat, Zun 서비스 상태, API 엔드포인트, 스토리지 풀 정보를 종합적으로 조회합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "compute": [
-    {
-      "id": "1",
-      "binary": "nova-compute",
-      "host": "compute01",
-      "status": "enabled",
-      "state": "up",
-      "zone": "nova",
-      "updated_at": "2024-01-01T00:00:00Z",
-      "disabled_reason": null
-    }
-  ],
-  "block_storage": [],
-  "network": [
-    {
-      "id": "uuid",
-      "binary": "neutron-openvswitch-agent",
-      "host": "network01",
-      "agent_type": "Open vSwitch agent",
-      "availability_zone": null,
-      "alive": true,
-      "admin_state_up": true,
-      "updated_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "shared_file_system": [],
-  "orchestration": [],
-  "container": [],
-  "container_infra": [],
-  "endpoints": [
-    {
-      "service_id": "uuid",
-      "name": "nova",
-      "service": "compute",
-      "region": "RegionOne",
-      "endpoints": {
-        "public": "http://...",
-        "internal": "http://...",
-        "admin": "http://..."
-      }
-    }
-  ],
-  "storage_pools": [
-    {
-      "name": "pool-name",
-      "volume_backend_name": "ceph",
-      "driver_version": "1.0",
-      "storage_protocol": "ceph",
-      "vendor_name": "Ceph",
-      "total_capacity_gb": 10000.0,
-      "free_capacity_gb": 6500.0,
-      "allocated_capacity_gb": 3500.0
-    }
-  ]
+  "compute": {"instances": {"limit": 20, "in_use": 5}, "cores": {"limit": 40, "in_use": 10}, "ram": {"limit": 81920, "in_use": 20480}},
+  "volume": {"volumes": {"limit": 10, "in_use": 3}, "gigabytes": {"limit": 1000, "in_use": 200}}
 }
 ```
 
 ---
 
-## 9. Flavor 관리
+## 그룹 관리
+
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/groups` | 그룹 목록 | - |
+| `POST` | `/api/v1/admin/groups` | 그룹 생성 (`201`) | `name`(필수), `description`, `domain_id` |
+| `PATCH` | `/api/v1/admin/groups/{group_id}` | 그룹 수정 | `name`, `description` (선택) |
+| `DELETE` | `/api/v1/admin/groups/{group_id}` | 그룹 삭제 (`204`) | - |
+| `GET` | `/api/v1/admin/groups/{group_id}/users` | 그룹 멤버 목록 | - |
+| `PUT` | `/api/v1/admin/groups/{group_id}/users/{user_id}` | 그룹에 사용자 추가 (`204`) | - |
+| `DELETE` | `/api/v1/admin/groups/{group_id}/users/{user_id}` | 그룹에서 사용자 제거 (`204`) | - |
+
+**주의**: 멤버십 변경 시 Keystone이 관련 토큰을 revoke할 수 있어 관련 세션 캐시가 함께 삭제됩니다.
+
+---
+
+## 역할·시스템 역할 관리
+
+프로젝트 스코프 역할(assign/assign-group)과 시스템 스코프 역할(system-roles)을 구분해 관리합니다.
+
+| 메서드 | 경로 | 설명 | 파라미터/본문 |
+|--------|------|------|---------------|
+| `GET` | `/api/v1/admin/roles` | 역할 목록 | - |
+| `POST` | `/api/v1/admin/roles/assign` | 사용자에게 프로젝트 역할 할당 | `user_id`, `project_id`, `role_id` (body) |
+| `DELETE` | `/api/v1/admin/roles/assign` | 사용자 프로젝트 역할 회수 | `user_id`, `project_id`, `role_id` (query) |
+| `POST` | `/api/v1/admin/roles/assign-group` | 그룹에 프로젝트 역할 할당 | `group_id`, `project_id`, `role_id` (body) |
+| `DELETE` | `/api/v1/admin/roles/assign-group` | 그룹 프로젝트 역할 회수 | `group_id`, `project_id`, `role_id` (query) |
+| `GET` | `/api/v1/admin/identity/system-roles` | 시스템 스코프 역할 할당 목록 | - |
+| `POST` | `/api/v1/admin/identity/system-roles/grant` | 시스템 역할 부여 | 사용자·역할 지정 |
+| `POST` | `/api/v1/admin/identity/system-roles/revoke` | 시스템 역할 회수 | 사용자·역할 지정 |
+| `POST` | `/api/v1/admin/identity/system-roles/migrate-from-project` | 프로젝트 admin → 시스템 역할로 마이그레이션 | - |
+| `GET` | `/api/v1/admin/identity/security-policy` | 보안 정책(비밀번호·잠금 등) 조회 | - |
+| `GET` | `/api/v1/admin/identity/summary` | identity 도메인 요약(사용자·프로젝트·역할 수) | - |
+
+**주의**: 시스템 역할은 클러스터 전역 권한을 부여하므로 `grant`/`revoke`는 신중히 수행합니다. `migrate-from-project`는 기존 프로젝트 스코프 admin 권한을 시스템 스코프로 승격시키는 일회성 전환 작업입니다.
+
+---
+
+## Flavor 관리
 
 > 태그: `admin-flavors`
 
-### GET /api/admin/flavors
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/flavors` | 전체 flavor 목록(공개+비공개) | `limit`, `marker`, `is_public` (query) |
+| `POST` | `/api/v1/admin/flavors` | flavor 생성 (`201`) | `name`, `vcpus`, `ram`(MB), `disk`(GB), `is_public`, `description` |
+| `DELETE` | `/api/v1/admin/flavors/{flavor_id}` | flavor 삭제 (`204`) | - |
+| `GET` | `/api/v1/admin/flavors/{flavor_id}/access` | 비공개 flavor 접근 허용 프로젝트 목록 | - |
+| `POST` | `/api/v1/admin/flavors/{flavor_id}/access` | 프로젝트 접근 권한 추가 | `project_id` |
+| `DELETE` | `/api/v1/admin/flavors/{flavor_id}/access/{project_id}` | 프로젝트 접근 권한 제거 (`204`) | - |
+| `POST` | `/api/v1/admin/flavors/{flavor_id}/extra-specs` | extra_spec 추가/수정 (GPU 지정 등) | `key`, `value` |
+| `DELETE` | `/api/v1/admin/flavors/{flavor_id}/extra-specs/{key}` | extra_spec 삭제 (`204`) | - |
 
-전체 flavor 목록을 반환합니다 (공개 + 비공개).
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `limit` | query | integer | 20 | 페이지 크기 (1~100) |
-| `marker` | query | string | - | 페이지네이션 마커 |
-| `is_public` | query | boolean | - | 공개 여부 필터. 생략 시 전체 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "items": [
-    {
-      "id": "uuid-string",
-      "name": "m1.small",
-      "vcpus": 2,
-      "ram": 2048,
-      "disk": 20,
-      "is_public": true,
-      "description": "",
-      "extra_specs": {},
-      "is_gpu": false,
-      "gpu_count": 0
-    }
-  ],
-  "next_marker": "uuid-string-or-null",
-  "count": 20
-}
-```
-
-### POST /api/admin/flavors
-
-Flavor를 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "vcpus": 4,
-  "ram": 8192,
-  "disk": 50,
-  "is_public": true,
-  "description": "string (선택)"
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `name` | string | 예 | Flavor 이름 |
-| `vcpus` | integer | 예 | vCPU 수 |
-| `ram` | integer | 예 | RAM (MB) |
-| `disk` | integer | 예 | 루트 디스크 (GB) |
-| `is_public` | boolean | 아니오 | 공개 여부 (기본값: `true`) |
-| `description` | string | 아니오 | 설명 |
-
-**응답 (201 Created)** — 위 목록 응답 항목과 동일
-
-### DELETE /api/admin/flavors/{flavor_id}
-
-Flavor를 삭제합니다.
-
-**응답**: `204 No Content`
-
-### GET /api/admin/flavors/{flavor_id}/access
-
-Flavor 접근 권한이 있는 프로젝트 목록을 반환합니다. 공개 flavor는 빈 배열을 반환합니다.
-
-**응답 (200 OK)**
-
-```json
-[
-  {
-    "flavor_id": "uuid-string",
-    "project_id": "uuid-string",
-    "project_name": "project-name"
-  }
-]
-```
-
-### POST /api/admin/flavors/{flavor_id}/access
-
-비공개 Flavor에 프로젝트 접근 권한을 추가합니다.
-
-**요청 본문**
-
-```json
-{
-  "project_id": "uuid-string (필수)"
-}
-```
-
-### DELETE /api/admin/flavors/{flavor_id}/access/{project_id}
-
-Flavor에서 프로젝트 접근 권한을 제거합니다.
-
-**응답**: `204 No Content`
-
-### POST /api/admin/flavors/{flavor_id}/extra-specs
-
-Flavor에 extra_spec을 추가/수정합니다. GPU 리소스 지정 등에 사용합니다.
-
-**요청 본문**
-
-```json
-{
-  "key": "string (필수)",
-  "value": "string (필수)"
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `key` | string | 예 | extra_spec 키 (예: `resources:VGPU`) |
-| `value` | string | 예 | extra_spec 값 (예: `1`) |
-
-**응답 (200 OK)**
-
-```json
-{
-  "key": "resources:VGPU",
-  "value": "1"
-}
-```
-
-### DELETE /api/admin/flavors/{flavor_id}/extra-specs/{key}
-
-Flavor의 특정 extra_spec을 삭제합니다.
-
-**응답**: `204 No Content`
+`extra-specs`는 `resources:VGPU` = `1` 처럼 GPU 리소스 요청 지정에 사용됩니다.
 
 ---
 
-## 10. 사용자 관리
-
-> 태그: `admin-identity`
-
-### GET /api/admin/users
-
-사용자 목록을 페이지네이션으로 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `limit` | query | integer | 20 | 페이지 크기 (1~100) |
-| `marker` | query | string | - | 페이지네이션 마커 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "items": [
-    {
-      "id": "uuid-string",
-      "name": "username",
-      "email": "user@example.com",
-      "enabled": true,
-      "domain_id": "uuid-string",
-      "default_project_id": "uuid-string",
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "next_marker": "uuid-string-or-null",
-  "count": 20
-}
-```
-
-### POST /api/admin/users
-
-사용자를 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "email": "string (선택)",
-  "password": "string (선택)",
-  "enabled": true,
-  "domain_id": "string (선택)"
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `name` | string | 예 | 사용자 이름 |
-| `email` | string | 아니오 | 이메일 주소 |
-| `password` | string | 아니오 | 초기 비밀번호 |
-| `enabled` | boolean | 아니오 | 활성화 여부 (기본값: `true`) |
-| `domain_id` | string | 아니오 | 도메인 UUID |
-
-**응답 (201 Created)**
-
-```json
-{
-  "id": "uuid-string",
-  "name": "username",
-  "email": "user@example.com",
-  "enabled": true
-}
-```
-
-### PATCH /api/admin/users/{user_id}
-
-사용자 정보를 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "email": "string (선택)",
-  "enabled": true,
-  "password": "string (선택)"
-}
-```
-
----
-
-## 11. 프로젝트 관리
-
-### GET /api/admin/projects
-
-프로젝트 목록을 페이지네이션으로 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `limit` | query | integer | 20 | 페이지 크기 (1~100) |
-| `marker` | query | string | - | 페이지네이션 마커 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "items": [
-    {
-      "id": "uuid-string",
-      "name": "project-name",
-      "description": "설명",
-      "enabled": true,
-      "domain_id": "uuid-string",
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "next_marker": "uuid-string-or-null",
-  "count": 20
-}
-```
-
-### GET /api/admin/projects/names
-
-모든 프로젝트의 id/name 목록을 반환합니다 (페이지네이션 없이 전체).
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)**
-
-```json
-[
-  {"id": "uuid-string", "name": "project-name"}
-]
-```
-
-### POST /api/admin/projects
-
-프로젝트를 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "description": "string (선택)",
-  "domain_id": "string (선택)",
-  "enabled": true
-}
-```
-
-**응답 (201 Created)**
-
-```json
-{
-  "id": "uuid-string",
-  "name": "project-name",
-  "description": "",
-  "enabled": true
-}
-```
-
-### PATCH /api/admin/projects/{project_id}
-
-프로젝트를 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "description": "string (선택)",
-  "enabled": true
-}
-```
-
-### DELETE /api/admin/projects/{project_id}
-
-프로젝트를 삭제합니다.
-
-**응답**: `204 No Content`
-
-### GET /api/admin/projects/{project_id}/members
-
-프로젝트의 사용자-역할 할당 목록을 반환합니다. 그룹 역할 할당도 포함됩니다.
-
-**응답 (200 OK)**
-
-```json
-[
-  {
-    "user_id": "uuid-string",
-    "user_name": "username",
-    "role_id": "uuid-string",
-    "role_name": "member",
-    "type": "user"
-  },
-  {
-    "user_id": "group:uuid-string",
-    "user_name": "[그룹] group-name",
-    "role_id": "uuid-string",
-    "role_name": "reader",
-    "type": "group",
-    "group_id": "uuid-string"
-  }
-]
-```
-
----
-
-## 12. 쿼터 관리
-
-### GET /api/admin/quotas/{project_id}
-
-프로젝트의 컴퓨트 및 볼륨 쿼터를 조회합니다.
-
-**응답 (200 OK)**
-
-```json
-{
-  "compute": {
-    "instances": {"limit": 20, "in_use": 5},
-    "cores": {"limit": 40, "in_use": 10},
-    "ram": {"limit": 81920, "in_use": 20480}
-  },
-  "volume": {
-    "volumes": {"limit": 10, "in_use": 3},
-    "gigabytes": {"limit": 1000, "in_use": 200}
-  }
-}
-```
-
-### PUT /api/admin/quotas/{project_id}
-
-프로젝트 쿼터를 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "instances": 20,
-  "cores": 40,
-  "ram": 81920,
-  "volumes": 10,
-  "gigabytes": 1000
-}
-```
-
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| `instances` | integer | 아니오 | 인스턴스 수 한도 |
-| `cores` | integer | 아니오 | vCPU 코어 수 한도 |
-| `ram` | integer | 아니오 | RAM 한도 (MB) |
-| `volumes` | integer | 아니오 | 볼륨 수 한도 |
-| `gigabytes` | integer | 아니오 | 볼륨 총 용량 한도 (GB) |
-
-**응답 (200 OK)**
-
-```json
-{
-  "status": "updated"
-}
-```
-
----
-
-## 13. 그룹 관리
-
-### GET /api/admin/groups
-
-그룹 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)**
-
-```json
-[
-  {
-    "id": "uuid-string",
-    "name": "group-name",
-    "description": "",
-    "domain_id": "uuid-string"
-  }
-]
-```
-
-### POST /api/admin/groups
-
-그룹을 생성합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (필수)",
-  "description": "string (선택)",
-  "domain_id": "string (선택)"
-}
-```
-
-**응답 (201 Created)**
-
-```json
-{
-  "id": "uuid-string",
-  "name": "group-name",
-  "description": "",
-  "domain_id": "uuid-string"
-}
-```
-
-### PATCH /api/admin/groups/{group_id}
-
-그룹을 수정합니다.
-
-**요청 본문**
-
-```json
-{
-  "name": "string (선택)",
-  "description": "string (선택)"
-}
-```
-
-### DELETE /api/admin/groups/{group_id}
-
-그룹을 삭제합니다.
-
-**응답**: `204 No Content`
-
-### GET /api/admin/groups/{group_id}/users
-
-그룹의 멤버 사용자 목록을 반환합니다.
-
-**응답 (200 OK)**
-
-```json
-[
-  {
-    "id": "uuid-string",
-    "name": "username",
-    "email": "user@example.com",
-    "enabled": true
-  }
-]
-```
-
-### PUT /api/admin/groups/{group_id}/users/{user_id}
-
-그룹에 사용자를 추가합니다.
-
-**응답**: `204 No Content`
-
-### DELETE /api/admin/groups/{group_id}/users/{user_id}
-
-그룹에서 사용자를 제거합니다. 그룹 멤버십 변경 시 Keystone이 토큰을 revoke할 수 있으므로 관련 세션 캐시도 함께 삭제됩니다.
-
-**응답**: `204 No Content`
-
----
-
-## 14. 역할 관리
-
-### GET /api/admin/roles
-
-역할 목록을 반환합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)**
-
-```json
-[
-  {
-    "id": "uuid-string",
-    "name": "member",
-    "domain_id": null
-  }
-]
-```
-
-### POST /api/admin/roles/assign
-
-사용자에게 프로젝트 역할을 할당합니다.
-
-**요청 본문**
-
-```json
-{
-  "user_id": "uuid-string (필수)",
-  "project_id": "uuid-string (필수)",
-  "role_id": "uuid-string (필수)"
-}
-```
-
-**응답 (200 OK)**
-
-```json
-{
-  "status": "assigned"
-}
-```
-
-### DELETE /api/admin/roles/assign
-
-사용자의 프로젝트 역할을 회수합니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `user_id` | query | string | 예 | 사용자 UUID |
-| `project_id` | query | string | 예 | 프로젝트 UUID |
-| `role_id` | query | string | 예 | 역할 UUID |
-
-**응답 (200 OK)**
-
-```json
-{
-  "status": "revoked"
-}
-```
-
-### POST /api/admin/roles/assign-group
-
-그룹에 프로젝트 역할을 할당합니다.
-
-**요청 본문**
-
-```json
-{
-  "group_id": "uuid-string (필수)",
-  "project_id": "uuid-string (필수)",
-  "role_id": "uuid-string (필수)"
-}
-```
-
-### DELETE /api/admin/roles/assign-group
-
-그룹의 프로젝트 역할을 회수합니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `group_id` | query | string | 예 | 그룹 UUID |
-| `project_id` | query | string | 예 | 프로젝트 UUID |
-| `role_id` | query | string | 예 | 역할 UUID |
-
----
-
-## 15. GPU 호스트 모니터링
+## GPU 호스트·디바이스·쿼터
 
 > 태그: `admin-gpu`
 
 ![GPU 리소스 관리](../../assets/admin-gpu-list.png)
-*GPU 타입별(GTX 1080 Ti · RTX 2000 Ada · TITAN X · RTX 3090 · RTX 4090 등) 전체/사용 중/사용 가능 수량과 호스트별 GPU 구성 및 가동률*
+*GPU 타입별 전체/사용 중/사용 가능 수량과 호스트별 GPU 구성 및 가동률*
 
-### GET /api/admin/gpu-hosts
-
-Placement API에서 각 호스트별 GPU 정보를 조회합니다. PCI 디바이스 식별, 사용량, 호스트별 집계를 제공합니다.
-
-| 파라미터 | 위치 | 타입 | 기본값 | 설명 |
-|----------|------|------|--------|------|
-| `refresh` | query | boolean | `false` | 캐시 무시 여부 |
-
-**응답 (200 OK)**
-
-```json
-{
-  "hosts": [
-    {
-      "name": "compute01_0000:03:00.0",
-      "uuid": "uuid-string",
-      "gpus": [
-        {
-          "provider_name": "compute01_0000:03:00.0",
-          "provider_uuid": "uuid-string",
-          "pci_address": "0000:03:00.0",
-          "resource_class": "CUSTOM_PCI_10DE_20B0",
-          "vendor_id": "10DE",
-          "vendor_name": "NVIDIA",
-          "device_id": "20B0",
-          "device_name": "A100 SXM4 40GB",
-          "total": 1,
-          "used": 0,
-          "allocation_ratio": 1.0,
-          "reserved": 0
-        }
-      ],
-      "gpu_total": 1,
-      "gpu_used": 0
-    }
-  ],
-  "aggregated_hosts": [
-    {
-      "name": "compute01",
-      "gpus": [],
-      "gpu_groups": [
-        {
-          "device_name": "A100 SXM4 40GB",
-          "vendor_name": "NVIDIA",
-          "total": 4,
-          "used": 2
-        }
-      ],
-      "gpu_total": 4,
-      "gpu_used": 2
-    }
-  ],
-  "summary": {
-    "total_hosts": 3,
-    "total_gpus": 12,
-    "used_gpus": 5,
-    "available_gpus": 7
-  },
-  "gpu_types": [
-    {
-      "device_name": "A100 SXM4 40GB",
-      "vendor": "NVIDIA",
-      "total": 8,
-      "used": 3
-    }
-  ]
-}
-```
-
-| 응답 필드 | 설명 |
-|-----------|------|
-| `hosts` | 개별 리소스 프로바이더(PCI 주소 포함) 단위 GPU 목록 |
-| `aggregated_hosts` | 호스트명 기준으로 병합된 GPU 정보 (PCI 주소 접미사 제거) |
-| `summary` | 전체 GPU 총/사용/가용 수 |
-| `gpu_types` | GPU 모델별 집계 |
----
-
-## 16. GPU Quota 관리
-
-> 태그: `admin-gpu`
-
-GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
-
-### 엔드포인트 목록
+### GPU 호스트 모니터링
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/admin/gpu-aliases` | GPU alias 목록 조회 |
-| `GET` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 조회 |
-| `PUT` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 수정 |
-| `DELETE` | `/api/admin/gpu-quotas/defaults/{gpu_type}` | 기본 GPU 쿼터 유형별 삭제 |
-| `GET` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 조회 |
-| `PUT` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
-| `DELETE` | `/api/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 GPU 쿼터 유형별 삭제 |
+| `GET` | `/api/v1/admin/gpu-hosts` | Placement 기반 호스트별 GPU 집계(개별/병합/요약/타입) |
+| `GET` | `/api/v1/admin/gpu-hosts/raw` | Placement 원본 데이터(디버깅용) |
 
-### GET /api/admin/gpu-aliases
+`gpu-hosts` 응답은 `hosts`(PCI 주소 단위) · `aggregated_hosts`(호스트명 병합) · `summary`(total/used/available) · `gpu_types`(모델별 집계)로 구성됩니다.
 
-클러스터에 구성된 GPU alias 목록을 반환합니다. 각 alias는 GPU 모델(예: A100)을 사용자 친화적인 이름으로 매핑합니다。
+### GPU 디바이스 카탈로그
 
-**응답 (200 OK)** — GPU alias 배열
+vendor_id/device_id → 표시 이름 매핑을 관리합니다.
 
-### GET /api/admin/gpu-quotas/defaults
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/gpu-devices` | GPU 디바이스 이름 매핑 목록 |
+| `GET` | `/api/v1/admin/gpu-devices/export` | 디바이스 매핑 내보내기 |
+| `POST` | `/api/v1/admin/gpu-devices` | 디바이스 매핑 추가/수정 |
+| `DELETE` | `/api/v1/admin/gpu-devices/{vendor_id}/{device_id}` | 디바이스 매핑 삭제 (`204`) |
+| `POST` | `/api/v1/admin/gpu-devices/import` | 디바이스 매핑 일괄 가져오기 |
 
-모든 프로젝트에 적용되는 기본 GPU 쿼터를 반환합니다。
+### GPU 쿼터
 
-**응답 (200 OK)** — 기본 GPU 쿼터 객체
-
-### PUT /api/admin/gpu-quotas/defaults
-
-기본 GPU 쿼터를 수정합니다. 새 프로젝트 생성 시 이 값이 적용됩니다。
-
-**요청 본문** — GPU 타입별 쿼터 매핑
-
-### DELETE /api/admin/gpu-quotas/defaults/{gpu_type}
-
-지정된 GPU 타입의 기본 쿼터를 삭제합니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `gpu_type` | path | string | 예 | GPU 타입 식별자 |
-
-**응답**: `204 No Content`
-
-### GET /api/admin/gpu-quotas/{project_id}
-
-지정 프로젝트의 GPU 쿼터를 반환합니다. 프로젝트별 쿼터가 없으면 기본 쿼터를 반환합니다。
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `project_id` | path | string | 예 | 프로젝트 UUID |
-
-**응답 (200 OK)** — 프로젝트 GPU 쿼터 객체
-
-### PUT /api/admin/gpu-quotas/{project_id}
-
-지정 프로젝트의 GPU 쿼터를 수정합니다.
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `project_id` | path | string | 예 | 프로젝트 UUID |
-
-**요청 본문** — GPU 타입별 쿼터 매핑
-
-### DELETE /api/admin/gpu-quotas/{project_id}/{gpu_type}
-
-지정 프로젝트의 특정 GPU 타입 쿼터를 삭제합니다. 삭제 후 해당 타입은 기본 쿼터로 돌아갑니다。
-
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `project_id` | path | string | 예 | 프로젝트 UUID |
-| `gpu_type` | path | string | 예 | GPU 타입 식별자 |
-
-**응답**: `204 No Content`
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/gpu-aliases` | GPU alias 목록 (모델 → 사용자 친화 이름) |
+| `GET` | `/api/v1/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 조회 |
+| `PUT` | `/api/v1/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 수정 (신규 프로젝트에 적용) |
+| `DELETE` | `/api/v1/admin/gpu-quotas/defaults/{gpu_type}` | 기본 쿼터 유형별 삭제 (`204`) |
+| `GET` | `/api/v1/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 (없으면 기본값 반환) |
+| `PUT` | `/api/v1/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
+| `DELETE` | `/api/v1/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 쿼터 유형별 삭제 → 기본값 복귀 (`204`) |
 
 ---
 
-## 17. 하이퍼바이저 상세
+## 이미지 관리
 
-### GET /api/admin/hypervisors/{hypervisor_id}
+> 태그: `admin-images`
 
-특정 하이퍼바이저의 상세 정보를 반환합니다.
+전체 프로젝트의 Glance 이미지를 관리합니다. 상태 전이(deactivate/reactivate)와 삭제는 사용자 부팅에 영향을 줄 수 있으므로 대상 확인이 필요합니다.
 
-| 파라미터 | 위치 | 타입 | 필수 | 설명 |
-|----------|------|------|------|------|
-| `hypervisor_id` | path | string | 예 | 하이퍼바이저 ID |
-
-**응답 (200 OK)** — 하이퍼바이저 상세 객체
-
----
-
-## 18. 파일 스토리지 빌드
-
-### GET /api/admin/file-storage/builds
-
-현재 진행 중이거나 대기 중인 파일 스토리지 빌드 목록을 반환합니다。
-
-**응답 (200 OK)** — 활성 빌드 배열
-
----
-
-## 19. 모니터링 요약
-
-### GET /api/admin/monitoring/summary
-
-클러스터 전체 모니터링 요약을 반환합니다. 서비스 상태, 리소스 사용량, 알림 등을 종합합니다。
-
-**응답 (200 OK)** — 모니터링 요약 객체
+| 메서드 | 경로 | 설명 | 파라미터/본문 |
+|--------|------|------|---------------|
+| `GET` | `/api/v1/admin/images` | 전체 이미지 목록 | `limit`, `marker`, `search`, `visibility` (query) |
+| `GET` | `/api/v1/admin/images/{image_id}` | 이미지 상세 | - |
+| `PATCH` | `/api/v1/admin/images/{image_id}` | 이미지 메타데이터 수정 | 이름·가시성 등 |
+| `PATCH` | `/api/v1/admin/images/{image_id}/properties` | 이미지 커스텀 속성 수정 (`ImageDetail`) | 속성 key/value |
+| `DELETE` | `/api/v1/admin/images/{image_id}` | 이미지 삭제 (`204`) | - |
+| `POST` | `/api/v1/admin/images/{image_id}/deactivate` | 이미지 비활성화(부팅 불가) | - |
+| `POST` | `/api/v1/admin/images/{image_id}/reactivate` | 이미지 재활성화 | - |
 
 ---
 
 ## Notion 연동
 
-OpenStack 리소스를 Notion 데이터베이스와 동기화하는 관리자 기능입니다. 시스템 메뉴의 **Notion 연동** 페이지에서 설정합니다.
+> 태그: `admin-notion`
+
+OpenStack 리소스를 Notion 데이터베이스와 동기화하는 관리자 기능입니다. 단일 연동 설정(`config`)과 다중 동기화 대상(`targets`)을 관리합니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/notion/config` | Notion 연동 설정 조회(토큰은 마스킹) |
+| `POST` | `/api/v1/admin/notion/config` | Notion 연동 설정 저장 |
+| `DELETE` | `/api/v1/admin/notion/config` | Notion 연동 설정 삭제 |
+| `POST` | `/api/v1/admin/notion/test` | 연동 설정 연결 테스트 |
+| `GET` | `/api/v1/admin/notion/targets` | 동기화 대상(DB) 목록 |
+| `POST` | `/api/v1/admin/notion/targets` | 동기화 대상 추가 |
+| `PATCH` | `/api/v1/admin/notion/targets/{target_id}` | 동기화 대상 수정 |
+| `DELETE` | `/api/v1/admin/notion/targets/{target_id}` | 동기화 대상 삭제 |
+| `POST` | `/api/v1/admin/notion/targets/{target_id}/test` | 특정 대상 동기화 테스트 |
 
 ![Notion 연동](../../assets/admin-notion.png)
 *Notion Integration 설정 — 다중 데이터베이스(인스턴스 DB·이미지 DB·GPU Spec DB) 연결, 즉시 동기화 및 마지막 동기화 시각 표시*
+
+---
+
+## 고아 리소스 정리 (orphans)
+
+> 태그: `admin-orphans`
+
+프로젝트가 사라졌거나 장기 미사용/미연결 상태인 리소스를 탐지·정리합니다. **삭제는 되돌릴 수 없으므로** 정리 전 스캔 결과 검토가 필수이며, 정리 시 race-safe 재검증 후 각 결과가 audit log에 기록됩니다.
+
+| 메서드 | 경로 | 설명 | 파라미터/본문 |
+|--------|------|------|---------------|
+| `GET` | `/api/v1/admin/orphans` | 전체 프로젝트 orphan 후보 스캔 | `min_age_days` (query, 1~365, 기본 14) |
+| `POST` | `/api/v1/admin/orphans/cleanup` | ID 목록 일괄 정리 | `kind`, `ids[]` (min 1) |
+
+- `kind`: `floating_ip`(port 미연결) / `volume`(available·attachments 없음) / `manila_share`(프로젝트 소멸) / `security_group`(자동생성 후 미연결).
+- 응답은 `deleted[]`와 `failed[]`(`{id, error}`)로 분리됩니다.
+
+---
+
+## 워커 런타임 관리
+
+> 태그: `admin-worker-runtime`
+
+백그라운드 워커(`drover`, `notion_worker`)의 관측 상태와 희망 레플리카 수를 관리합니다. 런타임 모드는 `static` / `docker` / `kubernetes` 중 하나이며, 모드가 관리 불가(`capable=false`)이면 변경이 거부될 수 있습니다.
+
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/worker-runtime/status` | 런타임 능력 + 워커별 상태 (`WorkerRuntimeStatus`) | - |
+| `PATCH` | `/api/v1/admin/worker-runtime/desired` | 희망 레플리카 수 오버라이드 | `workers[]` (`name`, `desired_replicas≥0`; 1~2개, 이름 유일) |
+| `POST` | `/api/v1/admin/worker-runtime/reconcile` | 희망 상태로 즉시 재조정 | - |
+
+**제한**: `workers[].name`은 `drover` 또는 `notion_worker`만 허용되며 중복 불가. `desired_replicas`는 `max_replicas`를 넘을 수 없습니다.
+
+---
+
+## Key Manager(Barbican) 쿼터
+
+> 태그: `admin-key-manager`
+
+Barbican(key-manager) 서비스가 활성화된 경우에만 마운트됩니다. 프로젝트별 시크릿/컨테이너 쿼터를 관리하며 rate limit(30/min)이 적용됩니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/key-manager/project-quotas` | 전체 프로젝트 쿼터 목록 |
+| `GET` | `/api/v1/admin/key-manager/project-quotas/{project_id}` | 프로젝트 쿼터 조회 |
+| `PUT` | `/api/v1/admin/key-manager/project-quotas/{project_id}` | 프로젝트 쿼터 설정 |
+| `DELETE` | `/api/v1/admin/key-manager/project-quotas/{project_id}` | 프로젝트 쿼터 초기화 (`204`) |
+
+---
+
+## 서비스 상태 모니터링
+
+> 태그: `admin-services`
+
+### GET /api/v1/admin/services
+
+Nova·Cinder·Neutron·Manila·Heat·Zun 서비스 상태, API 엔드포인트, 스토리지 풀 정보를 종합 조회합니다. `refresh` (query) 지원.
+
+응답은 `compute` / `block_storage` / `network` / `shared_file_system` / `orchestration` / `container` / `container_infra` / `endpoints` / `storage_pools` 필드로 구성됩니다.
+
+---
+
+## 공지사항 (announcements)
+
+> 태그: `admin-announcements`
+> prefix: `/api/v1/admin/announcements`
+
+사용자에게 표시할 공지를 관리합니다(사용자 수신 측 API는 별도). 라우터 레벨에서 `require_admin`이 적용됩니다.
+
+| 메서드 | 경로 | 설명 | 요청 본문 |
+|--------|------|------|-----------|
+| `GET` | `/api/v1/admin/announcements` | 공지 목록 (`AnnouncementAdminResponse[]`) | - |
+| `POST` | `/api/v1/admin/announcements` | 공지 생성 (`201`) | `title`, `body`, `severity`, `target_type`, `target_id`, `starts_at`, `ends_at`, `is_active` |
+| `PATCH` | `/api/v1/admin/announcements/{announcement_id}` | 공지 수정 | 위 필드 부분 갱신 |
+| `DELETE` | `/api/v1/admin/announcements/{announcement_id}` | 공지 삭제 (`204`) | - |
+| `GET` | `/api/v1/admin/announcements/meta/options` | severity/target_type 등 선택지 메타 | - |
+
+- `severity`: `info` 등(기본 `info`).
+- `target_type`: 대상 범위(전체/프로젝트 등), `target_id`로 특정 대상 지정.
+- `starts_at`/`ends_at`으로 노출 기간, `is_active`로 활성 여부 제어.
+
+---
+
+## k3s 클러스터 관리 (admin)
+
+관리자가 전체 프로젝트의 k3s 클러스터를 조회·스케일·삭제·인증서 관리하는 엔드포인트입니다. 사용자용 k3s API와 달리 프로젝트 소유권에 관계없이 접근합니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/v1/admin/k3s-clusters` | 전체 k3s 클러스터 목록 |
+| `GET` | `/api/v1/admin/k3s-clusters/{cluster_id}` | 클러스터 상세 |
+| `GET` | `/api/v1/admin/k3s-clusters/{cluster_id}/kubeconfig` | kubeconfig 조회(복호화) |
+| `PATCH` | `/api/v1/admin/k3s-clusters/{cluster_id}/scale` | 노드그룹 스케일 조정 |
+| `DELETE` | `/api/v1/admin/k3s-clusters/{cluster_id}` | 클러스터 삭제 (`204`) |
+| `POST` | `/api/v1/admin/k3s-clusters/{cluster_id}/delete-async` | 클러스터 비동기 삭제 |
+| `GET` | `/api/v1/admin/k3s-clusters/{cluster_id}/ca-certificate` | 클러스터 CA 인증서 조회 |
+| `GET` | `/api/v1/admin/k3s-clusters/{cluster_id}/certificate-expiry` | 인증서 만료 정보 |
+| `POST` | `/api/v1/admin/k3s-clusters/{cluster_id}/rotate-certs` | 클러스터 인증서 회전 |
+| `GET` | `/api/v1/admin/k3s-cluster-templates` | k3s 클러스터 템플릿 목록 |
+
+**주의**: `delete`/`delete-async`는 VM·볼륨·네트워크 등 클러스터 리소스를 함께 정리하며 되돌릴 수 없습니다. `rotate-certs`는 진행 중 클러스터 접속에 일시적 영향을 줄 수 있습니다.

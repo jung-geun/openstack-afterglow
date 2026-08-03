@@ -54,6 +54,7 @@ export interface K3sInterfaceInfo {
 	fixed_ips: { ip_address: string; subnet_id?: string }[];
 	vm_id: string;
 	node_role: 'server' | 'agent';
+	is_primary: boolean;
 }
 
 export interface ConfigMapInfo {

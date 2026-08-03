@@ -6,6 +6,7 @@
 	import LandingFigure from './LandingFigure.svelte';
 	import PlateGraphic from './PlateGraphic.svelte';
 	import type { PlateName } from './plateGraphics';
+	import { prefersReducedMotion } from '$lib/utils/motion';
 
 	interface Props {
 		siteName: string;
@@ -192,7 +193,7 @@
 	onMount(() => {
 		const html = document.documentElement;
 		const previousScrollBehavior = html.style.scrollBehavior;
-		const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		const reducedMotion = prefersReducedMotion();
 		html.style.scrollBehavior = reducedMotion ? 'auto' : 'smooth';
 
 		const handleScroll = () => updateActiveSection();
@@ -652,7 +653,7 @@
 	:global(.landing-page.reveal-enabled.reveal-ready) [data-reveal] { transition: opacity 600ms var(--landing-ease), transform 600ms var(--landing-ease); }
 
 	@media (prefers-reduced-motion: reduce) {
-		.landing-page :global(*), .landing-page :global(*::before), .landing-page :global(*::after) { scroll-behavior: auto !important; transition-duration: 1ms !important; animation-duration: 1ms !important; }
+		.landing-page :global(*), .landing-page :global(*::before), .landing-page :global(*::after) { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 		.landing-page [data-reveal], :global(.landing-page.reveal-enabled) [data-reveal]:not(.is-visible) { opacity: 1; transform: none; transition: none; }
 		.landing-page .top-strip { transition: none; }
 	}

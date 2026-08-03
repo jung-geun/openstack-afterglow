@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
@@ -24,7 +24,12 @@
   let loading = $state(true);
   let resourcesLoading = $state(false);
   let eventsLoading = $state(false);
+  let resourcesLoaded = $state(false);
+  let eventsLoaded = $state(false);
   let error = $state('');
+  let clusterGeneration = 0;
+  let resourcesGeneration = 0;
+  let eventsGeneration = 0;
 
   const clusterId = $derived($page.params.id);
   const token = $derived($auth.token ?? undefined);
@@ -35,41 +40,88 @@
   );
 
   async function fetchCluster() {
+    const requestId = clusterId;
+    const requestProjectId = projectId;
+    const generation = ++clusterGeneration;
     try {
-      cluster = await api.get<Cluster>(`/api/v1/clusters/${clusterId}`, token, projectId);
+      const value = await api.get<Cluster>(`/api/v1/clusters/${requestId}`, token, requestProjectId);
+      if (generation !== clusterGeneration || clusterId !== requestId || projectId !== requestProjectId) return;
+      cluster = value;
       error = '';
     } catch (e) {
-      error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
+      if (generation === clusterGeneration && clusterId === requestId && projectId === requestProjectId) {
+        error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
+      }
     } finally {
-      loading = false;
+      if (generation === clusterGeneration && clusterId === requestId && projectId === requestProjectId) loading = false;
     }
   }
 
   async function fetchResources() {
+    const requestId = clusterId;
+    const requestProjectId = projectId;
+    const generation = ++resourcesGeneration;
     resourcesLoading = true;
     try {
-      resources = await api.get<StackResource[]>(`/api/v1/clusters/${clusterId}/stack/resources`, token, projectId);
-    } catch { resources = []; } finally { resourcesLoading = false; }
+      const value = await api.get<StackResource[]>(`/api/v1/clusters/${requestId}/stack/resources`, token, requestProjectId);
+      if (generation === resourcesGeneration && clusterId === requestId && projectId === requestProjectId) {
+        resources = value;
+        resourcesLoaded = true;
+      }
+    } catch {
+      if (generation === resourcesGeneration && clusterId === requestId && projectId === requestProjectId) {
+        resources = [];
+        resourcesLoaded = false;
+      }
+    } finally {
+      if (generation === resourcesGeneration && clusterId === requestId && projectId === requestProjectId) resourcesLoading = false;
+    }
   }
 
   async function fetchEvents() {
+    const requestId = clusterId;
+    const requestProjectId = projectId;
+    const generation = ++eventsGeneration;
     eventsLoading = true;
     try {
-      events = await api.get<StackEvent[]>(`/api/v1/clusters/${clusterId}/stack/events`, token, projectId);
-    } catch { events = []; } finally { eventsLoading = false; }
+      const value = await api.get<StackEvent[]>(`/api/v1/clusters/${requestId}/stack/events`, token, requestProjectId);
+      if (generation === eventsGeneration && clusterId === requestId && projectId === requestProjectId) {
+        events = value;
+        eventsLoaded = true;
+      }
+    } catch {
+      if (generation === eventsGeneration && clusterId === requestId && projectId === requestProjectId) {
+        events = [];
+        eventsLoaded = false;
+      }
+    } finally {
+      if (generation === eventsGeneration && clusterId === requestId && projectId === requestProjectId) eventsLoading = false;
+    }
+  }
+
+  async function ensureTab(tab: Tab) {
+    if (tab === 'resources' && !resourcesLoaded && !resourcesLoading) await fetchResources();
+    if (tab === 'events' && !eventsLoaded && !eventsLoading) await fetchEvents();
   }
 
   async function switchTab(tab: Tab) {
     activeTab = tab;
-    if (tab === 'resources' && resources.length === 0) await fetchResources();
-    if (tab === 'events' && events.length === 0) await fetchEvents();
+    await ensureTab(tab);
   }
 
-  const ar = createAutoRefresh(() => { fetchResources(); fetchEvents(); }, {
+  async function refreshVisible() {
+    const tasks: Promise<void>[] = [fetchCluster()];
+    if (activeTab === 'resources') tasks.push(fetchResources());
+    if (activeTab === 'events') tasks.push(fetchEvents());
+    await Promise.allSettled(tasks);
+  }
+
+  const ar = createAutoRefresh(refreshVisible, {
     storageKey: 'dashboard-cluster-detail',
     defaultActive: true,
     defaultInterval: 10,
-    intervalOptions: [10, 15, 30, 60]
+    intervalOptions: [10, 15, 30, 60],
+    invokeOnMount: false,
   });
 
   async function handleDelete() {
@@ -83,8 +135,17 @@
     }
   }
 
-  onMount(() => {
-    fetchCluster();
+  $effect(() => {
+    const requestId = clusterId;
+    const requestProject = projectId;
+    if (!requestId || !requestProject) return;
+    loading = true;
+    resources = [];
+    events = [];
+    activeTab = 'detail';
+    untrack(() => void fetchCluster());
+    resourcesLoaded = false;
+    eventsLoaded = false;
   });
 </script>
 
@@ -101,7 +162,7 @@
       {cluster}
       refreshing={loading || resourcesLoading || eventsLoading}
       {ar}
-      onManualRefresh={() => { fetchCluster(); fetchResources(); fetchEvents(); }}
+      onManualRefresh={refreshVisible}
       onDelete={handleDelete}
     />
 
@@ -112,6 +173,7 @@
       {#each [['detail', '상세'], ['resources', '스택 리소스'], ['events', '스택 이벤트']] as [tab, label]}
         <button
           onclick={() => switchTab(tab as Tab)}
+          onfocus={() => { if (cluster?.stack_id) void ensureTab(tab as Tab); }}
           class="px-4 py-2 text-sm transition-colors border-b-2 {activeTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}"
           disabled={tab !== 'detail' && !cluster.stack_id}
         >{label}{tab !== 'detail' && !cluster.stack_id ? ' (없음)' : ''}</button>

@@ -232,59 +232,32 @@ async def test_admin_profile_publication_invalidates_union_layer_cache(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_admin_profile_publication_resolves_legacy_base_image(monkeypatch) -> None:
+async def test_admin_profile_publication_rejects_unimported_legacy_base_image(monkeypatch) -> None:
     profile = _profile(name="prof", layers=["legacy-root"])
     root = _artifact(name="legacy-root", base_image_id=None, base_image_name=None, ubuntu_base="ubuntu-24.04")
-    invalidate_mock = AsyncMock()
-    settings = SimpleNamespace(
-        builder_ubuntu_18_04_image_id="",
-        builder_ubuntu_20_04_image_id="",
-        builder_ubuntu_22_04_image_id="",
-        builder_ubuntu_24_04_image_id="",
-        builder_image_id="",
-        server_image_id="legacy-img-24",
-    )
 
     def factory():
         return _LayerOpsSession(results=[_FakeScalarResult(scalar=profile), _FakeScalarResult(rows=[root])])
 
     monkeypatch.setattr(layer_ops, "get_session_factory", lambda: factory)
-    monkeypatch.setattr("app.config.get_settings", lambda: settings)
-    monkeypatch.setattr(layer_ops, "invalidate", invalidate_mock)
 
-    result = await layer_ops.set_layer_profile_publication("prof", layer_ops.PublicationRequest(is_published=True))
-
-    assert result["name"] == "prof"
-    assert result["is_published"] is True
-    invalidate_mock.assert_awaited_once_with("afterglow:union_layer:*")
+    with pytest.raises(HTTPException, match="base image를 확인할 수 없습니다"):
+        await layer_ops.set_layer_profile_publication("prof", layer_ops.PublicationRequest(is_published=True))
 
 
 @pytest.mark.asyncio
-async def test_public_profile_listing_resolves_legacy_base_image(monkeypatch) -> None:
+async def test_public_profile_listing_omits_unimported_legacy_base_image(monkeypatch) -> None:
     profile = _profile(name="prof", layers=["legacy-root"], is_published=True)
     root = _artifact(name="legacy-root", base_image_id=None, base_image_name=None, ubuntu_base="ubuntu-24.04")
     added: list[object] = []
     results = [_FakeScalarResult(rows=[profile]), _FakeScalarResult(rows=[root])]
-    settings = SimpleNamespace(
-        builder_ubuntu_18_04_image_id="",
-        builder_ubuntu_20_04_image_id="",
-        builder_ubuntu_22_04_image_id="",
-        builder_ubuntu_24_04_image_id="",
-        builder_image_id="",
-        server_image_id="legacy-img-24",
-    )
 
     def factory():
         return _FakeSession(results, added)
 
     monkeypatch.setattr(layer_public, "get_session_factory", lambda: factory)
-    monkeypatch.setattr(layer_public, "get_settings", lambda: settings)
 
-    result = await layer_public.list_public_squashfs_profiles(_token_info={"project_id": "project-a"})
-
-    assert result[0]["name"] == "prof"
-    assert result[0]["base_image"]["base_image_id"] == "legacy-img-24"
-    assert result[0]["artifacts"][0]["base_image_id"] == "legacy-img-24"
+    assert await layer_public.list_public_squashfs_profiles(_token_info={"project_id": "project-a"}) == []
 
 
 @pytest.mark.asyncio
@@ -305,7 +278,17 @@ async def test_public_consume_persists_project_and_uses_split_connections(monkey
     mutation_mock = AsyncMock()
 
     monkeypatch.setattr(layer_public, "get_session_factory", lambda: factory)
-    monkeypatch.setattr(layer_public, "get_service_project_connection", lambda: service_conn)
+    monkeypatch.setattr(layer_public, "get_service_project_connection", AsyncMock(return_value=service_conn))
+    monkeypatch.setattr(
+        "app.services.layer_build.resolve_layer_consume_resource_snapshot",
+        AsyncMock(
+            return_value={
+                "network": {"id": "net-1", "name": "network"},
+                "flavor": {"id": "flavor-1", "name": "flavor"},
+                "openstack.service_project": {"id": "service", "name": "service"},
+            }
+        ),
+    )
     monkeypatch.setattr("app.services.layer_build.run_layer_consume", run_mock)
     monkeypatch.setattr(layer_public, "invalidate", invalidate_mock)
     monkeypatch.setattr(layer_public.cache_invalidation, "invalidate_mutation_count", mutation_mock)

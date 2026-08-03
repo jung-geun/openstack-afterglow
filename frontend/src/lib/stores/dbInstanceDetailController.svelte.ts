@@ -156,6 +156,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	// AutoRefresh
 	const ar = createAutoRefresh(() => loadAll(), {
 		storageKey: 'dashboard-db-instance-detail',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],

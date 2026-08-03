@@ -46,6 +46,19 @@ async def test_list_prebuilt_file_storages_success(client, mock_conn):
     assert isinstance(resp.json(), list)
 
 
+@pytest.mark.asyncio
+async def test_list_prebuilt_file_storages_returns_empty_when_service_project_is_unavailable(
+    client,
+):
+    with patch(
+        "app.api.common.libraries.get_service_project_connection",
+        side_effect=RuntimeError("service project is not configured"),
+    ):
+        resp = await client.get("/api/v1/libraries/file-storages")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 # ────── 라이브러리 검증 서비스 ──────
 
 

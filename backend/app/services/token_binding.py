@@ -3,7 +3,7 @@
 MAC 주소는 웹 환경에서 수집 불가능하므로(브라우저 JS 접근 차단, 서버는 L3 너머 클라이언트 MAC 불가),
 IP + User-Agent/Accept-Language/Accept-Encoding 해시(기기 지문)로 대체한다.
 
-검사 모드 (config.toml [session] token_ip_binding_mode):
+검사 모드 (afterglow.conf [session] token_ip_binding_mode):
   off    — 검사 없음
   log    — 불일치 로깅만, 차단 없음
   subnet — IP가 다른 /24(IPv4) · /64(IPv6) 대역이면 차단 (기본)

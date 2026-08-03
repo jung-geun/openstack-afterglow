@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { sidebarOpen } from './sidebar';
 
 export const wizardOpen = writable<boolean>(false);
 
@@ -15,6 +16,7 @@ export function openWizard(opts?: WizardOpenOptions) {
 			...(opts?.prefill ?? {}),
 		}));
 	}
+	sidebarOpen.close();
 	wizardOpen.set(true);
 }
 
@@ -55,8 +57,9 @@ export interface WizardState {
 	networkId: string | null;
 	networkName: string | null;
 	keyName: string | null;
+	sshAccessMode: 'keypair' | 'github';
+	githubUsername: string;
 	securityGroups: string[];
-	availabilityZone: string | null;
 	cloudInit: string;
 	bootVolumeSizeGb: number;
 	deleteBootVolumeOnTermination: boolean;
@@ -88,8 +91,9 @@ const initial: WizardState = {
 	networkId: null,
 	networkName: null,
 	keyName: null,
+	sshAccessMode: 'keypair',
+	githubUsername: '',
 	securityGroups: [],
-	availabilityZone: null,
 	cloudInit: '',
 	bootVolumeSizeGb: 20,
 	deleteBootVolumeOnTermination: false,
@@ -100,6 +104,18 @@ const initial: WizardState = {
 };
 
 export const wizard = writable<WizardState>({ ...initial });
+
+// 위저드 단계가 바뀔 때마다 단 하나의 모듈 레벨 구독에서 이벤트를 발행한다.
+// 튜토리얼 엔진이 이 이벤트로 팝오버를 현재 위저드 단계에 동기화한다(중복 구독 금지).
+if (typeof window !== 'undefined') {
+	let lastWizardStep: number | null = null;
+	wizard.subscribe((w) => {
+		if (w.step !== lastWizardStep) {
+			lastWizardStep = w.step;
+			window.dispatchEvent(new CustomEvent('afterglow:wizard-step', { detail: { step: w.step } }));
+		}
+	});
+}
 
 export function resetWizard() {
 	wizard.set({ ...initial });

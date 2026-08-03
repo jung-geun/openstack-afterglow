@@ -1,6 +1,6 @@
 """통합 테스트 크리덴셜 로더.
 
-우선순위: 환경변수 > credentials.toml > config.toml [openstack]
+우선순위: 환경변수 > credentials.toml > afterglow.conf [openstack]
 
 사용법:
     from .credentials import admin_credentials, user_credentials
@@ -21,7 +21,7 @@ def _toml() -> dict:
 
 
 def admin_credentials() -> dict:
-    """admin 크리덴셜. 미설정 시 config.toml [openstack] 값으로 폴백."""
+    """admin 크리덴셜. 미설정 시 afterglow.conf [openstack] 값으로 폴백."""
     from app.config import get_settings
 
     t = _toml().get("admin", {})

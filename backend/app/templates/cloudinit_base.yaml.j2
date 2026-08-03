@@ -2,6 +2,11 @@
 # Union: OpenStack VM 자동 OverlayFS 설정
 # 전략: {{ strategy }}   라이브러리: {{ libraries | join(", ") }}
 
+{% if github_ssh_import_id %}
+ssh_import_id:
+  - {{ github_ssh_import_id | tojson }}
+
+{% endif %}
 package_update: false
 package_upgrade: false
 

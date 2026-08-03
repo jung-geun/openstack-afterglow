@@ -29,6 +29,7 @@ describe('api client', () => {
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers['Authorization']).toBe('Bearer my-token');
     expect(options.headers['X-Project-Id']).toBe('proj-123');
+    expect(options.credentials).toBe('include');
   });
 
   it('204 응답에서 undefined를 반환한다', async () => {

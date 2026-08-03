@@ -1,7 +1,13 @@
+---
+title: 키페어 (Keypairs)
+parent: API 레퍼런스
+nav_order: 35
+---
+
 # 키페어 (Keypairs) API
 
 > 태그: `keypairs`  
-> 기본 경로: `/api/keypairs`
+> 기본 경로: `/api/v1/keypairs`
 
 Nova SSH 키페어를 관리합니다. 인스턴스 생성 시 SSH 접속에 사용됩니다.
 
@@ -11,8 +17,8 @@ Nova SSH 키페어를 관리합니다. 인스턴스 생성 시 SSH 접속에 사
 
 | 헤더 | 설명 |
 |------|------|
-| `X-Auth-Token` | Keystone 인증 토큰 |
-| `X-Project-Id` | OpenStack 프로젝트 UUID |
+| `Authorization` | `Bearer <access_token>` (로그인 응답의 access JWT) |
+| `X-Project-Id` | (선택) 프로젝트 UUID — 생략 시 토큰의 프로젝트로 처리, 다른 값이면 rescope |
 
 ---
 
@@ -20,13 +26,13 @@ Nova SSH 키페어를 관리합니다. 인스턴스 생성 시 SSH 접속에 사
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/api/keypairs` | 키페어 목록 반환 |
-| `POST` | `/api/keypairs` | 키페어 생성 |
-| `DELETE` | `/api/keypairs/{keypair_name}` | 키페어 삭제 |
+| `GET` | `/api/v1/keypairs` | 키페어 목록 반환 |
+| `POST` | `/api/v1/keypairs` | 키페어 생성 |
+| `DELETE` | `/api/v1/keypairs/{keypair_name}` | 키페어 삭제 |
 
 ---
 
-## GET /api/keypairs
+## GET /api/v1/keypairs
 
 프로젝트의 SSH 키페어 목록을 반환합니다.
 
@@ -45,7 +51,7 @@ Nova SSH 키페어를 관리합니다. 인스턴스 생성 시 SSH 접속에 사
 
 ---
 
-## POST /api/keypairs
+## POST /api/v1/keypairs
 
 새 SSH 키페어를 생성합니다.
 
@@ -80,7 +86,7 @@ Nova SSH 키페어를 관리합니다. 인스턴스 생성 시 SSH 접속에 사
 
 ---
 
-## DELETE /api/keypairs/{keypair_name}
+## DELETE /api/v1/keypairs/{keypair_name}
 
 키페어를 삭제합니다.
 

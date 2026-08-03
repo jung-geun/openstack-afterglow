@@ -37,6 +37,10 @@
 		}
 	}
 
+	function prefetchExternalNetworks() {
+		void api.prefetch('/api/v1/admin/all-networks', token, projectId);
+	}
+
 	async function openCreate() {
 		showCreate = true; createError = '';
 		try {
@@ -68,6 +72,7 @@
 
 	const ar = createAutoRefresh(load, {
 		storageKey: 'admin-floating-ips',
+		invokeOnMount: false,
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [15, 30, 60]
@@ -79,7 +84,7 @@
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="NETWORK / FLOATING IPs" title="Floating IP">
 		{#snippet actions()}
-			<button onclick={openCreate} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
+			<button onclick={openCreate} onpointerenter={prefetchExternalNetworks} onfocus={prefetchExternalNetworks} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}

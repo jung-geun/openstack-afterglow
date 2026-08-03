@@ -15,6 +15,23 @@ permalink: /en/
 
 Afterglow is an open-source web dashboard for OpenStack cloud environments. It preserves Horizon's stability and feature coverage while adopting Skyline's modern UI/UX. It also ships a **k3s-based Kubernetes provisioning** stack that replaces Magnum.
 
+## Live service
+
+Afterglow currently runs as the [DMS Cloud research-cloud delivery console](https://cloud.dmslab.re.kr). The live service connects resource requests from researchers and teaching teams with operator allocation under quota and permission policies, usage and topology observability, and environment reuse through library layers and snapshots.
+
+### Operational surface and implementation
+
+| Operational surface | Implementation |
+|---|---|
+| VM, GPU, vCPU, and storage | Nova VM creation with project quotas, images, networks, and keypairs |
+| Kubernetes clusters | cloud-init-based k3s control-plane and worker-node configuration, with state and workload tracking |
+| Shared data space | Manila CephFS/NFS shares and snapshots |
+| AI/ML libraries | Store squashfs/NFS content-addressable immutable layer chains on Manila shares and compose them with OverlayFS in consumer VMs for reuse |
+| Operations | Projects, users, roles, quotas, Grafana, Prometheus, and audit logs |
+
+The browser uses the SvelteKit frontend to reach the FastAPI `/api/v1` gateway; the backend talks to OpenStack services through `openstacksdk`, while Redis provides cache and session storage. See the [architecture documentation](../architecture.md) and [Palimpsest layer documentation](../palimpsest.md) for detailed flows.
+
+
 ---
 
 ## Quick Links
@@ -36,11 +53,11 @@ Afterglow is an open-source web dashboard for OpenStack cloud environments. It p
 ### k3s Cluster Provisioning
 Installs k3s directly onto OpenStack VMs to deliver a Kubernetes environment on demand. No complex Magnum setup — master and worker nodes are configured automatically through cloud-init.
 
-### OverlayFS Library Layer
-Mounts Manila NFS/CephFS shares as OverlayFS lower layers so that AI/ML libraries (Python, PyTorch, vLLM) can be shared across many VMs. Storage efficiency and boot speed improve at the same time.
+### squashfs/NFS Library Layer
+Each layer stores a `.sqsh` artifact on its own Manila NFS share. A consumer VM mounts the share read-only and composes the chain with OverlayFS. See the [squashfs layer pipeline](../squashfs-layer-pipeline.md) for the operational implementation.
 
 ### Monitoring Integration
-Issues Grafana embed JWTs (`POST /api/grafana/token`) and exposes VM targets for Prometheus via http_sd (`GET /api/sd/prometheus/targets`). Monitoring ingress security groups are attached automatically on project and instance creation.
+Provides Grafana embed support (`GET /api/v1/grafana/dashboards` — returns dashboard UIDs and base URL) and exposes VM targets for Prometheus via http_sd (`GET /api/v1/sd/prometheus/targets`). Monitoring ingress security groups are attached automatically on project and instance creation.
 
 ### kolla-ansible Integration
 Deploys Afterglow inside an existing OpenStack cluster using a single kolla-ansible playbook (`deploy/kolla/`).

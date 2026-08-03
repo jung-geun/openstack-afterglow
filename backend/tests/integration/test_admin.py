@@ -1,6 +1,6 @@
 """관리자 API 통합 테스트.
 
-config.toml의 admin 계정으로 로그인하므로 admin 역할이 있어야 한다.
+afterglow.conf의 admin 계정으로 로그인하므로 admin 역할이 있어야 한다.
 """
 
 import pytest

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	interface Snapshot {
 		id: string;
@@ -16,6 +17,11 @@
 		snapshots,
 		deleting,
 		openSnapshotActionMenu,
+		selectedIds,
+		selectableIds,
+		selectionDisabled,
+		onToggleSelect,
+		onToggleAll,
 		onActionMenuOpen,
 		onActionMenuClose,
 		onDelete,
@@ -23,10 +29,16 @@
 		snapshots: Snapshot[];
 		deleting: string | null;
 		openSnapshotActionMenu: string | null;
+		selectedIds: ReadonlySet<string>;
+		selectableIds: ReadonlySet<string>;
+		selectionDisabled: boolean;
+		onToggleSelect: (id: string) => void;
+		onToggleAll: () => void;
 		onActionMenuOpen: (id: string) => void;
 		onActionMenuClose: () => void;
 		onDelete: (id: string, name: string) => void;
 	} = $props();
+	const selectedSelectableCount = $derived([...selectedIds].filter((id) => selectableIds.has(id)).length);
 </script>
 
 {#if snapshots.length === 0}
@@ -35,7 +47,8 @@
 	</div>
 {:else}
 	<div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
-		<div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+		<div class="grid grid-cols-[32px_1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+			<div><SelectionCheckbox checked={selectableIds.size > 0 && selectedSelectableCount === selectableIds.size} indeterminate={selectedSelectableCount > 0 && selectedSelectableCount < selectableIds.size} disabled={selectionDisabled || selectableIds.size === 0} onclick={onToggleAll} ariaLabel="전체 선택" /></div>
 			<div>이름</div>
 			<div>원본 볼륨</div>
 			<div>크기</div>
@@ -44,7 +57,8 @@
 			<div></div>
 		</div>
 		{#each snapshots as snap (snap.id)}
-			<div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0">
+			<div class="resource-selection-surface grid grid-cols-[32px_1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0" data-selected={selectedIds.has(snap.id)}>
+				<div><SelectionCheckbox checked={selectedIds.has(snap.id)} disabled={selectionDisabled} onclick={() => onToggleSelect(snap.id)} ariaLabel={`${snap.name || snap.id} 선택`} /></div>
 				<div class="min-w-0">
 					<div class="text-white font-medium truncate">{snap.name || snap.id.slice(0, 12)}</div>
 					<div class="text-[11px] text-gray-500 font-mono truncate">{snap.id.slice(0, 8)}…</div>

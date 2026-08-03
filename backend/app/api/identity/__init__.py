@@ -3,6 +3,7 @@
 _ROUTERS = {
     "admin_router": ".admin",
     "auth_router": ".auth",
+    "mcp_access_router": ".mcp_access",
 }
 
 # OIDC 인증 API 라우터 - main.py에서 /api/v1/auth 경로로 마운트

@@ -103,7 +103,7 @@
     border-radius: 0.375rem;
     color: var(--color-ink-2);
     background: transparent;
-    transition: background 0.15s, color 0.15s;
+    transition: background var(--motion-duration-fast) var(--motion-ease-standard), color var(--motion-duration-fast) var(--motion-ease-standard);
   }
   .action-trigger:hover {
     color: var(--color-ink-0);
@@ -111,7 +111,7 @@
   }
   .action-menu {
     position: fixed;
-    z-index: 9999;
+    z-index: var(--z-popover);
     min-width: 8.75rem;
     padding-block: 0.25rem;
     border: 1px solid var(--color-line-2);
