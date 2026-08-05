@@ -8,12 +8,13 @@ Before splitting a distribution:
 
 1. Complete and archive the active OpenSpec change.
 2. Run the monorepo test and lint gates from the repository root.
-3. Confirm that the service distribution contains no `app.*` imports and that Afterglow imports the service only through its `<service>_sdk` package.
-4. Choose the target repository and its protected default branch.
+3. Confirm that the service distribution contains no `app.*` imports, contains its own `LICENSE` and `Dockerfile`, and has no dependency source path outside the distribution.
+4. Confirm that service wheels resolve `afterglow-crypto` through its immutable direct Git dependency; do not restore sibling editable sources.
+5. Choose the target repository and its protected default branch.
 
 ## Split a distribution
 
-Run the split from the Afterglow repository root. Replace `<distribution>` with one of `waygate`, `waygate-sdk`, `drover`, `drover-sdk`, `lumen`, or `lumen-sdk`.
+Run the split from the Afterglow repository root. Replace `<distribution>` with one of `afterglow-crypto`, `waygate`, `waygate-sdk`, `drover`, `drover-sdk`, `lumen`, or `lumen-sdk`.
 
 ```bash
 git subtree split --prefix="services/<distribution>" -b "<distribution>-split"
@@ -35,4 +36,4 @@ After the standalone package is published:
    - Lumen: `lumen_api_image`, `lumen_worker_image`, `lumen_image_tag`
 4. Run the catalog SDK round-trip, proxy, explicit-unavailability, migration-idempotency, health, and full monorepo gates before deployment.
 
-No service source changes are part of promotion. If a split service imports `app.*`, or Afterglow imports service implementation modules instead of `<service>_sdk`, fix that boundary in the monorepo before splitting rather than carrying a compatibility shim into the new repository.
+Promotion must not change service behavior. Complete packaging prerequisites—license, standalone Dockerfile, and resolvable direct dependencies—before splitting. If a split service imports `app.*`, or Afterglow imports service implementation modules instead of `<service>_sdk`, fix that boundary in the monorepo before splitting rather than carrying a compatibility shim into the new repository.
