@@ -33,6 +33,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres" },
     { name = "litellm" },
+    { name = "lumen-sdk" },
     { name = "mcp" },
     { name = "mutagen" },
     { name = "openpyxl" },
@@ -74,10 +75,12 @@ worker = [
     { name = "afterglow-crypto" },
     { name = "aiomysql" },
     { name = "apscheduler" },
+    { name = "drover-sdk" },
     { name = "httpx" },
     { name = "idna" },
     { name = "jinja2" },
     { name = "langchain-mcp-adapters" },
+    { name = "lumen-sdk" },
     { name = "openstacksdk" },
     { name = "prometheus-client" },
     { name = "pydantic" },
@@ -86,18 +89,19 @@ worker = [
     { name = "pyyaml" },
     { name = "redis", extra = ["hiredis"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "waygate-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "afterglow-crypto", directory = "../services/afterglow-crypto" },
+    { name = "afterglow-crypto", git = "https://github.com/openstack-afterglow/afterglow-crypto.git?rev=aee36e8ea173e486f443fa816de4e6397d11cff2" },
     { name = "aiofiles", specifier = "==24.1.0" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "aiosmtplib", specifier = ">=3.0.0" },
     { name = "asyncssh", specifier = ">=2.18" },
     { name = "beautifulsoup4", specifier = "==4.14.3" },
     { name = "boto3", specifier = ">=1.35.0" },
-    { name = "drover-sdk", directory = "../services/drover-sdk" },
+    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover-sdk.git?rev=e65b9261ce883b0fae9272e4b483699fd127ac2a" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.21" },
     { name = "fastapi", specifier = "==0.125.0" },
     { name = "httpcore", specifier = "==1.0.9" },
@@ -112,6 +116,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-postgres", specifier = "==3.1.0" },
     { name = "libvirt-python", marker = "extra == 'kvm'", specifier = ">=10.0.0" },
     { name = "litellm", specifier = "==1.93.0" },
+    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen-sdk.git?rev=e72d95e9ca78bba55e03518f8ae2b59710b60d34" },
     { name = "mcp", specifier = "==1.28.1" },
     { name = "mutagen", specifier = "==1.47.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -135,20 +140,22 @@ requires-dist = [
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.39.0" },
-    { name = "waygate-sdk", directory = "../services/waygate-sdk" },
+    { name = "waygate-sdk", git = "https://github.com/openstack-afterglow/waygate-sdk.git?rev=8455a9f94b25006b3326af329a6e34d1bfdcb54c" },
     { name = "websockets", specifier = ">=14.0" },
 ]
 provides-extras = ["kvm", "dev"]
 
 [package.metadata.requires-dev]
 worker = [
-    { name = "afterglow-crypto", directory = "../services/afterglow-crypto" },
+    { name = "afterglow-crypto", git = "https://github.com/openstack-afterglow/afterglow-crypto.git?rev=aee36e8ea173e486f443fa816de4e6397d11cff2" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "apscheduler", specifier = ">=3.10" },
+    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover-sdk.git?rev=e65b9261ce883b0fae9272e4b483699fd127ac2a" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "idna", specifier = ">=3.15" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "langchain-mcp-adapters", specifier = "==0.3.1" },
+    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen-sdk.git?rev=e72d95e9ca78bba55e03518f8ae2b59710b60d34" },
     { name = "openstacksdk", specifier = "==3.3.0" },
     { name = "prometheus-client", specifier = ">=0.20.0" },
     { name = "pydantic", specifier = "==2.13.4" },
@@ -157,18 +164,16 @@ worker = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", extras = ["hiredis"], specifier = "==5.0.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
+    { name = "waygate-sdk", git = "https://github.com/openstack-afterglow/waygate-sdk.git?rev=8455a9f94b25006b3326af329a6e34d1bfdcb54c" },
 ]
 
 [[package]]
 name = "afterglow-crypto"
 version = "0.1.1"
-source = { directory = "../services/afterglow-crypto" }
+source = { git = "https://github.com/openstack-afterglow/afterglow-crypto.git?rev=aee36e8ea173e486f443fa816de4e6397d11cff2#aee36e8ea173e486f443fa816de4e6397d11cff2" }
 dependencies = [
     { name = "cryptography" },
 ]
-
-[package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=42.0.0" }]
 
 [[package]]
 name = "aiofiles"
@@ -699,19 +704,10 @@ wheels = [
 [[package]]
 name = "drover-sdk"
 version = "0.1.0"
-source = { directory = "../services/drover-sdk" }
+source = { git = "https://github.com/openstack-afterglow/drover-sdk.git?rev=e65b9261ce883b0fae9272e4b483699fd127ac2a#e65b9261ce883b0fae9272e4b483699fd127ac2a" }
 dependencies = [
     { name = "openstacksdk" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "openstacksdk", specifier = ">=3.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
-    { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "et-xmlfile"
@@ -1510,6 +1506,14 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/64/49/2db5757f7e284eb12618b547cb62dab49687ffaf1d749ca048210e3d0dbd/litellm-1.93.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:98c15e84d32e922a821c105308bf9ddae8700de9ed396530bee2cbb1cacf4cbb", size = 20157288, upload-time = "2026-07-19T03:01:15.395Z" },
     { url = "https://files.pythonhosted.org/packages/0d/7f/b48d88cb32055b4ba7e51cd67e4ea13a589d4a568d33c3d0dc6994d13b83/litellm-1.93.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:1a476ebc340c070c982eab15b4673fa63a70f5936935f9f20e4d2acb5f35d23b", size = 20165502, upload-time = "2026-07-19T03:01:18.425Z" },
     { url = "https://files.pythonhosted.org/packages/45/6c/65a7f916326daa151131f1fce5e254d4834127a95d53a18f1c4d238dd5c3/litellm-1.93.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:cd70ccd4ba3ef1a395535c287bce72d30c7d937ecca4290c0db37a00738f7ada", size = 20159007, upload-time = "2026-07-19T03:01:21.704Z" },
+]
+
+[[package]]
+name = "lumen-sdk"
+version = "0.1.0"
+source = { git = "https://github.com/openstack-afterglow/lumen-sdk.git?rev=e72d95e9ca78bba55e03518f8ae2b59710b60d34#e72d95e9ca78bba55e03518f8ae2b59710b60d34" }
+dependencies = [
+    { name = "openstacksdk" },
 ]
 
 [[package]]
@@ -3574,19 +3578,10 @@ wheels = [
 [[package]]
 name = "waygate-sdk"
 version = "0.1.0"
-source = { directory = "../services/waygate-sdk" }
+source = { git = "https://github.com/openstack-afterglow/waygate-sdk.git?rev=8455a9f94b25006b3326af329a6e34d1bfdcb54c#8455a9f94b25006b3326af329a6e34d1bfdcb54c" }
 dependencies = [
     { name = "openstacksdk" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "openstacksdk", specifier = ">=3.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
-    { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "websockets"
