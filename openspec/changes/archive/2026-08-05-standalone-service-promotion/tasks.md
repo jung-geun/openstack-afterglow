@@ -5,4 +5,4 @@
 - [x] Add standalone API and worker Dockerfiles for Waygate, Drover, and Lumen.
 - [x] Verify standalone installs and image targets.
 - [x] Document standalone promotion prerequisites.
-- [ ] Regenerate split branches and publish repository targets.
+- [x] Regenerate split branches and publish repository targets.
