@@ -403,7 +403,7 @@ function jsonFixture(method: string, normalized: string, body: unknown, profile:
 	}
 	if (method === 'GET' && pathname === '/api/v1/dashboard/k3s-stats') {
 		const clusters = state.k3sClusters.filter((cluster) => !cluster.deleted_at);
-		return { total: clusters.length, active: clusters.filter((cluster) => cluster.status === 'ACTIVE').length };
+		return { total: clusters.length, active: clusters.filter((cluster) => cluster.status === 'ACTIVE').length, available: true };
 	}
 	if (method === 'GET' && pathname === '/api/v1/dashboard/notifications') return { notifications: [{ type: 'quota', severity: 'warning', message: 'GPU quota 사용률이 70%를 넘었습니다.', count: 1 }, { type: 'backup', severity: 'info', message: '오늘 3개의 스냅샷 검증이 완료되었습니다.', count: 3 }] };
 	if (method === 'GET' && pathname === '/api/v1/dashboard/metrics/trend') return dashboardTrend(params.get('range'), params.get('include_network') !== 'false');

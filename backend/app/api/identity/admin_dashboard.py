@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     import openstack
 
+from drover_sdk import register as register_drover
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -99,16 +100,17 @@ async def get_admin_notifications(
     except Exception:
         _logger.debug("hypervisor 알림 조회 실패", exc_info=True)
 
-    # k3s 클러스터 대기/오류 (선택적)
+    # K3s pending/error state is authoritative in Drover.
     try:
         from app.config import get_settings
 
         if get_settings().service_k3s_enabled:
-            from app.services import k3s_cluster
 
-            def _k3s_pending():
-                clusters = list(k3s_cluster.list_all_clusters(conn))
-                return [c for c in clusters if c.get("status") in ("CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS", "ERROR")]
+            async def _k3s_pending():
+                return await asyncio.to_thread(
+                    register_drover(conn).admin_clusters,
+                    status="CREATE_IN_PROGRESS,UPDATE_IN_PROGRESS,ERROR",
+                )
 
             pending = await cached_call(
                 "afterglow:admin:notifications:k3s_pending",
@@ -124,11 +126,21 @@ async def get_admin_notifications(
                         "severity": "info",
                         "message": f"대기/오류 k3s 클러스터 {len(pending)}개",
                         "count": len(pending),
+                        "available": True,
                     }
                 )
     except Exception:
-        _logger.debug("k3s 알림 조회 실패", exc_info=True)
-
+        _logger.debug("Drover k3s 알림 조회 실패", exc_info=True)
+        if get_settings().service_k3s_enabled:
+            notifications.append(
+                {
+                    "type": "k3s",
+                    "severity": "warning",
+                    "message": "Drover 클러스터를 불러오지 못했습니다",
+                    "count": 0,
+                    "available": False,
+                }
+            )
     # FIP 풀 고갈 경고
     try:
 

@@ -1,0 +1,31 @@
+---
+- name: Deploy | Pull Lumen images
+  become: true
+  community.docker.docker_image:
+    name: "{{ item.value.image }}"
+    source: pull
+    force_source: "{{ lumen_image_tag == 'latest' }}"
+  loop: "{{ lumen_services | dict2items }}"
+  when:
+    - inventory_hostname in groups['lumen']
+    - item.value.enabled | bool
+
+- name: Deploy | Start Lumen containers
+  become: true
+  community.docker.docker_container:
+    name: "{{ item.value.container_name }}"
+    image: "{{ item.value.image }}"
+    state: started
+    restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
+    volumes: "{{ item.value.volumes | default([]) }}"
+    env: "{{ item.value.environment | default({}) }}"
+    command: "{{ item.value.command | default(omit) }}"
+    healthcheck: "{{ item.value.healthcheck | default(omit) }}"
+    ports: "{{ item.value.ports | default([]) }}"
+    labels:
+      kolla_version: "2025.2"
+      service: lumen
+  loop: "{{ lumen_services | dict2items }}"
+  when:
+    - inventory_hostname in groups['lumen']
+    - item.value.enabled | bool

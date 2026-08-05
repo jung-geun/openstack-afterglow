@@ -10,33 +10,32 @@ ciphertext 버전:
 re-encrypt 권장.
 """
 
-import base64
 import logging
-import os
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from afterglow_crypto import aesgcm
 
 from app.config import get_settings
 
 _logger = logging.getLogger(__name__)
 
-_V3_PREFIX = "v3:"
-_V2_PREFIX = "v2:"
+_V3_PREFIX = aesgcm._V3_PREFIX
+_V2_PREFIX = aesgcm._V2_PREFIX
 
 # 도메인 라벨 — encrypt/decrypt 가 같은 값을 써야 함
 _DOMAIN_KUBECONFIG = b"kubeconfig"
 _DOMAIN_NODE_TOKEN = b"node_token"
 _DOMAIN_NOTION = b"notion_config"
 _DOMAIN_MANAGER_PW = b"manager_password"
-_DOMAIN_WG_CLIENT_KEY = b"wg_client_key"
-_DOMAIN_WG_AGENT_TOKEN = b"wg_agent_token"
 _DOMAIN_LLM_PROVIDER_KEY = b"llm_provider_key"
 _DOMAIN_CHAT_CONTENT = b"chat_content"
 _DOMAIN_VM_CLOUD_INIT = b"vm_cloud_init"
 
-_LEGACY_WARNED: set[str] = set()
+# Compatibility aliases
+_derive_subkey = aesgcm._derive_subkey
+_warn_legacy_once = aesgcm._warn_legacy_once
+_aes_encrypt_v3 = aesgcm.encrypt
+_aes_decrypt = aesgcm.decrypt
+_LEGACY_WARNED = aesgcm._LEGACY_WARNED
 
 
 def _get_key() -> bytes:
@@ -59,139 +58,49 @@ def _get_notion_key() -> bytes:
     return bytes.fromhex(hex_key)
 
 
-def _derive_subkey(master: bytes, domain: bytes) -> bytes:
-    """HKDF-SHA256 으로 마스터키 → 도메인별 32 byte sub-key 파생.
-
-    동일 마스터키여도 도메인이 다르면 서로 다른 sub-key — 한 도메인의 ciphertext
-    가 다른 도메인 키로 복호화되지 않는다 (key separation).
-    """
-    return HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b"afterglow-k3s/" + domain,
-    ).derive(master)
-
-
 def derive_encryption_subkey(domain: bytes) -> bytes:
     """Return an AES-256 sub-key for a non-empty application encryption domain."""
-
-    if not domain:
-        raise ValueError("encryption domain must not be empty")
-    return _derive_subkey(_get_key(), domain)
-
-
-def _warn_legacy_once(domain: bytes, version: str) -> None:
-    """legacy/v2 ciphertext 복호화 1회만 로그 (도메인 단위) — 운영 spam 방지."""
-    key = f"{version}:{domain.decode('latin-1')}"
-    if key in _LEGACY_WARNED:
-        return
-    _LEGACY_WARNED.add(key)
-    _logger.warning(
-        "k3s_crypto: %s ciphertext detected for domain=%s — please migrate to v3 (HKDF sub-key) before next release",
-        version,
-        domain.decode("latin-1"),
-    )
-
-
-def _aes_encrypt_v3(master: bytes, domain: bytes, plaintext: str) -> str:
-    """v3 — HKDF sub-key 사용. AAD = domain."""
-    key = _derive_subkey(master, domain)
-    aesgcm = AESGCM(key)
-    nonce = os.urandom(12)
-    ct = aesgcm.encrypt(nonce, plaintext.encode(), domain)
-    return _V3_PREFIX + base64.b64encode(nonce + ct).decode()
-
-
-def _aes_decrypt(master: bytes, domain: bytes, ciphertext_b64: str) -> str:
-    """복호화 — v3 우선, v2/legacy 는 fallback + deprecation warning."""
-    if ciphertext_b64.startswith(_V3_PREFIX):
-        key = _derive_subkey(master, domain)
-        raw = base64.b64decode(ciphertext_b64[len(_V3_PREFIX) :])
-        nonce, ct = raw[:12], raw[12:]
-        return AESGCM(key).decrypt(nonce, ct, domain).decode()
-
-    if ciphertext_b64.startswith(_V2_PREFIX):
-        _warn_legacy_once(domain, "v2")
-        raw = base64.b64decode(ciphertext_b64[len(_V2_PREFIX) :])
-        nonce, ct = raw[:12], raw[12:]
-        return AESGCM(master).decrypt(nonce, ct, domain).decode()
-
-    # 접두사 없음 — legacy (AAD 없음)
-    _warn_legacy_once(domain, "legacy")
-    raw = base64.b64decode(ciphertext_b64)
-    nonce, ct = raw[:12], raw[12:]
-    return AESGCM(master).decrypt(nonce, ct, None).decode()
+    return aesgcm.derive_encryption_subkey(_get_key(), domain)
 
 
 def encrypt_kubeconfig(plaintext: str) -> str:
     """Encrypt kubeconfig YAML string with AES-256-GCM + HKDF sub-key (v3)."""
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_KUBECONFIG, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_KUBECONFIG, plaintext)
 
 
 def decrypt_kubeconfig(ciphertext_b64: str) -> str:
     """Decrypt kubeconfig — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_KUBECONFIG, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_KUBECONFIG, ciphertext_b64)
 
 
 def encrypt_node_token(plaintext: str) -> str:
     """Encrypt k3s node token (v3)."""
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_NODE_TOKEN, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_NODE_TOKEN, plaintext)
 
 
 def decrypt_node_token(ciphertext_b64: str) -> str:
     """Decrypt k3s node token — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_NODE_TOKEN, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_NODE_TOKEN, ciphertext_b64)
 
 
 def encrypt_notion_config(plaintext: str) -> str:
     """Encrypt Notion API key (v3)."""
-    return _aes_encrypt_v3(_get_notion_key(), _DOMAIN_NOTION, plaintext)
+    return aesgcm.encrypt(_get_notion_key(), _DOMAIN_NOTION, plaintext)
 
 
 def decrypt_notion_config(ciphertext_b64: str) -> str:
     """Decrypt Notion API key — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_notion_key(), _DOMAIN_NOTION, ciphertext_b64)
+    return aesgcm.decrypt(_get_notion_key(), _DOMAIN_NOTION, ciphertext_b64)
 
 
 def encrypt_manager_password(plaintext: str) -> str:
     """Encrypt per-project cluster manager user password (v3)."""
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_MANAGER_PW, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_MANAGER_PW, plaintext)
 
 
 def decrypt_manager_password(ciphertext_b64: str) -> str:
     """Decrypt cluster manager user password — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_MANAGER_PW, ciphertext_b64)
-
-
-def encrypt_wg_client_key(plaintext: str) -> str:
-    """Encrypt WireGuard 클라이언트 private/preshared key (v3).
-
-    마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
-    도메인 분리로 kubeconfig/node_token 등 다른 도메인 ciphertext와 교차 복호화되지 않는다.
-    """
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_WG_CLIENT_KEY, plaintext)
-
-
-def decrypt_wg_client_key(ciphertext_b64: str) -> str:
-    """Decrypt WireGuard 클라이언트 private/preshared key — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_WG_CLIENT_KEY, ciphertext_b64)
-
-
-def encrypt_wg_agent_token(plaintext: str) -> str:
-    """Encrypt Waygate 에이전트 reconcile 베어러 토큰 (v3).
-
-    이 토큰은 VM 에이전트가 무기한 사용하는 영구 제어채널 자격증명이므로 Redis(휘발성)가
-    아니라 waygate_servers 행에 암호화 저장해 durable 하게 보관한다. 마스터키는 기존
-    k3s_kubeconfig_encryption_key 를 재사용하고, 도메인 분리로 다른 ciphertext 와 교차
-    복호화되지 않는다.
-    """
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_WG_AGENT_TOKEN, plaintext)
-
-
-def decrypt_wg_agent_token(ciphertext_b64: str) -> str:
-    """Decrypt Waygate 에이전트 reconcile 베어러 토큰 — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_WG_AGENT_TOKEN, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_MANAGER_PW, ciphertext_b64)
 
 
 def encrypt_llm_provider_key(plaintext: str) -> str:
@@ -200,12 +109,12 @@ def encrypt_llm_provider_key(plaintext: str) -> str:
     마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
     도메인 분리로 kubeconfig/node_token 등 다른 도메인 ciphertext와 교차 복호화되지 않는다.
     """
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, plaintext)
 
 
 def decrypt_llm_provider_key(ciphertext_b64: str) -> str:
     """Decrypt LLM 프로바이더 API 키 — v3/v2/legacy 모두 처리."""
-    return _aes_decrypt(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_LLM_PROVIDER_KEY, ciphertext_b64)
 
 
 def encrypt_chat_content(plaintext: str) -> str:
@@ -213,7 +122,7 @@ def encrypt_chat_content(plaintext: str) -> str:
 
     마스터키는 기존 k3s_kubeconfig_encryption_key 를 재사용한다(신규 시크릿 불필요).
     """
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_CHAT_CONTENT, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_CHAT_CONTENT, plaintext)
 
 
 def decrypt_chat_content(ciphertext_b64: str) -> str:
@@ -225,14 +134,14 @@ def decrypt_chat_content(ciphertext_b64: str) -> str:
     """
     if not ciphertext_b64.startswith(_V3_PREFIX):
         return ciphertext_b64
-    return _aes_decrypt(_get_key(), _DOMAIN_CHAT_CONTENT, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_CHAT_CONTENT, ciphertext_b64)
 
 
 def encrypt_vm_cloud_init(plaintext: str) -> str:
     """Encrypt a user's reusable VM cloud-init snippet with a dedicated sub-key."""
-    return _aes_encrypt_v3(_get_key(), _DOMAIN_VM_CLOUD_INIT, plaintext)
+    return aesgcm.encrypt(_get_key(), _DOMAIN_VM_CLOUD_INIT, plaintext)
 
 
 def decrypt_vm_cloud_init(ciphertext_b64: str) -> str:
     """Decrypt a user's reusable VM cloud-init snippet."""
-    return _aes_decrypt(_get_key(), _DOMAIN_VM_CLOUD_INIT, ciphertext_b64)
+    return aesgcm.decrypt(_get_key(), _DOMAIN_VM_CLOUD_INIT, ciphertext_b64)

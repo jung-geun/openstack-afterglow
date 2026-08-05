@@ -501,24 +501,3 @@ def test_apply_db_overlay_overrides_builtin(_restore_device_map):
     assert PCI_DEVICE_MAP["10DE"]["2204"]["name"] == "RTX 3090 Renamed"
     apply_db_overlay([])
     assert PCI_DEVICE_MAP["10DE"]["2204"]["name"] == "RTX 3090"
-
-
-def test_invalidate_norm_map_picks_up_overlay(_restore_device_map):
-    from app.services.gpu_quota import invalidate_norm_map, normalize_gpu_alias
-
-    apply_db_overlay(
-        [
-            {
-                "vendor_id": "10DE",
-                "device_id": "EEEE",
-                "name": "Custom GPU",
-                "is_audio": False,
-                "aliases": ["MYGPU", "my-gpu"],
-            }
-        ]
-    )
-    invalidate_norm_map()
-    assert normalize_gpu_alias("my-gpu") == "MYGPU"
-    apply_db_overlay([])
-    invalidate_norm_map()
-    assert normalize_gpu_alias("my-gpu") == "my-gpu"

@@ -124,83 +124,85 @@ async def test_registry_file_storage_quota_get_dispatch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_project_k3s_clusters_success(monkeypatch):
-    monkeypatch.setattr("app.services.mcp_control_plane.k3s.is_db_available", lambda: True)
+async def test_list_project_k3s_clusters_uses_catalog_sdk_and_redacts(monkeypatch):
+    conn = object()
+    observed = {}
 
-    cluster_mock = SimpleNamespace(
-        id="c1",
-        name="k3s-demo",
-        status="ACTIVE",
-        project_id="proj-1",
-        agent_count=3,
-        k3s_version="v1.34.6+k3s1",
-        created_at=None,
-        updated_at=None,
-        master_count=1,
-        stampede_enabled=False,
-        occm_enabled=True,
-    )
-
-    class FakeSession:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def execute(self, stmt):
-            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [cluster_mock]))
+    class Proxy:
+        def clusters(self, **query):
+            observed.update(query)
+            return [
+                {
+                    "id": "c1",
+                    "name": "k3s-demo",
+                    "status": "ACTIVE",
+                    "project_id": "proj-1",
+                    "agent_count": 3,
+                    "k3s_version": "v1.34.6+k3s1",
+                    "created_at": None,
+                    "updated_at": None,
+                    "master_count": 1,
+                    "stampede_enabled": False,
+                    "occm_enabled": True,
+                    "kubeconfig_encrypted": "must-not-leak",
+                }
+            ]
 
     monkeypatch.setattr(
-        "app.services.mcp_control_plane.k3s.get_session_factory",
-        lambda: lambda: FakeSession(),
+        "app.services.mcp_control_plane.k3s.register",
+        lambda actual_conn: Proxy() if actual_conn is conn else None,
     )
 
-    clusters = await list_project_k3s_clusters("proj-1", limit=10)
-    assert len(clusters) == 1
-    assert clusters[0]["id"] == "c1"
-    assert clusters[0]["name"] == "k3s-demo"
-    assert clusters[0]["status"] == "ACTIVE"
-    assert clusters[0]["agent_count"] == 3
-    assert clusters[0]["occm_enabled"] is True
+    clusters = await list_project_k3s_clusters(conn, "proj-1", limit=10)
+
+    assert observed == {"limit": 10}
+    assert clusters == [
+        {
+            "id": "c1",
+            "name": "k3s-demo",
+            "status": "ACTIVE",
+            "agent_count": 3,
+            "k3s_version": "v1.34.6+k3s1",
+            "created_at": None,
+            "updated_at": None,
+            "master_count": 1,
+            "stampede_enabled": False,
+            "occm_enabled": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio
-async def test_list_project_k3s_clusters_db_unavailable(monkeypatch):
-    monkeypatch.setattr("app.services.mcp_control_plane.k3s.is_db_available", lambda: False)
+async def test_list_project_k3s_clusters_catalog_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.mcp_control_plane.k3s.register",
+        lambda _conn: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
+    )
 
-    with pytest.raises(McpK3sError, match="unavailable"):
-        await list_project_k3s_clusters("proj-1")
+    with pytest.raises(McpK3sError, match="list query failed"):
+        await list_project_k3s_clusters(object(), "proj-1")
 
 
 @pytest.mark.asyncio
 async def test_get_project_k3s_cluster_ownership_proof(monkeypatch):
-    monkeypatch.setattr("app.services.mcp_control_plane.k3s.is_db_available", lambda: True)
+    conn = object()
 
-    cluster_foreign = SimpleNamespace(
-        id="c2",
-        name="foreign-cluster",
-        status="ACTIVE",
-        project_id="other-project",
-    )
-
-    class FakeSession:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def execute(self, stmt):
-            return SimpleNamespace(scalar_one_or_none=lambda: cluster_foreign)
+    class Proxy:
+        def get_cluster(self, cluster_id):
+            return {
+                "id": cluster_id,
+                "name": "foreign-cluster",
+                "status": "ACTIVE",
+                "project_id": "other-project",
+            }
 
     monkeypatch.setattr(
-        "app.services.mcp_control_plane.k3s.get_session_factory",
-        lambda: lambda: FakeSession(),
+        "app.services.mcp_control_plane.k3s.register",
+        lambda actual_conn: Proxy() if actual_conn is conn else None,
     )
 
     with pytest.raises(McpK3sError, match="ownership cannot be proven"):
-        await get_project_k3s_cluster("proj-1", "c2")
+        await get_project_k3s_cluster(conn, "proj-1", "c2")
 
 
 # --- Object Storage Tests ---
@@ -352,37 +354,42 @@ async def test_list_project_secret_metadata_rejects_missing_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_project_waygate_servers_redacts_connection_details(monkeypatch):
-    monkeypatch.setattr(
-        "app.services.mcp_control_plane.waygate.is_db_available",
-        lambda: True,
-    )
+async def test_list_project_waygate_servers_uses_catalog_sdk_and_redacts(monkeypatch):
+    conn = object()
+    observed: dict[str, object] = {}
 
-    async def fake_list_servers(project_id, *, limit):
-        assert project_id == "project-1"
-        assert limit == 1
-        return [
-            {
-                "id": "1f521da3-2524-4d0a-bb6a-68fbac7a25bd",
-                "project_id": project_id,
-                "name": "gateway",
-                "status": "ACTIVE",
-                "created_at": "2026-07-31T00:00:00+00:00",
-                "updated_at": "2026-07-31T01:00:00+00:00",
-                "endpoint_ip": "203.0.113.10",
-                "server_public_key": "public-key",
-                "agent_token_encrypted": "ciphertext",
-                "provider_network_id": "network-id",
-            }
-        ]
+    class Proxy:
+        def servers(self):
+            return [
+                {
+                    "id": "1f521da3-2524-4d0a-bb6a-68fbac7a25bd",
+                    "project_id": "project-1",
+                    "name": "gateway",
+                    "status": "ACTIVE",
+                    "created_at": "2026-07-31T00:00:00+00:00",
+                    "updated_at": "2026-07-31T01:00:00+00:00",
+                    "endpoint_ip": "203.0.113.10",
+                    "server_public_key": "public-key",
+                    "agent_token_encrypted": "ciphertext",
+                    "provider_network_id": "network-id",
+                },
+                {
+                    "id": "second",
+                    "project_id": "project-1",
+                    "name": "bounded-out",
+                    "status": "ACTIVE",
+                },
+            ]
 
-    monkeypatch.setattr(
-        "app.services.mcp_control_plane.waygate.waygate_db.list_servers",
-        fake_list_servers,
-    )
+    def fake_register(actual_conn):
+        observed["conn"] = actual_conn
+        return Proxy()
 
-    servers = await list_project_waygate_servers("project-1", limit=1)
+    monkeypatch.setattr("app.services.mcp_control_plane.waygate.register", fake_register)
 
+    servers = await list_project_waygate_servers(conn, "project-1", limit=1)
+
+    assert observed["conn"] is conn
     assert servers == [
         {
             "id": "1f521da3-2524-4d0a-bb6a-68fbac7a25bd",
@@ -395,22 +402,29 @@ async def test_list_project_waygate_servers_redacts_connection_details(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_get_project_waygate_server_rejects_foreign_record(monkeypatch):
-    monkeypatch.setattr(
-        "app.services.mcp_control_plane.waygate.is_db_available",
-        lambda: True,
-    )
+async def test_get_project_waygate_server_rejects_foreign_catalog_record(monkeypatch):
+    conn = object()
 
-    async def fake_get_server(_project_id, _server_id):
-        return {"id": _server_id, "project_id": "other-project", "name": "foreign", "status": "ACTIVE"}
+    class Proxy:
+        def get_server(self, server_id):
+            return {
+                "id": server_id,
+                "project_id": "other-project",
+                "name": "foreign",
+                "status": "ACTIVE",
+            }
 
     monkeypatch.setattr(
-        "app.services.mcp_control_plane.waygate.waygate_db.get_server",
-        fake_get_server,
+        "app.services.mcp_control_plane.waygate.register",
+        lambda actual_conn: Proxy() if actual_conn is conn else None,
     )
 
     with pytest.raises(McpWaygateError, match="ownership cannot be proven"):
-        await get_project_waygate_server("project-1", "1f521da3-2524-4d0a-bb6a-68fbac7a25bd")
+        await get_project_waygate_server(
+            conn,
+            "project-1",
+            "1f521da3-2524-4d0a-bb6a-68fbac7a25bd",
+        )
 
 
 # --- Inventory and Feature Flag Gate Tests ---
@@ -511,7 +525,7 @@ async def test_registry_key_manager_and_waygate_dispatch_redacted_results(monkey
             }
         ]
 
-    async def fake_waygate_list(_project_id, *, limit):
+    async def fake_waygate_list(_conn, _project_id, *, limit):
         assert limit == 1
         return [
             {
@@ -523,7 +537,7 @@ async def test_registry_key_manager_and_waygate_dispatch_redacted_results(monkey
             }
         ]
 
-    async def fake_waygate_get(_project_id, server_id):
+    async def fake_waygate_get(_conn, _project_id, server_id):
         return {
             "id": server_id,
             "name": "gateway",

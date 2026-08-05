@@ -20,7 +20,7 @@
   when: inventory_hostname in groups['afterglow']
   notify:
     - Restart afterglow-backend container
-    - Restart afterglow-worker container
+    - Restart afterglow-notion-worker container
 
 - name: Config | Ensure haproxy services.d directory exists
   become: true

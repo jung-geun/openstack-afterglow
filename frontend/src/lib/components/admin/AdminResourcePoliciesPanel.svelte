@@ -95,6 +95,8 @@
 		definePolicy('k3s.fcos_image', 'image', 'K3s Fedora CoreOS image', 'K3s', 'Public Fedora CoreOS image.', 'tenant'),
 		definePolicy('k3s.server_flavor', 'flavor', 'K3s server flavor', 'K3s', 'Default server-node flavor.', 'tenant'),
 		definePolicy('k3s.default_agent_flavor', 'flavor', 'K3s default agent flavor', 'K3s', 'Default agent-node flavor.', 'tenant'),
+		definePolicy('k3s.volume_availability_zone', 'volume_availability_zone', 'K3s volume availability zone', 'K3s', 'Cinder placement zone for K3s boot volumes.', 'admin'),
+		definePolicy('k3s.default_network', 'network', 'K3s default network', 'K3s', 'Shared fallback network used when a cluster request omits network_id.', 'tenant', { shared_only: true }),
 		definePolicy('k3s.occm_floating_network', 'network', 'K3s OCCM floating network', 'K3s', 'External network for OCCM floating IP allocation.', 'tenant', { external_only: true }),
 		definePolicy('k3s.occm_public_network', 'network', 'K3s OCCM public network', 'K3s', 'Shared/external network rendered into OCCM as its saved name.', 'tenant', { shared_only: true }),
 		definePolicy('k3s.lb_subnet', 'subnet', 'K3s load-balancer subnet', 'K3s', 'Subnet used for active load-balancer modes.', 'tenant'),

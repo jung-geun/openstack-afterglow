@@ -1,0 +1,67 @@
+---
+# Waygate kolla role defaults
+
+waygate_image_tag: "{{ afterglow_image_tag | default('latest') }}"
+waygate_api_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/waygate-api"
+waygate_worker_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/waygate-worker"
+
+enable_waygate: "no"
+enable_waygate_api: "{{ enable_waygate }}"
+enable_waygate_worker: "{{ enable_waygate }}"
+waygate_run_preconditions: true
+
+waygate_api_port: 8010
+waygate_database_name: "waygate"
+waygate_database_user: "waygate"
+waygate_redis_db_index: 6
+
+waygate_keystone_user: "waygate"
+waygate_service_project_name: "waygate-service"
+waygate_external_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}:{{ waygate_api_port }}"
+waygate_callback_base_url: "{{ waygate_external_url }}"
+waygate_default_tunnel_cidr: "10.8.0.0/24"
+waygate_default_listen_port: 51820
+waygate_key_name: ""
+# Existing Waygate ciphertext was derived from this Afterglow master key; cutover must keep it byte-compatible.
+waygate_encryption_key: "{{ afterglow_kubeconfig_encryption_key | default('') }}"
+waygate_trusted_proxies: "127.0.0.1/32,::1/128"
+
+waygate_services:
+  waygate-api:
+    container_name: waygate_api
+    group: waygate
+    enabled: "{{ enable_waygate_api | bool }}"
+    image: "{{ waygate_api_image }}:{{ waygate_image_tag }}"
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/waygate/waygate.conf:/app/waygate.conf:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+aiomysql://{{ waygate_database_user }}:{{ waygate_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ waygate_database_name }}"
+      REDIS_URL: "redis://:{{ waygate_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ waygate_redis_db_index }}"
+      OS_PASSWORD: "{{ waygate_keystone_password }}"
+      WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "{{ waygate_api_port }}:8010"
+
+  waygate-worker:
+    container_name: waygate_worker
+    group: waygate
+    enabled: "{{ enable_waygate_worker | bool }}"
+    image: "{{ waygate_worker_image }}:{{ waygate_image_tag }}"
+    command: ["python", "-m", "waygate.worker"]
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/waygate/waygate.conf:/app/waygate.conf:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+aiomysql://{{ waygate_database_user }}:{{ waygate_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ waygate_database_name }}"
+      REDIS_URL: "redis://:{{ waygate_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ waygate_redis_db_index }}"
+      OS_PASSWORD: "{{ waygate_keystone_password }}"
+      WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"

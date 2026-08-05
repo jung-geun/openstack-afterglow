@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY services/afterglow-crypto/ /services/afterglow-crypto/
+COPY services/waygate-sdk/ /services/waygate-sdk/
+COPY services/drover-sdk/ /services/drover-sdk/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
@@ -79,12 +82,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 CMD ["sh", "-c", "uv sync --frozen --no-install-project && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Worker 스테이지 (afterglow-drover 이미지)
-# ─────────────────────────────────────────────────────────────────────────────
-# drover (app.worker) 와 notion-worker (app.notion_worker) 공용.
-# OpenTofu/curl/unzip 제외, fastapi/uvicorn/boto3 등 API 전용 패키지 제외.
-# 사용법:
-#   docker build --target worker -t afterglow-drover .
+# Notion integration worker stage
+# OpenTofu/curl/unzip and API-only dependencies are omitted.
+# Usage:
+#   docker build --target worker -t afterglow-worker .
 
 # ── Worker 빌더 (worker 의존성 그룹만 설치) ──────────────────────────────────
 FROM python:3.12-slim AS worker-builder
@@ -98,6 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY services/afterglow-crypto/ /services/afterglow-crypto/
 COPY backend/pyproject.toml backend/uv.lock ./
 # worker 의존성 그룹만 설치 (fastapi/uvicorn/boto3 등 API 전용 패키지 제외)
 RUN uv sync --frozen --no-dev --no-install-project --only-group worker
@@ -127,8 +129,145 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
 
-# 기본 CMD: drover. notion-worker는 compose/k8s command로 override.
-CMD ["python", "-m", "app.worker"]
+# Default command for the sole remaining Afterglow integration worker.
+CMD ["python", "-m", "app.notion_worker"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Waygate API and worker stages
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim AS waygate-builder
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/afterglow-crypto/ ./services/afterglow-crypto/
+COPY services/waygate/pyproject.toml services/waygate/uv.lock ./services/waygate/
+COPY services/waygate/waygate/ ./services/waygate/waygate/
+RUN uv sync --frozen --no-dev --project services/waygate
+
+FROM python:3.12-slim AS waygate-runtime
+
+WORKDIR /app/services/waygate
+
+COPY --from=waygate-builder /app/services/waygate/.venv /app/services/waygate/.venv
+COPY services/afterglow-crypto/afterglow_crypto/ /app/services/afterglow-crypto/afterglow_crypto/
+COPY services/waygate/pyproject.toml services/waygate/uv.lock ./
+COPY services/waygate/waygate/ ./waygate/
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m compileall -q /app/services/afterglow-crypto/afterglow_crypto waygate \
+    && adduser --disabled-password --gecos "" appuser \
+    && adduser appuser root \
+    && chown -R appuser:appuser /app
+
+ENV PATH="/app/services/waygate/.venv/bin:$PATH"
+
+USER appuser
+
+FROM waygate-runtime AS waygate-api
+CMD ["uvicorn", "waygate.main:app", "--host", "0.0.0.0", "--port", "8010"]
+
+FROM waygate-runtime AS waygate-worker
+CMD ["python", "-m", "waygate.worker"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Drover API and worker stages
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim AS drover-builder
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/afterglow-crypto/ ./services/afterglow-crypto/
+COPY services/drover/pyproject.toml services/drover/uv.lock ./services/drover/
+COPY services/drover/drover/ ./services/drover/drover/
+RUN uv sync --frozen --no-dev --project services/drover
+
+FROM python:3.12-slim AS drover-runtime
+
+WORKDIR /app/services/drover
+
+COPY --from=drover-builder /app/services/drover/.venv /app/services/drover/.venv
+COPY services/afterglow-crypto/afterglow_crypto/ /app/services/afterglow-crypto/afterglow_crypto/
+COPY services/drover/pyproject.toml services/drover/uv.lock ./
+COPY services/drover/drover/ ./drover/
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m compileall -q /app/services/afterglow-crypto/afterglow_crypto drover \
+    && adduser --disabled-password --gecos "" appuser \
+    && adduser appuser root \
+    && chown -R appuser:appuser /app
+
+ENV PATH="/app/services/drover/.venv/bin:$PATH"
+
+USER appuser
+
+FROM drover-runtime AS drover-api
+CMD ["uvicorn", "drover.main:app", "--host", "0.0.0.0", "--port", "8011"]
+
+FROM drover-runtime AS drover-worker
+CMD ["python", "-m", "drover.worker"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lumen API and worker stages
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim AS lumen-builder
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/afterglow-crypto/ ./services/afterglow-crypto/
+COPY services/lumen/pyproject.toml services/lumen/uv.lock* ./services/lumen/
+COPY services/lumen/lumen/ ./services/lumen/lumen/
+RUN uv sync --no-dev --project services/lumen
+
+FROM python:3.12-slim AS lumen-runtime
+
+WORKDIR /app/services/lumen
+
+COPY --from=lumen-builder /app/services/lumen/.venv /app/services/lumen/.venv
+COPY services/afterglow-crypto/afterglow_crypto/ /app/services/afterglow-crypto/afterglow_crypto/
+COPY services/lumen/pyproject.toml services/lumen/uv.lock* ./
+COPY services/lumen/lumen/ ./lumen/
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && adduser --disabled-password --gecos "" appuser \
+    && adduser appuser root \
+    && chown -R appuser:appuser /app
+
+ENV PATH="/app/services/lumen/.venv/bin:$PATH"
+
+USER appuser
+
+FROM lumen-runtime AS lumen-api
+CMD ["uvicorn", "lumen.main:app", "--host", "0.0.0.0", "--port", "8012"]
+
+FROM lumen-runtime AS lumen-worker
+CMD ["python", "-m", "lumen.worker"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Frontend 스테이지

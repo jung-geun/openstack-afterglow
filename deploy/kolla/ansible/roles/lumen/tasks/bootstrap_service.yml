@@ -1,0 +1,33 @@
+---
+- name: Bootstrap | Apply Lumen database migrations
+  become: true
+  community.docker.docker_container:
+    name: lumen_bootstrap
+    image: "{{ lumen_api_image }}:{{ lumen_image_tag }}"
+    command: ["python", "-m", "lumen.scripts.migrate", "--apply"]
+    state: started
+    detach: false
+    auto_remove: true
+    volumes:
+      - "{{ lumen_config_dir }}/lumen.conf:/etc/lumen/lumen.conf:ro"
+    env:
+      LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
+      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      REDIS_URL: "redis://:{{ lumen_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ lumen_redis_db_index }}"
+      KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
+      KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
+      KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"
+      KEYSTONE_ADMIN_PROJECT: "{{ lumen_service_project_name }}"
+      LUMEN_ENCRYPTION_KEY: "{{ lumen_encryption_key }}"
+      MCP_CONTROL_PLANE_URL: "{{ lumen_mcp_control_plane_url }}"
+      LUMEN_MCP_SERVICE_TOKEN: "{{ lumen_mcp_service_token }}"
+      CHAT_CHECKPOINTER_POSTGRES_URL: "{{ lumen_checkpointer_postgres_url }}"
+      CHAT_MEMORY_PGVECTOR_URL: "{{ lumen_memory_pgvector_url }}"
+      CHAT_ASSET_S3_ACCESS_KEY: "{{ lumen_s3_access_key }}"
+      CHAT_ASSET_S3_SECRET_KEY: "{{ lumen_s3_secret_key }}"
+      CHAT_SANDBOX_API_KEY: "{{ lumen_sandbox_api_key }}"
+  no_log: true
+  register: lumen_bootstrap_result
+  run_once: true
+  delegate_to: "{{ groups['lumen'] | first }}"
+

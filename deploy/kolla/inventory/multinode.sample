@@ -26,6 +26,18 @@ localhost ansible_connection=local
 [afterglow:children]
 control
 
+# Waygate API and worker run on control nodes.
+[waygate:children]
+control
+
+# Drover API and worker run on control nodes.
+[drover:children]
+control
+
+# Lumen API and worker run on control nodes.
+[lumen:children]
+control
+
 # ── kolla 표준 논리 그룹 ──────────────────────────────────────────────────────
 [baremetal:children]
 control

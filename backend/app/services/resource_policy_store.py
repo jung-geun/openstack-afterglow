@@ -38,7 +38,6 @@ class RuntimeSettingSpec:
 
 
 RUNTIME_SETTING_SPECS = {
-    "k3s.version": RuntimeSettingSpec("k3s.version", "K3s version", "Version used for new K3s clusters."),
     "notion.sync_enabled": RuntimeSettingSpec(
         "notion.sync_enabled", "Enable Notion synchronization", "Global gate for all external Notion synchronization."
     ),
@@ -255,10 +254,6 @@ def _runtime_spec(key: str) -> RuntimeSettingSpec:
 
 
 def _validate_runtime_value(key: str, value: object) -> object:
-    if key == "k3s.version":
-        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 32:
-            raise RuntimeSettingValidationError("k3s.version must be a nonblank version string")
-        return value.strip()
     if key == "notion.sync_enabled":
         if type(value) is not bool:
             raise RuntimeSettingValidationError("notion.sync_enabled must be a boolean")

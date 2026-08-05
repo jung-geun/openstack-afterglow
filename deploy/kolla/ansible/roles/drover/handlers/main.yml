@@ -1,0 +1,24 @@
+---
+- name: Restart drover-api container
+  become: true
+  community.docker.docker_container:
+    name: drover_api
+    state: started
+    restart: true
+  when: inventory_hostname in groups['drover']
+
+- name: Restart drover-worker container
+  become: true
+  community.docker.docker_container:
+    name: drover_worker
+    state: started
+    restart: true
+  when: inventory_hostname in groups['drover']
+
+- name: Restart haproxy container
+  become: true
+  community.docker.docker_container:
+    name: haproxy
+    state: started
+    restart: true
+  when: inventory_hostname in groups['haproxy']

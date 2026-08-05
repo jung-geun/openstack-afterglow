@@ -285,3 +285,17 @@ test("--validate checks the complete target catalog", async () => {
 		cleanupRun(result);
 	}
 });
+
+test("service target runs from its declared project root", async () => {
+	const result = await runCli(["--dry-run", "waygate"])
+	try {
+		assert.equal(result.signal, null)
+		assert.equal(result.code, 0, result.stderr || result.stdout)
+		assert.match(result.stdout, /waygate \[backend\]/)
+		assert.match(result.stdout, /cwd: services\/waygate/)
+		assert.match(result.stdout, /cmd: uv run --extra dev python -m pytest tests -v/)
+		assert.deepEqual(result.events, [])
+	} finally {
+		cleanupRun(result)
+	}
+})

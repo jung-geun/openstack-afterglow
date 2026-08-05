@@ -23,7 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.models.activity import ActivityLog
-from app.models.chat_db import McpDelegatedGrant, McpLumenSelection, McpOwnerLock, McpPersonalToken, McpToolInvocation
+from app.models.mcp_authority import (
+    McpDelegatedGrant,
+    McpLumenSelection,
+    McpOwnerLock,
+    McpPersonalToken,
+    McpToolInvocation,
+)
 from app.services.mcp_control_plane.crypto import decrypt_application_credential, encrypt_application_credential
 
 PERSONAL_TOKEN_PREFIX = "mcp-afgl-"

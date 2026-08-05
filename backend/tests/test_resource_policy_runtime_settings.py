@@ -11,16 +11,13 @@ def test_policy_store_cannot_mutate_process_local_settings():
 
 
 def test_runtime_settings_are_strictly_allowlisted_and_typed():
-    assert resource_policy_store._validate_runtime_value("k3s.version", " v1.31.2+k3s1 ") == "v1.31.2+k3s1"
     assert resource_policy_store._validate_runtime_value("notion.sync_enabled", False) is False
 
-    with pytest.raises(resource_policy_store.RuntimeSettingValidationError):
-        resource_policy_store._validate_runtime_value("k3s.version", "")
     with pytest.raises(resource_policy_store.RuntimeSettingValidationError):
         resource_policy_store._validate_runtime_value("notion.sync_enabled", 1)
     with pytest.raises(resource_policy_store.RuntimeSettingValidationError):
         resource_policy_store._validate_runtime_value("unknown", True)
 
 
-def test_runtime_setting_registry_is_limited_to_scalar_controls():
-    assert set(resource_policy_store.RUNTIME_SETTING_SPECS) == {"k3s.version", "notion.sync_enabled"}
+def test_runtime_setting_registry_is_limited_to_afterglow_controls():
+    assert set(resource_policy_store.RUNTIME_SETTING_SPECS) == {"notion.sync_enabled"}

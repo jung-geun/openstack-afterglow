@@ -120,7 +120,7 @@ describe('dashboard overview loading', () => {
 		expect(screen.getByText('일부 동기화', { exact: false })).toBeTruthy();
 
 		requests.get('/api/v1/dashboard/quotas?view=overview')!.resolve(quotas);
-		requests.get('/api/v1/dashboard/k3s-stats')!.resolve({ total: 1, active: 1 });
+		requests.get('/api/v1/dashboard/k3s-stats')!.resolve({ total: 1, active: 1, available: true });
 		requests.get('/api/v1/dashboard/metrics/trend?range=14d&include_network=false')!.resolve(trend);
 		requests.get('/api/v1/announcements')!.resolve(announcements);
 		await waitFor(() => expect(screen.getByText('최근 동기화', { exact: false })).toBeTruthy());
@@ -149,7 +149,7 @@ describe('dashboard overview loading', () => {
 		mocks.apiGet.mockImplementation((path: string) => {
 			if (path.includes('/summary')) return Promise.resolve(summary);
 			if (path.includes('/quotas')) return Promise.resolve(quotas);
-			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1, available: true });
 			if (path.includes('/announcements')) return Promise.resolve(announcements);
 			return Promise.resolve(trend);
 		});
@@ -205,7 +205,7 @@ describe('dashboard overview loading', () => {
 				recent_instances: [{ ...summary.recent_instances[0], name: 'new-project-instance' }],
 			});
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
-			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1 });
+			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1, available: true });
 			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
 			else request.pending.resolve(trend);
 		}
@@ -221,7 +221,7 @@ describe('dashboard overview loading', () => {
 			if (callCount <= 5) {
 				if (path.includes('/summary')) return Promise.resolve(summary);
 				if (path.includes('/quotas')) return Promise.resolve(quotas);
-				if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+				if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1, available: true });
 				if (path.includes('/announcements')) return Promise.resolve(announcements);
 				return Promise.resolve(trend);
 			}
@@ -253,7 +253,7 @@ describe('dashboard overview loading', () => {
 			if (request === originalTrend) continue;
 			if (request.path.includes('/summary')) request.pending.resolve(summary);
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
-			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1 });
+			else if (request.path.includes('/k3s-stats')) request.pending.resolve({ total: 1, active: 1, available: true });
 			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
 			else request.pending.resolve({ ...trend, range: '24h' });
 		}
@@ -287,7 +287,7 @@ describe('dashboard overview loading', () => {
 			if (request.path.includes('/summary')) request.pending.resolve(summary);
 			else if (request.path.includes('/quotas')) request.pending.resolve(quotas);
 			else if (request.path.includes('/announcements')) request.pending.resolve(announcements);
-			else request.pending.resolve({ total: 1, active: 1 });
+			else request.pending.resolve({ total: 1, active: 1, available: true });
 		}
 		requests.at(-1)!.pending.reject(new Error('range failed'));
 		await screen.findByText('일부 동기화', { exact: false });
@@ -299,7 +299,7 @@ describe('dashboard overview loading', () => {
 			if (callCount > 5) return Promise.reject(new Error(`failed ${path}`));
 			if (path.includes('/summary')) return Promise.resolve(summary);
 			if (path.includes('/quotas')) return Promise.resolve(quotas);
-			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1 });
+			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 1, active: 1, available: true });
 			if (path.includes('/announcements')) return Promise.resolve(announcements);
 			return Promise.resolve(trend);
 		});
@@ -312,6 +312,19 @@ describe('dashboard overview loading', () => {
 		expect(screen.getByText('newest')).toBeTruthy();
 		expect(screen.getByText('최근 동기화', { exact: false })).toBeTruthy();
 		await waitFor(() => expect(screen.getByTitle('지금 새로고침')).toBeTruthy());
+	});
+
+	it('renders exact Korean unavailable text when K3s stats return available false', async () => {
+		mocks.apiGet.mockImplementation((path: string) => {
+			if (path.includes('/summary')) return Promise.resolve(summary);
+			if (path.includes('/quotas')) return Promise.resolve(quotas);
+			if (path.includes('/k3s-stats')) return Promise.resolve({ total: 0, active: 0, available: false });
+			if (path.includes('/announcements')) return Promise.resolve(announcements);
+			return Promise.resolve(trend);
+		});
+
+		render(Page);
+		await screen.findByText('사용할 수 없음');
 	});
 
 	it('aborts every outstanding domain request during teardown', async () => {

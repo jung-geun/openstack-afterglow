@@ -127,76 +127,6 @@ async def create_tables() -> None:
 
     # 기존 테이블에 soft-delete 컬럼 추가 (없는 경우에만)
     async with _engine.begin() as conn:
-        for col, col_def in [
-            ("deleted_at", "DATETIME(6)"),
-            ("deleted_by_user_id", "VARCHAR(64)"),
-            ("deleted_reason", "VARCHAR(255)"),
-        ]:
-            try:
-                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL")
-            except Exception:
-                pass  # 이미 존재하면 무시
-
-        # OCCM 활성화 플래그 추가 (없는 경우에만)
-        try:
-            await conn.exec_driver_sql(
-                "ALTER TABLE k3s_clusters ADD COLUMN occm_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-        except Exception:
-            pass  # 이미 존재하면 무시
-
-        # 플러그인 목록 JSON 컬럼 추가 (없는 경우에만)
-        try:
-            await conn.exec_driver_sql("ALTER TABLE k3s_clusters ADD COLUMN plugins_enabled JSON DEFAULT NULL")
-        except Exception:
-            pass  # 이미 존재하면 무시
-
-        # GPU quota 테이블 생성 (없는 경우에만)
-        try:
-            await conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS gpu_quotas ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "project_id VARCHAR(64) NOT NULL,"
-                "gpu_type VARCHAR(64) NOT NULL,"
-                "`limit` INT NOT NULL DEFAULT -1,"
-                "created_at DATETIME(6) NOT NULL,"
-                "updated_at DATETIME(6) NOT NULL,"
-                "UNIQUE KEY idx_gpu_quota_project_type (project_id, gpu_type),"
-                "KEY ix_gpu_quotas_project_id (project_id)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-            )
-        except Exception:
-            pass  # 이미 존재하면 무시
-
-        # API LB 관련 컬럼 추가 (없는 경우에만)
-        for col, col_def in [
-            ("api_lb_id", "VARCHAR(64) DEFAULT NULL"),
-            ("api_lb_pool_id", "VARCHAR(64) DEFAULT NULL"),
-            ("api_fip_id", "VARCHAR(64) DEFAULT NULL"),
-            ("api_fip_address", "VARCHAR(45) DEFAULT NULL"),
-            ("os_type", "VARCHAR(10) NOT NULL DEFAULT 'ubuntu'"),
-            ("plugin_status", "JSON DEFAULT NULL"),
-            ("secret_cloud_config_status", "VARCHAR(20) DEFAULT NULL"),
-            ("app_credential_id", "VARCHAR(64) DEFAULT NULL"),
-        ]:
-            try:
-                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
-            except Exception:
-                pass  # 이미 존재하면 무시
-
-        # Template (PR 1) + Master HA (PR 2) + 인증서 회전 (PR 3-B) 컬럼 (없는 경우에만)
-        for col, col_def in [
-            ("template_id", "CHAR(36) DEFAULT NULL"),
-            ("template_snapshot", "JSON DEFAULT NULL"),
-            ("master_count", "INT NOT NULL DEFAULT 1"),
-            ("last_rotation_at", "DATETIME(6) DEFAULT NULL"),
-            ("last_rotation_initiated_by", "VARCHAR(64) DEFAULT NULL"),
-        ]:
-            try:
-                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
-            except Exception:
-                pass  # 이미 존재하면 무시
-
         # 프로젝트 기본 네트워크 테이블 생성 (없는 경우에만)
         try:
             await conn.exec_driver_sql(
@@ -211,23 +141,6 @@ async def create_tables() -> None:
                 "updated_at DATETIME(6) DEFAULT NULL,"
                 "UNIQUE KEY uq_project_default_networks_project_id (project_id),"
                 "KEY ix_project_default_networks_project_id (project_id)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-            )
-        except Exception:
-            pass  # 이미 존재하면 무시
-
-        # 프로젝트 관리 사용자 자격 캐시 (k3s Octavia Ingress App Credential 발급용)
-        # — keystone.ensure_cluster_manager_user 가 raw SQL 로 read/write
-        try:
-            await conn.exec_driver_sql(
-                "CREATE TABLE IF NOT EXISTS project_manager_credentials ("
-                "project_id VARCHAR(64) NOT NULL PRIMARY KEY,"
-                "user_id VARCHAR(64) NOT NULL,"
-                "username VARCHAR(255) NOT NULL,"
-                "encrypted_password TEXT NOT NULL,"
-                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
-                "updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
-                "KEY ix_project_manager_credentials_user_id (user_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             )
         except Exception:

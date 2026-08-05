@@ -1,0 +1,3 @@
+---
+lumen_config_dir: "/etc/kolla/lumen"
+lumen_haproxy_services_d: "/etc/kolla/haproxy/services.d"

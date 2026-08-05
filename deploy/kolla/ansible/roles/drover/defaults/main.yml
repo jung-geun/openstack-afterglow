@@ -1,0 +1,100 @@
+---
+# Drover kolla role defaults
+
+drover_image_tag: "{{ afterglow_image_tag | default('latest') }}"
+drover_api_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/drover-api"
+drover_worker_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/drover-worker"
+
+enable_drover: "no"
+enable_drover_api: "{{ enable_drover }}"
+enable_drover_worker: "{{ enable_drover }}"
+drover_run_preconditions: true
+
+drover_api_port: 8011
+drover_database_name: "drover"
+drover_database_user: "drover"
+drover_redis_db_index: 7
+
+drover_keystone_user: "drover"
+drover_service_project_name: "drover-service"
+drover_external_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}:{{ drover_api_port }}"
+drover_callback_base_url: "{{ drover_external_url }}"
+
+# Existing Drover ciphertext (kubeconfig/node_token) was derived from this Afterglow master key;
+# cutover must keep it byte-compatible.
+drover_kubeconfig_encryption_key: "{{ afterglow_kubeconfig_encryption_key | default('') }}"
+
+drover_boot_volume_size_gb: 30
+
+drover_occm_enabled: false
+drover_occm_image: "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
+
+drover_cinder_csi_enabled: false
+drover_cinder_csi_image: "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
+
+drover_manila_csi_enabled: false
+drover_manila_csi_image: "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
+drover_manila_csi_nfs_image: "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
+drover_manila_csi_share_protocol: "NFS"
+
+drover_keystone_auth_enabled: false
+drover_keystone_auth_image: "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
+drover_keystone_auth_policy: ""
+
+drover_octavia_ingress_enabled: false
+drover_octavia_ingress_image: "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
+
+drover_barbican_kms_enabled: false
+drover_barbican_kms_image: "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
+drover_barbican_kms_kek_id: ""
+
+drover_cert_rotation_node_timeout_sec: 300
+drover_cert_rotation_job_image: "registry.k8s.io/util-linux/util-linux:latest"
+
+drover_stampede_enabled: false
+drover_stampede_interval: 60
+drover_stampede_scale_down_threshold: 0.5
+drover_stampede_scale_down_window: 600
+drover_stampede_scale_up_cooldown: 120
+drover_stampede_scale_down_cooldown: 300
+drover_stampede_resource_headroom_factor: 0.3
+
+drover_services:
+  drover-api:
+    container_name: drover_api
+    group: drover
+    enabled: "{{ enable_drover_api | bool }}"
+    image: "{{ drover_api_image }}:{{ drover_image_tag }}"
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
+      REDIS_URL: "redis://:{{ drover_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ drover_redis_db_index }}"
+      OS_PASSWORD: "{{ drover_keystone_password }}"
+      DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "{{ drover_api_port }}:8011"
+
+  drover-worker:
+    container_name: drover_worker
+    group: drover
+    enabled: "{{ enable_drover_worker | bool }}"
+    image: "{{ drover_worker_image }}:{{ drover_image_tag }}"
+    command: ["python", "-m", "drover.worker"]
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
+      REDIS_URL: "redis://:{{ drover_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ drover_redis_db_index }}"
+      OS_PASSWORD: "{{ drover_keystone_password }}"
+      DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"

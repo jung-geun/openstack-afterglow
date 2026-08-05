@@ -1,26 +1,19 @@
 """Phase 51d — 사용자용 /api/dashboard/notifications endpoint 단위 테스트."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
-
-def _patch_redis():
-    from app.services import cache as cache_mod
-
-    fake = AsyncMock()
-    fake.get.return_value = None
-    fake.setex.return_value = None
-    fake.delete.return_value = None
-    return patch.object(cache_mod, "_get_client", return_value=fake)
+from tests.conftest import patch_redis_cache_miss
 
 
 @pytest.mark.asyncio
-async def test_notifications_empty_when_no_errors(client, mock_conn):
+async def test_notifications_empty_when_no_errors(client, mock_conn, monkeypatch):
     """ERROR 인스턴스 없으면 빈 알림 목록 반환."""
     from app.services import nova as nova_svc
 
-    with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[]):
+    patch_redis_cache_miss(monkeypatch)
+    with patch.object(nova_svc, "list_servers", return_value=[]):
         resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
@@ -30,13 +23,14 @@ async def test_notifications_empty_when_no_errors(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_notifications_error_instance_triggers_alert(client, mock_conn):
+async def test_notifications_error_instance_triggers_alert(client, mock_conn, monkeypatch):
     """ERROR 인스턴스가 있으면 danger 알림 반환."""
     from app.services import nova as nova_svc
 
     error_server = type("S", (), {"id": "s1", "status": "ERROR", "flavor_id": None, "flavor_name": "m1.small"})()
 
-    with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[error_server]):
+    patch_redis_cache_miss(monkeypatch)
+    with patch.object(nova_svc, "list_servers", return_value=[error_server]):
         resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
@@ -49,13 +43,14 @@ async def test_notifications_error_instance_triggers_alert(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_notifications_project_scoped(client, mock_conn):
+async def test_notifications_project_scoped(client, mock_conn, monkeypatch):
     """project-scoped connection 사용 — 정상 인스턴스는 알림 없음."""
     from app.services import nova as nova_svc
 
     active_server = type("S", (), {"id": "s2", "status": "ACTIVE", "flavor_id": None, "flavor_name": "m1.small"})()
 
-    with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[active_server]):
+    patch_redis_cache_miss(monkeypatch)
+    with patch.object(nova_svc, "list_servers", return_value=[active_server]):
         resp = await client.get("/api/v1/dashboard/notifications")
 
     assert resp.status_code == 200
@@ -63,7 +58,7 @@ async def test_notifications_project_scoped(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_notifications_preserve_ordered_nested_quota_wire_types(client, mock_conn):
+async def test_notifications_preserve_ordered_nested_quota_wire_types(client, mock_conn, monkeypatch):
     from app.services import cinder as cinder_svc
     from app.services import nova as nova_svc
 
@@ -74,8 +69,8 @@ async def test_notifications_preserve_ordered_nested_quota_wire_types(client, mo
     }
     volume_limits = {"gigabytes": {"limit": 20, "in_use": 20}}
 
+    patch_redis_cache_miss(monkeypatch)
     with (
-        _patch_redis(),
         patch.object(nova_svc, "list_servers", return_value=[]),
         patch.object(nova_svc, "get_project_limits", return_value=compute_limits),
         patch.object(cinder_svc, "get_volume_limits", return_value=volume_limits),
@@ -106,12 +101,12 @@ async def test_notifications_preserve_ordered_nested_quota_wire_types(client, mo
 
 
 @pytest.mark.asyncio
-async def test_notifications_keep_real_flat_quota_sources_alert_free(client, mock_conn):
+async def test_notifications_keep_real_flat_quota_sources_alert_free(client, mock_conn, monkeypatch):
     from app.services import cinder as cinder_svc
     from app.services import nova as nova_svc
 
+    patch_redis_cache_miss(monkeypatch)
     with (
-        _patch_redis(),
         patch.object(nova_svc, "list_servers", return_value=[]),
         patch.object(
             nova_svc,

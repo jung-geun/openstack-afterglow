@@ -271,9 +271,9 @@ def render_secret(cfg: dict, namespace: str = "afterglow") -> str:
     k3s = cfg.get("k3s", {})
     db = cfg.get("database", {})
     mon = cfg.get("monitoring", {})
-    chat = cfg.get("chat", {})
     notion = cfg.get("notion", {})
     builder = cfg.get("builder", {})
+    mcp = cfg.get("mcp", {})
 
     secret_key = app.get("secret_key", "")
     _validate_k8s_secret_key(secret_key)
@@ -331,15 +331,12 @@ def render_secret(cfg: dict, namespace: str = "afterglow") -> str:
         ]
     )
 
+
     lines.extend(
         [
             "",
-            "  # Chat worker / PostgreSQL / asset storage secrets",
-            f"  CHAT_CHECKPOINTER_POSTGRES_URL: {_yaml_str(chat.get('checkpointer_postgres_url', ''))}",
-            f"  CHAT_MEMORY_PGVECTOR_URL: {_yaml_str(chat.get('memory_pgvector_url', ''))}",
-            f"  CHAT_ASSET_S3_ACCESS_KEY: {_yaml_str(chat.get('asset_s3_access_key', ''))}",
-            f"  CHAT_ASSET_S3_SECRET_KEY: {_yaml_str(chat.get('asset_s3_secret_key', ''))}",
-            f"  CHAT_SANDBOX_API_KEY: {_yaml_str(chat.get('sandbox_api_key', ''))}",
+            "  # Lumen 내부 MCP bridge workload credential",
+            f"  LUMEN_MCP_SERVICE_TOKEN: {_yaml_str(mcp.get('lumen_service_token', ''))}",
         ]
     )
 
@@ -404,11 +401,10 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     nova = cfg.get("nova", {})
     gpu = cfg.get("gpu", {})
     svc = cfg.get("services", {})
-    k3s = cfg.get("k3s", {})
+    instance_health = cfg.get("instance_health", {})
     builder = cfg.get("builder", {})
     union = cfg.get("union", {})
     palimpsest = cfg.get("palimpsest", {})
-    waygate = cfg.get("waygate", {})
     mcp = cfg.get("mcp", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
@@ -416,7 +412,6 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     oidc = cfg.get("gitlab_oidc", {})
     logging_cfg = cfg.get("logging", {})
     mon = cfg.get("monitoring", {})
-    chat = cfg.get("chat", {})
     notion = cfg.get("notion", {})
     smtp = cfg.get("smtp", {})
     worker_runtime = cfg.get("worker_runtime", {})
@@ -582,14 +577,6 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
                 lines.append(f"{key} = {_toml_str(palimpsest[key])}")
         lines.append("")
 
-    # [waygate] (선택) — 비밀 값 없음. 암호화 키는 K3S_KUBECONFIG_ENCRYPTION_KEY 재사용.
-    if waygate:
-        lines.append("[waygate]")
-        lines.append(
-            f"default_tunnel_cidr = {_toml_str(waygate.get('default_tunnel_cidr', '10.8.0.0/24'))}"
-        )
-        lines.append(f"default_listen_port = {waygate.get('default_listen_port', 51820)}")
-        lines.append("")
 
     # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
     lines.append("[gpu]")
@@ -600,15 +587,31 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
 
     # [services]
     lines.append("[services]")
-    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican", "waygate", "chat", "mcp"):
+    for svc_name in (
+        "magnum",
+        "manila",
+        "zun",
+        "k3s",
+        "swift",
+        "trove",
+        "barbican",
+        "waygate",
+        "chat",
+        "mcp",
+    ):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
+    for endpoint_name in ("waygate_internal_url", "drover_internal_url", "lumen_internal_url"):
+        if endpoint_name in svc:
+            lines.append(f"{endpoint_name} = {_toml_str(svc[endpoint_name])}")
     lines.append("")
     if mcp:
         lines.append("[mcp]")
         for key in ("public_url", "oauth_consent_url"):
             if key in mcp:
                 lines.append(f"{key} = {_toml_str(mcp[key])}")
+        if "lumen_service_token" in mcp:
+            lines.append("# lumen_service_token is injected as LUMEN_MCP_SERVICE_TOKEN from secret.yaml")
         for key in (
             "authorization_ticket_ttl_seconds",
             "access_token_ttl_seconds",
@@ -630,60 +633,18 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         lines.append("")
 
 
+    # [instance_health]
+    lines.append("[instance_health]")
+    lines.append(f"callback_base_url = {_toml_str(instance_health.get('callback_base_url', ''))}")
+    lines.append("")
     # [k3s]
     lines.append("[k3s]")
-    k3s_keys_str = (
-        "callback_base_url",
-        "occm_image",
-        "manila_csi_image",
-        "manila_csi_nfs_image",
-        "manila_csi_share_protocol",
-        "keystone_auth_image",
-        "keystone_auth_policy",
-        "octavia_ingress_image",
-        "cert_rotation_job_image",
-    )
-    k3s_keys_int = (
-        "boot_volume_size_gb",
-        "cert_rotation_node_timeout_sec",
-        "stampede_interval",
-        "stampede_scale_down_window",
-        "stampede_scale_up_cooldown",
-        "stampede_scale_down_cooldown",
-    )
-    k3s_keys_float = (
-        "stampede_scale_down_threshold",
-        "stampede_resource_headroom_factor",
-    )
-    k3s_keys_bool = (
-        "occm_enabled",
-        "cinder_csi_enabled",
-        "manila_csi_enabled",
-        "keystone_auth_enabled",
-        "octavia_ingress_enabled",
-        "barbican_kms_enabled",
-        "api_lb_enabled",
-        "stampede_enabled",
-    )
-    for key in k3s_keys_str:
-        if key in k3s:
-            lines.append(f"{key} = {_toml_str(k3s[key])}")
-    for key in k3s_keys_int:
-        if key in k3s:
-            lines.append(f"{key} = {k3s[key]}")
-    for key in k3s_keys_float:
-        if key in k3s:
-            lines.append(f"{key} = {float(k3s[key])}")
-    for key in k3s_keys_bool:
-        if key in k3s:
-            lines.append(f"{key} = {_toml_bool(k3s[key])}")
     lines.append(
-        "# kubeconfig_encryption_key는 secret.yaml의 K3S_KUBECONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다"
+        "# kubeconfig_encryption_key is injected as K3S_KUBECONFIG_ENCRYPTION_KEY from secret.yaml"
     )
     lines.append("")
     # [worker_runtime] (non-secret runtime manager config)
     wr_workers = worker_runtime.get("workers", {})
-    wr_drover = wr_workers.get("drover", {})
     wr_notion = wr_workers.get("notion_worker", {})
     wr_docker = worker_runtime.get("docker", {})
     wr_k8s = worker_runtime.get("kubernetes", {})
@@ -691,12 +652,6 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
     lines.append(f"mode = {_toml_str(worker_runtime.get('mode', 'static'))}")
     lines.append(f"reconcile_interval = {worker_runtime.get('reconcile_interval', 30)}")
     lines.append(f"fail_closed = {_toml_bool(worker_runtime.get('fail_closed', True))}")
-    lines.append("")
-    lines.append("[worker_runtime.workers.drover]")
-    lines.append(f"enabled = {_toml_bool(wr_drover.get('enabled', True))}")
-    lines.append(f"desired_replicas = {wr_drover.get('desired_replicas', 1)}")
-    lines.append(f"max_replicas = {wr_drover.get('max_replicas', 1)}")
-    lines.append(f"module = {_toml_str(wr_drover.get('module', 'app.worker'))}")
     lines.append("")
     lines.append("[worker_runtime.workers.notion_worker]")
     lines.append(f"enabled = {_toml_bool(wr_notion.get('enabled', True))}")
@@ -858,71 +813,6 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         f"instance_gpu_uid = {_toml_str(dashboards.get('instance_gpu_uid', 'afterglow-instance-gpu'))}"
     )
     lines.append("")
-    # [chat] — built-in chat configuration. Secrets are emitted only in secret.yaml.
-    if (
-        chat.get("default_model")
-        or chat.get("credit_per_usd") is not None
-        or chat.get("default_monthly_quota") is not None
-        or chat.get("stream_enabled") is not None
-        or any(
-            key in chat
-            for key in (
-                "execution_protocol_version",
-                "run_event_retention_hours",
-                "semantic_memory_enabled",
-                "memory_embedding_model",
-                "memory_embedding_dimensions",
-                "memory_candidate_limit",
-                "memory_retrieval_token_budget",
-                "memory_retention_days",
-                "asset_s3_endpoint",
-                "asset_s3_bucket",
-                "asset_s3_server_side_encryption",
-                "asset_s3_kms_key_id",
-                "asset_signed_url_ttl_seconds",
-                "clamav_host",
-                "clamav_port",
-                "sandbox_url",
-                "sandbox_workspace_url",
-                "sandbox_image_digest",
-                "sandbox_policy_version",
-                "mcp_oauth_callback_url",
-                "sandbox_egress_allowlist",
-            )
-        )
-    ):
-        lines.append("[chat]")
-        lines.append(f"default_model = {_toml_str(chat.get('default_model', ''))}")
-        lines.append(f"execution_protocol_version = {chat.get('execution_protocol_version', 1)}")
-        lines.append(f"credit_per_usd = {chat.get('credit_per_usd', 1000.0)}")
-        lines.append(f"default_monthly_quota = {chat.get('default_monthly_quota', 100000.0)}")
-        lines.append(f"stream_enabled = {str(chat.get('stream_enabled', True)).lower()}")
-        lines.append(f"api_hosts = {_toml_str(chat.get('api_hosts', ''))}")
-        lines.append(f"reasoning_effort = {_toml_str(chat.get('reasoning_effort', 'auto'))}")
-        lines.append(f"run_event_retention_hours = {chat.get('run_event_retention_hours', 24)}")
-        lines.append(f"checkpoint_retention_days = {chat.get('checkpoint_retention_days', 7)}")
-        lines.append(f"semantic_memory_enabled = {_toml_bool(chat.get('semantic_memory_enabled', False))}")
-        lines.append(f"memory_embedding_model = {_toml_str(chat.get('memory_embedding_model', ''))}")
-        lines.append(f"memory_embedding_dimensions = {chat.get('memory_embedding_dimensions', 0)}")
-        lines.append(f"memory_candidate_limit = {chat.get('memory_candidate_limit', 20)}")
-        lines.append(f"memory_retrieval_token_budget = {chat.get('memory_retrieval_token_budget', 1200)}")
-        lines.append(f"memory_retention_days = {chat.get('memory_retention_days', 365)}")
-        lines.append(f"asset_s3_endpoint = {_toml_str(chat.get('asset_s3_endpoint', ''))}")
-        lines.append(f"asset_s3_bucket = {_toml_str(chat.get('asset_s3_bucket', ''))}")
-        lines.append(
-            f"asset_s3_server_side_encryption = {_toml_str(chat.get('asset_s3_server_side_encryption', 'AES256'))}"
-        )
-        lines.append(f"asset_s3_kms_key_id = {_toml_str(chat.get('asset_s3_kms_key_id', ''))}")
-        lines.append(f"asset_signed_url_ttl_seconds = {chat.get('asset_signed_url_ttl_seconds', 300)}")
-        lines.append(f"clamav_host = {_toml_str(chat.get('clamav_host', ''))}")
-        lines.append(f"clamav_port = {chat.get('clamav_port', 3310)}")
-        lines.append(f"sandbox_url = {_toml_str(chat.get('sandbox_url', ''))}")
-        lines.append(f"sandbox_workspace_url = {_toml_str(chat.get('sandbox_workspace_url', ''))}")
-        lines.append(f"sandbox_image_digest = {_toml_str(chat.get('sandbox_image_digest', ''))}")
-        lines.append(f"sandbox_policy_version = {_toml_str(chat.get('sandbox_policy_version', ''))}")
-        lines.append(f"sandbox_egress_allowlist = {_toml_list_str(chat.get('sandbox_egress_allowlist', []))}")
-        lines.append(f"mcp_oauth_callback_url = {_toml_str(chat.get('mcp_oauth_callback_url', ''))}")
-        lines.append("")
 
     # [notion]
     if notion.get("config_encryption_key"):

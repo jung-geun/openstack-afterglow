@@ -6,7 +6,13 @@
 enable_afterglow: "yes"
 enable_afterglow_backend: "yes"
 enable_afterglow_frontend: "yes"
-enable_afterglow_worker: "yes"
+enable_afterglow_notion_worker: "yes"
+# Afterglow remains the browser BFF; enable its proxy mounts with the matching services.
+afterglow_service_waygate_enabled: true
+afterglow_service_chat_enabled: true
+afterglow_service_mcp_enabled: true
+# Generate a 32+ character random value and keep it in passwords.yml, not in source control.
+afterglow_lumen_mcp_service_token: ""
 
 # ── 이미지 ────────────────────────────────────────────────────────────────────
 afterglow_image_namespace: "ghcr.io/openstack-afterglow"
@@ -14,6 +20,62 @@ afterglow_image_tag: "latest"
 # GHCR private 이미지 접근 시 base64 인코딩된 Docker config JSON
 # echo '{"auths":{"ghcr.io":{"auth":"<base64(user:token)>"}}}' | base64
 afterglow_image_pull_secret_b64: ""
+
+# ── Waygate ───────────────────────────────────────────────────────────────────
+enable_waygate: "yes"
+enable_waygate_api: "yes"
+enable_waygate_worker: "yes"
+waygate_image_tag: "{{ afterglow_image_tag }}"
+waygate_database_name: "waygate"
+waygate_database_user: "waygate"
+waygate_redis_db_index: 6
+waygate_keystone_user: "waygate"
+waygate_service_project_name: "waygate-service"
+waygate_external_url: "https://{{ kolla_external_fqdn }}:8010"
+waygate_callback_base_url: "{{ waygate_external_url }}"
+
+# ── Drover ────────────────────────────────────────────────────────────────────
+enable_drover: "yes"
+enable_drover_api: "yes"
+enable_drover_worker: "yes"
+drover_image_tag: "{{ afterglow_image_tag }}"
+drover_database_name: "drover"
+drover_database_user: "drover"
+drover_redis_db_index: 7
+drover_keystone_user: "drover"
+drover_service_project_name: "drover-service"
+drover_external_url: "https://{{ kolla_external_fqdn }}:8011"
+drover_callback_base_url: "{{ drover_external_url }}"
+
+# ── Lumen ─────────────────────────────────────────────────────────────────────
+enable_lumen: "yes"
+enable_lumen_api: "yes"
+enable_lumen_worker: "yes"
+lumen_image_tag: "{{ afterglow_image_tag }}"
+lumen_database_name: "lumen"
+lumen_database_user: "lumen"
+lumen_redis_db_index: 8
+lumen_keystone_user: "lumen"
+lumen_service_project_name: "lumen-service"
+lumen_external_url: "https://{{ kolla_external_fqdn }}:8012"
+lumen_mcp_service_token: "{{ afterglow_lumen_mcp_service_token }}"
+
+# ── Lumen Datastores (LangGraph Postgres Checkpointer & pgvector) ─────────────
+lumen_enable_checkpointer: true
+lumen_checkpointer_postgres_db: "lumen_checkpointer"
+lumen_checkpointer_postgres_user: "lumen_checkpointer"
+lumen_checkpointer_postgres_host: "{{ database_address | default('localhost') }}"
+lumen_checkpointer_postgres_port: 5432
+
+lumen_enable_pgvector: true
+lumen_memory_pgvector_db: "lumen_pgvector"
+lumen_memory_pgvector_user: "lumen_memory_pgvector"
+lumen_memory_pgvector_host: "{{ database_address | default('localhost') }}"
+lumen_memory_pgvector_port: 5432
+
+# ── Lumen External Chat API Hosts ─────────────────────────────────────────────
+# 콤마 구분 전용 서브도메인 목록 (예: "api.lumen.example.com")
+lumen_chat_api_hosts: ""
 
 # ── 노출 URL ──────────────────────────────────────────────────────────────────
 # kolla_external_fqdn 변수를 재사용 권장
@@ -61,8 +123,8 @@ afterglow_ceph_monitors: ""
 # Manila CephX 접근 ID (share access create 시 access_to 값)
 afterglow_cephx_user: "client.afterglow"
 
-# ── k3s ──────────────────────────────────────────────────────────────────────
-afterglow_k3s_callback_base_url: "{{ afterglow_external_url }}"
+# ── Instance health ─────────────────────────────────────────────────────────
+afterglow_instance_health_callback_base_url: "{{ afterglow_external_url }}"
 
 # ── 선택적 OpenStack 서비스 (afterglow.conf [services] 반영) ─────────────────
 afterglow_service_manila_enabled: true

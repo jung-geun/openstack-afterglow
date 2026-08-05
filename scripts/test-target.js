@@ -8,16 +8,6 @@ const backendDir = path.join(rootDir, "backend");
 const frontendDir = path.join(rootDir, "frontend");
 const dbRequirementMessage = "AFTERGLOW_TEST_DATABASE_URL is required for target db. Example: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest";
 
-function expandK3sBackendSelectors() {
-	const testsDir = path.join(backendDir, "tests");
-	const selectors = fs
-		.readdirSync(testsDir, { withFileTypes: true })
-		.filter((entry) => entry.isFile() && /^test_k3s_.*\.py$/.test(entry.name))
-		.map((entry) => `tests/${entry.name}`)
-		.sort();
-	selectors.push("tests/test_clusters.py");
-	return selectors;
-}
 
 function expandChatBackendSelectors() {
 	const testsDir = path.join(backendDir, "tests");
@@ -72,7 +62,6 @@ const targets = {
 				"tests/test_token_binding.py",
 				"tests/test_x_auth_token_removal.py",
 				"tests/test_login_guard.py",
-				"tests/test_keystone_appcred.py",
 				"tests/test_keystone_system_scope.py"
 			]
 		},
@@ -259,10 +248,11 @@ const targets = {
 		}
 	},
 	k3s: {
-		description: "k3s API, cloud-init, security, plugin, and nodegroup tests",
+		description: "Drover API, worker, migration, security, plugin, and nodegroup tests",
 		liveServices: "none",
 		backend: {
-			selectors: expandK3sBackendSelectors
+			root: "services/drover",
+			selectors: ["tests"]
 		},
 		frontend: {
 			selectors: [
@@ -281,6 +271,14 @@ const targets = {
 				"tests/test_worker_runtime_templates.py",
 				"tests/test_notion_worker.py"
 			]
+		}
+	},
+	waygate: {
+		description: "Extracted Waygate API, worker, migrations, and security contracts",
+		liveServices: "none",
+		backend: {
+			root: "services/waygate",
+			selectors: ["tests"]
 		}
 	},
 	design: {
@@ -327,13 +325,6 @@ const targets = {
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_storage.py", "tests/integration/test_file_storage.py"]
-		}
-	},
-	"integration:k3s": {
-		description: "Live OpenStack k3s integration slice",
-		liveServices: "Redis + OpenStack credentials",
-		backend: {
-			selectors: ["tests/integration/test_k3s.py"]
 		}
 	},
 	"integration:layers": {
@@ -396,11 +387,17 @@ function ensureInside(baseDir, selectorPath, label) {
 	}
 }
 
-function validateBackendSelectors(targetName, selectors) {
+function resolveBackendDir(targetName, config) {
+	if (!config.root) return backendDir;
+	ensureInside(rootDir, config.root, `${targetName} backend root`);
+	return path.resolve(rootDir, config.root);
+}
+
+function validateBackendSelectors(targetName, selectors, baseDir = backendDir) {
 	for (const selector of selectors) {
 		const selectorPath = stripSelectorPath(selector);
-		ensureInside(backendDir, selectorPath, targetName);
-		if (!targetName.startsWith("integration:") && selectorPath.startsWith("tests/integration")) {
+		ensureInside(baseDir, selectorPath, targetName);
+		if (baseDir === backendDir && !targetName.startsWith("integration:") && selectorPath.startsWith("tests/integration")) {
 			fail(`Backend unit target ${targetName} cannot include integration selector: ${selectorPath}`);
 		}
 	}
@@ -417,7 +414,8 @@ function getSelectors(selectorsOrFactory) {
 }
 function validateTargetDefinition(targetName, target) {
 	if (target.backend) {
-		validateBackendSelectors(targetName, getSelectors(target.backend.selectors));
+		const baseDir = resolveBackendDir(targetName, target.backend);
+		validateBackendSelectors(targetName, getSelectors(target.backend.selectors), baseDir);
 	}
 	if (target.frontend) {
 		validateFrontendSelectors(targetName, getSelectors(target.frontend.selectors));
@@ -433,14 +431,15 @@ function validateAllTargetDefinitions() {
 
 function buildBackendStep(targetName, config) {
 	const selectors = getSelectors(config.selectors);
-	validateBackendSelectors(targetName, selectors);
+	const baseDir = resolveBackendDir(targetName, config);
+	validateBackendSelectors(targetName, selectors, baseDir);
 	return {
 		targetName,
 		label: `${targetName} [backend]`,
-		cwd: backendDir,
-		cwdLabel: "backend",
+		cwd: baseDir,
+		cwdLabel: config.root || "backend",
 		command: "uv",
-		args: ["run", "python", "-m", "pytest", ...selectors, "-v", ...(config.extraArgs || [])],
+		args: ["run", ...(config.root ? ["--extra", "dev"] : []), "python", "-m", "pytest", ...selectors, "-v", ...(config.extraArgs || [])],
 		envAdditions: { AFTERGLOW_ALLOW_INSECURE: "1" },
 		requiredEnv: targets[targetName].requiredEnv || []
 	};

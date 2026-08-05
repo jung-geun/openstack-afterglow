@@ -174,6 +174,7 @@ from app.api.identity.projects import router as projects_router
 from app.api.mcp import auth_router as mcp_oauth_router
 from app.api.mcp import root_router as mcp_root_router
 from app.api.mcp import router as mcp_router
+from app.api.mcp_lumen import router as mcp_lumen_router
 from app.api.union.layer_ops import router as admin_libraries_router
 from app.api.union.layer_public import router as squashfs_libraries_router
 from app.services.mcp_control_plane.transport import (
@@ -186,22 +187,8 @@ from app.services.mcp_control_plane.transport import (
 _mark("api.identity")
 
 # ---------------------------------------------------------------------------
-# app.api.k3s + network + storage
+# Network and storage APIs
 # ---------------------------------------------------------------------------
-from app.api.k3s import (
-    k3s_callback_router,
-    k3s_certificates_router,
-    k3s_clusters_router,
-    k3s_configmaps_router,
-    k3s_health_router,
-    k3s_nodegroups_router,
-    k3s_pods_router,
-    k3s_secrets_router,
-    k3s_services_router,
-    k3s_shell_router,
-    k3s_templates_router,
-    k3s_workloads_router,
-)
 from app.api.network import (
     loadbalancers_router,
     networks_router,
@@ -310,24 +297,6 @@ if _ClientDisconnect is not None:
 
 from app.services.activity import _audit_ctx
 from app.services.activity import record as _record_activity
-from app.services.k3s_errors import K3sApiError
-
-
-@app.exception_handler(K3sApiError)
-async def k3s_api_error_handler(request: Request, exc: K3sApiError) -> JSONResponse:
-    """k3s_kube 등 워커-공유 서비스가 던지는 FastAPI-free 예외를 HTTP 응답으로 변환."""
-    if exc.status_code >= 500:
-        _logger.error(
-            "K3sApiError %d: %s %s — %s",
-            exc.status_code,
-            request.method,
-            request.url.path,
-            exc.detail,
-        )
-        detail = exc.detail if getattr(exc, "_afterglow_safe_public_detail", False) else "내부 서버 오류"
-    else:
-        detail = exc.detail
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail})
 
 
 @app.exception_handler(Exception)
@@ -550,6 +519,7 @@ async def activity_audit_middleware(request: Request, call_next):
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(mcp_access_router, prefix="/api/v1/auth", tags=["mcp-access"])
 app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["mcp"])
+app.include_router(mcp_lumen_router, prefix="/api/v1/mcp/lumen", tags=["mcp-lumen"])
 app.include_router(mcp_root_router, tags=["mcp"])
 app.include_router(mcp_oauth_router, prefix="/api/v1/auth", tags=["mcp-oauth"])
 # OIDC/OAuth API routes follow the project-wide /api/v1 mount rule.
@@ -611,20 +581,20 @@ if _svc_cfg.service_magnum_enabled:
 if _svc_cfg.service_zun_enabled:
     app.include_router(containers_router, prefix="/api/v1/containers", tags=["containers"])
 if _svc_cfg.service_k3s_enabled:
-    app.include_router(k3s_clusters_router, prefix="/api/v1/k3s/clusters", tags=["k3s"])
-    app.include_router(k3s_health_router, prefix="/api/v1/k3s/clusters", tags=["k3s-health"])
-    app.include_router(k3s_callback_router, prefix="/api/v1/k3s", tags=["k3s-callback"])
-    # 레거시 /api/k3s 유지 — cloud-init baked VM 호환 (k3s/callback)
-    app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"], include_in_schema=False)
-    app.include_router(k3s_configmaps_router, prefix="/api/v1/k3s/clusters", tags=["k3s-configmaps"])
-    app.include_router(k3s_secrets_router, prefix="/api/v1/k3s/clusters", tags=["k3s-secrets"])
-    app.include_router(k3s_pods_router, prefix="/api/v1/k3s/clusters", tags=["k3s-pods"])
-    app.include_router(k3s_services_router, prefix="/api/v1/k3s/clusters", tags=["k3s-services"])
-    app.include_router(k3s_workloads_router, prefix="/api/v1/k3s/clusters", tags=["k3s-workloads"])
-    app.include_router(k3s_shell_router, prefix="/api/v1/k3s/clusters", tags=["k3s-shell"])
-    app.include_router(k3s_templates_router, prefix="/api/v1/k3s/cluster-templates", tags=["k3s-templates"])
-    app.include_router(k3s_nodegroups_router, prefix="/api/v1/k3s/clusters", tags=["k3s-nodegroups"])
-    app.include_router(k3s_certificates_router, prefix="/api/v1/k3s/clusters", tags=["k3s-certificates"])
+    from app.api.drover import drover_admin_router, drover_callback_router, drover_proxy_router
+    from app.api.k3s_shell_proxy import router as k3s_shell_proxy_router
+
+    # Baked machine callbacks and the WebSocket relay precede the authenticated catch-all.
+    app.include_router(drover_callback_router, prefix="/api/v1/k3s", tags=["k3s-callback"])
+    app.include_router(
+        drover_callback_router,
+        prefix="/api/k3s",
+        tags=["k3s-callback"],
+        include_in_schema=False,
+    )
+    app.include_router(k3s_shell_proxy_router, prefix="/api/v1/k3s/clusters", tags=["k3s-shell"])
+    app.include_router(drover_proxy_router, prefix="/api/v1/k3s", tags=["k3s"])
+    app.include_router(drover_admin_router, prefix="/api/v1/admin", tags=["admin-k3s"])
 
 # Palimpsest (레이어드 VM) — docs/palimpsest.md
 #
@@ -660,74 +630,14 @@ if _svc_cfg.service_barbican_enabled:
     app.include_router(orders_router, prefix="/api/v1/secret-orders", tags=["secret-orders"])
     app.include_router(admin_secrets_router, prefix="/api/v1/admin", tags=["admin-key-manager"])
 if _svc_cfg.service_waygate_enabled:
-    from app.api.waygate import (
-        waygate_agent_router,
-        waygate_attachments_router,
-        waygate_clients_router,
-        waygate_migration_router,
-        waygate_servers_router,
-    )
+    from app.api.waygate import waygate_agent_router, waygate_proxy_router
 
-    # Waygate — servers/clients/networks/migration(사용자 JWT) + agent(베어러 토큰, fail-closed) 모두 동일 prefix 마운트.
-    # 상대 경로가 서로 다르므로(POST /, GET /{id}/clients, POST /{id}/networks, POST /{id}/export, POST /{id}/agent/register 등) 충돌 없음.
-    app.include_router(waygate_servers_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
-    app.include_router(waygate_clients_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
-    app.include_router(waygate_attachments_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
-    app.include_router(waygate_migration_router, prefix="/api/v1/waygate/servers", tags=["waygate"])
+    # Agent routes precede the catch-all proxy because their bearer token is not a browser/Keystone token.
     app.include_router(waygate_agent_router, prefix="/api/v1/waygate/servers", tags=["waygate-agent"])
-if _svc_cfg.service_chat_enabled:
-    from app.api.chat import (
-        chat_admin_router,
-        chat_agents_router,
-        chat_api_keys_router,
-        chat_assets_router,
-        chat_code_workspaces_router,
-        chat_completions_router,
-        chat_conversations_router,
-        chat_extensions_admin_router,
-        chat_extensions_user_router,
-        chat_mcp_oauth_router,
-        chat_memory_router,
-        chat_stats_router,
-        chat_usage_router,
-        chat_workspaces_router,
-    )
+    app.include_router(waygate_proxy_router, prefix="/api/v1/waygate", tags=["waygate"])
+from app.api.lumen import register_lumen
 
-    # 관리자 프로바이더/모델 CRUD (require_admin) — /admin/providers, /admin/models
-    app.include_router(chat_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
-    # 관리자 사용량 통계 (require_admin, GET 전용) — /admin/stats
-    app.include_router(chat_stats_router, prefix="/api/v1/chat", tags=["chat-admin"])
-    # 관리자 MCP/커스텀툴 (require_admin, global) — /admin/mcp-servers, /admin/custom-tools
-    app.include_router(chat_extensions_admin_router, prefix="/api/v1/chat", tags=["chat-admin"])
-    # 사용자 대화/메시지 (project_id 소유권) — /conversations, /conversations/{id}/completions(SSE)
-    app.include_router(chat_conversations_router, prefix="/api/v1/chat", tags=["chat"])
-    app.include_router(chat_completions_router, prefix="/api/v1/chat", tags=["chat"])
-    # Canonical scanned assets use configured S3 + ClamAV.
-    app.include_router(chat_assets_router, prefix="/api/v1/chat", tags=["chat"])
-    # 사용자 MCP/커스텀툴 (본인 스코프) — /mcp-servers, /custom-tools
-    app.include_router(chat_extensions_user_router, prefix="/api/v1/chat", tags=["chat"])
-    # Browser callback is state-bound and intentionally has no browser bearer dependency.
-    app.include_router(chat_mcp_oauth_router, prefix="/api/v1/chat", tags=["chat"])
-    # 사용자 에이전트(프롬프트+MCP+tools) + 공개 허브 — /agents, /agents/hub, /agents/{id}/clone
-    app.include_router(chat_agents_router, prefix="/api/v1/chat", tags=["chat"])
-    # 사용자 프로젝트(workspace, 대화 그룹+공통 지침) + 장기 메모리 — /workspaces, /memories
-    app.include_router(chat_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
-    app.include_router(chat_code_workspaces_router, prefix="/api/v1/chat", tags=["chat"])
-    app.include_router(chat_memory_router, prefix="/api/v1/chat", tags=["chat"])
-    app.include_router(chat_usage_router, prefix="/api/v1/chat", tags=["chat"])
-    # 외부 API 키 관리 (본인 스코프, 웹 인증) — /api-keys
-    app.include_router(chat_api_keys_router, prefix="/api/v1/chat", tags=["chat"])
-
-    # 외부 OpenAI/Anthropic 호환 API — API 키 인증, stateless.
-    # ⚠️ 최상위 /v1 마운트는 "모든 라우터 /api/v1 단독" 규정의 명시적 예외(외부 SDK 표준 경로 호환).
-    # require_chat_api_host: 전용 서브도메인(chat_api_hosts)에서만 노출 — 기본 URL에선 404(충돌·오용 방지).
-    from app.api.ai_compat import ai_discovery_router, anthropic_compat_router, openai_compat_router
-    from app.api.deps import require_chat_api_host
-
-    _v1_gate = [Depends(require_chat_api_host)]
-    app.include_router(ai_discovery_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
-    app.include_router(openai_compat_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
-    app.include_router(anthropic_compat_router, prefix="/v1", tags=["ai-compat"], dependencies=_v1_gate)
+register_lumen(app, _svc_cfg)
 # Common
 app.include_router(announcements_router, prefix="/api/v1/announcements", tags=["announcements"])
 app.include_router(tutorial_status_router, prefix="/api/v1/tutorials", tags=["tutorials"])
@@ -935,19 +845,6 @@ async def _snapshot_loop() -> None:
     while True:
         await _collect_snapshot()
         await asyncio.sleep(600)
-
-
-async def _k3s_cleanup_loop() -> None:
-    """5분 간격으로 stale CREATING 클러스터를 ERROR로 변경."""
-    await asyncio.sleep(120)
-    while True:
-        try:
-            from app.services import k3s_db as _k3s
-
-            await _k3s.check_stale_clusters(timeout_minutes=30)
-        except Exception:
-            _logger.warning("k3s stale cluster check failed", exc_info=True)
-        await asyncio.sleep(300)
 
 
 async def _mcp_cleanup_loop() -> None:
@@ -1236,22 +1133,8 @@ async def start_background_workers():
         else:
             asyncio.create_task(_deferred_load_gpu_catalog())
 
-    if _db_cfg.chat_checkpointer_postgres_url:
-        from app.services.chat.checkpointer import chat_checkpointer
-
-        await chat_checkpointer.start(_db_cfg.chat_checkpointer_postgres_url)
-    if _db_cfg.chat_semantic_memory_enabled:
-        from app.services.chat.semantic_memory import setup_semantic_memory
-
-        try:
-            await setup_semantic_memory()
-        except Exception:
-            _logger.warning("semantic memory is unavailable; keeping manual memory active", exc_info=True)
-
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
-    if _svc_cfg.service_k3s_enabled:
-        asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
     if _svc_cfg.service_mcp_enabled:
@@ -1273,9 +1156,7 @@ async def start_background_workers():
 async def shutdown_event():
     from app.database import close_db
     from app.services import prom_query
-    from app.services.chat.checkpointer import chat_checkpointer
 
     await stop_mcp_transport()
-    await chat_checkpointer.close()
     await close_db()
     await prom_query.aclose_client()

@@ -1,0 +1,22 @@
+---
+- name: Postgres | Validate Lumen checkpointer PostgreSQL endpoint connectivity
+  ansible.builtin.wait_for:
+    host: "{{ lumen_checkpointer_postgres_host }}"
+    port: "{{ lumen_checkpointer_postgres_port | int }}"
+    timeout: 10
+    state: started
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when:
+    - lumen_enable_checkpointer | bool
+
+- name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity
+  ansible.builtin.wait_for:
+    host: "{{ lumen_memory_pgvector_host }}"
+    port: "{{ lumen_memory_pgvector_port | int }}"
+    timeout: 10
+    state: started
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when:
+    - lumen_enable_pgvector | bool

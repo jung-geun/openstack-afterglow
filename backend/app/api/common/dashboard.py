@@ -11,13 +11,13 @@ import re
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
+from drover_sdk import register as register_drover
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, case, func, select
-from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy import and_, func, select
 
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.config import get_settings
-from app.database import get_session_factory, is_db_available, is_db_configured, mark_db_unhealthy
+from app.database import get_session_factory, is_db_available
 from app.services import cinder, nova, prom_query
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
@@ -258,6 +258,7 @@ async def get_dashboard_config():
 async def get_dashboard_k3s_stats(
     token_info: dict = Depends(get_token_info),
     cm: CacheMode = Depends(cache_mode),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Return tenant K3s totals through a bounded, read-only source path."""
     _ = cm  # Preserve the established cache-mode query contract without caching source state.
@@ -268,47 +269,16 @@ async def get_dashboard_k3s_stats(
     if not isinstance(project_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id) is None:
         raise HTTPException(status_code=400, detail="유효하지 않은 프로젝트 ID")
 
-    if is_db_configured():
-        if not is_db_available():
-            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
-        factory = get_session_factory()
-        if factory is None:
-            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
-        try:
-            from app.models.db import K3sCluster
-
-            async with factory() as session:
-                result = await session.execute(
-                    select(
-                        func.count(K3sCluster.id),
-                        func.coalesce(
-                            func.sum(case((K3sCluster.status == "ACTIVE", 1), else_=0)),
-                            0,
-                        ),
-                    ).where(
-                        and_(
-                            K3sCluster.project_id == project_id,
-                            K3sCluster.deleted_at.is_(None),
-                        )
-                    )
-                )
-                total, active = result.one()
-            return {"total": int(total or 0), "active": int(active or 0)}
-        except (OperationalError, InterfaceError):
-            mark_db_unhealthy()
-            _logger.warning("dashboard K3s stats DB 연결 실패", exc_info=True)
-            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
-        except Exception:
-            _logger.warning("dashboard K3s stats DB 조회 실패", exc_info=True)
-            raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
-
-    from app.services import k3s_cluster
-
     try:
-        return await k3s_cluster.dashboard_cluster_stats(project_id)
+        stats = await asyncio.to_thread(register_drover(conn).cluster_stats, project_id=project_id)
+        return {
+            "total": int(stats.get("total", 0)),
+            "active": int(stats.get("active", 0)),
+            "available": True,
+        }
     except Exception:
-        _logger.warning("dashboard K3s stats Redis 조회 실패", exc_info=True)
-        raise _dashboard_service_unavailable("K3s 현황을 불러오지 못했습니다")
+        _logger.warning("dashboard Drover stats 조회 실패", exc_info=True)
+        return {"total": 0, "active": 0, "available": False}
 
 
 def _quota_threshold(resource: str, quota: dict) -> dict | None:
@@ -565,28 +535,9 @@ async def get_project_quotas(
     gpu_quota: list[dict] = []
     if is_db_available():
         try:
-            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
-
-            effective_result, usage_result = await asyncio.gather(
-                get_effective_gpu_quotas(project_id),
-                get_project_gpu_usage(conn, project_id),
-                return_exceptions=True,
-            )
-            if isinstance(effective_result, Exception) or isinstance(usage_result, Exception):
-                _logger.warning("GPU quota 조회 부분 실패: effective=%r usage=%r", effective_result, usage_result)
-                if isinstance(effective_result, OperationalError) or isinstance(usage_result, OperationalError):
-                    mark_db_unhealthy()
-            else:
-                for gpu_type, limit in effective_result.items():
-                    in_use = usage_result.get(gpu_type, 0)
-                    gpu_quota.append(
-                        {
-                            "gpu_type": gpu_type,
-                            "limit": limit,
-                            "in_use": in_use,
-                            "available": (limit - in_use) if limit >= 0 else -1,
-                        }
-                    )
+            status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+            if isinstance(status_list, list):
+                gpu_quota = status_list
         except Exception:
             _logger.warning("GPU quota 조회 실패", exc_info=True)
 
@@ -663,11 +614,10 @@ async def get_gpu_available(
     if is_db_available():
         try:
             from app.api.identity.admin_gpu import build_device_name_to_alias_map
-            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
 
-            project_id = conn._afterglow_project_id
-            quotas = await get_effective_gpu_quotas(project_id)
-            usage = await get_project_gpu_usage(conn, project_id)
+            status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+            quotas = {item["gpu_type"]: item["limit"] for item in status_list}
+            usage = {item["gpu_type"]: item["in_use"] for item in status_list}
             name_to_alias = build_device_name_to_alias_map()
 
             filtered = []
@@ -794,19 +744,19 @@ async def get_dashboard_overview(
     error_instances = [s for s in servers if s.get("status") == "ERROR"]
     recent = sorted(servers, key=lambda s: s.get("status", ""), reverse=False)[-8:]
 
-    # k3s 클러스터 수 (선택적)
+    # Drover owns the authoritative cluster inventory. Report an unavailable
+    # service explicitly instead of presenting a failed query as no clusters.
     k3s_count = 0
     k3s_active = 0
-    if settings.service_k3s_enabled:
+    k3s_available = settings.service_k3s_enabled
+    if k3s_available:
         try:
-            from app.services import k3s_cluster
-
-            clusters = await asyncio.to_thread(k3s_cluster.list_clusters_for_project, conn, project_id)
-            k3s_count = len(clusters)
-            k3s_active = sum(1 for c in clusters if c.get("status") == "CREATE_COMPLETE")
+            stats = await asyncio.to_thread(register_drover(conn).cluster_stats, project_id=project_id)
+            k3s_count = int(stats.get("total", 0))
+            k3s_active = int(stats.get("active", 0))
         except Exception:
-            pass
-
+            k3s_available = False
+            _logger.debug("overview Drover stats 조회 실패", exc_info=True)
     alerts = []
     if error_instances:
         alerts.append({"type": "error", "message": f"오류 상태 인스턴스 {len(error_instances)}개"})
@@ -824,6 +774,7 @@ async def get_dashboard_overview(
             "instances_active": sum(1 for s in servers if s.get("status") == "ACTIVE"),
             "k3s_clusters": k3s_count,
             "k3s_active": k3s_active,
+            "k3s_available": k3s_available,
             "vcpus_used": vcpus_used,
             "vcpus_total": vcpus_total,
             "ram_used_mb": ram_used,

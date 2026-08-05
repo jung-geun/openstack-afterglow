@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from app.database import is_db_available
-from app.services import waygate_db
+from waygate_sdk import register
 
 
 class McpWaygateError(ValueError):
@@ -29,29 +29,42 @@ def _safe_server(server: dict[str, Any], *, project_id: str) -> dict[str, str | 
     }
 
 
-async def list_project_waygate_servers(project_id: str, *, limit: int) -> list[dict[str, str | None]]:
-    """Return bounded, exact-project Waygate server metadata without connection details."""
-    if not is_db_available():
-        raise McpWaygateError("Waygate database is unavailable")
+def _list_servers(conn: object) -> object:
+    return register(conn).servers()
 
+
+def _get_server(conn: object, server_id: str) -> object:
+    return register(conn).get_server(server_id)
+
+
+async def list_project_waygate_servers(
+    conn: object,
+    project_id: str,
+    *,
+    limit: int,
+) -> list[dict[str, str | None]]:
+    """Return bounded, exact-project Waygate metadata through its catalog service."""
     try:
-        servers = await waygate_db.list_servers(project_id, limit=limit)
-        return [_safe_server(server, project_id=project_id) for server in servers]
+        servers = await asyncio.to_thread(_list_servers, conn)
+        if not isinstance(servers, list):
+            raise McpWaygateError("Waygate server list response is invalid")
+        return [_safe_server(server, project_id=project_id) for server in servers[:limit]]
     except McpWaygateError:
         raise
     except Exception as exc:
         raise McpWaygateError("Waygate server list query failed") from exc
 
 
-async def get_project_waygate_server(project_id: str, server_id: str) -> dict[str, str | None]:
-    """Return one exact-project Waygate server or fail closed when it is absent."""
-    if not is_db_available():
-        raise McpWaygateError("Waygate database is unavailable")
-
+async def get_project_waygate_server(
+    conn: object,
+    project_id: str,
+    server_id: str,
+) -> dict[str, str | None]:
+    """Return one exact-project Waygate server through its catalog service."""
     try:
-        server = await waygate_db.get_server(project_id, server_id)
-        if server is None:
-            raise McpWaygateError("Waygate server not found")
+        server = await asyncio.to_thread(_get_server, conn, server_id)
+        if not isinstance(server, dict):
+            raise McpWaygateError("Waygate server response is invalid")
         return _safe_server(server, project_id=project_id)
     except McpWaygateError:
         raise

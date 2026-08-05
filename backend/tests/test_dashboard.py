@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.exc import InterfaceError, OperationalError
 
 from app.main import app
 
@@ -334,166 +333,58 @@ async def test_dashboard_quota_overview_waits_for_late_worker_before_failure_res
 
 
 @pytest.mark.asyncio
-async def test_dashboard_k3s_stats_uses_read_only_fallback(client):
+async def test_dashboard_k3s_stats_uses_caller_catalog_sdk(client):
+    from types import SimpleNamespace
+
+    drover = MagicMock()
+    drover.cluster_stats.return_value = {"total": 3, "active": 2}
+    with (
+        patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
+        patch("app.api.common.dashboard.register_drover", return_value=drover) as register,
+    ):
+        response = await client.get("/api/v1/dashboard/k3s-stats?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json() == {"total": 3, "active": 2, "available": True}
+    register.assert_called_once()
+    drover.cluster_stats.assert_called_once_with(project_id="test-project-123")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_k3s_stats_reports_drover_unavailable(client):
     from types import SimpleNamespace
 
     with (
         patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
-        patch("app.api.common.dashboard.is_db_configured", return_value=False),
-        patch(
-            "app.services.k3s_cluster.dashboard_cluster_stats",
-            new=AsyncMock(return_value={"total": 3, "active": 2}),
-        ) as stats,
+        patch("app.api.common.dashboard.register_drover", side_effect=RuntimeError("catalog unavailable")),
     ):
-        resp = await client.get("/api/v1/dashboard/k3s-stats?refresh=true")
+        response = await client.get("/api/v1/dashboard/k3s-stats")
 
-    assert resp.status_code == 200
-    assert resp.json() == {"total": 3, "active": 2}
-    stats.assert_awaited_once()
+    assert response.status_code == 200
+    assert response.json() == {"total": 0, "active": 0, "available": False}
 
 
 @pytest.mark.asyncio
-async def test_dashboard_k3s_stats_fails_fast_when_configured_db_circuit_open(client):
-    from types import SimpleNamespace
-
-    with (
-        patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
-        patch("app.api.common.dashboard.is_db_configured", return_value=True),
-        patch("app.api.common.dashboard.is_db_available", return_value=False),
-        patch("app.api.common.dashboard.get_session_factory") as factory,
-    ):
-        resp = await client.get("/api/v1/dashboard/k3s-stats")
-
-    assert resp.status_code == 503
-    assert resp.json() == {"detail": "K3s 현황을 불러오지 못했습니다"}
-    factory.assert_not_called()
-
-
-class _K3sStatsResult:
-    def __init__(self, value: tuple[int, int]):
-        self._value = value
-
-    def one(self) -> tuple[int, int]:
-        return self._value
-
-
-class _K3sStatsSession:
-    def __init__(self, *, value: tuple[int, int] = (0, 0), error: Exception | None = None):
-        self.value = value
-        self.error = error
-        self.statement = None
-        self.execute_calls = 0
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args):
-        return False
-
-    async def execute(self, statement):
-        self.execute_calls += 1
-        self.statement = statement
-        if self.error:
-            raise self.error
-        return _K3sStatsResult(self.value)
-
-
-@pytest.mark.asyncio
-async def test_dashboard_k3s_stats_db_aggregate_scopes_total_and_active_to_token_project():
-    from types import SimpleNamespace
-
-    from app.api.common.dashboard import get_dashboard_k3s_stats
-
-    session = _K3sStatsSession(value=(3, 2))
-    with (
-        patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
-        patch("app.api.common.dashboard.is_db_configured", return_value=True),
-        patch("app.api.common.dashboard.is_db_available", return_value=True),
-        patch("app.api.common.dashboard.get_session_factory", return_value=lambda: session),
-    ):
-        result = await get_dashboard_k3s_stats({"project_id": "tenant-two"}, cm=None)
-
-    assert result == {"total": 3, "active": 2}
-    assert session.execute_calls == 1
-    compiled = session.statement.compile()
-    assert "tenant-two" in compiled.params.values()
-    assert "k3s_clusters.deleted_at IS NULL" in str(session.statement)
-    assert "k3s_clusters.status" in str(session.statement)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure",
-    [
-        OperationalError("select", {}, RuntimeError("offline")),
-        InterfaceError("select", {}, RuntimeError("offline")),
-    ],
-)
-async def test_dashboard_k3s_stats_db_connectivity_marks_circuit_then_fast_fails(failure):
+async def test_dashboard_k3s_stats_rejects_invalid_project_before_catalog_call():
     from types import SimpleNamespace
 
     from fastapi import HTTPException
 
     from app.api.common.dashboard import get_dashboard_k3s_stats
 
-    session = _K3sStatsSession(error=failure)
-    mark_unhealthy = MagicMock()
     with (
         patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
-        patch("app.api.common.dashboard.is_db_configured", return_value=True),
-        patch("app.api.common.dashboard.is_db_available", side_effect=[True, False]),
-        patch("app.api.common.dashboard.get_session_factory", return_value=lambda: session) as factory,
-        patch("app.api.common.dashboard.mark_db_unhealthy", mark_unhealthy),
+        patch("app.api.common.dashboard.register_drover") as register,
+        pytest.raises(HTTPException) as error,
     ):
-        with pytest.raises(HTTPException) as first:
-            await get_dashboard_k3s_stats({"project_id": "tenant-a"}, cm=None)
-        with pytest.raises(HTTPException) as second:
-            await get_dashboard_k3s_stats({"project_id": "tenant-a"}, cm=None)
-
-    assert first.value.status_code == 503
-    assert second.value.status_code == 503
-    mark_unhealthy.assert_called_once()
-    assert session.execute_calls == 1
-    assert factory.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_dashboard_k3s_stats_db_programming_error_does_not_poison_circuit():
-    from types import SimpleNamespace
-
-    from fastapi import HTTPException
-
-    from app.api.common.dashboard import get_dashboard_k3s_stats
-
-    session = _K3sStatsSession(error=RuntimeError("bad query"))
-    mark_unhealthy = MagicMock()
-    with (
-        patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)),
-        patch("app.api.common.dashboard.is_db_configured", return_value=True),
-        patch("app.api.common.dashboard.is_db_available", return_value=True),
-        patch("app.api.common.dashboard.get_session_factory", return_value=lambda: session),
-        patch("app.api.common.dashboard.mark_db_unhealthy", mark_unhealthy),
-    ):
-        with pytest.raises(HTTPException) as error:
-            await get_dashboard_k3s_stats({"project_id": "tenant-a"}, cm=None)
-
-    assert error.value.status_code == 503
-    mark_unhealthy.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_dashboard_k3s_stats_rejects_redis_glob_project_id():
-    from types import SimpleNamespace
-
-    from fastapi import HTTPException
-
-    from app.api.common.dashboard import get_dashboard_k3s_stats
-
-    with patch("app.api.common.dashboard.get_settings", return_value=SimpleNamespace(service_k3s_enabled=True)):
-        with pytest.raises(HTTPException) as error:
-            await get_dashboard_k3s_stats({"project_id": "tenant-*"}, cm=None)
+        await get_dashboard_k3s_stats(
+            {"project_id": "tenant-*"},
+            cm=None,
+            conn=object(),
+        )
 
     assert error.value.status_code == 400
+    register.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -527,7 +418,7 @@ async def test_http_5xx_sanitizer_only_exposes_explicitly_reviewed_detail():
     from fastapi import HTTPException
 
     from app.api.common.dashboard import _dashboard_service_unavailable
-    from app.main import k3s_api_error_handler, sanitized_http_exception_handler
+    from app.main import sanitized_http_exception_handler
 
     request = MagicMock()
     request.method = "GET"
@@ -535,15 +426,9 @@ async def test_http_5xx_sanitizer_only_exposes_explicitly_reviewed_detail():
 
     internal = await sanitized_http_exception_handler(request, HTTPException(status_code=503, detail="sensitive"))
     safe = await sanitized_http_exception_handler(request, _dashboard_service_unavailable("안전한 상태 메시지"))
-    from app.services.k3s_errors import K3sApiError
-
-    k3s_internal = await k3s_api_error_handler(request, K3sApiError(502, "upstream Kubernetes detail"))
-    k3s_public = await k3s_api_error_handler(request, K3sApiError(400, "잘못된 K3s 요청"))
 
     assert json.loads(internal.body) == {"detail": "내부 서버 오류"}
     assert json.loads(safe.body) == {"detail": "안전한 상태 메시지"}
-    assert json.loads(k3s_internal.body) == {"detail": "내부 서버 오류"}
-    assert json.loads(k3s_public.body) == {"detail": "잘못된 K3s 요청"}
 
 
 @pytest.mark.asyncio
@@ -619,15 +504,13 @@ async def test_gpu_available_cache_refresh(client):
 
 
 # ---------------------------------------------------------------------------
-# GPU quota OperationalError → 200 + 빈 gpu 배열
+# Drover GPU quota errors → 200 + empty GPU list
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_dashboard_quotas_gpu_db_error_returns_empty_gpu(client):
-    """GPU quota DB OperationalError 발생 시 200 반환 + gpu 빈 배열."""
-    from sqlalchemy.exc import OperationalError
-
+async def test_get_dashboard_quotas_gpu_drover_error_returns_empty_gpu(client):
+    """Drover GPU quota lookup failure returns an empty GPU quota list."""
     quota = {"limit": 10, "in_use": 2, "reserved": 0}
     quota_int = 0
     swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}
@@ -638,42 +521,7 @@ async def test_get_dashboard_quotas_gpu_db_error_returns_empty_gpu(client):
             new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
         ),
         patch("app.api.common.dashboard.is_db_available", return_value=True),
-        patch(
-            "app.services.gpu_quota.get_effective_gpu_quotas",
-            new=AsyncMock(side_effect=OperationalError("lost", None, None)),
-        ),
-        patch("app.services.gpu_quota.get_project_gpu_usage", new=AsyncMock(return_value={})),
-        patch("app.api.common.dashboard.mark_db_unhealthy") as mock_mark,
-    ):
-        resp = await client.get("/api/v1/dashboard/quotas")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["gpu"] == []
-    mock_mark.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_get_dashboard_quotas_gpu_partial_error_returns_empty_gpu(client):
-    """GPU usage 조회만 실패해도 200 + gpu 빈 배열."""
-    from sqlalchemy.exc import OperationalError
-
-    quota = {"limit": 10, "in_use": 2, "reserved": 0}
-    quota_int = 0
-    swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}
-
-    with (
-        patch(
-            "app.api.common.dashboard.cached_call",
-            new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
-        ),
-        patch("app.api.common.dashboard.is_db_available", return_value=True),
-        patch("app.services.gpu_quota.get_effective_gpu_quotas", new=AsyncMock(return_value={"RTX3090": 2})),
-        patch(
-            "app.services.gpu_quota.get_project_gpu_usage",
-            new=AsyncMock(side_effect=OperationalError("lost", None, None)),
-        ),
-        patch("app.api.common.dashboard.mark_db_unhealthy"),
+        patch("app.api.common.dashboard.register_drover", side_effect=Exception("lost")),
     ):
         resp = await client.get("/api/v1/dashboard/quotas")
 

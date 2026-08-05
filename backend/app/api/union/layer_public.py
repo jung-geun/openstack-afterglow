@@ -19,10 +19,10 @@ from app.models.db import LayerArtifact, LayerConsume, LayerProfile
 from app.services import vm_cloud_init_library
 from app.services.cache import invalidate
 from app.services.cache import invalidation as cache_invalidation
-from app.services.k3s_cloudinit import _validate_ssh_public_key
 from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
 from app.services.layer_ubuntu import normalize_ubuntu_base
 from app.services.resource_policy_store import get_service_project_connection
+from app.utils.ssh_keys import validate_ssh_public_key
 
 _logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class PublicLayerConsumeRequest(BaseModel):
         v = v.strip()
         if v == "":
             return None
-        _validate_ssh_public_key(v)
+        validate_ssh_public_key(v)
         return v
 
     @field_validator("github_username")

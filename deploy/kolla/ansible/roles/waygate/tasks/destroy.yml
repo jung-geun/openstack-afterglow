@@ -1,0 +1,16 @@
+---
+- name: Destroy | Stop and remove Waygate containers
+  become: true
+  community.docker.docker_container:
+    name: "{{ item.value.container_name }}"
+    state: absent
+  loop: "{{ waygate_services | dict2items }}"
+  when: inventory_hostname in groups['waygate']
+
+- name: Destroy | Remove HAProxy Waygate config
+  become: true
+  ansible.builtin.file:
+    path: "{{ waygate_haproxy_services_d }}/waygate.cfg"
+    state: absent
+  when: inventory_hostname in groups['haproxy']
+  notify: Restart haproxy container

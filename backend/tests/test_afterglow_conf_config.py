@@ -312,7 +312,15 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
     services = compose["services"]
 
     expected_env_file = [{"path": ".env", "required": False}]
-    for service_name in ("backend", "drover", "notion-worker", "palimpsest-worker"):
+    for service_name in (
+        "backend",
+        "waygate-api",
+        "waygate-worker",
+        "drover-api",
+        "drover-worker",
+        "notion-worker",
+        "palimpsest-worker",
+    ):
         service = services[service_name]
         assert service["env_file"] == expected_env_file
         environment = service.get("environment", {})
@@ -373,47 +381,3 @@ def test_helm_python_templates_use_production_secret_contract():
         assert "name: afterglow-secrets" in text
         assert "key: SECRET_KEY" in text
         assert "AFTERGLOW_ALLOW_INSECURE" not in text
-
-
-def test_app_config_loads_capability_platform_chat_settings(isolated_config_dir):
-    (isolated_config_dir / "afterglow.conf").write_text(
-        """
-[chat]
-execution_protocol_version = 2
-run_event_retention_hours = 48
-checkpoint_retention_days = 14
-semantic_memory_enabled = true
-memory_pgvector_url = "postgresql://memory.example/afterglow"
-memory_embedding_model = "embedding-model"
-memory_embedding_dimensions = 1536
-memory_candidate_limit = 12
-memory_retrieval_token_budget = 900
-memory_retention_days = 30
-asset_s3_endpoint = "https://objects.example"
-asset_s3_bucket = "chat-assets"
-asset_signed_url_ttl_seconds = 120
-clamav_host = "clamav"
-clamav_port = 3311
-sandbox_url = "https://sandbox.example"
-sandbox_workspace_url = "https://workspace.example"
-sandbox_image_digest = "sha256:abc"
-sandbox_policy_version = "v1"
-sandbox_egress_allowlist = ["api.example"]
-""".strip(),
-        encoding="utf-8",
-    )
-
-    settings = app_config.Settings(**app_config._load_toml())
-
-    assert settings.chat_run_event_retention_hours == 48
-    assert settings.chat_reasoning_effort == "auto"
-    assert settings.chat_memory_embedding_dimensions == 1536
-    assert settings.chat_asset_s3_bucket == "chat-assets"
-    assert settings.chat_sandbox_egress_allowlist == ["api.example"]
-    assert settings.chat_execution_protocol_version == 2
-    assert settings.chat_sandbox_workspace_url == "https://workspace.example"
-
-
-def test_chat_execution_protocol_version_rejects_unrecognized_version():
-    with pytest.raises(ValueError):
-        app_config.Settings(chat_execution_protocol_version=3)

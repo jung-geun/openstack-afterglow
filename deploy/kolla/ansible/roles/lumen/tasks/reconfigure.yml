@@ -1,0 +1,4 @@
+---
+- name: Reconfigure | Re-render config and restart Lumen containers
+  ansible.builtin.debug:
+    msg: "Reconfigure handled by config.yml and handlers"

@@ -100,6 +100,37 @@ else
   log "role symlink 생성 완료: $ROLE_LINK -> $ROLE_SRC"
 fi
 
+WAYGATE_ROLE_SRC="$REPO_DIR/deploy/kolla/ansible/roles/waygate"
+WAYGATE_ROLE_LINK="$ROLES_DIR/waygate"
+
+log "waygate role symlink 생성 중..."
+if [[ -L "$WAYGATE_ROLE_LINK" ]] && [[ "$(readlink "$WAYGATE_ROLE_LINK")" == "$WAYGATE_ROLE_SRC" ]]; then
+  log "role symlink 이미 존재 (skip): $WAYGATE_ROLE_LINK"
+else
+  ln -sfn "$WAYGATE_ROLE_SRC" "$WAYGATE_ROLE_LINK"
+  log "role symlink 생성 완료: $WAYGATE_ROLE_LINK -> $WAYGATE_ROLE_SRC"
+fi
+DROVER_ROLE_SRC="$REPO_DIR/deploy/kolla/ansible/roles/drover"
+DROVER_ROLE_LINK="$ROLES_DIR/drover"
+
+log "drover role symlink 생성 중..."
+if [[ -L "$DROVER_ROLE_LINK" ]] && [[ "$(readlink "$DROVER_ROLE_LINK")" == "$DROVER_ROLE_SRC" ]]; then
+  log "role symlink 이미 존재 (skip): $DROVER_ROLE_LINK"
+else
+  ln -sfn "$DROVER_ROLE_SRC" "$DROVER_ROLE_LINK"
+  log "role symlink 생성 완료: $DROVER_ROLE_LINK -> $DROVER_ROLE_SRC"
+fi
+LUMEN_ROLE_SRC="$REPO_DIR/deploy/kolla/ansible/roles/lumen"
+LUMEN_ROLE_LINK="$ROLES_DIR/lumen"
+
+log "lumen role symlink 생성 중..."
+if [[ -L "$LUMEN_ROLE_LINK" ]] && [[ "$(readlink "$LUMEN_ROLE_LINK")" == "$LUMEN_ROLE_SRC" ]]; then
+  log "role symlink 이미 존재 (skip): $LUMEN_ROLE_LINK"
+else
+  ln -sfn "$LUMEN_ROLE_SRC" "$LUMEN_ROLE_LINK"
+  log "role symlink 생성 완료: $LUMEN_ROLE_LINK -> $LUMEN_ROLE_SRC"
+fi
+
 # ── 4. play symlink 생성 ──────────────────────────────────────────────────────
 PLAY_SRC="$REPO_DIR/deploy/kolla/playbooks/afterglow.yml"
 PLAY_LINK="$KOLLA_DIR/ansible/afterglow.yml"
@@ -110,6 +141,37 @@ if [[ -L "$PLAY_LINK" ]] && [[ "$(readlink "$PLAY_LINK")" == "$PLAY_SRC" ]]; the
 else
   ln -sfn "$PLAY_SRC" "$PLAY_LINK"
   log "play symlink 생성 완료: $PLAY_LINK -> $PLAY_SRC"
+fi
+
+WAYGATE_PLAY_SRC="$REPO_DIR/deploy/kolla/playbooks/waygate.yml"
+WAYGATE_PLAY_LINK="$KOLLA_DIR/ansible/waygate.yml"
+
+log "waygate playbook symlink 생성 중..."
+if [[ -L "$WAYGATE_PLAY_LINK" ]] && [[ "$(readlink "$WAYGATE_PLAY_LINK")" == "$WAYGATE_PLAY_SRC" ]]; then
+  log "play symlink 이미 존재 (skip): $WAYGATE_PLAY_LINK"
+else
+  ln -sfn "$WAYGATE_PLAY_SRC" "$WAYGATE_PLAY_LINK"
+  log "play symlink 생성 완료: $WAYGATE_PLAY_LINK -> $WAYGATE_PLAY_SRC"
+fi
+DROVER_PLAY_SRC="$REPO_DIR/deploy/kolla/playbooks/drover.yml"
+DROVER_PLAY_LINK="$KOLLA_DIR/ansible/drover.yml"
+
+log "drover playbook symlink 생성 중..."
+if [[ -L "$DROVER_PLAY_LINK" ]] && [[ "$(readlink "$DROVER_PLAY_LINK")" == "$DROVER_PLAY_SRC" ]]; then
+  log "play symlink 이미 존재 (skip): $DROVER_PLAY_LINK"
+else
+  ln -sfn "$DROVER_PLAY_SRC" "$DROVER_PLAY_LINK"
+  log "play symlink 생성 완료: $DROVER_PLAY_LINK -> $DROVER_PLAY_SRC"
+fi
+LUMEN_PLAY_SRC="$REPO_DIR/deploy/kolla/playbooks/lumen.yml"
+LUMEN_PLAY_LINK="$KOLLA_DIR/ansible/lumen.yml"
+
+log "lumen playbook symlink 생성 중..."
+if [[ -L "$LUMEN_PLAY_LINK" ]] && [[ "$(readlink "$LUMEN_PLAY_LINK")" == "$LUMEN_PLAY_SRC" ]]; then
+  log "play symlink 이미 존재 (skip): $LUMEN_PLAY_LINK"
+else
+  ln -sfn "$LUMEN_PLAY_SRC" "$LUMEN_PLAY_LINK"
+  log "play symlink 생성 완료: $LUMEN_PLAY_LINK -> $LUMEN_PLAY_SRC"
 fi
 
 # ── 5. site.yml 패치 ──────────────────────────────────────────────────────────
@@ -126,28 +188,72 @@ site_yml = sys.argv[1]
 with open(site_yml) as f:
     content = f.read()
 
-if '# BEGIN afterglow integration' in content:
-    print('[afterglow-install] site.yml already patched, skipping')
+plays = []
+if '# BEGIN afterglow integration' not in content:
+    plays.append(
+        '\n# BEGIN afterglow integration\n'
+        '- name: Apply role afterglow\n'
+        '  gather_facts: false\n'
+        '  hosts:\n'
+        '    - afterglow\n'
+        "    - '&enable_afterglow_True'\n"
+        "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
+        '  roles:\n'
+        '    - { role: afterglow, tags: afterglow }\n'
+        '# END afterglow integration\n'
+    )
+
+if '# BEGIN waygate integration' not in content:
+    plays.append(
+        '\n# BEGIN waygate integration\n'
+        '- name: Apply role waygate\n'
+        '  gather_facts: false\n'
+        '  hosts:\n'
+        '    - waygate\n'
+        '    - haproxy\n'
+        "    - '&enable_waygate_True'\n"
+        "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
+        '  roles:\n'
+        '    - { role: waygate, tags: waygate }\n'
+        '# END waygate integration\n'
+    )
+if '# BEGIN drover integration' not in content:
+    plays.append(
+        '\n# BEGIN drover integration\n'
+        '- name: Apply role drover\n'
+        '  gather_facts: false\n'
+        '  hosts:\n'
+        '    - drover\n'
+        '    - haproxy\n'
+        "    - '&enable_drover_True'\n"
+        "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
+        '  roles:\n'
+        '    - { role: drover, tags: drover }\n'
+        '# END drover integration\n'
+    )
+if '# BEGIN lumen integration' not in content:
+    plays.append(
+        '\n# BEGIN lumen integration\n'
+        '- name: Apply role lumen\n'
+        '  gather_facts: false\n'
+        '  hosts:\n'
+        '    - lumen\n'
+        '    - haproxy\n'
+        "    - '&enable_lumen_True'\n"
+        "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
+        '  roles:\n'
+        '    - { role: lumen, tags: lumen }\n'
+        '# END lumen integration\n'
+    )
+
+if not plays:
+    print('[afterglow-install] site.yml integrations already patched, skipping')
     sys.exit(0)
 
-# kolla site.yml은 import_playbook이 아닌 full play 블록 형식.
-# horizon play 블록 직후에 afterglow play 블록을 삽입한다.
-afterglow_play = (
-    '\n# BEGIN afterglow integration\n'
-    '- name: Apply role afterglow\n'
-    '  gather_facts: false\n'
-    '  hosts:\n'
-    '    - afterglow\n'
-    "    - '&enable_afterglow_True'\n"
-    "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
-    '  roles:\n'
-    '    - { role: afterglow, tags: afterglow }\n'
-    '# END afterglow integration\n'
-)
-
+integration_plays = ''.join(plays)
 lines = content.split('\n')
 
-# horizon play 블록 시작 인덱스 탐색 (column 0에서 "- name:" 패턴)
+# Insert custom plays after Horizon when possible.
 horizon_play_idx = None
 for i, line in enumerate(lines):
     if re.match(r'^- name:\s+Apply role horizon\b', line):
@@ -155,21 +261,19 @@ for i, line in enumerate(lines):
         break
 
 if horizon_play_idx is not None:
-    # 다음 top-level play 시작 위치 = 삽입 지점
     insert_idx = len(lines)
     for i in range(horizon_play_idx + 1, len(lines)):
         if re.match(r'^- (name|hosts):', lines[i]):
             insert_idx = i
             break
-    patch_lines = afterglow_play.split('\n')
+    patch_lines = integration_plays.split('\n')
     new_lines = lines[:insert_idx] + patch_lines + lines[insert_idx:]
     open(site_yml, 'w').write('\n'.join(new_lines))
-    print('[afterglow-install] site.yml 패치 완료 (horizon play 블록 이후 삽입)')
+    print('[afterglow-install] site.yml integration patch complete')
 else:
-    # horizon play를 찾지 못한 경우 파일 끝에 추가
-    print('[afterglow-install] WARNING: "Apply role horizon" play를 찾지 못했습니다. 파일 끝에 삽입합니다.')
-    open(site_yml, 'w').write(content.rstrip('\n') + '\n' + afterglow_play)
-    print('[afterglow-install] site.yml 패치 완료 (파일 끝에 삽입)')
+    print('[afterglow-install] WARNING: "Apply role horizon" play not found; appending integrations.')
+    open(site_yml, 'w').write(content.rstrip('\n') + '\n' + integration_plays)
+    print('[afterglow-install] site.yml integration patch complete at end of file')
 PYEOF
 
 # ── 6. passwords.yml merge (--apply-passwords 옵션) ───────────────────────────
@@ -227,6 +331,19 @@ if [[ -f "$GLOBALS_YML" ]]; then
   else
     log "globals.yml에 enable_afterglow 설정 확인됨"
   fi
+
+  if ! grep -q "enable_waygate" "$GLOBALS_YML"; then
+    warn "globals.yml에 enable_waygate 설정이 없습니다."
+    warn "Waygate 배포 시 enable_waygate: \"yes\"를 추가하세요."
+  else
+    log "globals.yml에 enable_waygate 설정 확인됨"
+  fi
+  if ! grep -q "enable_drover" "$GLOBALS_YML"; then
+    warn "globals.yml에 enable_drover 설정이 없습니다."
+    warn "Drover 배포 시 enable_drover: \"yes\"를 추가하세요."
+  else
+    log "globals.yml에 enable_drover 설정 확인됨"
+  fi
 else
   warn "globals.yml 파일을 찾을 수 없습니다: $GLOBALS_YML"
   warn "KOLLA_GLOBALS_FILE 환경변수로 경로를 지정하거나, 수동으로 설정하세요."
@@ -243,7 +360,7 @@ fi
 # ── 완료 ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " afterglow integration installed."
-echo " Set enable_afterglow: \"yes\" in globals.yml and run:"
+echo " Afterglow, Waygate, and Drover integrations installed."
+echo " Set enable_afterglow, enable_waygate, and enable_drover in globals.yml, then run:"
 echo " kolla-ansible deploy -i <inventory>"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

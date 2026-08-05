@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 모델 — k3s 클러스터 및 Notion 설정 영속화."""
+"""SQLAlchemy ORM models for Afterglow-owned persistence."""
 
 from datetime import UTC, datetime
 
@@ -17,129 +17,13 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.mysql import DATETIME, MEDIUMBLOB, MEDIUMTEXT
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-class K3sCluster(Base):
-    __tablename__ = "k3s_clusters"
-
-    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False)
-    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    status_reason: Mapped[str | None] = mapped_column(TEXT)
-
-    # OpenStack 리소스 ID
-    server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    server_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    server_image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
-    network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
-    api_lb_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    api_lb_pool_id: Mapped[str | None] = mapped_column(VARCHAR(64))  # LB-first 방식: 클러스터 생성 시 pool 저장
-    api_fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    api_fip_address: Mapped[str | None] = mapped_column(VARCHAR(45))
-
-    # k3s 정보
-    server_ip: Mapped[str | None] = mapped_column(VARCHAR(45))
-    api_address: Mapped[str | None] = mapped_column(VARCHAR(255))
-    k3s_version: Mapped[str | None] = mapped_column(VARCHAR(32))
-    node_token: Mapped[str | None] = mapped_column(VARCHAR(512))  # 에이전트 join용
-
-    # SSH / 접근
-    key_name: Mapped[str | None] = mapped_column(VARCHAR(255))
-    ssh_public_key: Mapped[str | None] = mapped_column(TEXT)
-
-    # kubeconfig (AES-256-GCM 암호화 상태로 저장)
-    kubeconfig_encrypted: Mapped[str | None] = mapped_column(TEXT)
-
-    # 생성자 정보
-    created_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
-    created_by_username: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 설정
-    agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
-    occm_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-    plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"occm": true, ...}
-    plugin_status: Mapped[dict | None] = mapped_column(
-        JSON, nullable=True
-    )  # {"occm": {"status": "deployed", "error": ""}}
-    secret_cloud_config_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
-    os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
-    # Octavia Ingress Application Credential (per-cluster, managed by per-project manager user)
-    app_credential_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
-
-    # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    # soft-delete
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # HA 멀티 마스터 (1 | 3)
-    master_count: Mapped[int] = mapped_column(INT, nullable=False, default=1)
-
-    # Template 추적 (생성 시 사용한 템플릿)
-    template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
-    template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    # Stampede 오토스케일 모드
-    stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-
-    # 인증서 회전 추적
-    last_rotation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_rotation_initiated_by: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
-
-    # 관계
-    agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
-        "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
-    )
-    nodegroups: Mapped[list["K3sNodegroup"]] = relationship(
-        "K3sNodegroup", back_populates="cluster", cascade="all, delete-orphan"
-    )
-
-    __table_args__ = (Index("idx_k3s_cluster_project_created", "project_id", "created_at"),)
-
-
-class K3sAgentVM(Base):
-    __tablename__ = "k3s_agent_vms"
-
-    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    cluster_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("k3s_clusters.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    vm_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    name: Mapped[str | None] = mapped_column(VARCHAR(255))
-    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-
-    cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="agent_vms")
-
-
-class GpuQuota(Base):
-    """프로젝트별 GPU 타입 quota. limit=-1 은 무제한."""
-
-    __tablename__ = "gpu_quotas"
-
-    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    gpu_type: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)  # PCI alias (예: "RTX3090")
-    limit: Mapped[int] = mapped_column(INT, nullable=False, default=-1)  # -1 = 무제한
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    __table_args__ = (Index("idx_gpu_quota_project_type", "project_id", "gpu_type", unique=True),)
 
 
 class GpuDeviceCatalog(Base):
@@ -653,81 +537,6 @@ class PalimpsestImageExport(Base):
 # ---------------------------------------------------------------------------
 
 
-class K3sNodegroup(Base):
-    """k3s 노드그룹. 클러스터 내 동일 role/flavor VM 집합."""
-
-    __tablename__ = "k3s_nodegroups"
-
-    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
-    cluster_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("k3s_clusters.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False)
-    role: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="agent")  # "server" | "agent"
-    node_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
-    flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    image_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    labels: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    taints: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    is_default: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-    # Stampede 오토스케일
-    stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-    min_size: Mapped[int] = mapped_column(INT, nullable=False, default=0)
-    max_size: Mapped[int] = mapped_column(INT, nullable=False, default=5)
-    stampede_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="nodegroups")
-    vms: Mapped[list["K3sNodegroupVM"]] = relationship(
-        "K3sNodegroupVM", back_populates="nodegroup", cascade="all, delete-orphan"
-    )
-
-    __table_args__ = (Index("idx_ng_cluster_role", "cluster_id", "role"),)
-
-
-class K3sNodegroupVM(Base):
-    """노드그룹 내 개별 VM 추적."""
-
-    __tablename__ = "k3s_nodegroup_vms"
-
-    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    nodegroup_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("k3s_nodegroups.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    cluster_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("k3s_clusters.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    vm_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    name: Mapped[str | None] = mapped_column(VARCHAR(255))
-    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-
-    nodegroup: Mapped["K3sNodegroup"] = relationship("K3sNodegroup", back_populates="vms")
-
-
-class K3sClusterTemplate(Base):
-    """k3s 클러스터 프리셋. 운영자가 정의하고 사용자가 클러스터 생성 시 선택."""
-
-    __tablename__ = "k3s_cluster_templates"
-
-    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
-    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False, index=True)
-    description: Mapped[str | None] = mapped_column(TEXT)
-    k3s_version: Mapped[str | None] = mapped_column(VARCHAR(32))
-    default_node_count: Mapped[int] = mapped_column(INT, nullable=False, default=1)
-    default_agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    default_image_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
-    public_visible: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
-    created_by: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class ProjectRole(Base):
     """afterglow 자체 프로젝트 관리자 역할 (Keystone role과 별개)."""
 
@@ -826,187 +635,14 @@ class UserTutorialStatus(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
-# ---------------------------------------------------------------------------
-# Waygate (WireGuard 게이트웨이 — Phase 1 서버 프로비저닝 + 클라이언트 관리)
-# ---------------------------------------------------------------------------
-
-
-class WaygateServer(Base):
-    """Waygate 게이트웨이 인스턴스 1개.
-
-    테넌트 프로젝트에 부팅되는 bastion VM. 서버 private key는 VM 내부에서만
-    생성되고 백엔드 DB에는 절대 저장하지 않는다(마이그레이션 요구사항 ③ 자연 충족).
-    """
-
-    __tablename__ = "waygate_servers"
-
-    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False)
-    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    status_reason: Mapped[str | None] = mapped_column(TEXT)
-
-    # OpenStack 리소스 ID
-    server_vm_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    image_id: Mapped[str | None] = mapped_column(VARCHAR(128))
-    provider_network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    floating_network_id: Mapped[str | None] = mapped_column(VARCHAR(128))
-    provider_port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    endpoint_ip: Mapped[str | None] = mapped_column(VARCHAR(45))  # FIP 또는 provider fixed IP
-    key_name: Mapped[str | None] = mapped_column(VARCHAR(255))
-    resource_policy_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    # 에이전트 제어채널 자격증명 — AES-256-GCM 암호화 저장(도메인 wg_agent_token).
-    # Redis(휘발성)가 아니라 여기에 durable 하게 보관해, Redis eviction/재시작이나 이전
-    # 7일 TTL 만료 후에도 에이전트 register/desired-state/status 채널이 유지된다.
-    agent_token_encrypted: Mapped[str | None] = mapped_column(TEXT)
-
-    # WireGuard 설정
-    server_public_key: Mapped[str | None] = mapped_column(VARCHAR(64))  # 에이전트 register가 채움
-    listen_port: Mapped[int] = mapped_column(INT, nullable=False, default=51820)
-    tunnel_cidr: Mapped[str] = mapped_column(VARCHAR(43), nullable=False, default="10.8.0.0/24")
-    dns: Mapped[str | None] = mapped_column(VARCHAR(255))
-    mtu: Mapped[int | None] = mapped_column(INT)
-
-    # 생성자 정보
-    created_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
-    created_by_username: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    # soft-delete
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 관계
-    clients: Mapped[list["WaygateClient"]] = relationship(
-        "WaygateClient", back_populates="server", cascade="all, delete-orphan"
-    )
-    network_attachments: Mapped[list["WaygateNetworkAttachment"]] = relationship(
-        "WaygateNetworkAttachment", back_populates="server", cascade="all, delete-orphan"
-    )
-
-    __table_args__ = (Index("idx_waygate_server_project_created", "project_id", "created_at"),)
-
-
-class WaygateClient(Base):
-    """WireGuard peer(=wg-easy client). 클라이언트 private key는 AES-256-GCM 암호화 저장.
-
-    private key는 백엔드가 X25519로 생성하며 서버 VM에는 절대 전송하지 않는다
-    (서버는 peer의 public key만 필요).
-    """
-
-    __tablename__ = "waygate_clients"
-
-    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
-    server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_name 슬롯을 해제한다(아래 참고).
-    name: Mapped[str | None] = mapped_column(VARCHAR(63))
-    enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
-
-    public_key: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    private_key_encrypted: Mapped[str] = mapped_column(TEXT, nullable=False)
-    preshared_key_encrypted: Mapped[str | None] = mapped_column(TEXT)
-
-    # NOTE: soft-delete 시 NULL로 비워 uq_waygate_client_server_tunnel_ip 슬롯을 해제한다.
-    # MySQL/MariaDB는 partial/filtered unique index를 지원하지 않으므로, 활성 클라이언트만
-    # unique 제약을 갖도록 하려면 값 자체를 NULL로 비우는 방법뿐이다(NULL은 unique index에서
-    # 여러 번 허용됨). list_clients/list_all_active_clients 등 조회 경로는 전부
-    # deleted_at IS NULL 필터를 거치므로, 활성 클라이언트의 name/tunnel_ip는 항상 non-null이다.
-    tunnel_ip: Mapped[str | None] = mapped_column(VARCHAR(45))
-    allowed_ips: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 클라이언트→서버 방향 route 대상
-    dns: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    # soft-delete
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
-
-    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="clients")
-
-    __table_args__ = (
-        UniqueConstraint("server_id", "tunnel_ip", name="uq_waygate_client_server_tunnel_ip"),
-        UniqueConstraint("server_id", "name", name="uq_waygate_client_server_name"),
-        Index("idx_waygate_client_project_created", "project_id", "created_at"),
-    )
-
-
-class WaygateNetworkAttachment(Base):
-    """Waygate VM에 붙은 테넌트 네트워크 (Phase 2용 스키마 — Phase 1 API는 이 테이블을 사용하지 않음).
-
-    다중 테넌트 네트워크 연결(요구사항 ②) 시 nova.attach_interface로 생성된 포트를 기록한다.
-    """
-
-    __tablename__ = "waygate_network_attachments"
-
-    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    server_id: Mapped[str] = mapped_column(
-        CHAR(36), ForeignKey("waygate_servers.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
-    network_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
-    subnet_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
-    cidr: Mapped[str | None] = mapped_column(VARCHAR(43))  # NAT 대상
-    nat_mode: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="snat")
-    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
-
-    server: Mapped["WaygateServer"] = relationship("WaygateServer", back_populates="network_attachments")
-
-    __table_args__ = (Index("idx_waygate_netattach_server", "server_id"),)
-
-
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.activity import ActivityLog  # noqa: E402,F401
 
 # Announcement/AnnouncementRead 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.announcement import Announcement, AnnouncementRead  # noqa: E402,F401
-from app.models.chat_agent_platform import (  # noqa: E402,F401
-    ChatCodeWorkspace,
-    ChatCodeWorkspaceAsset,
-    ChatCommand,
-    ChatContextCheckpoint,
-    ChatExtensionPackage,
-    ChatExtensionPackageComponent,
-    ChatExtensionPackageInstall,
-    ChatGitCredential,
-    ChatRunInteraction,
-)
-from app.models.chat_assets import ChatAsset, ChatMessageAsset, ChatRunAsset  # noqa: E402,F401
 
-# 빌트인 AI 채팅 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
-from app.models.chat_db import (  # noqa: E402,F401
-    ChatAgent,
-    ChatApiKey,
-    ChatConversation,
-    ChatCustomTool,
-    ChatMcpOAuthConnection,
-    ChatMcpOAuthRequest,
-    ChatMcpServer,
-    ChatMemory,
-    ChatMemoryOwnerLock,
-    ChatMessage,
-    ChatSkill,
-    ChatUsageLog,
-    ChatWorkspace,
-    LlmModel,
-    LlmProvider,
+# Afterglow owns only the MCP control-plane persistence. Lumen owns chat state.
+from app.models.mcp_authority import (  # noqa: E402,F401
     McpDelegatedGrant,
     McpLumenSelection,
     McpOAuthAuthorizationRequest,
@@ -1017,18 +653,6 @@ from app.models.chat_db import (  # noqa: E402,F401
     McpOwnerLock,
     McpPersonalToken,
     McpToolInvocation,
-    UserWallet,
-)
-from app.models.chat_jobs import ChatInputDerivation, ChatJob, ChatMemoryOutbox, ChatMemoryProvenance  # noqa: E402,F401
-from app.models.chat_runs import (  # noqa: E402,F401
-    ChatRun,
-    ChatRunEventRow,
-    ChatRunProvider,
-    ChatRunSegment,
-    ChatRunTurn,
-    ChatSchedulerLease,
-    ChatTempThread,
-    ChatToolApproval,
 )
 
 

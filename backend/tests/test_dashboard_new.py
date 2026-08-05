@@ -1,19 +1,11 @@
 """Phase 50b — 신규 대시보드 endpoint 단위 테스트 (overview/usage-stats/usage-report/activity)."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-def _patch_redis():
-    from app.services import cache as cache_mod
-
-    fake = AsyncMock()
-    fake.get.return_value = None
-    fake.setex.return_value = None
-    fake.delete.return_value = None
-    return patch.object(cache_mod, "_get_client", return_value=fake)
-
+from tests.conftest import patch_redis_cache_miss
 
 MOCK_SERVERS = [
     {"id": "s1", "status": "ACTIVE", "flavor_id": "f1", "flavor_name": "c2.medium", "name": "web-01"},
@@ -33,11 +25,11 @@ MOCK_FLAVORS = [
 
 
 @pytest.mark.asyncio
-async def test_overview_returns_stats(client, mock_conn):
+async def test_overview_returns_stats(client, mock_conn, monkeypatch):
     """정상 조회: stats / recent_instances / alerts 반환."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.network.ips.return_value = [MagicMock(), MagicMock()]
     with (
-        _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
         patch(
             "app.api.common.dashboard.nova.get_project_limits",
@@ -52,6 +44,14 @@ async def test_overview_returns_stats(client, mock_conn):
                 "gigabytes": {"in_use": 100, "limit": 1000},
             },
         ),
+        patch(
+            "app.api.common.dashboard.get_settings",
+            return_value=SimpleNamespace(service_k3s_enabled=True),
+        ),
+        patch(
+            "app.api.common.dashboard.register_drover",
+            return_value=MagicMock(cluster_stats=MagicMock(return_value={"total": 2, "active": 1})),
+        ),
     ):
         resp = await client.get("/api/v1/dashboard/overview")
 
@@ -65,11 +65,38 @@ async def test_overview_returns_stats(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_overview_error_instance_in_alerts(client, mock_conn):
-    """ERROR 인스턴스 → alerts에 error 항목 포함."""
+async def test_overview_marks_drover_unavailable_when_cluster_stats_fail(client, mock_conn, monkeypatch):
+    """A Drover failure is visible to dashboard clients rather than reported as zero clusters."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.network.ips.return_value = []
     with (
-        _patch_redis(),
+        patch("app.api.common.dashboard._list_servers_as_dicts", return_value=[]),
+        patch("app.api.common.dashboard.nova.get_project_limits", return_value={}),
+        patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={}),
+        patch(
+            "app.api.common.dashboard.get_settings",
+            return_value=SimpleNamespace(service_k3s_enabled=True),
+        ),
+        patch(
+            "app.api.common.dashboard.register_drover",
+            return_value=MagicMock(cluster_stats=MagicMock(side_effect=RuntimeError("Drover unavailable"))),
+        ),
+    ):
+        resp = await client.get("/api/v1/dashboard/overview")
+
+    assert resp.status_code == 200
+    stats = resp.json()["stats"]
+    assert stats["k3s_clusters"] == 0
+    assert stats["k3s_active"] == 0
+    assert stats["k3s_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_overview_error_instance_in_alerts(client, mock_conn, monkeypatch):
+    """ERROR 인스턴스 → alerts에 error 항목 포함."""
+    patch_redis_cache_miss(monkeypatch)
+    mock_conn.network.ips.return_value = []
+    with (
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
         patch("app.api.common.dashboard.nova.get_project_limits", return_value={}),
         patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={}),
@@ -82,11 +109,11 @@ async def test_overview_error_instance_in_alerts(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_overview_no_instances(client, mock_conn):
+async def test_overview_no_instances(client, mock_conn, monkeypatch):
     """인스턴스 0건 → alerts 비어있음."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.network.ips.return_value = []
     with (
-        _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=[]),
         patch("app.api.common.dashboard.nova.get_project_limits", return_value={}),
         patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={}),
@@ -105,14 +132,14 @@ async def test_overview_no_instances(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_usage_stats_returns_expected_structure(client, mock_conn):
+async def test_usage_stats_returns_expected_structure(client, mock_conn, monkeypatch):
     """top_instances / volume_by_type / instance_hours 반환."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.block_storage.volumes.return_value = [
         MagicMock(id="v1", size=50, volume_type="ssd"),
         MagicMock(id="v2", size=100, volume_type="hdd"),
     ]
     with (
-        _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
         patch("app.api.common.dashboard._list_flavors_as_dicts", return_value=MOCK_FLAVORS),
         patch(
@@ -135,11 +162,11 @@ async def test_usage_stats_returns_expected_structure(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_usage_stats_top_instances_sorted_by_vcpus(client, mock_conn):
+async def test_usage_stats_top_instances_sorted_by_vcpus(client, mock_conn, monkeypatch):
     """top_instances는 vCPU 내림차순 정렬."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.block_storage.volumes.return_value = []
     with (
-        _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
         patch("app.api.common.dashboard._list_flavors_as_dicts", return_value=MOCK_FLAVORS),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
@@ -155,13 +182,13 @@ async def test_usage_stats_top_instances_sorted_by_vcpus(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_usage_stats_unauthenticated(non_admin_client):
+async def test_usage_stats_unauthenticated(non_admin_client, monkeypatch):
     """인증 없이 접근 — 401 (auth 헤더 없는 별도 client 사용 시)."""
     # non_admin_client는 일반 사용자 — 정상 접근 가능해야 함 (admin 전용 아님)
     from unittest.mock import MagicMock, patch
 
+    patch_redis_cache_miss(monkeypatch)
     with (
-        _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=[]),
         patch("app.api.common.dashboard._list_flavors_as_dicts", return_value=[]),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
@@ -189,10 +216,10 @@ async def test_usage_stats_unauthenticated(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_usage_report_structure(client, mock_conn):
+async def test_usage_report_structure(client, mock_conn, monkeypatch):
     """stats / flavor_hours / quota 구조 반환."""
+    patch_redis_cache_miss(monkeypatch)
     with (
-        _patch_redis(),
         patch(
             "app.api.common.dashboard.nova.get_project_usage",
             return_value={
@@ -223,10 +250,10 @@ async def test_usage_report_structure(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_usage_report_flavor_hours_sorted(client, mock_conn):
+async def test_usage_report_flavor_hours_sorted(client, mock_conn, monkeypatch):
     """flavor_hours는 usage_hours 내림차순 정렬."""
+    patch_redis_cache_miss(monkeypatch)
     with (
-        _patch_redis(),
         patch(
             "app.api.common.dashboard.nova.get_project_usage",
             return_value={

@@ -3,9 +3,11 @@
 Drover 카운트 버그(0 하드코딩) 수정 + 누락 리소스(스냅샷/백업/LB/SG/서브넷/이미지/DB/Identity) 통합.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.conftest import patch_redis_cache_miss
 
 
 def _setup_conn() -> MagicMock:
@@ -27,29 +29,21 @@ def _setup_conn() -> MagicMock:
     return conn
 
 
-def _patch_redis_cache():
-    """cached_call이 캐시 미스 후 fn 직접 실행하도록 — fake Redis client."""
-    from app.services import cache as cache_mod
-
-    fake = AsyncMock()
-    fake.get.return_value = None  # cache miss → fn 실행
-    fake.setex.return_value = None  # write 무시
-    fake.delete.return_value = None
-    return patch.object(cache_mod, "_get_client", return_value=fake)
+def _drover(clusters: list[dict]) -> MagicMock:
+    proxy = MagicMock()
+    proxy.admin_clusters.return_value = clusters
+    return proxy
 
 
 @pytest.mark.asyncio
-async def test_monitoring_summary_includes_k3s_active(admin_client):
+async def test_monitoring_summary_includes_k3s_active(admin_client, monkeypatch):
     """k3s 클러스터 mock 1대 ACTIVE → k3s_count == 1, k3s_active == 1 (Drover 버그 수정)."""
+    patch_redis_cache_miss(monkeypatch)
     conn = _setup_conn()
     cluster = {"id": "c1", "name": "dms-cloud", "status": "ACTIVE"}
     with (
-        _patch_redis_cache(),
         patch("app.api.identity.admin.get_os_conn", return_value=conn),
-        patch(
-            "app.api.identity.admin.k3s_cluster.list_all_clusters",
-            new=AsyncMock(return_value=[cluster]),
-        ),
+        patch("app.api.identity.admin.register_drover", return_value=_drover([cluster])),
         patch("app.api.identity.admin._fetch_hypervisors_raw", return_value=[]),
         patch(
             "app.api.identity.admin._fetch_overview_servers",
@@ -77,18 +71,16 @@ async def test_monitoring_summary_includes_k3s_active(admin_client):
     body = resp.json()
     assert body["containers"]["k3s_count"] == 1
     assert body["containers"]["k3s_active"] == 1
+    assert body["containers"]["k3s_available"] is True
 
 
 @pytest.mark.asyncio
-async def test_monitoring_summary_k3s_zero_when_empty(admin_client):
+async def test_monitoring_summary_k3s_zero_when_empty(admin_client, monkeypatch):
     """k3s 클러스터 0대 → k3s_count == 0, k3s_active == 0."""
+    patch_redis_cache_miss(monkeypatch)
     conn = _setup_conn()
     with (
-        _patch_redis_cache(),
-        patch(
-            "app.api.identity.admin.k3s_cluster.list_all_clusters",
-            new=AsyncMock(return_value=[]),
-        ),
+        patch("app.api.identity.admin.register_drover", return_value=_drover([])),
         patch("app.api.identity.admin._fetch_hypervisors_raw", return_value=[]),
         patch(
             "app.api.identity.admin._fetch_overview_servers",
@@ -117,15 +109,49 @@ async def test_monitoring_summary_k3s_zero_when_empty(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_summary_includes_new_groups(admin_client):
-    """응답에 신규 그룹 data_services / identity 키가 존재."""
+async def test_monitoring_summary_marks_drover_unavailable(admin_client, monkeypatch):
+    patch_redis_cache_miss(monkeypatch)
     conn = _setup_conn()
     with (
-        _patch_redis_cache(),
+        patch("app.api.identity.admin.register_drover", side_effect=RuntimeError("catalog unavailable")),
+        patch("app.api.identity.admin._fetch_hypervisors_raw", return_value=[]),
         patch(
-            "app.api.identity.admin.k3s_cluster.list_all_clusters",
-            new=AsyncMock(return_value=[]),
+            "app.api.identity.admin._fetch_overview_servers",
+            return_value={"instance_stats": {}, "gpu_instances": 0},
         ),
+        patch("app.api.identity.admin._fetch_overview_containers", return_value=0),
+        patch("app.api.identity.admin._fetch_overview_file_storage", return_value=0),
+        patch("app.api.identity.admin._count_database_instances_admin", return_value=0),
+        patch("app.api.identity.admin._count_identity_users_projects", return_value=(0, 0)),
+    ):
+        from app.api.deps import get_os_conn
+        from app.main import app
+
+        async def override():
+            yield conn
+
+        app.dependency_overrides[get_os_conn] = override
+        try:
+            resp = await admin_client.get("/api/v1/admin/monitoring/summary")
+        finally:
+            app.dependency_overrides.pop(get_os_conn, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["containers"] == {
+        "zun_count": 0,
+        "k3s_count": 0,
+        "k3s_active": 0,
+        "k3s_available": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_monitoring_summary_includes_new_groups(admin_client, monkeypatch):
+    """응답에 신규 그룹 data_services / identity 키가 존재."""
+    patch_redis_cache_miss(monkeypatch)
+    conn = _setup_conn()
+    with (
+        patch("app.api.identity.admin.register_drover", return_value=_drover([])),
         patch("app.api.identity.admin._fetch_hypervisors_raw", return_value=[]),
         patch(
             "app.api.identity.admin._fetch_overview_servers",
@@ -167,16 +193,16 @@ async def test_monitoring_summary_includes_new_groups(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_summary_handles_per_resource_failure(admin_client):
+async def test_monitoring_summary_handles_per_resource_failure(admin_client, monkeypatch):
     """각 카운터 함수가 예외를 던져도 다른 카운터는 정상 — 0 fallback."""
+    patch_redis_cache_miss(monkeypatch)
     conn = _setup_conn()
     # network.subnets만 예외, 나머지는 정상
     conn.network.subnets.side_effect = RuntimeError("subnet API down")
     with (
-        _patch_redis_cache(),
         patch(
-            "app.api.identity.admin.k3s_cluster.list_all_clusters",
-            new=AsyncMock(return_value=[{"status": "ACTIVE"}, {"status": "CREATING"}]),
+            "app.api.identity.admin.register_drover",
+            return_value=_drover([{"status": "ACTIVE"}, {"status": "CREATING"}]),
         ),
         patch("app.api.identity.admin._fetch_hypervisors_raw", return_value=[]),
         patch(
@@ -207,16 +233,13 @@ async def test_monitoring_summary_handles_per_resource_failure(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_summary_async_collect_works_with_cached_call():
+async def test_monitoring_summary_async_collect_works_with_cached_call(monkeypatch):
     """_collect가 async로 변환된 후에도 cached_call이 정상 동작하는지 (간접 — iscoroutinefunction 분기)."""
     from app.services.cache import cached_call
 
     async def my_collect():
         return {"ok": True}
 
-    fake = AsyncMock()
-    fake.get.return_value = None
-    fake.setex.return_value = None
-    with patch("app.services.cache._get_client", return_value=fake):
-        result = await cached_call("test:key", 60, my_collect)
+    patch_redis_cache_miss(monkeypatch)
+    result = await cached_call("test:key", 60, my_collect)
     assert result == {"ok": True}

@@ -1,0 +1,21 @@
+---
+- name: Bootstrap | Apply Waygate database migrations
+  become: true
+  community.docker.docker_container:
+    name: waygate_bootstrap
+    image: "{{ waygate_api_image }}:{{ waygate_image_tag }}"
+    command: ["python", "-m", "waygate.scripts.migrate", "--apply"]
+    state: started
+    detach: false
+    auto_remove: true
+    volumes:
+      - "{{ waygate_config_dir }}/waygate.conf:/app/waygate.conf:ro"
+    env:
+      DATABASE_URL: "mysql+aiomysql://{{ waygate_database_user }}:{{ waygate_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ waygate_database_name }}"
+      REDIS_URL: "redis://:{{ waygate_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ waygate_redis_db_index }}"
+      WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
+  no_log: true
+  register: waygate_bootstrap_result
+  run_once: true
+  delegate_to: "{{ groups['waygate'] | first }}"
+

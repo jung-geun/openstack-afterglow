@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.chat_db import (
+from app.models.mcp_authority import (
     McpDelegatedGrant,
     McpOAuthAuthorizationRequest,
     McpOAuthClient,

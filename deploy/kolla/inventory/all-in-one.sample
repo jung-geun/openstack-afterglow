@@ -22,6 +22,15 @@ localhost ansible_connection=local
 [afterglow:children]
 control
 
+[waygate:children]
+control
+
+[drover:children]
+control
+
+[lumen:children]
+control
+
 [baremetal:children]
 control
 

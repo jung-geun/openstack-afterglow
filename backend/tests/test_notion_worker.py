@@ -251,16 +251,11 @@ async def test_run_sync_cycle_refreshes_gpu_catalog_before_fallback_mapping_call
 _FASTAPI_FREE_SCRIPT = """
 import sys
 
-# 워커 진입점 모듈
-import app.worker
+# Afterglow-owned worker entry point and its runtime dependencies.
 import app.notion_worker
-
-# 런타임에 실제 사용되는 서비스 모듈 (지연 import를 해당 경로로 강제 적재)
 import app.services.gpu_inventory
 import app.services.openstack_inventory
 import app.services.notion_sync
-import app.services.k3s_health
-import app.services.k3s_stampede
 
 leaked = [m for m in sys.modules if m in ("fastapi", "starlette", "uvicorn")]
 if leaked:
@@ -274,10 +269,7 @@ _BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 def test_worker_imports_are_fastapi_free():
-    """app.worker 및 app.notion_worker import 시 fastapi/starlette/uvicorn가
-    sys.modules에 없어야 한다 (경량 이미지 보장).
-    서비스 레이어 모듈(notion_sync, k3s_health 등)도 함께 검사해 지연 import 경로 포함.
-    """
+    """Afterglow-owned worker imports must not load FastAPI, Starlette, or Uvicorn."""
     result = subprocess.run(
         [sys.executable, "-c", _FASTAPI_FREE_SCRIPT],
         capture_output=True,

@@ -346,12 +346,13 @@ async def create_instance(
         gpu_available = flavor.is_gpu if flavor else False
 
         if gpu_available and is_db_available():
-            from app.services.gpu_quota import check_gpu_quota
+            from drover_sdk import register as register_drover
 
-            ok, msg = await check_gpu_quota(conn, conn._afterglow_project_id, flavor.extra_specs or {})
-            if not ok:
-                raise HTTPException(status_code=409, detail=msg)
-
+            _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, flavor.extra_specs or {})
+            if not _res.get("ok"):
+                raise HTTPException(
+                    status_code=409, detail=_res.get("detail") or _res.get("message") or "GPU quota 초과"
+                )
         # 헬스 리포트 토큰 발급 + userdata (libraries·GPU·data_mounts 있을 때만)
         project_id = conn._afterglow_project_id
         _health_id = ""
@@ -596,10 +597,11 @@ async def create_instance_async(
 
             # GPU quota 사전 체크
             if is_db_available() and _sse_flavor and _sse_flavor.is_gpu:
-                from app.services.gpu_quota import check_gpu_quota
+                from drover_sdk import register as register_drover
 
-                _ok, _msg = await check_gpu_quota(conn, conn._afterglow_project_id, _sse_flavor.extra_specs or {})
-                if not _ok:
+                _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, _sse_flavor.extra_specs or {})
+                if not _res.get("ok"):
+                    _msg = _res.get("detail") or _res.get("message") or "GPU quota 초과"
                     yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
                     raise HTTPException(status_code=409, detail=_msg)
 

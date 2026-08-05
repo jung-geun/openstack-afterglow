@@ -242,57 +242,6 @@ async def get_token_info(
     raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
 
 
-async def get_api_key_info(
-    request: Request,
-    authorization: str | None = Header(None),
-    x_api_key: str | None = Header(None),
-) -> dict:
-    """외부 OpenAI/Anthropic 호환 /v1 엔드포인트 전용 인증 — API 키(sk-afgl-…) 기반.
-
-    `Authorization: Bearer sk-...`(OpenAI SDK) 또는 `x-api-key: sk-...`(Anthropic SDK) 수용.
-    fail-closed: 키 누락/무효/폐기는 모두 401(CLAUDE.md §3). JWT 세션과 별개 경로다.
-    """
-    from app.services.chat import api_key_store as aks
-
-    raw = None
-    if authorization and authorization.startswith("Bearer "):
-        raw = authorization[7:].strip()
-    elif x_api_key:
-        raw = x_api_key.strip()
-    if not raw:
-        raise HTTPException(status_code=401, detail="API 키가 필요합니다 (Authorization: Bearer 또는 x-api-key)")
-
-    info = await aks.verify_key(raw)
-    if info is None:
-        raise HTTPException(status_code=401, detail="유효하지 않은 API 키입니다")
-
-    token_info = {
-        "user_id": info["user_id"],
-        "project_id": info["project_id"],
-        "api_key_id": info["api_key_id"],
-        "source": "api",
-        "username": f"api-key:{info['api_key_id']}",
-        "roles": [],
-        "is_system_admin": False,
-    }
-    request.state.token_info = token_info  # activity_audit_middleware 로깅용
-    return token_info
-
-
-def require_chat_api_host(request: Request) -> None:
-    """외부 /v1 호환 API를 허용 Host(전용 서브도메인)에서만 노출.
-
-    settings.chat_api_hosts 가 설정되면 그 Host 로 들어온 요청만 통과, 그 외는 404(존재 자체를 숨김
-    — 기본 URL과의 충돌·오용 방지). 미설정(빈 목록)이면 전체 허용(개발 편의).
-    """
-    allowed = get_settings().chat_api_host_list
-    if not allowed:
-        return
-    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
-    if host not in allowed:
-        raise HTTPException(status_code=404, detail="Not Found")
-
-
 def require_admin(token_info: dict = Depends(get_token_info)):
     """시스템 관리자(admin 프로젝트의 admin role 보유자)가 아니면 403 반환."""
     if not token_info.get("is_system_admin", False):

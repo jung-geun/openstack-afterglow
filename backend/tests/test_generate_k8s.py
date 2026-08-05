@@ -62,14 +62,6 @@ def test_render_toml_falls_back_to_backend_port_without_public_origin():
     assert 'public_api_base = "http://localhost:8123"' in result
 
 
-def test_render_toml_includes_explicit_mcp_oauth_callback_url():
-    result = _render_toml_for_k8s(
-        {"chat": {"mcp_oauth_callback_url": "https://oauth.example.test/custom/mcp-callback"}}
-    )
-
-    assert 'mcp_oauth_callback_url = "https://oauth.example.test/custom/mcp-callback"' in result
-
-
 def test_render_toml_includes_public_mcp_urls():
     result = _render_toml_for_k8s(
         {
@@ -82,6 +74,18 @@ def test_render_toml_includes_public_mcp_urls():
 
     assert 'public_url = "https://mcp.example.test/control-plane/mcp"' in result
     assert 'oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"' in result
+
+
+def test_render_mcp_lumen_bridge_credential_only_in_secret():
+    credential = "lumen-mcp-bridge-secret-sentinel-0123456789abcdef"
+    cfg = {
+        "app": {"secret_key": "application-secret-key-sentinel-0123456789abcdef"},
+        "mcp": {"lumen_service_token": credential},
+    }
+
+    assert credential not in _render_toml_for_k8s(cfg)
+    secret = yaml.safe_load(render_secret(cfg))
+    assert secret["stringData"]["LUMEN_MCP_SERVICE_TOKEN"] == credential
 
 
 def test_render_toml_includes_login_branding_paths():
@@ -105,8 +109,6 @@ def test_render_toml_includes_worker_runtime_defaults():
     assert 'mode = "static"' in result
     assert "reconcile_interval = 30" in result
     assert "fail_closed = true" in result
-    assert "[worker_runtime.workers.drover]" in result
-    assert 'module = "app.worker"' in result
     assert "[worker_runtime.workers.notion_worker]" in result
     assert 'module = "app.notion_worker"' in result
     assert "[worker_runtime.docker]" in result
@@ -147,6 +149,7 @@ def test_render_toml_and_configmap_exclude_secret_values():
             "password": sentinels["smtp_password"],
         },
         "builder": {"ssh_private_key": sentinels["builder_ssh_private_key"]},
+        "waygate": {"callback_base_url": "https://legacy-waygate.example"},
         "worker_runtime": {
             "kubernetes": {
                 "service_account_token_path": "/var/run/secrets/afterglow/token",
@@ -165,6 +168,7 @@ def test_render_toml_and_configmap_exclude_secret_values():
     assert 'service_account_ca_path = "/var/run/secrets/afterglow/ca.crt"' in toml_output
     assert 'service_account_token_path = "/var/run/secrets/afterglow/token"' in configmap_doc["data"]["afterglow.conf"]
     assert 'service_account_ca_path = "/var/run/secrets/afterglow/ca.crt"' in configmap_doc["data"]["afterglow.conf"]
+    assert "[waygate]" not in toml_output
 
     for sentinel in sentinels.values():
         assert sentinel not in toml_output
@@ -179,10 +183,7 @@ def test_dev_override_renders_dev_urls(tmp_path):
 frontend_base_url = "https://cloud.dmslab.re.kr"
 public_api_base = "https://cloud.dmslab.re.kr"
 
-[k3s]
-callback_base_url = "https://cloud.dmslab.re.kr"
-
-[waygate]
+[instance_health]
 callback_base_url = "https://cloud.dmslab.re.kr"
 
 [cors]
@@ -294,38 +295,6 @@ def test_render_secret_always_emits_manifest_required_keys():
     assert keys["DATABASE_URL"] == ""
     assert keys["PROMETHEUS_PASSWORD"] == ""
     assert keys["BUILDER_SSH_PRIVATE_KEY"] == ""
-
-
-def test_chat_capability_platform_secrets_stay_out_of_configmap():
-    cfg = {
-        "app": {"secret_key": "0123456789abcdef0123456789abcdef"},
-        "chat": {
-            "memory_pgvector_url": "postgresql://memory-secret.example/db",
-            "asset_s3_access_key": "asset-access-secret",
-            "asset_s3_secret_key": "asset-secret",
-            "sandbox_api_key": "sandbox-secret",
-            "asset_s3_bucket": "chat-assets",
-            "semantic_memory_enabled": True,
-            "execution_protocol_version": 2,
-            "sandbox_workspace_url": "https://workspace.example",
-        },
-    }
-
-    secret = render_secret(cfg)
-    configmap = _render_toml_for_k8s(cfg)
-
-    assert "postgresql://memory-secret.example/db" in secret
-    assert "asset-access-secret" in secret
-    assert "asset-secret" in secret
-    assert "sandbox-secret" in secret
-    assert "memory_pgvector_url" not in configmap
-    assert "asset_s3_access_key" not in configmap
-    assert "asset_s3_secret_key" not in configmap
-    assert "sandbox_api_key" not in configmap
-    assert 'asset_s3_bucket = "chat-assets"' in configmap
-    assert "sandbox_workspace_url" not in secret
-    assert "execution_protocol_version = 2" in configmap
-    assert 'sandbox_workspace_url = "https://workspace.example"' in configmap
 
 
 class TestRenderGrafanaDeployment:

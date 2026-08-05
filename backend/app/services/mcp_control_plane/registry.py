@@ -1382,16 +1382,26 @@ class K3sClusterListOutput(McpDomainOutput):
 
 async def _k3s_cluster_list(context: ConsumerCloudContext, arguments: K3sClusterListArguments) -> K3sClusterListOutput:
     try:
-        clusters = await list_project_k3s_clusters(project_id=context.project_id, limit=arguments.limit)
-    except McpK3sError as exc:
+        async with context.openstack_connection() as conn:
+            clusters = await list_project_k3s_clusters(
+                conn,
+                project_id=context.project_id,
+                limit=arguments.limit,
+            )
+    except (McpK3sError, McpConsumerConnectionError) as exc:
         raise ValueError("MCP K3s cluster data is unavailable") from exc
     return K3sClusterListOutput.model_validate({"clusters": clusters})
 
 
 async def _k3s_cluster_get(context: ConsumerCloudContext, arguments: K3sClusterGetArguments) -> K3sClusterSummaryOutput:
     try:
-        cluster = await get_project_k3s_cluster(project_id=context.project_id, cluster_id=str(arguments.cluster_id))
-    except McpK3sError as exc:
+        async with context.openstack_connection() as conn:
+            cluster = await get_project_k3s_cluster(
+                conn,
+                project_id=context.project_id,
+                cluster_id=str(arguments.cluster_id),
+            )
+    except (McpK3sError, McpConsumerConnectionError) as exc:
         raise ValueError("MCP K3s cluster data is unavailable") from exc
     return K3sClusterSummaryOutput.model_validate(cluster)
 
@@ -1473,8 +1483,13 @@ async def _waygate_server_list(
     context: ConsumerCloudContext, arguments: WaygateServerListArguments
 ) -> WaygateServerListOutput:
     try:
-        servers = await list_project_waygate_servers(context.project_id, limit=arguments.limit)
-    except McpWaygateError as exc:
+        async with context.openstack_connection() as conn:
+            servers = await list_project_waygate_servers(
+                conn,
+                context.project_id,
+                limit=arguments.limit,
+            )
+    except (McpWaygateError, McpConsumerConnectionError) as exc:
         raise ValueError("MCP Waygate server data is unavailable") from exc
     return WaygateServerListOutput.model_validate({"servers": servers})
 
@@ -1483,8 +1498,13 @@ async def _waygate_server_get(
     context: ConsumerCloudContext, arguments: WaygateServerGetArguments
 ) -> WaygateServerSummaryOutput:
     try:
-        server = await get_project_waygate_server(context.project_id, str(arguments.server_id))
-    except McpWaygateError as exc:
+        async with context.openstack_connection() as conn:
+            server = await get_project_waygate_server(
+                conn,
+                context.project_id,
+                str(arguments.server_id),
+            )
+    except (McpWaygateError, McpConsumerConnectionError) as exc:
         raise ValueError("MCP Waygate server data is unavailable") from exc
     return WaygateServerSummaryOutput.model_validate(server)
 

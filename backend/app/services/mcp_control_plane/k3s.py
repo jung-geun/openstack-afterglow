@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
-from sqlalchemy import select
-
-from app.database import get_session_factory, is_db_available
-from app.models.db import K3sCluster
+from drover_sdk import register
 
 
 class McpK3sError(ValueError):
@@ -61,48 +59,43 @@ def _safe_cluster(cluster: Any, *, project_id: str) -> dict[str, Any]:
     }
 
 
-async def list_project_k3s_clusters(project_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    """Return exact-project K3s clusters with bounded non-sensitive fields only."""
-    if not is_db_available():
-        raise McpK3sError("K3s database is unavailable")
+def _list_clusters(conn: object, limit: int) -> Any:
+    return register(conn).clusters(limit=limit)
 
-    factory = get_session_factory()
+
+def _get_cluster(conn: object, cluster_id: str) -> Any:
+    return register(conn).get_cluster(cluster_id)
+
+
+async def list_project_k3s_clusters(
+    conn: object,
+    project_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return exact-project K3s clusters through the caller-scoped Drover catalog."""
     try:
-        async with factory() as session:
-            stmt = (
-                select(K3sCluster)
-                .where(K3sCluster.project_id == project_id, K3sCluster.deleted_at.is_(None))
-                .order_by(K3sCluster.created_at.desc())
-                .limit(limit)
-            )
-            result = await session.execute(stmt)
-            clusters = result.scalars().all()
-            return [_safe_cluster(c, project_id=project_id) for c in clusters]
+        clusters = await asyncio.to_thread(_list_clusters, conn, limit)
+        if not isinstance(clusters, list):
+            raise McpK3sError("K3s cluster list response is invalid")
+        return [_safe_cluster(cluster, project_id=project_id) for cluster in clusters[:limit]]
+    except McpK3sError:
+        raise
     except Exception as exc:
-        if isinstance(exc, McpK3sError):
-            raise
         raise McpK3sError("K3s cluster list query failed") from exc
 
 
-async def get_project_k3s_cluster(project_id: str, cluster_id: str) -> dict[str, Any]:
-    """Return a single exact-project K3s cluster with bounded non-sensitive fields only."""
-    if not is_db_available():
-        raise McpK3sError("K3s database is unavailable")
-
-    factory = get_session_factory()
+async def get_project_k3s_cluster(
+    conn: object,
+    project_id: str,
+    cluster_id: str,
+) -> dict[str, Any]:
+    """Return one exact-project K3s cluster through the caller-scoped Drover catalog."""
     try:
-        async with factory() as session:
-            stmt = select(K3sCluster).where(
-                K3sCluster.id == cluster_id,
-                K3sCluster.project_id == project_id,
-                K3sCluster.deleted_at.is_(None),
-            )
-            result = await session.execute(stmt)
-            cluster = result.scalar_one_or_none()
-            if cluster is None:
-                raise McpK3sError("K3s cluster not found")
-            return _safe_cluster(cluster, project_id=project_id)
+        cluster = await asyncio.to_thread(_get_cluster, conn, cluster_id)
+        if not isinstance(cluster, dict):
+            raise McpK3sError("K3s cluster response is invalid")
+        return _safe_cluster(cluster, project_id=project_id)
+    except McpK3sError:
+        raise
     except Exception as exc:
-        if isinstance(exc, McpK3sError):
-            raise
         raise McpK3sError("K3s cluster query failed") from exc

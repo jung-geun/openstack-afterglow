@@ -6,14 +6,13 @@ afterglow_image_namespace: "ghcr.io/openstack-afterglow"
 afterglow_image_tag: "latest"
 afterglow_backend_image: "{{ afterglow_image_namespace }}/afterglow-api"
 afterglow_frontend_image: "{{ afterglow_image_namespace }}/afterglow"
-# 워커 전용 경량 이미지 (drover + notion-worker 공용)
-afterglow_drover_image: "{{ afterglow_image_namespace }}/afterglow-worker"
+# Notion integration worker image
+afterglow_worker_image: "{{ afterglow_image_namespace }}/afterglow-worker"
 
 # ── 토글 ──────────────────────────────────────────────────────────────────────
 enable_afterglow: "no"
 enable_afterglow_backend: "{{ enable_afterglow }}"
 enable_afterglow_frontend: "{{ enable_afterglow }}"
-enable_afterglow_worker: "{{ enable_afterglow }}"
 enable_afterglow_notion_worker: "{{ enable_afterglow }}"
 
 # ── 사전조건 실행 여부 ────────────────────────────────────────────────────────
@@ -79,8 +78,8 @@ afterglow_share_layer_store_ro_id: ""
 afterglow_share_manifest_store_id: ""
 afterglow_share_metadata_store_id: ""
 
-# ── k3s ──────────────────────────────────────────────────────────────────────
-afterglow_k3s_callback_base_url: "{{ afterglow_external_url }}"
+# ── Instance health ─────────────────────────────────────────────────────────
+afterglow_instance_health_callback_base_url: "{{ afterglow_external_url }}"
 
 # ── 선택적 서비스 ─────────────────────────────────────────────────────────────
 afterglow_service_manila_enabled: true
@@ -90,6 +89,11 @@ afterglow_service_zun_enabled: false
 afterglow_service_trove_enabled: false
 afterglow_service_magnum_enabled: false
 afterglow_service_barbican_enabled: false
+afterglow_service_waygate_enabled: false
+afterglow_service_chat_enabled: false
+afterglow_service_mcp_enabled: false
+# Shared only with the Lumen workload for the internal delegated-MCP bridge.
+afterglow_lumen_mcp_service_token: ""
 
 # ── GHCR imagePullSecret ──────────────────────────────────────────────────────
 afterglow_image_pull_secret_b64: ""
@@ -113,6 +117,7 @@ afterglow_services:
       SECRET_KEY: "{{ afterglow_secret_key }}"
       GITLAB_OIDC_CLIENT_SECRET: "{{ afterglow_oidc_client_secret | default('') }}"
       K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
+      LUMEN_MCP_SERVICE_TOKEN: "{{ afterglow_lumen_mcp_service_token }}"
       UNION_OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
       UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
       UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
@@ -147,35 +152,11 @@ afterglow_services:
     ports:
       - "{{ afterglow_frontend_port }}:3080"
 
-  afterglow-worker:
-    container_name: afterglow_worker
-    group: afterglow
-    enabled: "{{ enable_afterglow_worker | bool }}"
-    image: "{{ afterglow_drover_image }}:{{ afterglow_image_tag }}"
-    command: ["python", "-m", "app.worker"]
-    restart_policy: unless-stopped
-    volumes:
-      - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
-      - "kolla_logs:/var/log/kolla/"
-    environment:
-      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
-      REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
-      OS_PASSWORD: "{{ afterglow_admin_keystone_password }}"
-      OS_INTERFACE: "public"
-      SECRET_KEY: "{{ afterglow_secret_key }}"
-      K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
-      UNION_OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
-      UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
-      UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
-      UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
-      UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
-      K3S_HEALTH_INTERVAL: "180"
-
   afterglow-notion-worker:
     container_name: afterglow_notion_worker
     group: afterglow
     enabled: "{{ enable_afterglow_notion_worker | bool }}"
-    image: "{{ afterglow_drover_image }}:{{ afterglow_image_tag }}"
+    image: "{{ afterglow_worker_image }}:{{ afterglow_image_tag }}"
     command: ["python", "-m", "app.notion_worker"]
     restart_policy: unless-stopped
     volumes:

@@ -459,7 +459,7 @@ describe('mockup transport', () => {
 			'mock-token-tutorial-scoped',
 			'mock-project-1',
 		);
-		const k3sStats = await maybeMockJson<{ total: number; active: number }>(
+		const k3sStats = await maybeMockJson<{ total: number; active: number; available: boolean }>(
 			'GET',
 			'/api/v1/dashboard/k3s-stats',
 			undefined,
@@ -478,6 +478,7 @@ describe('mockup transport', () => {
 		expect(overviewSummary).toMatchObject({ recent_instances: expect.any(Array) });
 		expect(overviewSummary.recent_instances).toHaveLength(8);
 		expect(overviewQuotas).toMatchObject({ alerts: expect.any(Array) });
+		expect(k3sStats.available).toBe(true);
 		expect(k3sStats.total).toBeGreaterThanOrEqual(k3sStats.active);
 		expect(trend.network).toMatchObject({ unit: 'KiB/s', data: [] });
 
@@ -498,13 +499,14 @@ describe('mockup transport', () => {
 		for await (const _event of stream) {
 			// Exhaust the local mutation stream.
 		}
-		const afterDelete = (await maybeMockJson<{ total: number; active: number }>(
+		const afterDelete = (await maybeMockJson<{ total: number; active: number; available: boolean }>(
 			'GET',
 			'/api/v1/dashboard/k3s-stats',
 			undefined,
 			'mock-token-tutorial-scoped',
 			'mock-project-1',
-		)) as { total: number; active: number };
+		)) as { total: number; active: number; available: boolean };
+		expect(afterDelete.available).toBe(true);
 		expect(afterDelete.total).toBe(k3sStats.total - 1);
 		expect(afterDelete.active).toBe(k3sStats.active - 1);
 	});

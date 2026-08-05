@@ -1,0 +1,10 @@
+---
+- name: Apply role waygate
+  gather_facts: false
+  hosts:
+    - waygate
+    - haproxy
+    - '&enable_waygate_True'
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: waygate, tags: waygate, when: enable_waygate | bool }

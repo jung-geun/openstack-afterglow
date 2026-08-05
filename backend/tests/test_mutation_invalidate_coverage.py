@@ -77,14 +77,8 @@ EXEMPT_ROUTERS: set[str] = {
     "storage/file_storage.py",  # TODO: Phase C/D — access rule sub-resources
     "storage/volumes.py",  # TODO: Phase C/D — volume transfer sub-resources
     "storage/volume_backups.py",  # TODO: Phase C/D — backup / restore
-    # Waygate server/client/network/migration state is read directly from its
-    # SQLAlchemy store; it bypasses the OpenStack resource-cache layer entirely.
-    "waygate/servers.py",
-    "waygate/clients.py",
-    "waygate/attachments.py",
-    "waygate/migration.py",
-    # Agent endpoints update their dedicated Redis status/token store, not the
-    # application resource cache covered by this invariant.
+    # Permanent Waygate guest callbacks proxy into the extracted service and
+    # therefore do not mutate Afterglow's OpenStack resource cache.
     "waygate/agent.py",
     # Palimpsest hub owns its own tables (palimpsest_hub_layers / _uploads) and a
     # content-addressed blob store. Nothing caches hub responses, so there is no
@@ -92,23 +86,9 @@ EXEMPT_ROUTERS: set[str] = {
     # backfill DOES invalidate `afterglow:union_layer:*` because it mutates
     # layer_artifacts rows that the layer listing cache serves.
     "palimpsest/hub.py",
-    # Admin resource policy and AI compatibility routes own application data
-    # read directly from their stores; no OpenStack cache key is affected.
+    # Admin resource policy routes own application data read directly from
+    # their stores; no OpenStack cache key is affected.
     "identity/admin_resource_policies.py",
-    "ai_compat/openai.py",
-    "ai_compat/anthropic.py",
-    "chat/api_keys.py",
-    "chat/assets.py",
-    "chat/memory.py",
-    # 빌트인 AI 채팅(chat/*) — 프로바이더/모델/대화/메시지는 provider_store·
-    # conversation_store 가 SQLAlchemy select()로 DB를 매 요청 직접 읽으며
-    # cached_call/app 캐시 레이어를 전혀 거치지 않는다(announcements/site branding/
-    # VPN과 동일 사유 — 무효화할 per-project OpenStack 리소스 캐시가 애초에 없음).
-    "chat/models.py",  # 관리자 프로바이더/모델 CRUD
-    "chat/conversations.py",  # 대화/메시지 (DB 직접)
-    "chat/completions.py",  # 스트리밍 completions (사용량 원장 append-only)
-    "chat/extensions.py",  # MCP 서버/커스텀툴 CRUD (DB 직접, app 캐시 미사용)
-    "chat/code_workspaces.py",  # workspace/credential metadata is read directly from its SQLAlchemy store
     # MCP OAuth/control-plane state is DB-backed and bypasses app resource caches.
     "mcp.py",
     "identity/mcp_access.py",
@@ -176,6 +156,13 @@ EXEMPT_HANDLERS: set[str] = {
     "create_workspace",
     "delete_workspace",
     "update_workspace",
+    # Drover callback is a transparent service proxy. The Lumen internal
+    # snapshot and preview endpoints are read-only; execute records its
+    # authority state directly, outside the per-project OpenStack cache.
+    "callback",
+    "snapshot",
+    "preview",
+    "execute",
 }
 
 # ---------------------------------------------------------------------------

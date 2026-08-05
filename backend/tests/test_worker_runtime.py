@@ -147,8 +147,6 @@ async def test_worker_runtime_settings_default_to_static_with_single_replica_lim
     settings = app_config.get_settings()
 
     assert settings.worker_runtime_mode == "static"
-    assert settings.worker_runtime_drover_desired_replicas == 1
-    assert settings.worker_runtime_drover_max_replicas == 1
     assert settings.worker_runtime_notion_worker_desired_replicas == 1
     assert settings.worker_runtime_notion_worker_max_replicas == 1
 
@@ -163,7 +161,7 @@ async def test_static_worker_runtime_adapter_reports_disabled_status():
     assert status.mode == "static"
     assert status.capable is False
     assert status.reason == "runtime_manager_disabled"
-    assert {worker.name for worker in status.workers} == {"drover", "notion_worker"}
+    assert {worker.name for worker in status.workers} == {"notion_worker"}
     assert all(worker.mode == "static" for worker in status.workers)
     assert all(worker.capable is False for worker in status.workers)
     assert all(worker.reason == "runtime_manager_disabled" for worker in status.workers)
@@ -203,35 +201,26 @@ async def test_docker_reconcile_recreates_lowest_missing_slot_and_ignores_static
     docker = FakeDockerAPI(
         [
             {
-                "Id": "drover-running-0",
-                "Names": ["/afterglow-managed-drover-0"],
+                "Id": "notion-running-0",
+                "Names": ["/afterglow-managed-notion-worker-0"],
                 "State": "running",
                 "Labels": {
                     "afterglow.worker-runtime.managed": "true",
-                    "afterglow.worker": "drover",
+                    "afterglow.worker": "notion_worker",
                 },
             },
             {
-                "Id": "drover-exited-1",
-                "Names": ["/afterglow-managed-drover-1"],
+                "Id": "notion-exited-1",
+                "Names": ["/afterglow-managed-notion-worker-1"],
                 "State": "exited",
                 "Labels": {
                     "afterglow.worker-runtime.managed": "true",
-                    "afterglow.worker": "drover",
+                    "afterglow.worker": "notion_worker",
                 },
             },
             {
-                "Id": "drover-running-2",
-                "Names": ["/afterglow-managed-drover-2"],
-                "State": "running",
-                "Labels": {
-                    "afterglow.worker-runtime.managed": "true",
-                    "afterglow.worker": "drover",
-                },
-            },
-            {
-                "Id": "notion-running-0",
-                "Names": ["/afterglow-managed-notion-worker-0"],
+                "Id": "notion-running-2",
+                "Names": ["/afterglow-managed-notion-worker-2"],
                 "State": "running",
                 "Labels": {
                     "afterglow.worker-runtime.managed": "true",
@@ -250,19 +239,12 @@ async def test_docker_reconcile_recreates_lowest_missing_slot_and_ignores_static
     adapter = runtime_service.DockerWorkerRuntimeAdapter(config, client=client)
     specs = [
         runtime_service.WorkerSpec(
-            name="drover",
-            module="app.worker",
-            enabled=True,
-            desired_replicas=3,
-            max_replicas=3,
-        ),
-        runtime_service.WorkerSpec(
             name="notion_worker",
             module="app.notion_worker",
             enabled=True,
-            desired_replicas=1,
-            max_replicas=1,
-        ),
+            desired_replicas=3,
+            max_replicas=3,
+        )
     ]
     desired = runtime_service.desired_from_specs(specs)
 
@@ -271,12 +253,10 @@ async def test_docker_reconcile_recreates_lowest_missing_slot_and_ignores_static
     finally:
         await client.aclose()
 
-    workers = {worker.name: worker for worker in status.workers}
     assert status.capable is True
-    assert workers["drover"].observed_replicas == 3
-    assert workers["notion_worker"].observed_replicas == 1
-    assert docker.deleted_ids == ["drover-exited-1"]
-    assert [item["name"] for item in docker.created] == ["afterglow-managed-drover-1"]
+    assert status.workers[0].observed_replicas == 3
+    assert docker.deleted_ids == ["notion-exited-1"]
+    assert [item["name"] for item in docker.created] == ["afterglow-managed-notion-worker-1"]
     assert docker.started_ids == ["created-0"]
 
     create_body = docker.created[0]["body"]
@@ -337,7 +317,7 @@ async def test_kubernetes_status_maps_api_failures_to_stable_reasons(tmp_path, s
 @pytest.mark.asyncio
 async def test_kubernetes_reconcile_patches_only_scale_subresource(tmp_path):
     config = _kubernetes_config(tmp_path)
-    observed: dict[str, int] = {"drover": 0, "notion-worker": 0}
+    observed: dict[str, int] = {"notion-worker": 0}
     patch_calls: list[tuple[str, dict, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -363,24 +343,14 @@ async def test_kubernetes_reconcile_patches_only_scale_subresource(tmp_path):
     adapter = runtime_service.KubernetesWorkerRuntimeAdapter(config, client=client)
     specs = [
         runtime_service.WorkerSpec(
-            name="drover",
-            module="app.worker",
-            enabled=True,
-            desired_replicas=1,
-            max_replicas=4,
-        ),
-        runtime_service.WorkerSpec(
             name="notion_worker",
             module="app.notion_worker",
             enabled=True,
             desired_replicas=1,
             max_replicas=4,
-        ),
+        )
     ]
-    desired = [
-        runtime_service.WorkerDesired(name="drover", desired_replicas=3),
-        runtime_service.WorkerDesired(name="notion_worker", desired_replicas=2),
-    ]
+    desired = [runtime_service.WorkerDesired(name="notion_worker", desired_replicas=2)]
 
     try:
         status = await adapter.reconcile(desired, specs)
@@ -389,13 +359,9 @@ async def test_kubernetes_reconcile_patches_only_scale_subresource(tmp_path):
 
     assert status.capable is True
     assert [path for path, _, _ in patch_calls] == [
-        "/apis/apps/v1/namespaces/afterglow/deployments/drover/scale",
-        "/apis/apps/v1/namespaces/afterglow/deployments/notion-worker/scale",
+        "/apis/apps/v1/namespaces/afterglow/deployments/notion-worker/scale"
     ]
-    assert [body for _, body, _ in patch_calls] == [
-        {"spec": {"replicas": 3}},
-        {"spec": {"replicas": 2}},
-    ]
+    assert [body for _, body, _ in patch_calls] == [{"spec": {"replicas": 2}}]
     assert all(content_type == "application/merge-patch+json" for _, _, content_type in patch_calls)
 
 
@@ -412,7 +378,7 @@ async def test_kubernetes_reconcile_patches_only_scale_subresource(tmp_path):
         (
             "PATCH",
             "/api/v1/admin/worker-runtime/desired",
-            {"workers": [{"name": "drover", "desired_replicas": 1}]},
+            {"workers": [{"name": "notion_worker", "desired_replicas": 1}]},
             "app.api.identity.admin_worker_runtime.patch_desired_counts",
         ),
         (
@@ -465,15 +431,15 @@ async def test_worker_runtime_admin_routes_return_403_for_non_admin(non_admin_cl
 
 @pytest.mark.asyncio
 async def test_patch_worker_runtime_desired_rejects_counts_above_worker_max(admin_client):
-    settings = Settings(worker_runtime_drover_max_replicas=1)
+    settings = Settings(worker_runtime_notion_worker_max_replicas=1)
     with patch("app.services.worker_runtime.get_settings", return_value=settings):
         response = await admin_client.patch(
             "/api/v1/admin/worker-runtime/desired",
-            json={"workers": [{"name": "drover", "desired_replicas": 2}]},
+            json={"workers": [{"name": "notion_worker", "desired_replicas": 2}]},
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "drover desired_replicas exceeds max_replicas=1"
+    assert response.json()["detail"] == "notion_worker desired_replicas exceeds max_replicas=1"
 
 
 @pytest.mark.asyncio
@@ -497,23 +463,23 @@ async def test_reconcile_once_with_lock_calls_adapter_after_lock_acquisition():
     settings = Settings(worker_runtime_mode="docker")
     specs = [
         runtime_service.WorkerSpec(
-            name="drover",
-            module="app.worker",
+            name="notion_worker",
+            module="app.notion_worker",
             enabled=True,
             desired_replicas=1,
             max_replicas=2,
         )
     ]
-    desired = [runtime_service.WorkerDesired(name="drover", desired_replicas=1)]
+    desired = [runtime_service.WorkerDesired(name="notion_worker", desired_replicas=1)]
     expected = WorkerRuntimeStatus(
         mode="docker",
         capable=True,
         reason=None,
         workers=[
             runtime_service.WorkerRuntimeWorkerStatus(
-                name="drover",
+                name="notion_worker",
                 enabled=True,
-                module="app.worker",
+                module="app.notion_worker",
                 desired_replicas=1,
                 max_replicas=2,
                 observed_replicas=1,

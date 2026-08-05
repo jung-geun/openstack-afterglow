@@ -1,6 +1,7 @@
 export interface DashboardK3sStats {
   total: number;
   active: number;
+  available: boolean;
 }
 
 export interface K3sCluster {

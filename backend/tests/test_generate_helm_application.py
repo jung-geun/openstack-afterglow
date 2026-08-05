@@ -29,7 +29,7 @@ def test_worker_ignore_differences_covers_both_worker_deployments():
     entries = _worker_replica_ignore_differences("afterglow-dev")
 
     names = {e["name"] for e in entries}
-    assert names == {"drover", "notion-worker"}
+    assert names == {"notion-worker"}
     for entry in entries:
         assert entry["group"] == "apps"
         assert entry["kind"] == "Deployment"
@@ -68,10 +68,7 @@ def test_docker_mode_does_not_ignore_worker_replicas():
 def test_ignore_differences_enabled_for_worker_replicas_in_kubernetes_mode():
     entries = _ignore_differences_for({"workerRuntime": {"mode": "kubernetes"}}, "afterglow")
 
-    assert {e["name"] for e in entries if e["kind"] == "Deployment"} == {
-        "drover",
-        "notion-worker",
-    }
+    assert {e["name"] for e in entries if e["kind"] == "Deployment"} == {"notion-worker"}
     assert all(e["namespace"] == "afterglow" for e in entries if e["kind"] == "Deployment")
 
 

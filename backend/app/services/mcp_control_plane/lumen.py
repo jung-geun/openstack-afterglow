@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models.chat_db import McpDelegatedGrant, McpLumenSelection, McpOwnerLock, McpPersonalToken
+from app.models.mcp_authority import McpDelegatedGrant, McpLumenSelection, McpOwnerLock, McpPersonalToken
 from app.services.mcp_control_plane.authentication import McpPrincipal
 from app.services.mcp_control_plane.authority import McpGrantStateError, _as_utc, _now, grant_scopes
 

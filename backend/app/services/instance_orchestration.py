@@ -158,8 +158,8 @@ async def try_issue_health_token(
     project_id: str,
     settings,
 ) -> tuple[str, str, str]:
-    """(health_id, report_url, token) 반환. 실패 시 ("", "", "") 반환 (best-effort)."""
-    report_url = settings.k3s_callback_base_url or ""
+    """Return a best-effort instance-health report token and callback URL."""
+    report_url = settings.instance_health_callback_base_url or ""
     if not report_url:
         return "", "", ""
     health_id = str(uuid.uuid4())

@@ -14,12 +14,14 @@ name = "afterglow-api"
 version = "1.17.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "afterglow-crypto" },
     { name = "aiofiles" },
     { name = "aiomysql" },
     { name = "aiosmtplib" },
     { name = "asyncssh" },
     { name = "beautifulsoup4" },
     { name = "boto3" },
+    { name = "drover-sdk" },
     { name = "fastapi" },
     { name = "httpcore" },
     { name = "httpx" },
@@ -51,6 +53,7 @@ dependencies = [
     { name = "slowapi" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "waygate-sdk" },
     { name = "websockets" },
 ]
 
@@ -68,6 +71,7 @@ kvm = [
 
 [package.dev-dependencies]
 worker = [
+    { name = "afterglow-crypto" },
     { name = "aiomysql" },
     { name = "apscheduler" },
     { name = "httpx" },
@@ -86,12 +90,14 @@ worker = [
 
 [package.metadata]
 requires-dist = [
+    { name = "afterglow-crypto", directory = "../services/afterglow-crypto" },
     { name = "aiofiles", specifier = "==24.1.0" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "aiosmtplib", specifier = ">=3.0.0" },
     { name = "asyncssh", specifier = ">=2.18" },
     { name = "beautifulsoup4", specifier = "==4.14.3" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "drover-sdk", directory = "../services/drover-sdk" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.21" },
     { name = "fastapi", specifier = "==0.125.0" },
     { name = "httpcore", specifier = "==1.0.9" },
@@ -129,12 +135,14 @@ requires-dist = [
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.39.0" },
+    { name = "waygate-sdk", directory = "../services/waygate-sdk" },
     { name = "websockets", specifier = ">=14.0" },
 ]
 provides-extras = ["kvm", "dev"]
 
 [package.metadata.requires-dev]
 worker = [
+    { name = "afterglow-crypto", directory = "../services/afterglow-crypto" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "apscheduler", specifier = ">=3.10" },
     { name = "httpx", specifier = "==0.28.1" },
@@ -150,6 +158,17 @@ worker = [
     { name = "redis", extras = ["hiredis"], specifier = "==5.0.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
 ]
+
+[[package]]
+name = "afterglow-crypto"
+version = "0.1.0"
+source = { directory = "../services/afterglow-crypto" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=42.0.0" }]
 
 [[package]]
 name = "aiofiles"
@@ -676,6 +695,23 @@ sdist = { url = "https://files.pythonhosted.org/packages/e7/c8/301ff89746e76745b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/80/12235e5b75bb2c586733280854f131b86051e0bbdfb55349ff70d0f72cf9/dogpile_cache-1.5.0-py3-none-any.whl", hash = "sha256:dc7b47d37844db15e8fdc0243c1b58857a2ddc52a5118237a97127bac200e18d", size = 64447, upload-time = "2025-10-11T17:35:38.573Z" },
 ]
+
+[[package]]
+name = "drover-sdk"
+version = "0.1.0"
+source = { directory = "../services/drover-sdk" }
+dependencies = [
+    { name = "openstacksdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "openstacksdk", specifier = ">=3.3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "et-xmlfile"
@@ -3534,6 +3570,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/1d/d0d200b10c9311ec25d2273f8aad8c3ef7cc7ea11808022501811208a750/watchfiles-1.1.1-cp314-cp314t-musllinux_1_1_aarch64.whl", hash = "sha256:311ff15a0bae3714ffb603e6ba6dbfba4065ab60865d15a6ec544133bdb21099", size = 629104, upload-time = "2025-10-14T15:05:49.908Z" },
     { url = "https://files.pythonhosted.org/packages/e3/bd/fa9bb053192491b3867ba07d2343d9f2252e00811567d30ae8d0f78136fe/watchfiles-1.1.1-cp314-cp314t-musllinux_1_1_x86_64.whl", hash = "sha256:a916a2932da8f8ab582f242c065f5c81bed3462849ca79ee357dd9551b0e9b01", size = 622112, upload-time = "2025-10-14T15:05:50.941Z" },
 ]
+
+[[package]]
+name = "waygate-sdk"
+version = "0.1.0"
+source = { directory = "../services/waygate-sdk" }
+dependencies = [
+    { name = "openstacksdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "openstacksdk", specifier = ">=3.3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "websockets"

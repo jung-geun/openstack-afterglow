@@ -1,0 +1,41 @@
+---
+- name: Precheck | Verify enable_waygate is set
+  ansible.builtin.assert:
+    that:
+      - enable_waygate is defined
+    fail_msg: "enable_waygate must be set in globals.yml"
+  run_once: true
+  tags: precheck
+
+- name: Precheck | Check required Waygate secrets
+  ansible.builtin.assert:
+    that:
+      - waygate_database_password is defined and waygate_database_password | length > 0
+      - waygate_keystone_password is defined and waygate_keystone_password | length > 0
+      - waygate_encryption_key is defined and waygate_encryption_key | length == 64
+      - waygate_encryption_key == afterglow_kubeconfig_encryption_key
+    fail_msg: "Waygate DB/Keystone secrets must be set, and its encryption key must equal afterglow_kubeconfig_encryption_key during cutover"
+  tags: precheck
+  when: enable_waygate | bool
+
+- name: Precheck | Verify Waygate API image accessibility
+  become: true
+  ansible.builtin.command:
+    cmd: "docker manifest inspect {{ waygate_api_image }}:{{ waygate_image_tag }}"
+  register: waygate_image_check
+  failed_when: false
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['waygate'] | first }}"
+  tags: precheck
+  when: enable_waygate | bool
+
+- name: Precheck | Warn if Waygate API image is inaccessible
+  ansible.builtin.debug:
+    msg: "WARNING: Cannot access {{ waygate_api_image }}:{{ waygate_image_tag }}. Ensure registry credentials are configured."
+  when:
+    - enable_waygate | bool
+    - waygate_image_check is defined
+    - waygate_image_check.rc != 0
+  run_once: true
+  tags: precheck

@@ -1,0 +1,94 @@
+---
+- name: Keystone | Create Drover service project
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_project
+    module_args:
+      cloud: kolla
+      name: "{{ drover_service_project_name }}"
+      description: "Drover service project"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+
+- name: Keystone | Create Drover service user
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_user
+    module_args:
+      cloud: kolla
+      name: "{{ drover_keystone_user }}"
+      password: "{{ drover_keystone_password }}"
+      default_project: "{{ drover_service_project_name }}"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+  no_log: true
+
+- name: Keystone | Assign admin role to Drover service user
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_user_role
+    module_args:
+      cloud: kolla
+      user: "{{ drover_keystone_user }}"
+      role: admin
+      project: "{{ drover_service_project_name }}"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+
+- name: Keystone | Register Drover service
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_keystone_service
+    module_args:
+      cloud: kolla
+      name: drover
+      service_type: drover
+      description: "Drover K3s Kubernetes provisioning service"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+
+- name: Keystone | Register Drover public endpoint
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_keystone_endpoint
+    module_args:
+      cloud: kolla
+      service: drover
+      region: "{{ openstack_region_name }}"
+      endpoint_interface: public
+      url: "{{ public_protocol }}://{{ kolla_external_fqdn }}:{{ drover_api_port }}"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+
+- name: Keystone | Register Drover internal endpoint
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_keystone_endpoint
+    module_args:
+      cloud: kolla
+      service: drover
+      region: "{{ openstack_region_name }}"
+      endpoint_interface: internal
+      url: "http://{{ kolla_internal_vip_address }}:{{ drover_api_port }}"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"
+
+- name: Keystone | Register Drover admin endpoint
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: os_keystone_endpoint
+    module_args:
+      cloud: kolla
+      service: drover
+      region: "{{ openstack_region_name }}"
+      endpoint_interface: admin
+      url: "http://{{ kolla_internal_vip_address }}:{{ drover_api_port }}"
+      state: present
+  run_once: true
+  delegate_to: "{{ groups['drover'][0] }}"

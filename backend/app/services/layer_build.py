@@ -25,7 +25,6 @@ from datetime import UTC, datetime
 from app.config import get_settings
 from app.services import cloudinit, manila, neutron, nova
 from app.services.cloud_init_builder import render_user_data
-from app.services.k3s_cloudinit import _validate_ssh_public_key
 from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
 from app.services.layer_ubuntu import normalize_ubuntu_base
 from app.services.palimpsest_digest import parse_digest_sentinel
@@ -37,6 +36,7 @@ from app.services.recipe_blocks import (
     squashfs_uv_layer,
 )
 from app.services.ssh_access import normalize_github_username
+from app.utils.ssh_keys import validate_ssh_public_key
 
 _logger = logging.getLogger(__name__)
 
@@ -525,7 +525,7 @@ def render_layer_consume_user_data(
             raise ValueError(f"유효하지 않은 sqsh 파일명: {sqsh_filename!r}")
 
     if ssh_public_key:
-        _validate_ssh_public_key(ssh_public_key)
+        validate_ssh_public_key(ssh_public_key)
     if ssh_username:
         if not _SSH_USERNAME_RE.match(ssh_username):
             raise ValueError(f"유효하지 않은 SSH 사용자명: {ssh_username!r}")

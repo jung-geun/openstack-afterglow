@@ -7,7 +7,7 @@
 4. 정상 응답 (admin 허용, 200/204)
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -113,7 +113,7 @@ async def test_delete_gpu_quota_db_not_initialized(admin_client):
 @pytest.mark.asyncio
 async def test_get_gpu_aliases_allowed(admin_client):
     with patch(
-        "app.services.gpu_quota.get_all_gpu_aliases",
+        "app.services.gpu_inventory.get_all_gpu_aliases",
         new=AsyncMock(return_value=["RTX3090", "RTX4090"]),
     ):
         resp = await admin_client.get("/api/v1/admin/gpu-aliases")
@@ -124,7 +124,7 @@ async def test_get_gpu_aliases_allowed(admin_client):
 @pytest.mark.asyncio
 async def test_get_gpu_aliases_empty(admin_client):
     with patch(
-        "app.services.gpu_quota.get_all_gpu_aliases",
+        "app.services.gpu_inventory.get_all_gpu_aliases",
         new=AsyncMock(return_value=[]),
     ):
         resp = await admin_client.get("/api/v1/admin/gpu-aliases")
@@ -142,7 +142,7 @@ async def test_get_all_gpu_aliases_refreshes_db_overlay_before_discovery():
 
     refresh = AsyncMock()
     with (
-        patch("app.services.gpu_quota.is_db_available", return_value=True),
+        patch("app.database.is_db_available", return_value=True),
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=refresh),
         patch("openstack.connect", return_value=FakeConnection()),
         patch("app.services.nova.list_flavors", return_value=[]),
@@ -151,12 +151,12 @@ async def test_get_all_gpu_aliases_refreshes_db_overlay_before_discovery():
         ),
         patch("app.api.identity.admin_gpu.build_device_name_to_alias_map", return_value={"RTX 3090": "RTX-3090"}),
     ):
-        from app.services.gpu_quota import get_all_gpu_aliases
+        from app.services.gpu_inventory import get_all_gpu_aliases
 
         result = await get_all_gpu_aliases()
 
     refresh.assert_awaited_once()
-    assert result == ["RTX-3090"]
+    assert result == ["RTX3090"]
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -164,13 +164,11 @@ async def test_get_all_gpu_aliases_refreshes_db_overlay_before_discovery():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-@pytest.mark.asyncio
 async def test_get_default_gpu_quotas_success(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.default_gpu_quotas.return_value = [{"gpu_type": "RTX3090", "limit": 4}]
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_project_gpu_quotas",
-            new=AsyncMock(return_value=[{"gpu_type": "RTX3090", "limit": 4, "id": 1}]),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.get("/api/v1/admin/gpu-quotas/defaults")
     assert resp.status_code == 200
     data = resp.json()
@@ -179,11 +177,10 @@ async def test_get_default_gpu_quotas_success(admin_client):
 
 @pytest.mark.asyncio
 async def test_get_default_gpu_quotas_empty(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.default_gpu_quotas.return_value = []
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_project_gpu_quotas",
-            new=AsyncMock(return_value=[]),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.get("/api/v1/admin/gpu-quotas/defaults")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -191,11 +188,10 @@ async def test_get_default_gpu_quotas_empty(admin_client):
 
 @pytest.mark.asyncio
 async def test_set_default_gpu_quota_success(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.set_default_gpu_quota.return_value = {"project_id": "__default__", "gpu_type": "RTX3090", "limit": 4}
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.set_project_gpu_quota",
-            new=AsyncMock(return_value={"project_id": "__default__", "gpu_type": "RTX3090", "limit": 4}),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.put("/api/v1/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4})
     assert resp.status_code == 200
     data = resp.json()
@@ -205,11 +201,10 @@ async def test_set_default_gpu_quota_success(admin_client):
 
 @pytest.mark.asyncio
 async def test_delete_default_gpu_quota_success(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.delete_default_gpu_quota.return_value = None
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.delete_project_gpu_quota",
-            new=AsyncMock(return_value=None),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.delete("/api/v1/admin/gpu-quotas/defaults/RTX3090")
     assert resp.status_code == 204
 
@@ -221,11 +216,10 @@ async def test_delete_default_gpu_quota_success(admin_client):
 
 @pytest.mark.asyncio
 async def test_set_gpu_quota_success(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.set_project_gpu_quota.return_value = {"project_id": "proj-1", "gpu_type": "RTX3090", "limit": 2}
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.set_project_gpu_quota",
-            new=AsyncMock(return_value={"project_id": "proj-1", "gpu_type": "RTX3090", "limit": 2}),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.put("/api/v1/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2})
     assert resp.status_code == 200
     data = resp.json()
@@ -236,11 +230,10 @@ async def test_set_gpu_quota_success(admin_client):
 
 @pytest.mark.asyncio
 async def test_delete_gpu_quota_success(admin_client):
+    mock_proxy = MagicMock()
+    mock_proxy.delete_project_gpu_quota.return_value = None
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.delete_project_gpu_quota",
-            new=AsyncMock(return_value=None),
-        ):
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
             resp = await admin_client.delete("/api/v1/admin/gpu-quotas/proj-1/RTX3090")
     assert resp.status_code == 204
 
@@ -250,23 +243,12 @@ async def test_delete_gpu_quota_success(admin_client):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-@pytest.mark.asyncio
 async def test_get_gpu_quotas_available_calculation(admin_client):
-    """limit - in_use 계산 검증: available = limit - in_use."""
+    mock_proxy = MagicMock()
+    mock_proxy.project_gpu_quotas.return_value = [{"gpu_type": "RTX3090", "limit": 4, "in_use": 1, "available": 3}]
     with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX3090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={"RTX3090": 4}),
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={"RTX3090": 1}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
+        with patch("app.api.identity.admin.register_drover", return_value=mock_proxy):
+            resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -274,150 +256,9 @@ async def test_get_gpu_quotas_available_calculation(admin_client):
     assert item["gpu_type"] == "RTX3090"
     assert item["limit"] == 4
     assert item["in_use"] == 1
-    assert item["available"] == 3  # 4 - 1
-
-
-@pytest.mark.asyncio
-async def test_get_gpu_quotas_available_zero(admin_client):
-    """quota를 모두 사용한 경우 available = 0."""
-    with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX3090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={"RTX3090": 2}),
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={"RTX3090": 2}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
-    assert resp.status_code == 200
-    item = resp.json()[0]
-    assert item["available"] == 0  # 2 - 2
-
-
-@pytest.mark.asyncio
-async def test_get_gpu_quotas_unlimited(admin_client):
-    """limit = -1 (무제한)일 때 available = -1 검증."""
-    with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX4090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={"RTX4090": -1}),
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={"RTX4090": 5}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 1
-    item = data[0]
-    assert item["gpu_type"] == "RTX4090"
-    assert item["limit"] == -1
-    assert item["in_use"] == 5
-    assert item["available"] == -1  # 무제한이면 available도 -1
-
-
-@pytest.mark.asyncio
-async def test_get_gpu_quotas_multiple_types(admin_client):
-    """여러 GPU 타입에 대한 quota 계산 검증."""
-    with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX3090", "RTX4090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={"RTX3090": 4, "RTX4090": -1}),
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={"RTX3090": 2, "RTX4090": 3}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
-    assert resp.status_code == 200
-    data = {item["gpu_type"]: item for item in resp.json()}
-    assert data["RTX3090"]["available"] == 2  # 4 - 2
-    assert data["RTX4090"]["available"] == -1  # 무제한
-
-
-@pytest.mark.asyncio
-async def test_get_gpu_quotas_no_quota_set(admin_client):
-    """quota 미설정 GPU alias는 limit=0, available=0으로 반환."""
-    with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX3090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={}),  # 미설정
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
-    assert resp.status_code == 200
-    item = resp.json()[0]
-    assert item["gpu_type"] == "RTX3090"
-    assert item["limit"] == 0
-    assert item["in_use"] == 0
-    assert item["available"] == 0
-
-
-@pytest.mark.asyncio
-async def test_get_gpu_quotas_union_of_alias_sources(admin_client):
-    """aliases, effective, usage 세 소스의 합집합으로 결과를 반환."""
-    # aliases에는 없지만 usage에는 있는 타입도 포함되어야 함
-    with patch("app.database.is_db_available", return_value=True):
-        with patch(
-            "app.services.gpu_quota.get_all_gpu_aliases",
-            new=AsyncMock(return_value=["RTX3090"]),
-        ):
-            with patch(
-                "app.services.gpu_quota.get_effective_gpu_quotas",
-                new=AsyncMock(return_value={"RTX3090": 4, "GTX1080": 1}),
-            ):
-                with patch(
-                    "app.services.gpu_quota.get_project_gpu_usage",
-                    new=AsyncMock(return_value={"RTX3090": 1}),
-                ):
-                    resp = await admin_client.get("/api/v1/admin/gpu-quotas/proj-1")
-    assert resp.status_code == 200
-    types = {item["gpu_type"] for item in resp.json()}
-    assert "RTX3090" in types
-    assert "GTX1080" in types
+    assert item["available"] == 3
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # circuit breaker 가드 — is_db_available() False 시 빈 결과
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-@pytest.mark.asyncio
-async def test_get_project_gpu_quotas_returns_empty_when_db_unavailable():
-    """is_db_available() False 시 get_project_gpu_quotas가 즉시 빈 목록을 반환한다."""
-    with patch("app.services.gpu_quota.is_db_available", return_value=False):
-        from app.services.gpu_quota import get_project_gpu_quotas
-
-        result = await get_project_gpu_quotas("test-project")
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_get_effective_gpu_quotas_returns_empty_when_db_unavailable():
-    """is_db_available() False 시 get_effective_gpu_quotas가 즉시 빈 dict를 반환한다."""
-    with patch("app.services.gpu_quota.is_db_available", return_value=False):
-        from app.services.gpu_quota import get_effective_gpu_quotas
-
-        result = await get_effective_gpu_quotas("test-project")
-    assert result == {}

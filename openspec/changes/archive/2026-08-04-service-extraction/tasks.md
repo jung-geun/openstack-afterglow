@@ -1,0 +1,26 @@
+## Implementation Tasks
+
+- [x] Step 1 — Remove GPU-quota duplicates from `backend/tests/test_admin_services_gpu.py`.
+- [x] Step 2 — Collapse admin-gate repetition in `backend/tests/test_admin_write.py`.
+- [x] Step 3 — Remove redundant cases from `frontend/src/lib/api/__tests__/client.security.test.ts`.
+- [x] Step 4 — Extract the repeated Redis cache-miss helper.
+- [x] Step 5 — Create `services/afterglow-crypto` and rewire `k3s_crypto`.
+- [x] Step 6 — Move SSH public-key validation out of Drover internals.
+- [x] Step 7 — Build the service-proxy layer in Afterglow.
+- [x] Step 8 — Add explicit-unavailable dashboard aggregation.
+- [x] Step 9 — Register and verify the new audit prefixes.
+- [x] Step 10 — Fix the Waygate provisioning persistence defect.
+- [x] Step 11 — Replace Waygate fire-and-forget provisioning with a durable worker.
+- [x] Step 12 — Create `services/waygate` and move the implementation.
+- [x] Step 13 — Preserve baked Waygate agent URLs and contracts.
+- [x] Step 14 — Create and verify `services/waygate-sdk`.
+- [x] Step 15 — Add service container images and Compose services.
+- [x] Step 16 — Add the Waygate Kolla deployment role and catalog registration.
+- [x] Step 17 — Repoint every Afterglow Waygate caller and test target.
+- [x] Step 18 — Migrate Waygate data and remove Afterglow ownership.
+- [x] Step 19 — Extract the Drover service inventory.
+- [x] Step 20 — Complete Drover-specific boundary, proxy, SDK, image, Kolla, and cutover work.
+- [x] Step 21 — Extract the Lumen service inventory.
+- [x] Step 22 — Convert Lumen to a remote client of Afterglow's MCP control plane.
+- [x] Step 23 — Complete Lumen-specific boundary, proxy, SDK, image, Kolla, and cutover work.
+- [x] Step 24 — Document mechanical standalone-repository promotion.

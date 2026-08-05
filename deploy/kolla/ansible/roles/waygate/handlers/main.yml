@@ -1,0 +1,24 @@
+---
+- name: Restart waygate-api container
+  become: true
+  community.docker.docker_container:
+    name: waygate_api
+    state: started
+    restart: true
+  when: inventory_hostname in groups['waygate']
+
+- name: Restart waygate-worker container
+  become: true
+  community.docker.docker_container:
+    name: waygate_worker
+    state: started
+    restart: true
+  when: inventory_hostname in groups['waygate']
+
+- name: Restart haproxy container
+  become: true
+  community.docker.docker_container:
+    name: haproxy
+    state: started
+    restart: true
+  when: inventory_hostname in groups['haproxy']
