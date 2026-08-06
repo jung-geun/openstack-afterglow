@@ -25,7 +25,7 @@
     "test:k3s": "node scripts/test-target.js k3s",
     "test:workers": "node scripts/test-target.js workers",
     "test:waygate": "node scripts/test-target.js waygate",
-    "test:services": "uv run --project services/waygate --extra dev python -m pytest services/waygate/tests -v && uv run --project services/waygate-sdk --extra dev python -m pytest services/waygate-sdk/tests -v && uv run --project services/drover --extra dev python -m pytest services/drover/tests -v && uv run --project services/drover-sdk --extra dev python -m pytest services/drover-sdk/tests -v",
+    "test:services": "uv run --project services/waygate --extra dev python -m pytest services/waygate/tests -v && uv run --project services/waygate/sdk --extra dev python -m pytest services/waygate/sdk/tests -v && uv run --project services/drover --extra dev python -m pytest services/drover/tests -v && uv run --project services/drover/sdk --extra dev python -m pytest services/drover/sdk/tests -v && uv run --project services/lumen --extra dev python -m pytest services/lumen/tests -v && uv run --project services/lumen/sdk --extra dev python -m pytest services/lumen/sdk/tests -v",
     "test:frontend:design": "node scripts/test-target.js design",
     "test:integration:auth": "node scripts/test-target.js integration:auth",
     "test:integration:admin": "node scripts/test-target.js integration:admin",

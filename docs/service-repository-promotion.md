@@ -1,6 +1,6 @@
 # Service repository promotion
 
-Waygate, Drover, Lumen, and their OpenStack SDKs are self-contained distributions under `services/`. Promotion to standalone repositories is a history-preserving directory split; it does not require moving or rewriting service source code.
+Waygate, Drover, and Lumen are self-contained service repositories under `services/`; each service tree includes its OpenStack SDK at `sdk/`. Promotion to standalone repositories is a history-preserving directory split; it does not require moving or rewriting service source code.
 
 ## Preconditions
 
@@ -8,13 +8,13 @@ Before splitting a distribution:
 
 1. Complete and archive the active OpenSpec change.
 2. Run the monorepo test and lint gates from the repository root.
-3. Confirm that the service distribution contains no `app.*` imports, contains its own `LICENSE` and `Dockerfile`, and has no dependency source path outside the distribution.
+3. Confirm that the service distribution and its `sdk/` distribution contain no `app.*` imports, the service root contains its own `LICENSE` and `Dockerfile`, and neither package has a dependency source path outside the service tree.
 4. Confirm that service wheels resolve `afterglow-crypto` through its immutable direct Git dependency; do not restore sibling editable sources.
 5. Choose the target repository and its protected default branch.
 
 ## Split a distribution
 
-Run the split from the Afterglow repository root. Replace `<distribution>` with one of `afterglow-crypto`, `waygate`, `waygate-sdk`, `drover`, `drover-sdk`, `lumen`, or `lumen-sdk`.
+Run the split from the Afterglow repository root. Replace `<distribution>` with one of `afterglow-crypto`, `waygate`, `drover`, or `lumen`; each service split includes its `sdk/` directory.
 
 ```bash
 git subtree split --prefix="services/<distribution>" -b "<distribution>-split"
@@ -26,9 +26,9 @@ For a hosted repository, replace the local bare-repository URL with the hosted G
 
 ## Reconnect Afterglow
 
-After the standalone package is published:
+After the standalone service repository is published:
 
-1. Replace the corresponding path dependency in `backend/pyproject.toml` with the released SDK version. Afterglow depends on `waygate-sdk`, `drover-sdk`, and `lumen-sdk`; it does not depend on service implementation packages.
+1. Point each `waygate-sdk`, `drover-sdk`, or `lumen-sdk` dependency in `backend/pyproject.toml` to the released service repository's `sdk` subdirectory at an immutable commit.
 2. Refresh `backend/uv.lock` through the normal dependency workflow.
 3. Point the Kolla role at the new image build pipeline:
    - Waygate: `waygate_api_image`, `waygate_worker_image`, `waygate_image_tag`
