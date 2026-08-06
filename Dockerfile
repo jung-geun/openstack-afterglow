@@ -26,8 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY services/afterglow-crypto/ /services/afterglow-crypto/
-COPY services/waygate-sdk/ /services/waygate-sdk/
-COPY services/drover-sdk/ /services/drover-sdk/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
