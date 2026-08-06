@@ -44,9 +44,9 @@ dependencies = [
     "psycopg[binary]==3.3.4",  # AsyncPostgresSaver 용 — [binary]로 libpq 번들(시스템 의존 불요)
     "langchain-mcp-adapters==0.3.1",
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
-    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate-sdk.git@8455a9f94b25006b3326af329a6e34d1bfdcb54c",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover-sdk.git@e65b9261ce883b0fae9272e4b483699fd127ac2a",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen-sdk.git@e72d95e9ca78bba55e03518f8ae2b59710b60d34",
+    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@b6738ea7364ca463f4633dab547d8c2af5af8401#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@d8ba8c5dfc847e1553b46315031c0352fba22aa9#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@20e7bd3ffe93b4174dd53995e8aed46e82dbd1af#subdirectory=sdk",
 ]
 
 [build-system]
@@ -126,9 +126,9 @@ worker = [
     "langchain-mcp-adapters==0.3.1",
     "apscheduler>=3.10",
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
-    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate-sdk.git@8455a9f94b25006b3326af329a6e34d1bfdcb54c",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover-sdk.git@e65b9261ce883b0fae9272e4b483699fd127ac2a",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen-sdk.git@e72d95e9ca78bba55e03518f8ae2b59710b60d34",
+    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@b6738ea7364ca463f4633dab547d8c2af5af8401#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@d8ba8c5dfc847e1553b46315031c0352fba22aa9#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@20e7bd3ffe93b4174dd53995e8aed46e82dbd1af#subdirectory=sdk",
 ]
 
 [tool.hatch.build.targets.wheel]
