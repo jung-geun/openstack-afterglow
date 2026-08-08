@@ -191,6 +191,8 @@ docker logs afterglow_frontend
 docker logs afterglow_worker
 ```
 
+Drover, Lumen, Waygate를 OpenStack SDK service catalog로 사용하는 환경에서는 [서비스 카탈로그 등록 튜토리얼](openstack-service-catalog.md)에서 service type, endpoint, 리전 검증 절차를 완료하세요.
+
 ---
 
 ## Kubernetes 배포
