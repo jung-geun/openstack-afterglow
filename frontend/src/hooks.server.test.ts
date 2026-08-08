@@ -249,9 +249,9 @@ describe('hooks.server SPA fallback', () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it('keeps 404 for backend-forwarded prefixes (/api, /v1)', async () => {
+	it('keeps 404 for backend-forwarded prefixes (/api, /v1, /.well-known)', async () => {
 		const { handle } = await loadHandle();
-		for (const path of ['/api/v1/x', '/v1/chat/completions']) {
+		for (const path of ['/api/v1/x', '/v1/chat/completions', '/.well-known/oauth-protected-resource/api/v1/mcp']) {
 			const { event, fetch } = createNavRequest(`http://f.example.com${path}`, { cookies: SESSION });
 			const resolve = vi.fn(async () => new Response('nf', { status: 404, headers: new Headers() }));
 			const response = await handle({ event, resolve });

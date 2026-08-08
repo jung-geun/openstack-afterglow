@@ -295,6 +295,13 @@ spec:
     - host: afterglow.example.com
       http:
         paths:
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:
@@ -308,7 +315,7 @@ spec:
               service:
                 name: frontend
                 port:
-                  number: 3000
+                  number: 3080
 ```
 
 > **주의**: 프론트엔드 `PUBLIC_API_BASE` 환경변수는 브라우저에서 직접 접근 가능한 외부 URL로 설정해야 합니다. 클러스터 내부 주소(`http://backend:8000`)로 설정하면 브라우저에서 접근할 수 없습니다.

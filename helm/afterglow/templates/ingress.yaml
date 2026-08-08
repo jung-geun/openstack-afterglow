@@ -69,7 +69,7 @@ spec:
                 port:
                   number: 3080
     {{- range .Values.ingress.apiHosts }}
-    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)만 백엔드로. 나머지는 프론트(랜딩).
+    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)은 Lumen 서비스(포트 8012)가 제공한다. 나머지는 프론트(랜딩).
     - host: {{ . }}
       http:
         paths:
@@ -96,9 +96,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: backend
+                name: lumen
                 port:
-                  number: 8000
+                  number: 8012
           - path: /api
             pathType: Prefix
             backend:

@@ -103,6 +103,7 @@ const targets = {
 		backend: {
 			selectors: [
 				"tests/test_afterglow_conf_config.py",
+				"tests/test_ingress_root_path_coverage.py",
 				"tests/test_config_insecure_guard.py",
 				"tests/test_config_keystone_url.py",
 				"tests/test_config_layer_images.py",
