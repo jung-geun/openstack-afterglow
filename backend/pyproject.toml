@@ -35,7 +35,7 @@ dependencies = [
     "beautifulsoup4==4.14.3",
     "puremagic==1.30",
     "Pillow==12.1.1",
-    "pypdf==6.7.3",
+    "pypdf==6.15.0",
     "mutagen==1.47.0",
     "pgvector==0.4.2",
     "langgraph==1.2.2",
