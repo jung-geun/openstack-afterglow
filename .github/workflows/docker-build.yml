@@ -18,7 +18,7 @@ on:
         required: false
         default: 'all'
         type: choice
-        options: [all, afterglow, drover, waygate, backend, frontend, worker]
+        options: [all, afterglow, backend, frontend, worker]
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
@@ -70,12 +70,10 @@ jobs:
 
           CHANGED=$(git diff --name-only HEAD^1 HEAD 2>/dev/null || echo "ALL")
 
-          # 비교 불가(초기 커밋 등)와 빌드 파이프라인 변경은 전체 이미지를 빌드한다.
+          # 비교 불가(초기 커밋 등)와 빌드 파이프라인 변경은 Afterglow 이미지를 모두 빌드한다.
           if [[ "$CHANGED" == "ALL" ]] || echo "$CHANGED" | grep -qE '^\.github/workflows/docker-build\.yml$'; then
             echo "afterglow=true" >> $GITHUB_OUTPUT
             echo "frontend=true" >> $GITHUB_OUTPUT
-            echo "drover=true" >> $GITHUB_OUTPUT
-            echo "waygate=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -91,25 +89,11 @@ jobs:
             echo "frontend=false" >> $GITHUB_OUTPUT
           fi
 
-          if echo "$CHANGED" | grep -qE '^(services/drover/|Dockerfile$|\.dockerignore$|services/afterglow-crypto/)'; then
-            echo "drover=true" >> $GITHUB_OUTPUT
-          else
-            echo "drover=false" >> $GITHUB_OUTPUT
-          fi
-
-          if echo "$CHANGED" | grep -qE '^(services/waygate/|Dockerfile$|\.dockerignore$|services/afterglow-crypto/)'; then
-            echo "waygate=true" >> $GITHUB_OUTPUT
-          else
-            echo "waygate=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build target list
         id: set-targets
         env:
           CHANGED_AFTERGLOW: ${{ steps.filter.outputs.afterglow }}
           CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
-          CHANGED_DROVER: ${{ steps.filter.outputs.drover }}
-          CHANGED_WAYGATE: ${{ steps.filter.outputs.waygate }}
           DISPATCH_TARGETS: ${{ inputs.targets }}
           EFFECTIVE_REF: ${{ steps.eff-ref.outputs.ref }}
         run: |
@@ -118,17 +102,15 @@ jobs:
               backend) echo 'targets=["backend"]' >> $GITHUB_OUTPUT ;;
               frontend) echo 'targets=["frontend"]' >> $GITHUB_OUTPUT ;;
               worker) echo 'targets=["worker"]' >> $GITHUB_OUTPUT ;;
-              afterglow) echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT ;;
-              drover) echo 'targets=["drover-api","drover-worker"]' >> $GITHUB_OUTPUT ;;
-              waygate) echo 'targets=["waygate-api","waygate-worker"]' >> $GITHUB_OUTPUT ;;
-              *) echo 'targets=["backend","frontend","worker","drover-api","drover-worker","waygate-api","waygate-worker"]' >> $GITHUB_OUTPUT ;;
+              afterglow|all) echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT ;;
+              *) echo "Unsupported dispatch target: ${DISPATCH_TARGETS}" >&2; exit 1 ;;
             esac
             exit 0
           fi
 
-          # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
+          # dev 브랜치 이외(main, v* 태그, PR)는 Afterglow 전체 빌드
           if [[ "${EFFECTIVE_REF}" != "refs/heads/dev" ]]; then
-            echo 'targets=["backend","frontend","worker","drover-api","drover-worker","waygate-api","waygate-worker"]' >> $GITHUB_OUTPUT
+            echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -139,12 +121,6 @@ jobs:
           # Backend/worker와 frontend는 같은 dev 배포 세트로 갱신한다.
           if [[ "${CHANGED_FRONTEND}" == "true" || "${CHANGED_AFTERGLOW}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
-          fi
-          if [[ "${CHANGED_DROVER}" == "true" ]]; then
-            TARGETS=$(echo "$TARGETS" | jq -c '. + ["drover-api", "drover-worker"]')
-          fi
-          if [[ "${CHANGED_WAYGATE}" == "true" ]]; then
-            TARGETS=$(echo "$TARGETS" | jq -c '. + ["waygate-api", "waygate-worker"]')
           fi
           echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
 
@@ -214,7 +190,6 @@ jobs:
             backend) image_name="afterglow-api" ;;
             frontend) image_name="afterglow" ;;
             worker) image_name="afterglow-worker" ;;
-            drover-api|drover-worker|waygate-api|waygate-worker) image_name="${{ matrix.target }}" ;;
             *) echo "Unsupported build target: ${{ matrix.target }}" >&2; exit 1 ;;
           esac
           echo "name=${REGISTRY}/${IMAGE_OWNER}/${image_name}" >> $GITHUB_OUTPUT
@@ -342,13 +317,13 @@ jobs:
       - name: Resolve image name
         id: img
         run: |
-          if [ "${{ matrix.target }}" = "backend" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
-          elif [ "${{ matrix.target }}" = "worker" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
-          else
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
-          fi
+          case "${{ matrix.target }}" in
+            backend) image_name="afterglow-api" ;;
+            frontend) image_name="afterglow" ;;
+            worker) image_name="afterglow-worker" ;;
+            *) echo "Unsupported manifest target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          echo "name=${REGISTRY}/${IMAGE_OWNER}/${image_name}" >> $GITHUB_OUTPUT
 
       - name: Compute final tags
         id: tags
