@@ -1,5 +1,59 @@
 ---
-- name: Postgres | Validate Lumen checkpointer PostgreSQL endpoint connectivity
+- name: Postgres | Start managed Lumen PostgreSQL container
+  become: true
+  community.docker.docker_container:
+    name: lumen_postgres
+    image: "{{ lumen_postgres_image_ref }}"
+    state: started
+    restart_policy: unless-stopped
+    volumes:
+      - "{{ lumen_postgres_volume }}:/var/lib/postgresql/data"
+    env:
+      POSTGRES_DB: "{{ lumen_postgres_database }}"
+      POSTGRES_USER: "{{ lumen_postgres_user }}"
+      POSTGRES_PASSWORD: "{{ lumen_postgres_password }}"
+    ports:
+      - "{{ lumen_postgres_bind_address }}:{{ lumen_postgres_port }}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ lumen_postgres_user }} -d {{ lumen_postgres_database }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when: enable_lumen_postgres | bool
+
+- name: Postgres | Wait for managed Lumen PostgreSQL container health
+  become: true
+  community.docker.docker_container_info:
+    name: lumen_postgres
+  register: lumen_postgres_container_info
+  until:
+    - lumen_postgres_container_info.exists
+    - lumen_postgres_container_info.container.State.Health.Status is defined
+    - lumen_postgres_container_info.container.State.Health.Status == 'healthy'
+  retries: 12
+  delay: 5
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when: enable_lumen_postgres | bool
+
+- name: Postgres | Verify authenticated SELECT 1 on managed Lumen PostgreSQL
+  become: true
+  community.docker.docker_container_exec:
+    container: lumen_postgres
+    command: >
+      psql -U {{ lumen_postgres_user }} -d {{ lumen_postgres_database }} -c "SELECT 1;"
+  register: lumen_postgres_select_check
+  failed_when:
+    - lumen_postgres_select_check.rc != 0
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when: enable_lumen_postgres | bool
+
+- name: Postgres | Validate Lumen checkpointer PostgreSQL endpoint connectivity (external)
   ansible.builtin.wait_for:
     host: "{{ lumen_checkpointer_postgres_host }}"
     port: "{{ lumen_checkpointer_postgres_port | int }}"
@@ -9,8 +63,9 @@
   delegate_to: "{{ groups['lumen'][0] }}"
   when:
     - lumen_enable_checkpointer | bool
+    - not (enable_lumen_postgres | bool)
 
-- name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity
+- name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity (external)
   ansible.builtin.wait_for:
     host: "{{ lumen_memory_pgvector_host }}"
     port: "{{ lumen_memory_pgvector_port | int }}"
@@ -20,3 +75,4 @@
   delegate_to: "{{ groups['lumen'][0] }}"
   when:
     - lumen_enable_pgvector | bool
+    - not (enable_lumen_postgres | bool)

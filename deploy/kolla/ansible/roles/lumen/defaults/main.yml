@@ -5,6 +5,13 @@ lumen_image_tag: "{{ afterglow_image_tag | default('latest') }}"
 lumen_api_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/lumen-api"
 lumen_worker_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack-afterglow') }}/lumen-worker"
 
+lumen_source_mode: "{{ enable_lumen_source_build | default(enable_source_build | default(lumen_dev_mode | default(false))) | bool }}"
+lumen_source_repo: "https://github.com/openstack-afterglow/lumen.git"
+lumen_source_version: "c7d59a255148173232e5a4b32e90498dea5cee29"
+lumen_source_dir: "{{ lumen_source_checkout_path | default('/opt/afterglow/src/lumen') }}"
+lumen_api_image_ref: "{{ 'afterglow-local/lumen-api:' ~ (lumen_source_version | truncate(12, True, '')) if (lumen_source_mode | bool) else (lumen_api_image ~ ':' ~ lumen_image_tag) }}"
+lumen_worker_image_ref: "{{ 'afterglow-local/lumen-worker:' ~ (lumen_source_version | truncate(12, True, '')) if (lumen_source_mode | bool) else (lumen_worker_image ~ ':' ~ lumen_image_tag) }}"
+
 enable_lumen: "no"
 enable_lumen_api: "{{ enable_lumen }}"
 enable_lumen_worker: "{{ enable_lumen }}"
@@ -13,34 +20,49 @@ lumen_run_preconditions: true
 lumen_api_port: 8012
 lumen_database_name: "lumen"
 lumen_database_user: "lumen"
+lumen_valkey_host: "{{ kolla_internal_vip_address }}"
+lumen_valkey_port: "{{ redis_port | default(6379) }}"
+lumen_valkey_password: "{{ valkey_master_password }}"
 lumen_redis_db_index: 8
+lumen_redis_url: "redis://default:{{ lumen_valkey_password }}@{{ lumen_valkey_host }}:{{ lumen_valkey_port }}/{{ lumen_redis_db_index }}"
 
 lumen_keystone_user: "lumen"
 lumen_service_project_name: "lumen-service"
 lumen_external_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}:{{ lumen_api_port }}"
+lumen_public_endpoint_url: "{{ lumen_external_url }}"
+lumen_internal_endpoint_url: "http://{{ kolla_internal_vip_address }}:{{ lumen_api_port }}"
+lumen_admin_endpoint_url: "{{ lumen_internal_endpoint_url }}"
 
-# Existing Lumen ciphertext was derived from this Afterglow master key; cutover must keep it byte-compatible.
 lumen_encryption_key: "{{ afterglow_kubeconfig_encryption_key | default('') }}"
-# Authenticates Lumen's workload to Afterglow's opaque delegated-MCP bridge.
-# It is distinct from user Keystone and personal MCP credentials.
 lumen_mcp_service_token: "{{ afterglow_lumen_mcp_service_token | default('') }}"
 lumen_mcp_control_plane_url: "{{ public_protocol | default('https') }}://{{ kolla_internal_fqdn | default(kolla_internal_vip_address) }}"
 
-# Lumen PostgreSQL LangGraph Checkpointer
+# Managed PostgreSQL for Lumen Checkpointer
+enable_lumen_postgres: false
+lumen_postgres_image_ref: "pgvector/pgvector:0.8.6-pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b"
+lumen_postgres_database: "lumen"
+lumen_postgres_user: "lumen"
+lumen_postgres_password: ""
+lumen_postgres_bind_address: "172.30.0.11"
+lumen_postgres_port: 5432
+lumen_postgres_volume: "lumen_postgres_data"
+
+# Lumen LangGraph Checkpointer
 lumen_enable_checkpointer: true
-lumen_checkpointer_postgres_db: "lumen_checkpointer"
-lumen_checkpointer_postgres_user: "lumen_checkpointer"
-lumen_checkpointer_postgres_host: "{{ database_address | default('localhost') }}"
-lumen_checkpointer_postgres_port: 5432
-lumen_checkpointer_postgres_url: "postgresql://{{ lumen_checkpointer_postgres_user }}:{{ lumen_checkpointer_postgres_password | default('') }}@{{ lumen_checkpointer_postgres_host }}:{{ lumen_checkpointer_postgres_port }}/{{ lumen_checkpointer_postgres_db }}"
+lumen_checkpointer_postgres_db: "{{ lumen_postgres_database if (enable_lumen_postgres | bool) else 'lumen_checkpointer' }}"
+lumen_checkpointer_postgres_user: "{{ lumen_postgres_user if (enable_lumen_postgres | bool) else 'lumen_checkpointer' }}"
+lumen_checkpointer_postgres_host: "{{ lumen_postgres_bind_address if (enable_lumen_postgres | bool) else database_address | default(kolla_internal_vip_address) }}"
+lumen_checkpointer_postgres_port: "{{ lumen_postgres_port if (enable_lumen_postgres | bool) else 5432 }}"
+lumen_checkpointer_postgres_url: "postgresql://{{ lumen_checkpointer_postgres_user }}:{{ lumen_postgres_password if (enable_lumen_postgres | bool) else lumen_checkpointer_postgres_password | default('') }}@{{ lumen_checkpointer_postgres_host }}:{{ lumen_checkpointer_postgres_port }}/{{ lumen_checkpointer_postgres_db }}"
 
 # Lumen pgvector Semantic Memory Store
-lumen_enable_pgvector: true
+lumen_enable_pgvector: false
 lumen_memory_pgvector_db: "lumen_pgvector"
 lumen_memory_pgvector_user: "lumen_pgvector"
-lumen_memory_pgvector_host: "{{ database_address | default('localhost') }}"
+lumen_memory_pgvector_host: "{{ database_address | default(kolla_internal_vip_address) }}"
 lumen_memory_pgvector_port: 5432
-lumen_memory_pgvector_url: "postgresql://{{ lumen_memory_pgvector_user }}:{{ lumen_memory_pgvector_password | default('') }}@{{ lumen_memory_pgvector_host }}:{{ lumen_memory_pgvector_port }}/{{ lumen_memory_pgvector_db }}"
+lumen_memory_pgvector_url: ""
+chat_semantic_memory_enabled: false
 
 # Lumen S3 Asset Storage
 lumen_s3_endpoint_url: ""
@@ -58,15 +80,15 @@ lumen_services:
     container_name: lumen_api
     group: lumen
     enabled: "{{ enable_lumen_api | bool }}"
-    image: "{{ lumen_api_image }}:{{ lumen_image_tag }}"
+    image: "{{ lumen_api_image_ref }}"
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/lumen/lumen.conf:/etc/lumen/lumen.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
-      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
-      REDIS_URL: "redis://:{{ lumen_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ lumen_redis_db_index }}"
+      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      REDIS_URL: "{{ lumen_redis_url }}"
       KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
       KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
       KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"
@@ -89,13 +111,13 @@ lumen_services:
       retries: 3
       start_period: 30s
     ports:
-      - "{{ lumen_api_port }}:8012"
+      - "{{ kolla_internal_vip_address }}:{{ lumen_api_port }}:8012"
 
   lumen-worker:
     container_name: lumen_worker
     group: lumen
     enabled: "{{ enable_lumen_worker | bool }}"
-    image: "{{ lumen_worker_image }}:{{ lumen_image_tag }}"
+    image: "{{ lumen_worker_image_ref }}"
     command: ["python", "-m", "lumen.worker"]
     restart_policy: unless-stopped
     volumes:
@@ -103,8 +125,8 @@ lumen_services:
       - "kolla_logs:/var/log/kolla/"
     environment:
       LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
-      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
-      REDIS_URL: "redis://:{{ lumen_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ lumen_redis_db_index }}"
+      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      REDIS_URL: "{{ lumen_redis_url }}"
       KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
       KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
       KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"

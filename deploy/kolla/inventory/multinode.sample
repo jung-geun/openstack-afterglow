@@ -1,5 +1,6 @@
 # Afterglow × kolla-ansible multinode inventory sample
-# afterglow 컨테이너는 control 노드에 배포됩니다 (skyline/horizon 동일 패턴)
+# Plugin services (afterglow, waygate, drover, lumen) run on control nodes
+# Listeners bind directly to internal VIP ports (no HAProxy integration required)
 
 [control]
 ctrl01 ansible_host=10.0.0.11 ansible_user=ubuntu
@@ -22,32 +23,26 @@ storage01 ansible_host=10.0.0.31 ansible_user=ubuntu
 [deployment]
 localhost ansible_connection=local
 
-# ── afterglow 그룹 (control 노드에 자동 배포) ──────────────────────────────────
+# ── Plugin Logical Groups ─────────────────────────────────────────────────────
 [afterglow:children]
 control
 
-# Waygate API and worker run on control nodes.
 [waygate:children]
 control
 
-# Drover API and worker run on control nodes.
 [drover:children]
 control
 
-# Lumen API and worker run on control nodes.
 [lumen:children]
 control
 
-# ── kolla 표준 논리 그룹 ──────────────────────────────────────────────────────
+# ── Kolla Logical Groups ──────────────────────────────────────────────────────
 [baremetal:children]
 control
 network
 compute
 storage
 monitoring
-
-[haproxy:children]
-network
 
 [mariadb:children]
 control

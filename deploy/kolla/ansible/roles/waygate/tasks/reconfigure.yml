@@ -1,4 +1,9 @@
 ---
-- name: Reconfigure | Re-render config and restart Waygate containers
-  ansible.builtin.debug:
-    msg: "Reconfigure handled by config.yml and handlers"
+- name: Include precheck tasks
+  ansible.builtin.include_tasks: precheck.yml
+
+- name: Include config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Include start tasks
+  ansible.builtin.include_tasks: start.yml

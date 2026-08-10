@@ -6,11 +6,3 @@
     state: absent
   loop: "{{ drover_services | dict2items }}"
   when: inventory_hostname in groups['drover']
-
-- name: Destroy | Remove HAProxy Drover config
-  become: true
-  ansible.builtin.file:
-    path: "{{ drover_haproxy_services_d }}/drover.cfg"
-    state: absent
-  when: inventory_hostname in groups['haproxy']
-  notify: Restart haproxy container

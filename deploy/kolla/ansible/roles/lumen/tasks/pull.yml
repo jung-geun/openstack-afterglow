@@ -9,3 +9,4 @@
   when:
     - inventory_hostname in groups['lumen']
     - item.value.enabled | bool
+    - not (lumen_source_mode | default(false) | bool)

@@ -6,21 +6,36 @@ set -euo pipefail
 # Usage: ./deploy/kolla/uninstall.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
+REPO_DIR="${AFTERGLOW_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../.. && pwd)}"
+
 log()  { echo "[afterglow-uninstall] $*"; }
 warn() { echo "[afterglow-uninstall] WARNING: $*" >&2; }
 die()  { echo "[afterglow-uninstall] ERROR: $*" >&2; exit 1; }
 
-# ── kolla-ansible 설치 경로 탐지 ──────────────────────────────────────────────
 detect_kolla_dir() {
   if [[ -n "${KOLLA_ANSIBLE_DIR:-}" ]]; then
     echo "$KOLLA_ANSIBLE_DIR"
     return 0
   fi
 
+  if [[ -n "${KOLLA_ANSIBLE_BIN:-}" ]]; then
+    local bin_prefix
+    bin_prefix=$(cd "$(dirname "$KOLLA_ANSIBLE_BIN")/.." && pwd)
+    if [[ -d "$bin_prefix/share/kolla-ansible" ]]; then
+      echo "$bin_prefix/share/kolla-ansible"
+      return 0
+    fi
+    if [[ -d "$bin_prefix/local/share/kolla-ansible" ]]; then
+      echo "$bin_prefix/local/share/kolla-ansible"
+      return 0
+    fi
+  fi
+
   local py_path
   py_path=$(python3 -c "
 import sys, os
 for candidate in [
+    '/etc/kolla/.venv/share/kolla-ansible',
     '/usr/local/share/kolla-ansible',
     '/usr/share/kolla-ansible',
 ]:
@@ -30,7 +45,7 @@ for candidate in [
 sys.exit(1)
 " 2>/dev/null) && echo "$py_path" && return 0
 
-  for candidate in /usr/local/share/kolla-ansible /usr/share/kolla-ansible; do
+  for candidate in /etc/kolla/.venv/share/kolla-ansible /usr/local/share/kolla-ansible /usr/share/kolla-ansible; do
     if [[ -d "$candidate" ]]; then
       echo "$candidate"
       return 0
@@ -44,60 +59,50 @@ log "kolla-ansible 설치 경로 탐지 중..."
 KOLLA_DIR=$(detect_kolla_dir) || die "kolla-ansible 설치 경로를 찾을 수 없습니다. KOLLA_ANSIBLE_DIR 환경변수를 설정하세요."
 log "kolla-ansible 경로: $KOLLA_DIR"
 
-# ── 1. role symlink 제거 ──────────────────────────────────────────────────────
-ROLE_LINK="$KOLLA_DIR/ansible/roles/afterglow"
-if [[ -L "$ROLE_LINK" ]]; then
-  rm -f "$ROLE_LINK"
-  log "role symlink 제거 완료: $ROLE_LINK"
-elif [[ -e "$ROLE_LINK" ]]; then
-  warn "$ROLE_LINK 는 symlink가 아닙니다. 수동으로 확인하세요."
-else
-  log "role symlink 없음 (skip): $ROLE_LINK"
-fi
+remove_symlink_safe() {
+  local target="$1"
+  local link_path="$2"
+  local desc="$3"
 
-# ── 2. play symlink 제거 ──────────────────────────────────────────────────────
-PLAY_LINK="$KOLLA_DIR/ansible/afterglow.yml"
-if [[ -L "$PLAY_LINK" ]]; then
-  rm -f "$PLAY_LINK"
-  log "play symlink 제거 완료: $PLAY_LINK"
-elif [[ -e "$PLAY_LINK" ]]; then
-  warn "$PLAY_LINK 는 symlink가 아닙니다. 수동으로 확인하세요."
-else
-  log "play symlink 없음 (skip): $PLAY_LINK"
-fi
+  log "$desc 심볼릭 링크 제거 확인 중: $link_path"
 
-# ── 3. site.yml에서 marker 블록 제거 ─────────────────────────────────────────
-SITE_YML="$KOLLA_DIR/ansible/site.yml"
-if [[ ! -f "$SITE_YML" ]]; then
-  warn "site.yml 파일을 찾을 수 없습니다: $SITE_YML"
-else
-  log "site.yml에서 afterglow integration 블록 제거 중..."
-  python3 - "$SITE_YML" <<'PYEOF'
-import sys, re
+  if [[ ! -e "$link_path" && ! -L "$link_path" ]]; then
+    log "$link_path 존재하지 않음 (skip)"
+    return 0
+  fi
 
-site_yml = sys.argv[1]
-content = open(site_yml).read()
+  if [[ ! -L "$link_path" ]]; then
+    die "제거 거부: $link_path 가 심볼릭 링크가 아닙니다."
+  fi
 
-if '# BEGIN afterglow integration' not in content:
-    print('[afterglow-uninstall] site.yml에 afterglow 블록 없음 (skip)')
-    sys.exit(0)
+  local current_target
+  current_target=$(readlink "$link_path" || true)
+  local current_real expected_real
+  current_real=$(realpath "$link_path" 2>/dev/null || true)
+  expected_real=$(realpath "$target" 2>/dev/null || true)
 
-# BEGIN ~ END 마커 블록(포함) 제거, 앞의 빈 줄도 함께 정리
-new_content = re.sub(
-    r'\n?# BEGIN afterglow integration\n.*?# END afterglow integration\n',
-    '',
-    content,
-    flags=re.DOTALL
-)
-open(site_yml, 'w').write(new_content)
-print('[afterglow-uninstall] site.yml에서 afterglow integration 블록 제거 완료')
-PYEOF
-fi
+  if [[ "$current_target" != "$target" ]] && [[ -z "$expected_real" || "$current_real" != "$expected_real" ]]; then
+    die "제거 거부: $link_path 가 예상 대상($target)을 가리키지 않습니다 (현재: $current_target)."
+  fi
 
-# ── 완료 ─────────────────────────────────────────────────────────────────────
+  rm "$link_path" || die "$link_path 심볼릭 링크 제거 실패"
+  log "심볼릭 링크 제거 완료: $link_path"
+}
+
+ROLES_DIR="$KOLLA_DIR/ansible/roles"
+
+# 1. 4개 Role 심볼릭 링크 제거
+remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
+remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
+remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
+remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
+
+# 2. 1개 Aggregate playbook 심볼릭 링크 제거
+remove_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " afterglow integration uninstalled."
-echo " globals.yml 및 passwords.yml은 변경되지 않았습니다."
-echo " 필요하면 수동으로 afterglow 관련 설정을 제거하세요."
+echo " Afterglow integration symlinks removed."
+echo " Stock site.yml, globals.yml, passwords.yml, databases, containers, images,"
+echo " and source checkouts remain UNTOUCHED."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

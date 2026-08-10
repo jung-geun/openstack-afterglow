@@ -2,17 +2,18 @@
 - name: Bootstrap | Pull Drover API image for migration
   become: true
   community.docker.docker_image:
-    name: "{{ drover_api_image }}:{{ drover_image_tag }}"
+    name: "{{ drover_api_image_ref }}"
     source: pull
     force_source: "{{ drover_image_tag == 'latest' }}"
   run_once: true
   delegate_to: "{{ groups['drover'] | first }}"
+  when: not (drover_source_mode | default(false) | bool)
 
 - name: Bootstrap | Apply Drover database migrations
   become: true
   community.docker.docker_container:
     name: drover_bootstrap
-    image: "{{ drover_api_image }}:{{ drover_image_tag }}"
+    image: "{{ drover_api_image_ref }}"
     command: ["python", "-m", "drover.scripts.migrate", "--apply"]
     state: started
     detach: false
@@ -20,11 +21,10 @@
     volumes:
       - "{{ drover_config_dir }}/drover.conf:/app/drover.conf:ro"
     env:
-      DATABASE_URL: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
-      REDIS_URL: "redis://:{{ drover_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ drover_redis_db_index }}"
+      DATABASE_URL: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
+      REDIS_URL: "{{ drover_redis_url }}"
       DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
   no_log: true
   register: drover_bootstrap_result
   run_once: true
   delegate_to: "{{ groups['drover'] | first }}"
-

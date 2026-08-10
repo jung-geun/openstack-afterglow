@@ -3,7 +3,7 @@
   become: true
   community.docker.docker_container:
     name: afterglow_bootstrap
-    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+    image: "{{ afterglow_backend_image_ref }}"
     command: ["python", "-m", "app.bootstrap"]
     state: started
     detach: false
@@ -11,15 +11,13 @@
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
     env:
-      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
-      REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
-  register: bootstrap_result
+      DATABASE_URL: "{{ afterglow_database_url }}"
+      REDIS_URL: "{{ afterglow_redis_url }}"
+  no_log: true
   run_once: true
   delegate_to: "{{ groups['afterglow'] | first }}"
-  failed_when: false
 
 - name: Bootstrap | Show bootstrap output
   ansible.builtin.debug:
-    msg: "{{ bootstrap_result }}"
+    msg: "Afterglow database bootstrap completed successfully"
   run_once: true
-  when: bootstrap_result is defined

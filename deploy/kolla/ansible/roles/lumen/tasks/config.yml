@@ -18,23 +18,3 @@
     owner: root
     group: root
   when: inventory_hostname in groups['lumen']
-  notify:
-    - Restart lumen-api container
-    - Restart lumen-worker container
-
-- name: Config | Ensure HAProxy services.d directory exists
-  become: true
-  ansible.builtin.file:
-    path: "{{ lumen_haproxy_services_d }}"
-    state: directory
-    mode: "0755"
-  when: inventory_hostname in groups['haproxy']
-
-- name: Config | Render haproxy lumen.cfg
-  become: true
-  ansible.builtin.template:
-    src: haproxy-lumen.cfg.j2
-    dest: "{{ lumen_haproxy_services_d }}/lumen.cfg"
-    mode: "0644"
-  when: inventory_hostname in groups['haproxy']
-  notify: Restart haproxy container

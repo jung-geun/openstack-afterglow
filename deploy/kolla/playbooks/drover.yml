@@ -1,10 +1,7 @@
 ---
 - name: Apply role drover
   gather_facts: false
-  hosts:
-    - drover
-    - haproxy
-    - '&enable_drover_True'
+  hosts: drover
   serial: "{{ kolla_serial | default('0') }}"
   roles:
-    - { role: drover, tags: drover, when: enable_drover | bool }
+    - { role: drover, tags: drover, when: enable_drover | default(false) | bool }

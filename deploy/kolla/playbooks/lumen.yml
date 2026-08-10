@@ -1,10 +1,7 @@
 ---
 - name: Apply role lumen
   gather_facts: false
-  hosts:
-    - lumen
-    - haproxy
-    - '&enable_lumen_True'
+  hosts: lumen
   serial: "{{ kolla_serial | default('0') }}"
   roles:
-    - { role: lumen, tags: lumen, when: enable_lumen | bool }
+    - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }

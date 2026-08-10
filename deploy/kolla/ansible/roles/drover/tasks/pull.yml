@@ -9,3 +9,4 @@
   when:
     - inventory_hostname in groups['drover']
     - item.value.enabled | bool
+    - not (drover_source_mode | default(false) | bool)

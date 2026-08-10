@@ -18,23 +18,3 @@
     owner: root
     group: root
   when: inventory_hostname in groups['drover']
-  notify:
-    - Restart drover-api container
-    - Restart drover-worker container
-
-- name: Config | Ensure HAProxy services.d directory exists
-  become: true
-  ansible.builtin.file:
-    path: "{{ drover_haproxy_services_d }}"
-    state: directory
-    mode: "0755"
-  when: inventory_hostname in groups['haproxy']
-
-- name: Config | Render haproxy drover.cfg
-  become: true
-  ansible.builtin.template:
-    src: haproxy-drover.cfg.j2
-    dest: "{{ drover_haproxy_services_d }}/drover.cfg"
-    mode: "0644"
-  when: inventory_hostname in groups['haproxy']
-  notify: Restart haproxy container

@@ -11,6 +11,7 @@
       name: "{{ afterglow_database_name }}"
   run_once: true
   delegate_to: "{{ groups['afterglow'][0] }}"
+  no_log: true
 
 - name: DB | Create afterglow database user
   kolla_toolbox:

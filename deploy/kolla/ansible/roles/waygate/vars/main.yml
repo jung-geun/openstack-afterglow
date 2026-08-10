@@ -1,3 +1,2 @@
 ---
 waygate_config_dir: "/etc/kolla/waygate"
-waygate_haproxy_services_d: "/etc/kolla/haproxy/services.d"

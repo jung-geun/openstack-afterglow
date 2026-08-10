@@ -7,7 +7,7 @@ project_name = "{{ afterglow_service_project_name }}"
 project_domain_name = "Default"
 user_domain_name = "Default"
 region_name = "{{ openstack_region_name | default('RegionOne') }}"
-interface = "public"
+interface = "{{ afterglow_openstack_interface }}"
 username = "{{ afterglow_admin_keystone_user }}"
 password = "{{ afterglow_admin_keystone_password }}"
 service_project_id = "{{ afterglow_service_project_id }}"
@@ -18,6 +18,7 @@ manila_share_type = "{{ afterglow_manila_share_type }}"
 backend_port = {{ afterglow_backend_port }}
 frontend_port = {{ afterglow_frontend_port }}
 secret_key = "{{ afterglow_secret_key }}"
+public_api_base = "{{ afterglow_public_api_base }}"
 site_name = "Afterglow"
 site_description = "OpenStack VM + OverlayFS 배포 플랫폼"
 logo_path = "/logo.png"
@@ -25,7 +26,7 @@ favicon_path = "/favicon.ico"
 refresh_interval_ms = 5000
 
 [cache]
-redis_url = "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
+redis_url = "{{ afterglow_redis_url }}"
 ttl_fast = 15
 ttl_normal = 30
 ttl_slow = 60
@@ -76,10 +77,10 @@ layer_store_ro_share_id = "{{ afterglow_share_layer_store_ro_id }}"
 manifest_store_share_id = "{{ afterglow_share_manifest_store_id }}"
 
 [database]
-url = "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
+url = "{{ afterglow_database_url }}"
 pool_size = 5
 max_overflow = 10
-auto_create_tables = true
+auto_create_tables = false
 
 [cors]
 origins = "{{ afterglow_external_url }}"

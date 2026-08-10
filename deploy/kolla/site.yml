@@ -1,49 +1,43 @@
 ---
 # Kolla-Ansible site playbook integration for Afterglow services
 
-# BEGIN afterglow integration
+- name: Gather facts for all hosts
+  hosts: all
+  serial: "{{ kolla_serial | default('0') }}"
+  gather_facts: false
+  tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
+        filter: "{{ kolla_ansible_setup_filter }}"
+        gather_subset: "{{ kolla_ansible_setup_gather_subset }}"
+      when:
+        - not ansible_facts
+  tags: always
+
 - name: Apply role afterglow
   gather_facts: false
-  hosts:
-    - afterglow
-    - '&enable_afterglow_True'
+  hosts: afterglow
   serial: "{{ kolla_serial | default('0') }}"
   roles:
-    - { role: afterglow, tags: afterglow, when: enable_afterglow | default(true) | bool }
-# END afterglow integration
+    - { role: afterglow, tags: afterglow, when: enable_afterglow | default(false) | bool }
 
-# BEGIN waygate integration
 - name: Apply role waygate
   gather_facts: false
-  hosts:
-    - waygate
-    - haproxy
-    - '&enable_waygate_True'
+  hosts: waygate
   serial: "{{ kolla_serial | default('0') }}"
   roles:
     - { role: waygate, tags: waygate, when: enable_waygate | default(false) | bool }
-# END waygate integration
 
-# BEGIN drover integration
 - name: Apply role drover
   gather_facts: false
-  hosts:
-    - drover
-    - haproxy
-    - '&enable_drover_True'
+  hosts: drover
   serial: "{{ kolla_serial | default('0') }}"
   roles:
     - { role: drover, tags: drover, when: enable_drover | default(false) | bool }
-# END drover integration
 
-# BEGIN lumen integration
 - name: Apply role lumen
   gather_facts: false
-  hosts:
-    - lumen
-    - haproxy
-    - '&enable_lumen_True'
+  hosts: lumen
   serial: "{{ kolla_serial | default('0') }}"
   roles:
     - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }
-# END lumen integration

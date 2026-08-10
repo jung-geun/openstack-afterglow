@@ -5,5 +5,3 @@
 - name: Include Keystone precondition tasks
   ansible.builtin.import_tasks: preconditions_keystone.yml
 
-- name: Include PostgreSQL precondition tasks
-  ansible.builtin.import_tasks: preconditions_postgres.yml

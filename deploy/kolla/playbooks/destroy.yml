@@ -3,6 +3,12 @@
   gather_facts: false
   hosts:
     - afterglow
+    - waygate
+    - drover
+    - lumen
   serial: "{{ kolla_serial | default('0') }}"
   roles:
-    - { role: afterglow, tags: destroy }
+    - { role: afterglow, tags: destroy, when: enable_afterglow | default(false) | bool }
+    - { role: waygate, tags: destroy, when: enable_waygate | default(false) | bool }
+    - { role: drover, tags: destroy, when: enable_drover | default(false) | bool }
+    - { role: lumen, tags: destroy, when: enable_lumen | default(false) | bool }

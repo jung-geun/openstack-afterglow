@@ -13,14 +13,14 @@ insecure = {{ openstack_insecure | default(false) | bool | lower }}
 cacert = "{{ openstack_cacert | default('') }}"
 
 [database]
-url = "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
+url = "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
 pool_size = 5
 max_overflow = 10
 connect_timeout = 10
 pool_timeout = 10
 
 [cache]
-redis_url = "redis://:{{ drover_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ drover_redis_db_index }}"
+redis_url = "{{ drover_redis_url }}"
 
 [drover]
 callback_base_url = "{{ drover_callback_base_url }}"

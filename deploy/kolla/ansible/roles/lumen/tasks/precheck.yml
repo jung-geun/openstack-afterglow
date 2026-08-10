@@ -18,18 +18,29 @@
   tags: precheck
   when: enable_lumen | bool
 
-- name: Precheck | Verify Lumen checkpointer configuration if enabled
+- name: Precheck | Verify Lumen checkpointer configuration if enabled (managed)
+  ansible.builtin.assert:
+    that:
+      - lumen_postgres_password is defined and lumen_postgres_password | length > 0
+    fail_msg: "lumen_postgres_password must be set when enable_lumen_postgres is true"
+  tags: precheck
+  when:
+    - enable_lumen | bool
+    - lumen_enable_checkpointer | bool
+    - enable_lumen_postgres | bool
+
+- name: Precheck | Verify Lumen checkpointer configuration if enabled (external)
   ansible.builtin.assert:
     that:
       - lumen_checkpointer_postgres_host is defined and lumen_checkpointer_postgres_host | length > 0
       - lumen_checkpointer_postgres_port is defined
       - lumen_checkpointer_postgres_password is defined and lumen_checkpointer_postgres_password | length > 0
-    fail_msg: "Lumen checkpointer postgres host, port, and password must be set when lumen_enable_checkpointer is true"
+    fail_msg: "Lumen checkpointer postgres host, port, and password must be set when lumen_enable_checkpointer is true and enable_lumen_postgres is false"
   tags: precheck
   when:
     - enable_lumen | bool
     - lumen_enable_checkpointer | bool
-
+    - not (enable_lumen_postgres | bool)
 - name: Precheck | Verify Lumen pgvector configuration if enabled
   ansible.builtin.assert:
     that:

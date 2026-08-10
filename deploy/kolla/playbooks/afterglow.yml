@@ -1,9 +1,7 @@
 ---
 - name: Apply role afterglow
   gather_facts: false
-  hosts:
-    - afterglow
-    - '&enable_afterglow_True'
+  hosts: afterglow
   serial: "{{ kolla_serial | default('0') }}"
   roles:
-    - { role: afterglow, tags: afterglow, when: enable_afterglow | bool }
+    - { role: afterglow, tags: afterglow, when: enable_afterglow | default(false) | bool }

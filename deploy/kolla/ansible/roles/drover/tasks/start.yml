@@ -1,30 +1,29 @@
 ---
-- name: Upgrade | Pull new afterglow images
+- name: Start | Stat Drover config file
   become: true
-  community.docker.docker_image:
-    name: "{{ item.value.image }}"
-    source: pull
-    force_source: true
-  loop: "{{ afterglow_services | dict2items }}"
-  when:
-    - inventory_hostname in groups['afterglow']
-    - item.value.enabled | bool
+  ansible.builtin.stat:
+    path: "{{ drover_config_dir }}/drover.conf"
+  register: drover_config_stat
+  when: inventory_hostname in groups['drover']
 
-- name: Upgrade | Restart afterglow containers with new images
+- name: Start | Start Drover containers
   become: true
   community.docker.docker_container:
     name: "{{ item.value.container_name }}"
     image: "{{ item.value.image }}"
     state: started
-    restart: true
     restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
     volumes: "{{ item.value.volumes | default([]) }}"
     env: "{{ item.value.environment | default({}) }}"
     command: "{{ item.value.command | default(omit) }}"
     healthcheck: "{{ item.value.healthcheck | default(omit) }}"
     ports: "{{ item.value.ports | default([]) }}"
+    labels:
+      kolla_version: "2025.2"
+      service: drover
+      config_hash: "{{ drover_config_stat.stat.checksum | default('') }}"
   no_log: true
-  loop: "{{ afterglow_services | dict2items }}"
+  loop: "{{ drover_services | dict2items }}"
   when:
-    - inventory_hostname in groups['afterglow']
+    - inventory_hostname in groups['drover']
     - item.value.enabled | bool

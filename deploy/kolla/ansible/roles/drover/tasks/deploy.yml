@@ -1,31 +1,20 @@
 ---
-- name: Deploy | Pull Drover images
-  become: true
-  community.docker.docker_image:
-    name: "{{ item.value.image }}"
-    source: pull
-    force_source: "{{ drover_image_tag == 'latest' }}"
-  loop: "{{ drover_services | dict2items }}"
-  when:
-    - inventory_hostname in groups['drover']
-    - item.value.enabled | bool
+- name: Include precheck tasks
+  ansible.builtin.include_tasks: precheck.yml
 
-- name: Deploy | Start Drover containers
-  become: true
-  community.docker.docker_container:
-    name: "{{ item.value.container_name }}"
-    image: "{{ item.value.image }}"
-    state: started
-    restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
-    volumes: "{{ item.value.volumes | default([]) }}"
-    env: "{{ item.value.environment | default({}) }}"
-    command: "{{ item.value.command | default(omit) }}"
-    healthcheck: "{{ item.value.healthcheck | default(omit) }}"
-    ports: "{{ item.value.ports | default([]) }}"
-    labels:
-      kolla_version: "2025.2"
-      service: drover
-  loop: "{{ drover_services | dict2items }}"
-  when:
-    - inventory_hostname in groups['drover']
-    - item.value.enabled | bool
+- name: Include source build tasks
+  ansible.builtin.include_tasks: source_build.yml
+  when: drover_source_mode | default(false) | bool
+
+- name: Include config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Include precondition tasks
+  ansible.builtin.include_tasks: preconditions.yml
+  when: drover_run_preconditions | default(true) | bool
+
+- name: Include bootstrap service tasks
+  ansible.builtin.include_tasks: bootstrap_service.yml
+
+- name: Include start tasks
+  ansible.builtin.include_tasks: start.yml

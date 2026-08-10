@@ -9,3 +9,4 @@
   when:
     - inventory_hostname in groups['waygate']
     - item.value.enabled | bool
+    - not (waygate_source_mode | default(false) | bool)

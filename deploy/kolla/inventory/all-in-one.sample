@@ -1,5 +1,5 @@
 # Afterglow × kolla-ansible all-in-one inventory sample
-# 단일 노드에서 모든 서비스를 실행합니다
+# Plugin services run on single control node with direct internal VIP listeners
 
 [control]
 localhost ansible_connection=local
@@ -19,6 +19,7 @@ control
 [deployment]
 localhost ansible_connection=local
 
+# ── Plugin Logical Groups ─────────────────────────────────────────────────────
 [afterglow:children]
 control
 
@@ -31,11 +32,9 @@ control
 [lumen:children]
 control
 
+# ── Kolla Logical Groups ──────────────────────────────────────────────────────
 [baremetal:children]
 control
-
-[haproxy:children]
-network
 
 [mariadb:children]
 control

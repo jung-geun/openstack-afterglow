@@ -11,12 +11,12 @@ keystone_region_name = "{{ openstack_region_name | default('RegionOne') }}"
 keystone_interface = "internal"
 
 [database]
-database_url = "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+database_url = "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
 database_pool_size = 20
 database_max_overflow = 10
 
 [cache]
-redis_url = "redis://:{{ lumen_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ lumen_redis_db_index }}"
+redis_url = "{{ lumen_redis_url }}"
 
 [lumen]
 lumen_encryption_key = "{{ lumen_encryption_key }}"

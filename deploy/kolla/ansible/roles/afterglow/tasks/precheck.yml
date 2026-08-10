@@ -63,13 +63,16 @@
   run_once: true
   delegate_to: "{{ groups['afterglow'] | first }}"
   tags: precheck
-  when: enable_afterglow | bool
+  when:
+    - enable_afterglow | bool
+    - not (afterglow_source_mode | default(false) | bool)
 
 - name: Precheck | Warn if backend image not accessible
   ansible.builtin.debug:
     msg: "WARNING: Cannot access {{ afterglow_backend_image }}:{{ afterglow_image_tag }}. Ensure GHCR credentials are configured."
   when:
     - enable_afterglow | bool
+    - not (afterglow_source_mode | default(false) | bool)
     - image_check is defined
     - image_check.rc != 0
   run_once: true

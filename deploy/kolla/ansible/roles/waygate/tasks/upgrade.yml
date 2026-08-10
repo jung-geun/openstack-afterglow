@@ -1,29 +1,9 @@
 ---
-- name: Upgrade | Pull new Waygate images
-  become: true
-  community.docker.docker_image:
-    name: "{{ item.value.image }}"
-    source: pull
-    force_source: true
-  loop: "{{ waygate_services | dict2items }}"
-  when:
-    - inventory_hostname in groups['waygate']
-    - item.value.enabled | bool
+- name: Include pull tasks
+  ansible.builtin.include_tasks: pull.yml
 
-- name: Upgrade | Restart Waygate containers with new images
-  become: true
-  community.docker.docker_container:
-    name: "{{ item.value.container_name }}"
-    image: "{{ item.value.image }}"
-    state: started
-    restart: true
-    restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
-    volumes: "{{ item.value.volumes | default([]) }}"
-    env: "{{ item.value.environment | default({}) }}"
-    command: "{{ item.value.command | default(omit) }}"
-    healthcheck: "{{ item.value.healthcheck | default(omit) }}"
-    ports: "{{ item.value.ports | default([]) }}"
-  loop: "{{ waygate_services | dict2items }}"
-  when:
-    - inventory_hostname in groups['waygate']
-    - item.value.enabled | bool
+- name: Include bootstrap service tasks
+  ansible.builtin.include_tasks: bootstrap_service.yml
+
+- name: Include start tasks
+  ansible.builtin.include_tasks: start.yml

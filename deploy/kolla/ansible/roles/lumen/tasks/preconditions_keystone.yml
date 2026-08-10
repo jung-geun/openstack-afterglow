@@ -60,7 +60,7 @@
       service: lumen
       region: "{{ openstack_region_name }}"
       endpoint_interface: public
-      url: "{{ public_protocol }}://{{ kolla_external_fqdn }}:{{ lumen_api_port }}"
+      url: "{{ lumen_public_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
@@ -74,7 +74,7 @@
       service: lumen
       region: "{{ openstack_region_name }}"
       endpoint_interface: internal
-      url: "http://{{ kolla_internal_vip_address }}:{{ lumen_api_port }}"
+      url: "{{ lumen_internal_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
@@ -88,7 +88,7 @@
       service: lumen
       region: "{{ openstack_region_name }}"
       endpoint_interface: admin
-      url: "http://{{ kolla_internal_vip_address }}:{{ lumen_api_port }}"
+      url: "{{ lumen_admin_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
