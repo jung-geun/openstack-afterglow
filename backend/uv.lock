@@ -116,7 +116,7 @@ requires-dist = [
     { name = "langgraph-checkpoint-postgres", specifier = "==3.1.0" },
     { name = "libvirt-python", marker = "extra == 'kvm'", specifier = ">=10.0.0" },
     { name = "litellm", specifier = "==1.93.0" },
-    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=20e7bd3ffe93b4174dd53995e8aed46e82dbd1af" },
+    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=c7d59a255148173232e5a4b32e90498dea5cee29" },
     { name = "mcp", specifier = "==1.28.1" },
     { name = "mutagen", specifier = "==1.47.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -155,7 +155,7 @@ worker = [
     { name = "idna", specifier = ">=3.15" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "langchain-mcp-adapters", specifier = "==0.3.1" },
-    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=20e7bd3ffe93b4174dd53995e8aed46e82dbd1af" },
+    { name = "lumen-sdk", git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=c7d59a255148173232e5a4b32e90498dea5cee29" },
     { name = "openstacksdk", specifier = "==3.3.0" },
     { name = "prometheus-client", specifier = ">=0.20.0" },
     { name = "pydantic", specifier = "==2.13.4" },
@@ -1511,7 +1511,7 @@ wheels = [
 [[package]]
 name = "lumen-sdk"
 version = "0.1.0"
-source = { git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=20e7bd3ffe93b4174dd53995e8aed46e82dbd1af#20e7bd3ffe93b4174dd53995e8aed46e82dbd1af" }
+source = { git = "https://github.com/openstack-afterglow/lumen.git?subdirectory=sdk&rev=c7d59a255148173232e5a4b32e90498dea5cee29#c7d59a255148173232e5a4b32e90498dea5cee29" }
 dependencies = [
     { name = "openstacksdk" },
 ]

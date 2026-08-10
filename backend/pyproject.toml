@@ -46,7 +46,7 @@ dependencies = [
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3#subdirectory=sdk",
     "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@2b82bc16fc432ce84b21390a67106f3afcc593a1#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@20e7bd3ffe93b4174dd53995e8aed46e82dbd1af#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@c7d59a255148173232e5a4b32e90498dea5cee29#subdirectory=sdk",
 ]
 
 [build-system]
@@ -128,7 +128,7 @@ worker = [
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3#subdirectory=sdk",
     "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@2b82bc16fc432ce84b21390a67106f3afcc593a1#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@20e7bd3ffe93b4174dd53995e8aed46e82dbd1af#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@c7d59a255148173232e5a4b32e90498dea5cee29#subdirectory=sdk",
 ]
 
 [tool.hatch.build.targets.wheel]
