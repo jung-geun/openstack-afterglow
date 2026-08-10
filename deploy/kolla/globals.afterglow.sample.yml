@@ -7,6 +7,7 @@ enable_afterglow: "yes"
 enable_afterglow_backend: "yes"
 enable_afterglow_frontend: "yes"
 enable_afterglow_notion_worker: "yes"
+enable_afterglow_palimpsest_worker: "yes"
 # Afterglow remains the browser BFF; enable its proxy mounts with the matching services.
 afterglow_service_waygate_enabled: true
 afterglow_service_chat_enabled: true
@@ -17,6 +18,9 @@ afterglow_lumen_mcp_service_token: ""
 # ── 이미지 ────────────────────────────────────────────────────────────────────
 afterglow_image_namespace: "ghcr.io/openstack-afterglow"
 afterglow_image_tag: "latest"
+# The Palimpsest worker shares the Afterglow API image and requires this durable Docker volume.
+afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
+afterglow_palimpsest_hub_path: "/var/lib/afterglow/palimpsest"
 # GHCR private 이미지 접근 시 base64 인코딩된 Docker config JSON
 # echo '{"auths":{"ghcr.io":{"auth":"<base64(user:token)>"}}}' | base64
 afterglow_image_pull_secret_b64: ""
@@ -31,7 +35,8 @@ waygate_database_user: "waygate"
 waygate_redis_db_index: 6
 waygate_keystone_user: "waygate"
 waygate_service_project_name: "waygate-service"
-waygate_external_url: "https://{{ kolla_external_fqdn }}:8010"
+waygate_external_url: "https://waygate.example.com"
+waygate_public_endpoint_url: "{{ waygate_external_url }}"
 waygate_callback_base_url: "{{ waygate_external_url }}"
 
 # ── Drover ────────────────────────────────────────────────────────────────────
@@ -44,7 +49,8 @@ drover_database_user: "drover"
 drover_redis_db_index: 7
 drover_keystone_user: "drover"
 drover_service_project_name: "drover-service"
-drover_external_url: "https://{{ kolla_external_fqdn }}:8011"
+drover_external_url: "https://drover.example.com"
+drover_public_endpoint_url: "{{ drover_external_url }}"
 drover_callback_base_url: "{{ drover_external_url }}"
 
 # ── Lumen ─────────────────────────────────────────────────────────────────────

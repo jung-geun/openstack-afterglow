@@ -23,6 +23,14 @@
     restart: true
   when: inventory_hostname in groups['afterglow']
 
+- name: Restart afterglow-palimpsest-worker container
+  become: true
+  community.docker.docker_container:
+    name: afterglow_palimpsest_worker
+    state: started
+    restart: true
+  when: inventory_hostname in groups['afterglow']
+
 - name: Restart haproxy container
   become: true
   community.docker.docker_container:

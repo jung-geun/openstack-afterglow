@@ -60,7 +60,7 @@
       service: waygate
       region: "{{ openstack_region_name }}"
       endpoint_interface: public
-      url: "{{ public_protocol }}://{{ kolla_external_fqdn }}:{{ waygate_api_port }}"
+      url: "{{ waygate_public_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['waygate'][0] }}"
@@ -74,7 +74,7 @@
       service: waygate
       region: "{{ openstack_region_name }}"
       endpoint_interface: internal
-      url: "http://{{ kolla_internal_vip_address }}:{{ waygate_api_port }}"
+      url: "{{ waygate_internal_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['waygate'][0] }}"
@@ -88,7 +88,7 @@
       service: waygate
       region: "{{ openstack_region_name }}"
       endpoint_interface: admin
-      url: "http://{{ kolla_internal_vip_address }}:{{ waygate_api_port }}"
+      url: "{{ waygate_admin_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['waygate'][0] }}"

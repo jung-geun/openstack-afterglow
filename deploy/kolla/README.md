@@ -6,13 +6,13 @@ afterglow를 기존 kolla-ansible 배포에 통합하여 `kolla-ansible deploy` 
 
 ## 개요
 
-`install.sh`는 사용자의 kolla-ansible 설치에 멱등하게 패치를 적용합니다:
+`install.sh`는 사용자의 kolla-ansible 설치에 멱등하게 통합을 적용합니다:
 
-- afterglow Ansible role symlink를 kolla-ansible roles 디렉토리에 연결
-- afterglow playbook symlink를 kolla-ansible ansible 디렉토리에 연결
-- `site.yml`에 `import_playbook: afterglow.yml` 라인을 삽입
+- Afterglow, Waygate, Drover Ansible role symlink를 kolla-ansible roles 디렉토리에 연결
+- 각 custom playbook symlink를 kolla-ansible ansible 디렉토리에 연결
+- `site.yml`에 custom role play를 삽입
 
-이후에는 표준 `kolla-ansible deploy` 명령만 사용하면 afterglow도 함께 배포됩니다.
+운영 배포에서는 전체 Kolla 역할을 다시 실행하지 말고 custom 태그만 지정합니다.
 
 ---
 
@@ -20,7 +20,7 @@ afterglow를 기존 kolla-ansible 배포에 통합하여 `kolla-ansible deploy` 
 
 | 항목 | 요구 버전 / 조건 |
 |------|-----------------|
-| kolla-ansible | 2025.2 이상 |
+| kolla-ansible | 2025.2 계열 (패키지 버전 `21.0+`) |
 | OpenStack 서비스 | MariaDB, Valkey(Redis), Keystone, Manila, HAProxy 포함 |
 | Python | 3.10 이상 (PyYAML 포함) |
 | Ansible | kolla-ansible과 함께 설치된 버전 |
@@ -39,15 +39,16 @@ afterglow를 기존 kolla-ansible 배포에 통합하여 `kolla-ansible deploy` 
 # passwords.yml에 afterglow 항목을 자동으로 추가하려면
 ./deploy/kolla/install.sh --apply-passwords
 
-# kolla-ansible 경로를 직접 지정하려면
-KOLLA_ANSIBLE_DIR=/path/to/kolla-ansible ./deploy/kolla/install.sh
-```
+# kolla-ansible 실행 파일과 설치 경로를 직접 지정하려면
+KOLLA_ANSIBLE_DIR=/path/to/kolla-ansible \
+KOLLA_ANSIBLE_BIN=/path/to/venv/bin/kolla-ansible \
+./deploy/kolla/install.sh
 
 스크립트는 다음 작업을 수행합니다:
-- kolla-ansible 설치 경로 자동 탐지
-- 버전 검증 (2025.2 이상 요구)
+- kolla-ansible 설치 경로와 실행 파일 자동 탐지
+- 버전 검증 (`21.0+`, OpenStack 2025.2 계열)
 - role 및 playbook symlink 생성 (멱등)
-- `site.yml` 패치 (이미 패치된 경우 skip)
+- `site.yml` custom role play 삽입 (이미 패치된 경우 skip)
 - Ansible syntax-check 실행
 
 ### 2단계: 설정 파일 준비
@@ -78,20 +79,20 @@ cat deploy/kolla/passwords.afterglow.additions.yml >> /etc/kolla/passwords.yml
 # afterglow_kubeconfig_encryption_key: $(openssl rand -hex 32)
 ```
 
-### 3단계: 배포
+### 3단계: 제한 배포
 
 ```bash
-# multinode 배포 (평소와 동일)
-kolla-ansible deploy -i deploy/kolla/inventory/multinode.sample
+# 먼저 Kolla 노드 연결 상태를 확인한다.
+PATH=/etc/kolla/.venv/bin:$PATH \
+  /etc/kolla/.venv/bin/kolla-ansible check -i /etc/kolla/multinode
 
-# all-in-one 배포
-kolla-ansible deploy -i deploy/kolla/inventory/all-in-one.sample
-
-# bootstrap 및 사전 점검 포함 전체 배포
-kolla-ansible bootstrap-servers -i <inventory>
-kolla-ansible prechecks -i <inventory>
-kolla-ansible deploy -i <inventory>
+# Afterglow, Palimpsest worker, Waygate, Drover role만 실행한다.
+PATH=/etc/kolla/.venv/bin:$PATH \
+  /etc/kolla/.venv/bin/kolla-ansible deploy -i /etc/kolla/multinode \
+  --tags afterglow,waygate,drover
 ```
+
+`deploy` precondition은 각 custom 서비스의 database, Keystone service user/project, endpoint를 생성하거나 현재 상태에 맞춘다. 다른 Kolla 서비스에는 `reconfigure`, `upgrade`, `destroy`, 또는 unscoped `deploy`를 실행하지 않는다.
 
 ---
 
@@ -107,14 +108,12 @@ kolla-ansible deploy -i <inventory>
 
 ---
 
-## afterglow만 단독 재배포
+## custom 서비스만 재배포
 
 ```bash
-# afterglow 태그만 실행
-kolla-ansible deploy -i <inventory> --tags afterglow
-
-# 컨테이너 삭제
-ansible-playbook -i <inventory> deploy/kolla/playbooks/destroy.yml
+PATH=/etc/kolla/.venv/bin:$PATH \
+  /etc/kolla/.venv/bin/kolla-ansible deploy -i <inventory> \
+  --tags afterglow,waygate,drover
 ```
 
 ---
@@ -128,10 +127,11 @@ ansible-playbook -i <inventory> deploy/kolla/playbooks/destroy.yml
 | `enable_afterglow` | `"no"` | afterglow 전체 활성화 마스터 토글 |
 | `enable_afterglow_backend` | `"yes"` | FastAPI 백엔드 컨테이너 |
 | `enable_afterglow_frontend` | `"yes"` | SvelteKit 프론트엔드 컨테이너 |
-| `enable_afterglow_worker` | `"yes"` | 비동기 워커 컨테이너 |
+| `enable_afterglow_notion_worker` | `"yes"` | Notion integration 워커 컨테이너 |
+| `enable_afterglow_palimpsest_worker` | `"yes"` | Palimpsest 작업 워커 컨테이너 |
+| `afterglow_palimpsest_hub_volume` | `"afterglow_palimpsest_hub"` | API와 Palimpsest worker가 공유하는 durable Docker volume |
 | `afterglow_image_namespace` | `"ghcr.io/openstack-afterglow"` | 컨테이너 이미지 레지스트리 네임스페이스 |
 | `afterglow_image_tag` | `"latest"` | 컨테이너 이미지 태그 |
-| `afterglow_image_pull_secret_b64` | `""` | GHCR private 이미지 접근용 Docker config base64 |
 | `afterglow_external_url` | `"https://{{ kolla_external_fqdn }}"` | afterglow 외부 접근 URL |
 | `afterglow_database_name` | `"afterglow"` | MariaDB 데이터베이스 이름 |
 | `afterglow_redis_db_index` | `5` | Redis DB 인덱스 (타 서비스 충돌 방지) |
@@ -158,22 +158,20 @@ ansible-playbook -i <inventory> deploy/kolla/playbooks/destroy.yml
 
 ```bash
 # Ansible syntax-check
-ansible-playbook --syntax-check /usr/local/share/kolla-ansible/ansible/site.yml
+/etc/kolla/.venv/bin/ansible-playbook --syntax-check \
+  /etc/kolla/.venv/share/kolla-ansible/ansible/site.yml
 
-# afterglow role symlink 확인
-ls -la /usr/local/share/kolla-ansible/ansible/roles/afterglow
-
-# afterglow playbook symlink 확인
-ls -la /usr/local/share/kolla-ansible/ansible/afterglow.yml
+# role symlink 확인
+readlink /etc/kolla/.venv/share/kolla-ansible/ansible/roles/afterglow
+readlink /etc/kolla/.venv/share/kolla-ansible/ansible/roles/drover
+readlink /etc/kolla/.venv/share/kolla-ansible/ansible/roles/waygate
 
 # site.yml 패치 확인
-grep -A3 "afterglow integration" /usr/local/share/kolla-ansible/ansible/site.yml
-
-# 배포 dry-run (check mode)
-kolla-ansible deploy -i <inventory> --tags afterglow --check
+grep -A3 "afterglow integration" /etc/kolla/.venv/share/kolla-ansible/ansible/site.yml
 
 # 컨테이너 상태 확인 (배포 후)
-kolla-ansible status -i <inventory>
+docker ps --format '{{.Names}}\t{{.Status}}' \
+  --filter name=afterglow --filter name=drover --filter name=waygate
 ```
 
 ---

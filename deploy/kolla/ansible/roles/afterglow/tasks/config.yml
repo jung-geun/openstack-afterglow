@@ -21,6 +21,7 @@
   notify:
     - Restart afterglow-backend container
     - Restart afterglow-notion-worker container
+    - Restart afterglow-palimpsest-worker container
 
 - name: Config | Ensure haproxy services.d directory exists
   become: true

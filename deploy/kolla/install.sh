@@ -66,22 +66,42 @@ KOLLA_DIR=$(detect_kolla_dir) || die "kolla-ansible 설치 경로를 찾을 수 
 log "kolla-ansible 경로: $KOLLA_DIR"
 
 # ── 2. 버전 검증 ──────────────────────────────────────────────────────────────
+detect_kolla_bin() {
+  if [[ -n "${KOLLA_ANSIBLE_BIN:-}" ]]; then
+    [[ -x "$KOLLA_ANSIBLE_BIN" ]] || die "KOLLA_ANSIBLE_BIN이 실행 파일이 아닙니다: $KOLLA_ANSIBLE_BIN"
+    echo "$KOLLA_ANSIBLE_BIN"
+    return 0
+  fi
+
+  if command -v kolla-ansible &>/dev/null; then
+    command -v kolla-ansible
+    return 0
+  fi
+
+  local venv_bin
+  venv_bin="$(dirname "$(dirname "$KOLLA_DIR")")/bin/kolla-ansible"
+  [[ -x "$venv_bin" ]] && echo "$venv_bin" && return 0
+  return 1
+}
+
+KOLLA_ANSIBLE_BIN=$(detect_kolla_bin) || die "kolla-ansible 실행 파일을 찾을 수 없습니다. KOLLA_ANSIBLE_BIN을 설정하세요."
+log "kolla-ansible 실행 파일: $KOLLA_ANSIBLE_BIN"
 log "kolla-ansible 버전 검증 중..."
-KOLLA_VERSION=$(kolla-ansible --version 2>&1 | grep -oP '\d+\.\d+' | head -1) || die "kolla-ansible 버전을 확인할 수 없습니다."
+KOLLA_VERSION=$("$KOLLA_ANSIBLE_BIN" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1) || die "kolla-ansible 버전을 확인할 수 없습니다."
 log "검출된 버전: $KOLLA_VERSION"
 
-# 2025.2 이상 요구 (year * 100 + minor 형식으로 비교)
-required_major=2025
-required_minor=2
+# Kolla-Ansible 2025.2 릴리스 계열은 21.0.x 패키지 버전을 사용한다.
+required_major=21
+required_minor=0
 
 version_major=$(echo "$KOLLA_VERSION" | cut -d. -f1)
 version_minor=$(echo "$KOLLA_VERSION" | cut -d. -f2)
 
 if [[ "$version_major" -lt "$required_major" ]] || \
    { [[ "$version_major" -eq "$required_major" ]] && [[ "$version_minor" -lt "$required_minor" ]]; }; then
-  die "kolla-ansible 버전이 2025.2 미만입니다 (현재: $KOLLA_VERSION). 최신 버전으로 업그레이드하세요."
+  die "kolla-ansible 21.0(2025.2) 미만입니다 (현재: $KOLLA_VERSION). 최신 호환 릴리스로 업그레이드하세요."
 fi
-log "버전 검증 통과: $KOLLA_VERSION >= 2025.2"
+log "버전 검증 통과: $KOLLA_VERSION >= 21.0 (2025.2)"
 
 # ── 3. role symlink 생성 ──────────────────────────────────────────────────────
 ROLES_DIR="$KOLLA_DIR/ansible/roles"
@@ -351,10 +371,14 @@ fi
 
 # ── 8. syntax-check ───────────────────────────────────────────────────────────
 log "Ansible syntax-check 실행 중..."
-if command -v ansible-playbook &>/dev/null; then
-  ansible-playbook --syntax-check "$KOLLA_DIR/ansible/site.yml" && log "syntax-check 통과"
+ANSIBLE_PLAYBOOK_BIN="${ANSIBLE_PLAYBOOK_BIN:-$(dirname "$KOLLA_ANSIBLE_BIN")/ansible-playbook}"
+if [[ ! -x "$ANSIBLE_PLAYBOOK_BIN" ]]; then
+  ANSIBLE_PLAYBOOK_BIN="$(command -v ansible-playbook || true)"
+fi
+if [[ -n "$ANSIBLE_PLAYBOOK_BIN" && -x "$ANSIBLE_PLAYBOOK_BIN" ]]; then
+  "$ANSIBLE_PLAYBOOK_BIN" --syntax-check "$KOLLA_DIR/ansible/site.yml" && log "syntax-check 통과"
 else
-  warn "ansible-playbook 명령을 찾을 수 없습니다. syntax-check를 건너뜁니다."
+  warn "ansible-playbook 실행 파일을 찾을 수 없습니다. ANSIBLE_PLAYBOOK_BIN을 지정하세요."
 fi
 
 # ── 완료 ─────────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ enable_afterglow: "no"
 enable_afterglow_backend: "{{ enable_afterglow }}"
 enable_afterglow_frontend: "{{ enable_afterglow }}"
 enable_afterglow_notion_worker: "{{ enable_afterglow }}"
+enable_afterglow_palimpsest_worker: "{{ enable_afterglow }}"
 
 # ── 사전조건 실행 여부 ────────────────────────────────────────────────────────
 afterglow_run_preconditions: true
@@ -34,6 +35,8 @@ afterglow_haproxy_frontend_port: "{{ afterglow_frontend_port }}"
 
 # ── 노출 URL ──────────────────────────────────────────────────────────────────
 afterglow_external_url: "https://{{ kolla_external_fqdn | default('localhost') }}"
+afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
+afterglow_palimpsest_hub_path: "/var/lib/afterglow/palimpsest"
 
 # ── DB / Cache ────────────────────────────────────────────────────────────────
 afterglow_database_name: "afterglow"
@@ -109,6 +112,7 @@ afterglow_services:
     volumes:
       - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
+      - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
     environment:
       DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
       REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
@@ -119,6 +123,7 @@ afterglow_services:
       K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
       LUMEN_MCP_SERVICE_TOKEN: "{{ afterglow_lumen_mcp_service_token }}"
       UNION_OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
+      PALIMPSEST_HUB_LOCAL_PATH: "{{ afterglow_palimpsest_hub_path }}"
       UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
       UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
       UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
@@ -151,6 +156,20 @@ afterglow_services:
       start_period: 30s
     ports:
       - "{{ afterglow_frontend_port }}:3080"
+
+  afterglow-palimpsest-worker:
+    container_name: afterglow_palimpsest_worker
+    group: afterglow
+    enabled: "{{ enable_afterglow_palimpsest_worker | bool }}"
+    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+    command: ["python", "-m", "app.palimpsest_worker"]
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
+      - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      PALIMPSEST_HUB_LOCAL_PATH: "{{ afterglow_palimpsest_hub_path }}"
 
   afterglow-notion-worker:
     container_name: afterglow_notion_worker

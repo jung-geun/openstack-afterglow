@@ -60,7 +60,7 @@
       service: drover
       region: "{{ openstack_region_name }}"
       endpoint_interface: public
-      url: "{{ public_protocol }}://{{ kolla_external_fqdn }}:{{ drover_api_port }}"
+      url: "{{ drover_public_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['drover'][0] }}"
@@ -74,7 +74,7 @@
       service: drover
       region: "{{ openstack_region_name }}"
       endpoint_interface: internal
-      url: "http://{{ kolla_internal_vip_address }}:{{ drover_api_port }}"
+      url: "{{ drover_internal_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['drover'][0] }}"
@@ -88,7 +88,7 @@
       service: drover
       region: "{{ openstack_region_name }}"
       endpoint_interface: admin
-      url: "http://{{ kolla_internal_vip_address }}:{{ drover_api_port }}"
+      url: "{{ drover_admin_endpoint_url }}"
       state: present
   run_once: true
   delegate_to: "{{ groups['drover'][0] }}"
