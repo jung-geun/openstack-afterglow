@@ -55,6 +55,8 @@ test("Afterglow public hostname is routed by Kolla's external HAProxy frontend",
 	assert.match(precheck, /Validate Kolla public route hostname/)
 	assert.match(loadbalancer, /afterglow-public\.cfg/)
 	assert.match(loadbalancer, /delegate_to: "\{\{ groups\['deployment'\]\[0\] \}\}"/)
+	assert.match(loadbalancer, /mode: "0755"/)
+	assert.match(loadbalancer, /mode: "0644"/)
 	assert.match(loadbalancer, /external-frontend-map/)
 	assert.match(loadbalancer, /project_services: "\{\{ afterglow_haproxy_services \}\}"/)
 	assert.match(router, /backend afterglow-public_back/)
