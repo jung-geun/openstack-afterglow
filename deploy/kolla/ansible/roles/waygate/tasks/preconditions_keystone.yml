@@ -1,94 +1,24 @@
 ---
-- name: Keystone | Create Waygate service project
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_project
-    module_args:
-      cloud: kolla
-      name: "{{ waygate_service_project_name }}"
-      description: "Waygate service project"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
-
-- name: Keystone | Create Waygate service user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user
-    module_args:
-      cloud: kolla
-      name: "{{ waygate_keystone_user }}"
-      password: "{{ waygate_keystone_password }}"
-      default_project: "{{ waygate_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
+- name: Keystone | Register Waygate service, project, and user
+  ansible.builtin.import_role:
+    name: service-ks-register
+  vars:
+    project_name: waygate
+    service_ks_register_auth: "{{ openstack_keystone_auth }}"
+    service_ks_register_services:
+      - name: waygate
+        type: waygate
+        description: "Waygate WireGuard gateway service"
+        endpoints:
+          - interface: public
+            url: "{{ waygate_public_endpoint_url }}"
+          - interface: internal
+            url: "{{ waygate_internal_endpoint_url }}"
+          - interface: admin
+            url: "{{ waygate_admin_endpoint_url }}"
+    service_ks_register_users:
+      - project: "{{ waygate_service_project_name }}"
+        user: "{{ waygate_keystone_user }}"
+        password: "{{ waygate_keystone_password }}"
+        role: admin
   no_log: true
-
-- name: Keystone | Assign admin role to Waygate service user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user_role
-    module_args:
-      cloud: kolla
-      user: "{{ waygate_keystone_user }}"
-      role: admin
-      project: "{{ waygate_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
-
-- name: Keystone | Register Waygate service
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_service
-    module_args:
-      cloud: kolla
-      name: waygate
-      service_type: waygate
-      description: "Waygate WireGuard gateway service"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
-
-- name: Keystone | Register Waygate public endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: waygate
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: public
-      url: "{{ waygate_public_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
-
-- name: Keystone | Register Waygate internal endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: waygate
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: internal
-      url: "{{ waygate_internal_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"
-
-- name: Keystone | Register Waygate admin endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: waygate
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: admin
-      url: "{{ waygate_admin_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['waygate'][0] }}"

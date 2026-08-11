@@ -1,94 +1,24 @@
 ---
-- name: Keystone | Create Lumen service project
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_project
-    module_args:
-      cloud: kolla
-      name: "{{ lumen_service_project_name }}"
-      description: "Lumen service project"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-
-- name: Keystone | Create Lumen service user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user
-    module_args:
-      cloud: kolla
-      name: "{{ lumen_keystone_user }}"
-      password: "{{ lumen_keystone_password }}"
-      default_project: "{{ lumen_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
+- name: Keystone | Register Lumen service, project, and user
+  ansible.builtin.import_role:
+    name: service-ks-register
+  vars:
+    project_name: lumen
+    service_ks_register_auth: "{{ openstack_keystone_auth }}"
+    service_ks_register_services:
+      - name: lumen
+        type: lumen
+        description: "Lumen durable chat and LLM service"
+        endpoints:
+          - interface: public
+            url: "{{ lumen_public_endpoint_url }}"
+          - interface: internal
+            url: "{{ lumen_internal_endpoint_url }}"
+          - interface: admin
+            url: "{{ lumen_admin_endpoint_url }}"
+    service_ks_register_users:
+      - project: "{{ lumen_service_project_name }}"
+        user: "{{ lumen_keystone_user }}"
+        password: "{{ lumen_keystone_password }}"
+        role: admin
   no_log: true
-
-- name: Keystone | Assign admin role to Lumen service user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user_role
-    module_args:
-      cloud: kolla
-      user: "{{ lumen_keystone_user }}"
-      role: admin
-      project: "{{ lumen_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-
-- name: Keystone | Register Lumen service
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_service
-    module_args:
-      cloud: kolla
-      name: lumen
-      service_type: lumen
-      description: "Lumen durable chat and LLM service"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-
-- name: Keystone | Register Lumen public endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: lumen
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: public
-      url: "{{ lumen_public_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-
-- name: Keystone | Register Lumen internal endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: lumen
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: internal
-      url: "{{ lumen_internal_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-
-- name: Keystone | Register Lumen admin endpoint
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_keystone_endpoint
-    module_args:
-      cloud: kolla
-      service: lumen
-      region: "{{ openstack_region_name }}"
-      endpoint_interface: admin
-      url: "{{ lumen_admin_endpoint_url }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"

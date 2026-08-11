@@ -4,7 +4,7 @@
     container_engine: "{{ kolla_container_engine }}"
     module_name: openstack.cloud.project_info
     module_args:
-      cloud: kolla
+      auth: "{{ openstack_keystone_auth }}"
       name: "{{ afterglow_service_project_name }}"
   register: afterglow_service_project_lookup
   changed_when: false

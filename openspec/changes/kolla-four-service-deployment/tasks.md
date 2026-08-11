@@ -11,4 +11,4 @@
 - [ ] Add and document plugin-owned Kolla HAProxy internal-VIP routes with controller-local upstream ports.
 - [ ] Replace DMSLab source-build inputs with exact GHCR linux/amd64 image digests.
 - [ ] Re-run repository Kolla syntax/task-list checks and full test/lint gates for the revised topology.
-- [ ] Install, baseline, deploy, reconfigure, and prove the DMSLab plugin deployment, including HAProxy fragments and unchanged reconfigure behavior.
+- [ ] Repair Keystone registration after the failed DMSLab deploy, then deploy, reconfigure, and prove the plugin, including HAProxy fragments and unchanged reconfigure behavior.

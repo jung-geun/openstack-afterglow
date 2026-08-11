@@ -1,46 +1,13 @@
 ---
-- name: Keystone | Create afterglow service project
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_project
-    module_args:
-      cloud: kolla
-      name: "{{ afterglow_service_project_name }}"
-      description: "Afterglow service project"
-      state: present
-  register: afterglow_project_result
-  run_once: true
-  delegate_to: "{{ groups['afterglow'][0] }}"
-
-- name: Keystone | Set afterglow service project ID fact
-  ansible.builtin.set_fact:
-    afterglow_service_project_id: "{{ afterglow_project_result.project.id }}"
-  run_once: true
-  delegate_to: "{{ groups['afterglow'][0] }}"
-
-- name: Keystone | Create afterglow admin user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user
-    module_args:
-      cloud: kolla
-      name: "{{ afterglow_admin_keystone_user }}"
-      password: "{{ afterglow_admin_keystone_password }}"
-      default_project: "{{ afterglow_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['afterglow'][0] }}"
+- name: Keystone | Register Afterglow service project and user
+  ansible.builtin.import_role:
+    name: service-ks-register
+  vars:
+    project_name: afterglow
+    service_ks_register_auth: "{{ openstack_keystone_auth }}"
+    service_ks_register_users:
+      - project: "{{ afterglow_service_project_name }}"
+        user: "{{ afterglow_admin_keystone_user }}"
+        password: "{{ afterglow_admin_keystone_password }}"
+        role: admin
   no_log: true
-
-- name: Keystone | Assign admin role to afterglow user
-  kolla_toolbox:
-    container_engine: "{{ kolla_container_engine }}"
-    module_name: os_user_role
-    module_args:
-      cloud: kolla
-      user: "{{ afterglow_admin_keystone_user }}"
-      role: admin
-      project: "{{ afterglow_service_project_name }}"
-      state: present
-  run_once: true
-  delegate_to: "{{ groups['afterglow'][0] }}"
