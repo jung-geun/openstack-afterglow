@@ -38,11 +38,82 @@
     group: root
   when: inventory_hostname in groups['afterglow']
 
+- name: Config | Check operator configuration source
+  become: true
+  ansible.builtin.stat:
+    path: "{{ afterglow_operator_config_source }}"
+  register: afterglow_operator_config_source_stat
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_config_source | length > 0
+
+- name: Config | Require readable operator configuration source
+  ansible.builtin.assert:
+    that:
+      - afterglow_operator_config_source_stat.stat.isreg | default(false)
+      - afterglow_operator_config_source_stat.stat.readable | default(false)
+    fail_msg: "afterglow_operator_config_source must be a readable regular file on the Kolla deployment host"
+  no_log: true
+  run_once: true
+  when: afterglow_operator_config_source | length > 0
+
+- name: Config | Validate operator configuration TOML
+  become: true
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))"
+      - "{{ afterglow_operator_config_source }}"
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_config_source | length > 0
+
+- name: Config | Copy operator configuration override
+  become: true
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', afterglow_operator_config_source) }}"
+    dest: "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}"
+    mode: "0640"
+    owner: root
+    group: root
+  no_log: true
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_operator_config_source | length > 0
+
+- name: Config | Clear disabled operator configuration override
+  become: true
+  ansible.builtin.copy:
+    content: "# No operator configuration override is configured.\n"
+    dest: "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}"
+    mode: "0640"
+    owner: root
+    group: root
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_operator_config_source | length == 0
+
 - name: Config | Render afterglow.conf
   become: true
   ansible.builtin.template:
     src: afterglow.conf.j2
     dest: "{{ afterglow_config_dir }}/afterglow.conf"
+    mode: "0640"
+    owner: root
+    group: root
+  no_log: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Config | Render final Kolla configuration override
+  become: true
+  ansible.builtin.template:
+    src: afterglow.kolla.conf.j2
+    dest: "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}"
     mode: "0640"
     owner: root
     group: root

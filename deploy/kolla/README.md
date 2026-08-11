@@ -62,6 +62,59 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
    Copy `deploy/kolla/passwords.afterglow.additions.yml`, set permissions to `0600`, and populate generated 64-hex keys and database/Keystone passwords.
 
 
+### Afterglow Operator Configuration Handoff
+
+Keep the existing `afterglow.conf` on the Kolla deployment host, outside the
+repository and the Kolla globals files. Validate it locally, copy it with
+owner-only permissions, then point `globals.yml` at that deployed file:
+
+```bash
+python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' ./afterglow.conf
+sudo install -d -m 0700 /etc/kolla/afterglow/operator
+sudo install -m 0600 ./afterglow.conf /etc/kolla/afterglow/operator/afterglow.operator.conf
+```
+
+```yaml
+# /etc/kolla/afterglow/globals.yml
+afterglow_operator_config_source: "/etc/kolla/afterglow/operator/afterglow.operator.conf"
+```
+
+The role copies this source without logging it and mounts three TOML layers
+into the backend and workers, in this order:
+
+1. generated `afterglow.conf` base;
+2. operator-managed `afterglow.operator.conf`;
+3. generated `afterglow.zz-kolla.conf` final override.
+
+The final layer intentionally reasserts deployment-owned OpenStack
+credentials/project/region/interface, database and Redis connections,
+service toggles, public API/origin and CORS values, encryption keys, Manila
+storage bindings, and application ports. The operator layer owns
+application-level configuration such as branding, cache/session policy,
+monitoring, chat, SMTP, GitLab OIDC non-secret settings, and GPU settings.
+Secrets remain in `/etc/kolla/afterglow/secrets.yml`; do not put them in
+`globals.yml` or commit the operator file.
+
+`[builder].ssh_private_key` in legacy configuration files is not a supported
+runtime setting and is deliberately not transferred. Provision a builder key
+only through a future declared secret mount that is consumed by the runtime.
+`config.gpu.toml` is also not copied independently; place its supported
+settings in the operator TOML file until that file has an explicit handoff.
+
+Re-run the scoped Kolla deployment after changing the operator file. Its
+checksum is included in the container configuration hash, so the backend and
+workers are recreated with the updated settings:
+
+```bash
+PATH=/etc/kolla/.venv/bin:$PATH \
+/etc/kolla/.venv/bin/kolla-ansible reconfigure \
+  -i /etc/kolla/inventory-afterglow \
+  -p /etc/kolla/.venv/share/kolla-ansible/ansible/afterglow-site.yml \
+  -e @/etc/kolla/afterglow/globals.yml \
+  -e @/etc/kolla/afterglow/secrets.yml \
+  --tags afterglow
+```
+
 ### Afterglow Public Frontend Endpoint
 
 Set `afterglow_public_endpoint_url` to the browser-facing HTTP(S) origin without a path. The role renders it into the frontend `ORIGIN`, backend CORS origin, frontend base URL, OAuth callback, and instance-health callback base. The DMSLab configuration uses `https://cloud.dmslab.re.kr`.

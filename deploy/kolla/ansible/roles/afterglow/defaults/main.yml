@@ -30,6 +30,12 @@ afterglow_run_preconditions: true
 
 # ── 설정 디렉토리 ────────────────────────────────────────────────────────────
 afterglow_config_dir: "/etc/kolla/afterglow"
+# Operator TOML source lives on the Kolla deployment host. It is copied as an
+# active `afterglow.*.conf` override while `afterglow.zz-kolla.conf` reasserts
+# deployment-owned values after it.
+afterglow_operator_config_source: ""
+afterglow_operator_config_name: "afterglow.operator.conf"
+afterglow_kolla_config_name: "afterglow.zz-kolla.conf"
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
 afterglow_backend_port: 8020
@@ -138,6 +144,8 @@ afterglow_services:
     groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "kolla_logs:/var/log/kolla/"
       - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
     environment:
@@ -220,6 +228,8 @@ afterglow_services:
     groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
       - "kolla_logs:/var/log/kolla/"
     environment:
@@ -238,6 +248,8 @@ afterglow_services:
     groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "{{ afterglow_database_url }}"

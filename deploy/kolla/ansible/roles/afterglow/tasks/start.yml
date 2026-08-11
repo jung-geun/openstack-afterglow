@@ -1,9 +1,13 @@
 ---
-- name: Start | Stat Afterglow config file
+- name: Start | Stat Afterglow configuration layers
   become: true
   ansible.builtin.stat:
-    path: "{{ afterglow_config_dir }}/afterglow.conf"
-  register: afterglow_config_stat
+    path: "{{ item }}"
+  register: afterglow_config_stats
+  loop:
+    - "{{ afterglow_config_dir }}/afterglow.conf"
+    - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}"
+    - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}"
   when: inventory_hostname in groups['afterglow']
 
 - name: Start | Start Afterglow containers
@@ -22,8 +26,7 @@
     groups: "{{ item.value.groups | default(omit) }}"
     labels:
       kolla_version: "2025.2"
-      service: afterglow
-      config_hash: "{{ afterglow_config_stat.stat.checksum | default('') }}"
+      config_hash: "{{ afterglow_config_stats.results | map(attribute='stat.checksum') | join(':') }}"
   no_log: true
   loop: "{{ afterglow_services | dict2items }}"
   when:
