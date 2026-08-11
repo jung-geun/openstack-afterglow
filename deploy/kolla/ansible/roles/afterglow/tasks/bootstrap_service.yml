@@ -4,7 +4,22 @@
   community.docker.docker_container:
     name: afterglow_bootstrap
     image: "{{ afterglow_backend_image_ref }}"
-    command: ["python", "-m", "app.bootstrap"]
+    command:
+      - python
+      - -c
+      - |
+        import asyncio
+        import os
+        from app.database import close_db, create_tables, init_db
+
+        async def main():
+            try:
+                init_db(os.environ["DATABASE_URL"])
+                await create_tables()
+            finally:
+                await close_db()
+
+        asyncio.run(main())
     state: started
     detach: false
     cleanup: true
