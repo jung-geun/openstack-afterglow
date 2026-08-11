@@ -53,7 +53,7 @@ afterglow_database_address: "{{ database_address | default(kolla_internal_vip_ad
 afterglow_database_port: "{{ database_port | default(3306) }}"
 afterglow_database_name: "afterglow"
 afterglow_database_user: "afterglow"
-afterglow_database_url: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ afterglow_database_address }}:{{ afterglow_database_port }}/{{ afterglow_database_name }}"
+afterglow_database_url: "mysql+aiomysql://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ afterglow_database_address }}:{{ afterglow_database_port }}/{{ afterglow_database_name }}"
 
 afterglow_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
 afterglow_valkey_port: "{{ redis_port | default(6379) }}"
