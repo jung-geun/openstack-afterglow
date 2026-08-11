@@ -1,17 +1,25 @@
-# Afterglow Four-Service Kolla-Ansible Additive Deployment Guide
+# Afterglow Four-Service Kolla-Ansible Deployment Guide
 
-This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **Waygate** onto an existing Kolla-Ansible cloud as an isolated, additive plugin using native custom playbooks (`-p`).
+This guide deploys **Afterglow**, **Drover**, **Lumen**, and **Waygate** through
+the ordinary Kolla command line from `/etc/kolla`.
 
 ---
 
 ## Architecture & Integration Principles
 
-1. **Additive Kolla Integration**:
-   - Stock `site.yml`, `/etc/kolla/globals.yml`, `/etc/kolla/passwords.yml`, and inventory are never modified or patched.
-   - The plugin adds only its own HAProxy service fragments through Kolla's `loadbalancer-config` role. Kolla reconciles HAProxy after a fragment changes; its container may be recreated once for that deliberate route update.
-2. **Custom Playbook & Additive Vars**:
-   - The plugin provides an aggregate playbook `afterglow-site.yml` symlinked into Kolla's ansible directory.
-   - Settings and secrets live in isolated files `/etc/kolla/afterglow/globals.yml` and `/etc/kolla/afterglow/secrets.yml`, passed via `-e @...`.
+1. **Standard Kolla Invocation**:
+   - The installer appends one marker-delimited `afterglow-site.yml` import to
+     Kolla's installed `site.yml`. It refuses malformed or unexpected markers.
+   - It links Kolla's default `all-in-one` inventory path to `/etc/kolla/multinode`
+     and also links `group_vars` and `host_vars`, preserving normal Kolla
+     inventory variable discovery.
+2. **Plugin-owned Variables**:
+   - Settings and secrets remain in `/etc/kolla/afterglow/globals.yml` and
+     `/etc/kolla/afterglow/secrets.yml`.
+   - The installer links both files into Kolla's native `globals.d` loader;
+     no `-e @...` arguments are required. It does not copy secret values.
+   - Both files must be readable by the user that runs `kolla-ansible`; run
+     the installer as that same deployment user.
 3. **Kolla HAProxy Internal-VIP Listeners**:
    - HAProxy owns the internal-VIP frontend ports:
      - **Afterglow UI**: `3080`
@@ -20,6 +28,8 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
      - **Drover**: `8011`
      - **Lumen**: `8012`
    - App containers bind the controller API addresses only, using private upstream ports `18081`, `18020`, `18010`, `18011`, and `18012`. HAProxy balances each frontend across its matching controller group.
+   - A tag-selected plugin run reconciles the matching Kolla HAProxy fragments.
+     Kolla recreates HAProxy only if their resulting configuration hash changes.
    - The plugin does not create external-VIP routes, DNS records, or TLS certificates. Existing Drover and Waygate public catalog URLs remain operator-owned ingress contracts.
 4. **Pinned GHCR Images**:
    - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Do not use mutable `latest` or `dev` tags.
@@ -33,7 +43,11 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
 
 ## Installation & Symlink Creation
 
-Run `install.sh` to create non-conflicting symlinks in Kolla's installation path:
+> **Prerequisite:** Complete [Configuration Setup](#configuration-setup)
+> first. `install.sh` validates both plugin variable files before changing
+> Kolla's installation tree.
+
+Run `install.sh` to add the standard-command wiring:
 
 ```bash
 # Auto-detect Kolla binary/directory or pass explicit paths
@@ -42,11 +56,27 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 ./deploy/kolla/install.sh
 ```
 
-### Created Symlinks
-- Roles under `$KOLLA_DIR/ansible/roles/`: `afterglow`, `drover`, `lumen`, `waygate`
-- Aggregate Playbook under `$KOLLA_DIR/ansible/`: `afterglow-site.yml` -> `deploy/kolla/site.yml`
+### Installer-managed artifacts
+- Role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`, `drover`,
+  `lumen`, and `waygate`.
+- Aggregate playbook: `$KOLLA_DIR/ansible/afterglow-site.yml` ->
+  `deploy/kolla/site.yml`.
+- One marker-delimited `afterglow-site.yml` import in
+  `$KOLLA_DIR/ansible/site.yml`.
+- Default inventory link:
+  `/etc/kolla/ansible/inventory/all-in-one` -> `/etc/kolla/multinode`.
+- Inventory-variable directory links:
+  `/etc/kolla/ansible/inventory/{group_vars,host_vars}` when their
+  `/etc/kolla/{group_vars,host_vars}` sources exist.
+- `globals.d` links:
+  `90-openstack-afterglow-globals.yml` and
+  `91-openstack-afterglow-secrets.yml`.
+- An exact legacy duplicate of plugin globals is removed from stock
+  `globals.yml` only after a parsed-mapping equality check; the original is
+  retained as `globals.yml.before-afterglow-dedup`.
 
-*Safety Check*: If any target path exists and is not an exact expected symlink, `install.sh` aborts without mutating files.
+*Safety Check*: If any managed target conflicts or a `site.yml` marker is
+unexpected, `install.sh` aborts rather than replacing it.
 
 ---
 
@@ -129,18 +159,13 @@ only through a future declared secret mount that is consumed by the runtime.
 `config.gpu.toml` is also not copied independently; place its supported
 settings in the operator TOML file until that file has an explicit handoff.
 
-Re-run the scoped Kolla deployment after changing the operator file. Its
-checksum is included in the container configuration hash, so the backend and
-workers are recreated with the updated settings:
+Re-run Afterglow with the standard Kolla command after changing the operator
+file. Its checksum is included in the container configuration hash, so the
+backend and workers are recreated with the updated settings:
 
 ```bash
-PATH=/etc/kolla/.venv/bin:$PATH \
-/etc/kolla/.venv/bin/kolla-ansible reconfigure \
-  -i /etc/kolla/inventory-afterglow \
-  -p /etc/kolla/.venv/share/kolla-ansible/ansible/afterglow-site.yml \
-  -e @/etc/kolla/afterglow/globals.yml \
-  -e @/etc/kolla/afterglow/secrets.yml \
-  --tags afterglow
+cd /etc/kolla
+kolla-ansible reconfigure --tags afterglow
 ```
 
 ### Afterglow Public Frontend Endpoint
@@ -191,54 +216,60 @@ memory. It is required only when `lumen_enable_pgvector: true`; provide it in
 the same secret file rather than splitting it into host, port, and password
 variables.
 
-Do not configure an external Lumen PostgreSQL URL with the Kolla MariaDB
-endpoint. Select one mode and set only that mode's secret input.
+Never point `lumen_external_postgres_url` or `lumen_memory_pgvector_url` at
+Kolla MariaDB. PostgreSQL is required for these Lumen contracts.
 
----
+## Standard Inventory and Commands
 
-## Inventory Directory Overlay
+Add the four plugin groups directly to `/etc/kolla/multinode`; this is the
+authoritative inventory used by the ordinary Kolla command. Then run the
+installer once from the plugin checkout:
 
-Create an inventory overlay directory (e.g. `/etc/kolla/inventory-afterglow`):
 ```bash
-mkdir -p /etc/kolla/inventory-afterglow
-ln -s /etc/kolla/multinode /etc/kolla/inventory-afterglow/00-kolla
+KOLLA_ANSIBLE_BIN=/etc/kolla/.venv/bin/kolla-ansible \
+KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
+./deploy/kolla/install.sh
 ```
-Place a `10-afterglow` file containing the service target nodes (e.g. `[afterglow]`, `[drover]`, `[lumen]`, `[waygate]` on control nodes).
 
----
-
-## Deployment & Reconfiguration Commands
+The installer fails rather than replacing conflicting links or unexpected
+`site.yml` marker content. If it finds a legacy second YAML document in
+`/etc/kolla/globals.yml`, it removes it only when its parsed mapping exactly
+matches `/etc/kolla/afterglow/globals.yml`, preserving a backup beside the
+stock file.
 
 ### Deploy Services
+
+From `/etc/kolla`:
+
 ```bash
-PATH=/etc/kolla/.venv/bin:$PATH \
-/etc/kolla/.venv/bin/kolla-ansible deploy \
-  -i /etc/kolla/inventory-afterglow \
-  -p /etc/kolla/.venv/share/kolla-ansible/ansible/afterglow-site.yml \
-  -e @/etc/kolla/afterglow/globals.yml \
-  -e @/etc/kolla/afterglow/secrets.yml \
-  --tags afterglow,waygate,drover,lumen
+kolla-ansible deploy --tags afterglow,waygate,drover,lumen
 ```
 
 ### Reconfigure Services
+
+Reconfigure only Afterglow:
+
 ```bash
-PATH=/etc/kolla/.venv/bin:$PATH \
-/etc/kolla/.venv/bin/kolla-ansible reconfigure \
-  -i /etc/kolla/inventory-afterglow \
-  -p /etc/kolla/.venv/share/kolla-ansible/ansible/afterglow-site.yml \
-  -e @/etc/kolla/afterglow/globals.yml \
-  -e @/etc/kolla/afterglow/secrets.yml \
-  --tags afterglow,waygate,drover,lumen
+kolla-ansible reconfigure --tags afterglow
 ```
+
+Reconfigure all four plugin services:
+
+```bash
+kolla-ansible reconfigure --tags afterglow,waygate,drover,lumen
+```
+
+The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis;
+normal operations should use the commands above.
 
 ---
 
 ## Uninstallation
 
-To cleanly remove the plugin symlinks without touching stock Kolla files or plugin containers/data:
-
 ```bash
 ./deploy/kolla/uninstall.sh
 ```
 
-Uninstaller verifies that each destination is a symlink pointing to expected plugin targets before removal.
+Uninstall removes only the installer-owned `site.yml` marker block and expected
+symlinks. It leaves `/etc/kolla/multinode`, plugin configuration, databases,
+containers, images, and source checkouts untouched.

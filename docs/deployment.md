@@ -176,11 +176,13 @@ afterglow_redis_password: ""  # Redis 인증 미사용 시 빈 문자열
 ### 4. 배포 실행
 
 ```bash
-# 배포
-kolla-ansible deploy -i /etc/kolla/inventory --tags afterglow
+cd /etc/kolla
 
-# 설정만 반영 (재시작 없이)
-kolla-ansible reconfigure -i /etc/kolla/inventory --tags afterglow
+# 배포
+kolla-ansible deploy --tags afterglow
+
+# 설정 반영
+kolla-ansible reconfigure --tags afterglow
 ```
 
 ### 5. 서비스 확인

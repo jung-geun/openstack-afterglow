@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
+const os = require("node:os")
 const { spawnSync } = require("node:child_process")
 const test = require("node:test")
 
@@ -8,6 +9,18 @@ const rootDir = path.resolve(__dirname, "..")
 
 function readRepoFile(relativePath) {
 	return fs.readFileSync(path.join(rootDir, relativePath), "utf8")
+}
+
+function runGlobalsNormalizer(normalizer, ...args) {
+	const kollaPython = process.env.KOLLA_PYTHON
+	if (kollaPython) {
+		return spawnSync(kollaPython, [normalizer, ...args], { encoding: "utf8" })
+	}
+	return spawnSync(
+		"uv",
+		["run", "--project", path.join(rootDir, "backend"), "python", normalizer, ...args],
+		{ encoding: "utf8" }
+	)
 }
 
 test("Afterglow health checks use probe tools present in published images", () => {
@@ -120,6 +133,99 @@ test("Lumen external PostgreSQL renderer emits libpq service syntax", () => {
 			"sslmode=require\n" +
 			"application_name=afterglow\n"
 	})
+})
+
+test("Kolla installer safely patches the standard playbook import", () => {
+	const patcher = path.join(rootDir, "deploy/kolla/patch_stock_site.py")
+	const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "afterglow-kolla-site-"))
+	const sitePath = path.join(temporaryDirectory, "site.yml")
+	const original = "---\n- import_playbook: gather-facts.yml\n"
+
+	try {
+		fs.writeFileSync(sitePath, original)
+		for (const action of ["install", "install", "remove"]) {
+			const result = spawnSync("python3", [patcher, action, sitePath], { encoding: "utf8" })
+			assert.equal(result.status, 0, result.stderr)
+		}
+		assert.equal(fs.readFileSync(sitePath, "utf8"), original)
+		const globalsPath = path.join(temporaryDirectory, "globals.yml")
+		const pluginGlobalsPath = path.join(temporaryDirectory, "afterglow-globals.yml")
+		const backupPath = path.join(temporaryDirectory, "globals.yml.before-afterglow-dedup")
+		const stockGlobals = "kolla_base: true\n"
+		const pluginGlobals = "enable_afterglow: true\n"
+		fs.writeFileSync(globalsPath, `${stockGlobals}\n---\n${pluginGlobals}`)
+		fs.writeFileSync(pluginGlobalsPath, pluginGlobals)
+		const normalizer = path.join(rootDir, "deploy/kolla/normalize_stock_globals.py")
+		const normalization = runGlobalsNormalizer(normalizer, globalsPath, pluginGlobalsPath, backupPath)
+		assert.equal(normalization.status, 0, normalization.stderr)
+		assert.equal(fs.readFileSync(globalsPath, "utf8"), stockGlobals)
+		assert.equal(fs.readFileSync(backupPath, "utf8"), `${stockGlobals}\n---\n${pluginGlobals}`)
+		const uninstall = readRepoFile("deploy/kolla/uninstall.sh")
+		const installer = readRepoFile("deploy/kolla/install.sh")
+		assert.match(installer, /for inventory_vars_dir in group_vars host_vars/)
+		assert.match(uninstall, /default group_vars/)
+		assert.match(uninstall, /default host_vars/)
+		assert.match(uninstall, /MULTINODE_INVENTORY="\$KOLLA_CONFIG_DIR\/multinode"/)
+		assert.ok(
+			uninstall.indexOf("patch_stock_site.py\" remove") <
+				uninstall.indexOf('afterglow-site.yml" "aggregate afterglow-site.yml playbook"')
+		)
+		assert.match(readRepoFile("deploy/kolla/install.sh"), /globals\.d/)
+		assert.match(readRepoFile("deploy/kolla/install.sh"), /patch_stock_site\.py" install/)
+		assert.match(uninstall, /patch_stock_site\.py" remove/)
+	} finally {
+		fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+	}
+})
+
+test("Kolla helper refusals preserve stock files", () => {
+	const patcher = path.join(rootDir, "deploy/kolla/patch_stock_site.py")
+	const normalizer = path.join(rootDir, "deploy/kolla/normalize_stock_globals.py")
+	const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "afterglow-kolla-refusal-"))
+	const sitePath = path.join(temporaryDirectory, "site.yml")
+	const globalsPath = path.join(temporaryDirectory, "globals.yml")
+	const pluginGlobalsPath = path.join(temporaryDirectory, "afterglow-globals.yml")
+	const backupPath = path.join(temporaryDirectory, "globals.yml.before-afterglow-dedup")
+	const malformedSite = "# END openstack-afterglow plugin\n# BEGIN openstack-afterglow plugin\n"
+	const mismatchedGlobals = "kolla_base: true\n\n---\nenable_afterglow: false\n"
+
+	try {
+		fs.writeFileSync(sitePath, malformedSite)
+		const patchResult = spawnSync("python3", [patcher, "remove", sitePath], { encoding: "utf8" })
+		assert.equal(patchResult.status, 1, patchResult.stderr)
+		assert.match(patchResult.stderr, /managed marker is malformed/)
+		assert.equal(fs.readFileSync(sitePath, "utf8"), malformedSite)
+
+		fs.writeFileSync(globalsPath, mismatchedGlobals)
+		fs.writeFileSync(pluginGlobalsPath, "enable_afterglow: true\n")
+		const normalizeResult = runGlobalsNormalizer(
+			normalizer,
+			globalsPath,
+			pluginGlobalsPath,
+			backupPath
+		)
+		assert.equal(normalizeResult.status, 1, normalizeResult.stderr)
+		assert.match(normalizeResult.stderr, /trailing document does not exactly match plugin globals/)
+		assert.equal(fs.readFileSync(globalsPath, "utf8"), mismatchedGlobals)
+		assert.equal(fs.existsSync(backupPath), false)
+	} finally {
+		fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+	}
+})
+
+test("Plugin lifecycle dispatchers preserve stock actions and tag isolation", () => {
+	for (const service of ["afterglow", "waygate", "drover", "lumen"]) {
+		const dispatcher = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/main.yml`)
+		assert.doesNotMatch(dispatcher, /tags: always/)
+		assert.match(dispatcher, /'config_validate', 'stop', 'deploy-containers', 'check'/)
+		assert.match(dispatcher, /when: kolla_action \| default\('deploy'\) in \[.*'config'\]/)
+	}
+	const pluginSite = readRepoFile("deploy/kolla/site.yml")
+	const afterglowPull = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/pull.yml")
+
+	assert.match(pluginSite, /kolla_action \| default\('deploy'\) in \['deploy', 'reconfigure', 'upgrade', 'config'\]/)
+	assert.match(pluginSite, /kolla_action \| default\('deploy'\) in \['deploy', 'reconfigure', 'upgrade'\]/)
+	assert.match(afterglowPull, /not \(afterglow_source_mode \| default\(false\) \| bool\)/)
 })
 
 test("Plugin services derive data-plane and OpenStack topology from Kolla variables", () => {

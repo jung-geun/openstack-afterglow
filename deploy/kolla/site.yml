@@ -57,7 +57,9 @@
         apply:
           tags: [afterglow, waygate, drover, lumen, haproxy]
       tags: [afterglow, waygate, drover, lumen, haproxy]
-      when: enable_haproxy | default(true) | bool
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
 
     - name: Render Afterglow HAProxy routes
       ansible.builtin.include_role:
@@ -67,6 +69,7 @@
           tags: [afterglow, haproxy]
       tags: [afterglow, haproxy]
       when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
         - enable_haproxy | default(true) | bool
         - enable_afterglow | default(false) | bool
 
@@ -78,6 +81,7 @@
           tags: [waygate, haproxy]
       tags: [waygate, haproxy]
       when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
         - enable_haproxy | default(true) | bool
         - enable_waygate | default(false) | bool
 
@@ -89,6 +93,7 @@
           tags: [drover, haproxy]
       tags: [drover, haproxy]
       when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
         - enable_haproxy | default(true) | bool
         - enable_drover | default(false) | bool
 
@@ -100,6 +105,7 @@
           tags: [lumen, haproxy]
       tags: [lumen, haproxy]
       when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
         - enable_haproxy | default(true) | bool
         - enable_lumen | default(false) | bool
 
@@ -110,4 +116,6 @@
         apply:
           tags: [afterglow, waygate, drover, lumen, haproxy]
       tags: [afterglow, waygate, drover, lumen, haproxy]
-      when: enable_haproxy | default(true) | bool
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade']
+        - enable_haproxy | default(true) | bool

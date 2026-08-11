@@ -126,6 +126,23 @@ create_symlink_safe() {
   log "심볼릭 링크 생성 완료: $link_path -> $target"
 }
 
+
+# Standard Kolla invocation wiring. Kolla resolves its default inventory as
+# /etc/kolla/ansible/inventory/all-in-one and always loads globals.d after the
+# stock globals/passwords files. Keep the plugin-owned files authoritative.
+KOLLA_CONFIG_DIR="${KOLLA_CONFIG_PATH:-/etc/kolla}"
+MULTINODE_INVENTORY="$KOLLA_CONFIG_DIR/multinode"
+DEFAULT_INVENTORY="$KOLLA_CONFIG_DIR/ansible/inventory/all-in-one"
+PLUGIN_GLOBALS="$KOLLA_CONFIG_DIR/afterglow/globals.yml"
+PLUGIN_SECRETS="$KOLLA_CONFIG_DIR/afterglow/secrets.yml"
+GLOBALS_D="$KOLLA_CONFIG_DIR/globals.d"
+STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
+
+[[ -r "$MULTINODE_INVENTORY" ]] || die "Kolla multinode inventory를 읽을 수 없습니다: $MULTINODE_INVENTORY"
+[[ -r "$PLUGIN_GLOBALS" ]] || die "Afterglow globals를 읽을 수 없습니다: $PLUGIN_GLOBALS"
+[[ -r "$PLUGIN_SECRETS" ]] || die "Afterglow secrets를 읽을 수 없습니다: $PLUGIN_SECRETS"
+[[ -r "$KOLLA_CONFIG_DIR/globals.yml" ]] || die "Kolla globals.yml을 읽을 수 없습니다: $KOLLA_CONFIG_DIR/globals.yml"
+[[ -f "$STOCK_SITE" ]] || die "Kolla stock site.yml을 찾을 수 없습니다: $STOCK_SITE"
 # Role symlinks
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
@@ -135,17 +152,50 @@ create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lum
 # Aggregate playbook symlink (afterglow-site.yml)
 create_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
 
+# A prior manual installation appended the complete plugin globals as a second
+# YAML document. Kolla accepts only one document for -e @globals.yml. Remove
+# that exact duplicate only after proving it matches the plugin-owned source.
+KOLLA_PYTHON=$(command -v python3) || die "python3 실행 파일을 찾을 수 없습니다"
+if [[ "$KOLLA_ANSIBLE_BIN" == /* ]]; then
+  candidate_kolla_python="$(dirname "$KOLLA_ANSIBLE_BIN")/python"
+  [[ -x "$candidate_kolla_python" ]] && KOLLA_PYTHON="$candidate_kolla_python"
+fi
+"$KOLLA_PYTHON" "$REPO_DIR/deploy/kolla/normalize_stock_globals.py" \
+  "$KOLLA_CONFIG_DIR/globals.yml" \
+  "$PLUGIN_GLOBALS" \
+  "$KOLLA_CONFIG_DIR/globals.yml.before-afterglow-dedup" ||
+  die "Kolla globals.yml 중복 Afterglow 문서 정리 실패"
+mkdir -p "$KOLLA_CONFIG_DIR/ansible/inventory"
+
+# Preserve Kolla's normal inventory-relative host_vars/group_vars discovery
+# when its default all-in-one path is redirected to the multinode file.
+for inventory_vars_dir in group_vars host_vars; do
+  source_vars_dir="$KOLLA_CONFIG_DIR/$inventory_vars_dir"
+  target_vars_dir="$KOLLA_CONFIG_DIR/ansible/inventory/$inventory_vars_dir"
+  if [[ -d "$source_vars_dir" ]]; then
+    create_symlink_safe "$source_vars_dir" "$target_vars_dir" "Kolla default $inventory_vars_dir"
+  elif [[ -e "$target_vars_dir" || -L "$target_vars_dir" ]]; then
+    die "Kolla default $inventory_vars_dir exists but $source_vars_dir is absent"
+  fi
+done
+mkdir -p "$(dirname "$DEFAULT_INVENTORY")" "$GLOBALS_D"
+create_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
+create_symlink_safe "$PLUGIN_GLOBALS" "$GLOBALS_D/90-openstack-afterglow-globals.yml" "Afterglow globals.d override"
+create_symlink_safe "$PLUGIN_SECRETS" "$GLOBALS_D/91-openstack-afterglow-secrets.yml" "Afterglow secrets globals.d override"
+python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" ||
+  die "Afterglow stock site.yml import 설치 실패"
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Afterglow, Waygate, Drover, and Lumen integration symlinks installed."
-echo " Stock site.yml, globals.yml, and passwords.yml remain UNTOUCHED."
-echo " The custom playbook adds only plugin-owned HAProxy route fragments."
+echo " Afterglow, Waygate, Drover, and Lumen integration wiring installed."
+echo " The installer owns only its marked stock site.yml import, default"
+echo " inventory link, globals.d links, role links, and aggregate playbook link."
 echo ""
-echo " Run deployment using custom playbook (-p):"
-echo " kolla-ansible deploy \\"
-echo "   -i /etc/kolla/inventory-afterglow \\"
-echo "   -p $KOLLA_DIR/ansible/afterglow-site.yml \\"
-echo "   -e @/etc/kolla/afterglow/globals.yml \\"
-echo "   -e @/etc/kolla/afterglow/secrets.yml \\"
-echo "   --tags afterglow,waygate,drover,lumen"
+echo " From /etc/kolla, reconfigure Afterglow with:"
+echo " kolla-ansible reconfigure --tags afterglow"
+echo ""
+echo " For explicit inventory diagnostics, use:"
+echo " kolla-ansible reconfigure \\"
+echo "   -i $MULTINODE_INVENTORY \\"
+echo "   --tags afterglow"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

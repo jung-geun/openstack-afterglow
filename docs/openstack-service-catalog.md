@@ -187,10 +187,11 @@ enable_drover: "yes"
 enable_lumen: "yes"
 ```
 
-서비스 이미지, 비밀, 데이터베이스 설정을 완료한 뒤 Kolla 관리 노드에서 배포합니다.
+서비스 이미지, 비밀, 데이터베이스 설정을 완료하고 플러그인 설치기를 실행한 뒤
+Kolla 관리 노드의 `/etc/kolla`에서 배포합니다.
 
 ```bash
-kolla-ansible deploy -i /etc/kolla/inventory --tags waygate,drover,lumen
+kolla-ansible deploy --tags waygate,drover,lumen
 ```
 
 세 역할의 Keystone precondition은 `deploy`와 `upgrade`에서 실행되며 기본적으로 `*_run_preconditions: true`입니다. `reconfigure`만 실행하면 Keystone catalog를 생성하거나 교정하지 않습니다. 수동 CLI 복구와 Kolla 배포를 섞는 경우에도 URL, 리전, service type을 위 값과 동일하게 유지하십시오.

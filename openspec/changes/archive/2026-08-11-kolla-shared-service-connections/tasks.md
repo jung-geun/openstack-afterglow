@@ -7,5 +7,5 @@
 - [x] Render runtime OpenStack auth from Kolla internal Keystone variables.
 - [x] Document configuration ownership and source examples.
 - [x] Run targeted contract and regression tests.
-- [ ] Reconfigure DMSLab and verify connection/configuration behavior.
-- [ ] Archive the completed change.
+- [x] Reconfigure DMSLab and verify connection/configuration behavior.
+- [x] Archive the completed change.

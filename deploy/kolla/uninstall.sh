@@ -91,18 +91,39 @@ remove_symlink_safe() {
 
 ROLES_DIR="$KOLLA_DIR/ansible/roles"
 
-# 1. 4개 Role 심볼릭 링크 제거
+# Remove the site import before its target so an interruption can never leave a
+# dangling import in Kolla's stock playbook.
+KOLLA_CONFIG_DIR="${KOLLA_CONFIG_PATH:-/etc/kolla}"
+MULTINODE_INVENTORY="$KOLLA_CONFIG_DIR/multinode"
+DEFAULT_INVENTORY="$KOLLA_CONFIG_DIR/ansible/inventory/all-in-one"
+PLUGIN_GLOBALS="$KOLLA_CONFIG_DIR/afterglow/globals.yml"
+PLUGIN_SECRETS="$KOLLA_CONFIG_DIR/afterglow/secrets.yml"
+GLOBALS_D="$KOLLA_CONFIG_DIR/globals.d"
+STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
+
+[[ -f "$STOCK_SITE" ]] || die "Kolla stock site.yml을 찾을 수 없습니다: $STOCK_SITE"
+python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" remove "$STOCK_SITE" ||
+  die "Afterglow stock site.yml import 제거 실패"
+
+# Remove aggregate playbook link after its stock import is gone.
+remove_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
+
+# Remove the four plugin role links.
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
 
-# 2. 1개 Aggregate playbook 심볼릭 링크 제거
-remove_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
+remove_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
+remove_symlink_safe "$KOLLA_CONFIG_DIR/group_vars" "$KOLLA_CONFIG_DIR/ansible/inventory/group_vars" "Kolla default group_vars"
+remove_symlink_safe "$KOLLA_CONFIG_DIR/host_vars" "$KOLLA_CONFIG_DIR/ansible/inventory/host_vars" "Kolla default host_vars"
+remove_symlink_safe "$PLUGIN_GLOBALS" "$GLOBALS_D/90-openstack-afterglow-globals.yml" "Afterglow globals.d override"
+remove_symlink_safe "$PLUGIN_SECRETS" "$GLOBALS_D/91-openstack-afterglow-secrets.yml" "Afterglow secrets globals.d override"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Afterglow integration symlinks removed."
-echo " Stock site.yml, globals.yml, passwords.yml, databases, containers, images,"
-echo " and source checkouts remain UNTOUCHED."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " Afterglow integration wiring removed."
+echo " The installer-owned stock site.yml import, default inventory link, and"
+echo " globals.d links were removed. Stock globals/passwords, the multinode"
+echo " inventory, plugin configuration, databases, containers, images, and source"
+echo " checkouts remain UNTOUCHED."
