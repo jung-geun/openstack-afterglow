@@ -36,6 +36,7 @@ test("Afterglow public endpoint controls every browser-facing origin", () => {
 	assert.match(config, /frontend_base_url = "\{\{ afterglow_public_endpoint_url \}\}"/)
 	assert.match(config, /origins = "\{\{ afterglow_public_endpoint_url \}\}"/)
 	assert.match(config, /redirect_uri = "\{\{ afterglow_public_endpoint_url \}\}\/auth\/gitlab\/callback"/)
+	assert.match(sample, /^afterglow_public_api_base: "https:\/\/cloud\.dmslab\.re\.kr"$/m)
 	assert.match(sample, /^afterglow_public_endpoint_url: "https:\/\/cloud\.dmslab\.re\.kr"$/m)
 	assert.doesNotMatch(defaults, /afterglow_external_url/)
 })

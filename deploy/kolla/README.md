@@ -66,7 +66,8 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 
 Set `afterglow_public_endpoint_url` to the browser-facing HTTP(S) origin without a path. The role renders it into the frontend `ORIGIN`, backend CORS origin, frontend base URL, OAuth callback, and instance-health callback base. The DMSLab configuration uses `https://cloud.dmslab.re.kr`.
 
-`afterglow_public_api_base` is separate and remains the browser API origin. Configure operator-managed API ingress before changing it to a public HTTPS URL.
+`afterglow_public_api_base` is the browser API origin. DMSLab's ingress routes `https://cloud.dmslab.re.kr/api/v1` to the backend, so it uses the same HTTPS origin and avoids mixed-content requests.
+
 ### Lumen PostgreSQL Mode
 
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:

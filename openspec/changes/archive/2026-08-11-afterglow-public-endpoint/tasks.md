@@ -5,4 +5,4 @@
 - [x] Set the DMSLab public endpoint to `https://cloud.dmslab.re.kr`.
 - [x] Add and run the Kolla configuration contract test.
 - [x] Run repository verification gates.
-- [ ] Reconfigure DMSLab and verify the rendered domain and service health.
+- [x] Reconfigure DMSLab and verify the rendered domain and service health.
