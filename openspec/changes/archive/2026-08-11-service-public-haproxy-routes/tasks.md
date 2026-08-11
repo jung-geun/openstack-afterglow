@@ -6,4 +6,4 @@
 - [x] Add and run route contract coverage.
 - [x] Run repository verification gates.
 - [x] Reconfigure DMSLab and smoke-test all service public routes through the Kolla external VIP.
-- [ ] Archive the completed change.
+- [x] Archive the completed change.
