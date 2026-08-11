@@ -41,3 +41,61 @@
   serial: "{{ kolla_serial | default('0') }}"
   roles:
     - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }
+
+- name: Configure plugin HAProxy routes
+  gather_facts: false
+  hosts: loadbalancer
+  serial: "{{ kolla_serial | default('0') }}"
+  tags: haproxy
+  tasks:
+    # Use Kolla's native config/check path. The check task recreates HAProxy only
+    # when the resulting configuration hash changes.
+    - name: Render Kolla HAProxy base configuration
+      ansible.builtin.include_role:
+        name: loadbalancer
+        tasks_from: config
+      tags: [afterglow, waygate, drover, lumen, haproxy]
+      when: enable_haproxy | default(true) | bool
+
+    - name: Render Afterglow HAProxy routes
+      ansible.builtin.include_role:
+        name: afterglow
+        tasks_from: loadbalancer
+      tags: [afterglow, haproxy]
+      when:
+        - enable_haproxy | default(true) | bool
+        - enable_afterglow | default(false) | bool
+
+    - name: Render Waygate HAProxy routes
+      ansible.builtin.include_role:
+        name: waygate
+        tasks_from: loadbalancer
+      tags: [waygate, haproxy]
+      when:
+        - enable_haproxy | default(true) | bool
+        - enable_waygate | default(false) | bool
+
+    - name: Render Drover HAProxy routes
+      ansible.builtin.include_role:
+        name: drover
+        tasks_from: loadbalancer
+      tags: [drover, haproxy]
+      when:
+        - enable_haproxy | default(true) | bool
+        - enable_drover | default(false) | bool
+
+    - name: Render Lumen HAProxy routes
+      ansible.builtin.include_role:
+        name: lumen
+        tasks_from: loadbalancer
+      tags: [lumen, haproxy]
+      when:
+        - enable_haproxy | default(true) | bool
+        - enable_lumen | default(false) | bool
+
+    - name: Reconcile Kolla HAProxy after plugin route changes
+      ansible.builtin.include_role:
+        name: loadbalancer
+        tasks_from: check-containers
+      tags: [afterglow, waygate, drover, lumen, haproxy]
+      when: enable_haproxy | default(true) | bool

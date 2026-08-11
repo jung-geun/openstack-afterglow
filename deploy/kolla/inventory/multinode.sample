@@ -1,6 +1,6 @@
 # Afterglow × kolla-ansible multinode inventory sample
-# Plugin services (afterglow, waygate, drover, lumen) run on control nodes
-# Listeners bind directly to internal VIP ports (no HAProxy integration required)
+# Plugin services run on control nodes. Kolla HAProxy exposes their internal-VIP
+# frontends and balances them across controller-local upstream ports.
 
 [control]
 ctrl01 ansible_host=10.0.0.11 ansible_user=ubuntu
@@ -9,6 +9,10 @@ ctrl03 ansible_host=10.0.0.13 ansible_user=ubuntu
 
 [network:children]
 control
+
+
+[loadbalancer:children]
+network
 
 [compute]
 compute01 ansible_host=10.0.0.21 ansible_user=ubuntu

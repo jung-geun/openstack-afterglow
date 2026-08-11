@@ -1,0 +1,8 @@
+---
+- name: Configure loadbalancer for Lumen
+  ansible.builtin.import_role:
+    name: loadbalancer-config
+  vars:
+    project_name: lumen
+    project_services: "{{ lumen_services }}"
+  tags: always

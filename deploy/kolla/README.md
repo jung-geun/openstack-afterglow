@@ -6,26 +6,24 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
 
 ## Architecture & Integration Principles
 
-1. **Zero Impact on Stock Kolla Configuration**:
-   - Stock `site.yml`, `/etc/kolla/globals.yml`, `/etc/kolla/passwords.yml`, and HAProxy configuration files are **never modified or patched**.
-   - No stock Kolla containers are restarted or altered.
+1. **Additive Kolla Integration**:
+   - Stock `site.yml`, `/etc/kolla/globals.yml`, `/etc/kolla/passwords.yml`, and inventory are never modified or patched.
+   - The plugin adds only its own HAProxy service fragments through Kolla's `loadbalancer-config` role. Kolla reconciles HAProxy after a fragment changes; its container may be recreated once for that deliberate route update.
 2. **Custom Playbook & Additive Vars**:
    - The plugin provides an aggregate playbook `afterglow-site.yml` symlinked into Kolla's ansible directory.
    - Settings and secrets live in isolated files `/etc/kolla/afterglow/globals.yml` and `/etc/kolla/afterglow/secrets.yml`, passed via `-e @...`.
-3. **Direct Internal-VIP Listeners**:
-   - Services bind directly to `kolla_internal_vip_address` (e.g. `172.30.0.253`):
+3. **Kolla HAProxy Internal-VIP Listeners**:
+   - HAProxy owns the internal-VIP frontend ports:
      - **Afterglow UI**: `3080`
-     - **Afterglow API**: `8020` on the host/VIP; the container keeps port `8000`.
+     - **Afterglow API**: `8020`; Heat CFN retains `8000`.
      - **Waygate**: `8010`
      - **Drover**: `8011`
      - **Lumen**: `8012`
-   - Nonlocal binding (`net.ipv4.ip_nonlocal_bind=1`) allows active/standby controllers to share port definitions without HAProxy reloads.
-4. **Pinned Source Builds**:
-   - Images are built on controller hosts from pinned GitHub source commits into local tags (`afterglow-local/<component>:<12-char-sha>`):
-     - **Afterglow**: `openstack-afterglow/openstack-afterglow` (`backend`, `frontend`)
-     - **Drover**: `openstack-afterglow/drover` at `2b82bc16fc432ce84b21390a67106f3afcc593a1` (`drover-api`, `drover-worker`)
-     - **Lumen**: `openstack-afterglow/lumen` at `c7d59a255148173232e5a4b32e90498dea5cee29` (`lumen-api`, `lumen-worker`)
-     - **Waygate**: `openstack-afterglow/waygate` at `e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3` (`waygate-api`, `waygate-worker`)
+   - App containers bind the controller API addresses only, using private upstream ports `18081`, `18020`, `18010`, `18011`, and `18012`. HAProxy balances each frontend across its matching controller group.
+   - The plugin does not create external-VIP routes, DNS records, or TLS certificates. Existing Drover and Waygate public catalog URLs remain operator-owned ingress contracts.
+4. **Pinned GHCR Images**:
+   - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Do not use mutable `latest` or `dev` tags.
+   - Source-build mode remains an optional development path; it is not used for the DMSLab deployment.
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`).
    - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.

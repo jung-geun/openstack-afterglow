@@ -25,48 +25,46 @@ enable_lumen: "yes"
 enable_lumen_api: "yes"
 enable_lumen_worker: "yes"
 
-# ── 2. Source Build & Image References ───────────────────────────────────────
-# Build local images pinned to exact GitHub commits into plugin-owned checkouts.
-# Replace each Afterglow placeholder with the full SHA of the implementation commit
-# and its first 12 characters before deploying.
-enable_afterglow_source_build: true
-enable_drover_source_build: true
-enable_lumen_source_build: true
-enable_waygate_source_build: true
-afterglow_source_checkout_path: "/opt/afterglow/src/openstack-afterglow"
-afterglow_source_repo: "https://github.com/openstack-afterglow/openstack-afterglow.git"
-afterglow_source_version: "<AFTERGLOW_IMPLEMENTATION_FULL_SHA>"
+# ── 2. Immutable GHCR Image References ───────────────────────────────────────
+# Resolve and pin the linux/amd64 manifest digest before deployment. Never
+# deploy mutable tags such as latest or dev. Source builds remain available for
+# development, but this DMSLab topology pulls the published GHCR images.
+enable_afterglow_source_build: false
+enable_drover_source_build: false
+enable_lumen_source_build: false
+enable_waygate_source_build: false
 
-drover_source_checkout_path: "/opt/afterglow/src/drover"
-drover_source_repo: "https://github.com/openstack-afterglow/drover.git"
-drover_source_version: "2b82bc16fc432ce84b21390a67106f3afcc593a1"
+afterglow_backend_image_ref: "ghcr.io/openstack-afterglow/afterglow-api@sha256:<AFTERGLOW_API_AMD64_DIGEST>"
+afterglow_frontend_image_ref: "ghcr.io/openstack-afterglow/afterglow@sha256:<AFTERGLOW_FRONTEND_AMD64_DIGEST>"
+drover_api_image_ref: "ghcr.io/openstack-afterglow/drover-api@sha256:<DROVER_API_AMD64_DIGEST>"
+drover_worker_image_ref: "ghcr.io/openstack-afterglow/drover-worker@sha256:<DROVER_WORKER_AMD64_DIGEST>"
+waygate_api_image_ref: "ghcr.io/openstack-afterglow/waygate-api@sha256:<WAYGATE_API_AMD64_DIGEST>"
+waygate_worker_image_ref: "ghcr.io/openstack-afterglow/waygate-worker@sha256:<WAYGATE_WORKER_AMD64_DIGEST>"
+lumen_api_image_ref: "ghcr.io/openstack-afterglow/lumen-api@sha256:<LUMEN_API_AMD64_DIGEST>"
+lumen_worker_image_ref: "ghcr.io/openstack-afterglow/lumen-worker@sha256:<LUMEN_WORKER_AMD64_DIGEST>"
 
-lumen_source_checkout_path: "/opt/afterglow/src/lumen"
-lumen_source_repo: "https://github.com/openstack-afterglow/lumen.git"
-lumen_source_version: "c7d59a255148173232e5a4b32e90498dea5cee29"
-
-waygate_source_checkout_path: "/opt/afterglow/src/waygate"
-waygate_source_repo: "https://github.com/openstack-afterglow/waygate.git"
-waygate_source_version: "e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3"
-
-# Complete image refs (pinned local source builds with 12-character SHA tags).
-afterglow_backend_image_ref: "afterglow-local/backend:<AFTERGLOW_SHA12>"
-afterglow_frontend_image_ref: "afterglow-local/frontend:<AFTERGLOW_SHA12>"
-drover_api_image_ref: "afterglow-local/drover-api:2b82bc16fc43"
-drover_worker_image_ref: "afterglow-local/drover-worker:2b82bc16fc43"
-waygate_api_image_ref: "afterglow-local/waygate-api:e83ce559e3e3"
-waygate_worker_image_ref: "afterglow-local/waygate-worker:e83ce559e3e3"
-lumen_api_image_ref: "afterglow-local/lumen-api:c7d59a255148"
-lumen_worker_image_ref: "afterglow-local/lumen-worker:c7d59a255148"
-
-# ── 3. Direct Internal VIP Listeners ──────────────────────────────────────────
-# Bind API/UI host ports to kolla_internal_vip_address (172.30.0.253)
+# ── 3. HAProxy VIP Listeners and Controller Upstreams ────────────────────────
+# Kolla HAProxy owns the VIP ports. App containers bind only the controller API
+# addresses on private upstream ports; Heat retains VIP port 8000.
 afterglow_external_url: "http://172.30.0.253:3080"
 afterglow_backend_port: 8020
+afterglow_frontend_port: 3080
+afterglow_backend_listen_port: 18020
+afterglow_frontend_listen_port: 18081
 afterglow_public_api_base: "http://172.30.0.253:8020"
 afterglow_openstack_interface: "internal"
 
-# Preserve public DNS/TLS catalog URLs while internal and admin clients use VIP.
+waygate_api_port: 8010
+waygate_api_listen_port: 18010
+drover_api_port: 8011
+drover_api_listen_port: 18011
+lumen_api_port: 8012
+lumen_api_listen_port: 18012
+
+
+# Preserve the existing catalog public URLs. This plugin deliberately creates
+# only internal-VIP HAProxy routes; DNS, certificates, and external-VIP routing
+# are separate operator-owned ingress work.
 waygate_external_url: "https://waygate.dmslab.re.kr"
 waygate_public_endpoint_url: "https://waygate.dmslab.re.kr"
 waygate_internal_endpoint_url: "http://172.30.0.253:8010"

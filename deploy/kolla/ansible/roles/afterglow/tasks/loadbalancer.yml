@@ -1,0 +1,8 @@
+---
+- name: Configure loadbalancer for Afterglow
+  ansible.builtin.import_role:
+    name: loadbalancer-config
+  vars:
+    project_name: afterglow
+    project_services: "{{ afterglow_services }}"
+  tags: always

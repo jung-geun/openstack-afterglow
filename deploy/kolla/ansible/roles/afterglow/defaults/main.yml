@@ -34,8 +34,12 @@ afterglow_config_dir: "/etc/kolla/afterglow"
 # ── 포트 ──────────────────────────────────────────────────────────────────────
 afterglow_backend_port: 8020
 afterglow_frontend_port: 3080
-afterglow_backend_listen_port: "{{ afterglow_backend_port }}"
-afterglow_frontend_listen_port: "{{ afterglow_frontend_port }}"
+# Kolla HAProxy owns the VIP listeners. Application containers bind each
+# controller's API address on private upstream ports.
+afterglow_backend_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
+afterglow_frontend_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
+afterglow_backend_listen_port: 18020
+afterglow_frontend_listen_port: 18081
 
 # ── URL 및 엔드포인트 ────────────────────────────────────────────────────────
 afterglow_public_api_base: "http://{{ kolla_internal_vip_address }}:{{ afterglow_backend_port }}"
@@ -151,7 +155,19 @@ afterglow_services:
       retries: 3
       start_period: 40s
     ports:
-      - "{{ kolla_internal_vip_address }}:{{ afterglow_backend_port }}:8000"
+      - "{{ afterglow_backend_listen_address }}:{{ afterglow_backend_listen_port }}:8000"
+    haproxy:
+      afterglow-api:
+        enabled: "{{ enable_afterglow_backend | bool }}"
+        external: false
+        port: "{{ afterglow_backend_port }}"
+        listen_port: "{{ afterglow_backend_listen_port }}"
+        host_group: afterglow
+        frontend_http_extra:
+          - "option forwardfor"
+        backend_http_extra:
+          - "option httpchk GET /api/v1/health"
+          - "http-check expect status 200"
 
   afterglow-frontend:
     container_name: afterglow_frontend
@@ -171,7 +187,19 @@ afterglow_services:
       retries: 3
       start_period: 30s
     ports:
-      - "{{ kolla_internal_vip_address }}:{{ afterglow_frontend_port }}:3080"
+      - "{{ afterglow_frontend_listen_address }}:{{ afterglow_frontend_listen_port }}:3080"
+    haproxy:
+      afterglow-frontend:
+        enabled: "{{ enable_afterglow_frontend | bool }}"
+        external: false
+        port: "{{ afterglow_frontend_port }}"
+        listen_port: "{{ afterglow_frontend_listen_port }}"
+        host_group: afterglow
+        frontend_http_extra:
+          - "option forwardfor"
+        backend_http_extra:
+          - "option httpchk GET /"
+          - "http-check expect status 200"
 
   afterglow-palimpsest-worker:
     container_name: afterglow_palimpsest_worker

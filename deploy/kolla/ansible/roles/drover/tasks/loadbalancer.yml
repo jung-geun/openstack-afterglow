@@ -1,0 +1,8 @@
+---
+- name: Configure loadbalancer for Drover
+  ansible.builtin.import_role:
+    name: loadbalancer-config
+  vars:
+    project_name: drover
+    project_services: "{{ drover_services }}"
+  tags: always

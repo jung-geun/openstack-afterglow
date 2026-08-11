@@ -1,10 +1,14 @@
 # Afterglow × kolla-ansible all-in-one inventory sample
-# Plugin services run on single control node with direct internal VIP listeners
+# Plugin services and Kolla HAProxy run on the single control node.
 
 [control]
 localhost ansible_connection=local
 
 [network:children]
+control
+
+
+[loadbalancer:children]
 control
 
 [compute:children]

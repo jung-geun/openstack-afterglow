@@ -18,6 +18,8 @@ enable_lumen_worker: "{{ enable_lumen }}"
 lumen_run_preconditions: true
 
 lumen_api_port: 8012
+lumen_api_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
+lumen_api_listen_port: 18012
 lumen_database_name: "lumen"
 lumen_database_user: "lumen"
 lumen_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
@@ -111,7 +113,19 @@ lumen_services:
       retries: 3
       start_period: 30s
     ports:
-      - "{{ kolla_internal_vip_address }}:{{ lumen_api_port }}:8012"
+      - "{{ lumen_api_listen_address }}:{{ lumen_api_listen_port }}:8012"
+    haproxy:
+      lumen-api:
+        enabled: "{{ enable_lumen_api | bool }}"
+        external: false
+        port: "{{ lumen_api_port }}"
+        listen_port: "{{ lumen_api_listen_port }}"
+        host_group: lumen
+        frontend_http_extra:
+          - "option forwardfor"
+        backend_http_extra:
+          - "option httpchk GET /v1/health"
+          - "http-check expect status 200"
 
   lumen-worker:
     container_name: lumen_worker
