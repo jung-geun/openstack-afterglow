@@ -19,6 +19,15 @@
   tags: precheck
   when: enable_afterglow | bool
 
+- name: Precheck | Validate Afterglow public frontend origin
+  ansible.builtin.assert:
+    that:
+      - afterglow_public_endpoint_url is match('^https?://[^/?#\s]+/?$')
+    fail_msg: "afterglow_public_endpoint_url must be an absolute HTTP(S) origin without a path, query, or fragment"
+  run_once: true
+  tags: precheck
+  when: enable_afterglow | bool
+
 - name: Precheck | Verify Manila microversion support
   become: true
   community.docker.docker_container_exec:

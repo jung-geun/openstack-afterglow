@@ -7,8 +7,8 @@
         "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
     ],
     "environment": {
-        "ORIGIN": "{{ afterglow_external_url }}",
-        "PUBLIC_API_BASE": "{{ afterglow_external_url }}"
+        "ORIGIN": "{{ afterglow_public_endpoint_url }}",
+        "PUBLIC_API_BASE": "{{ afterglow_public_api_base }}"
     },
     "healthcheck": {
         "test": ["CMD", "curl", "-f", "http://localhost:3000/"],

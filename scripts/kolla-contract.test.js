@@ -23,6 +23,23 @@ test("Afterglow health checks use probe tools present in published images", () =
 	assert.doesNotMatch(defaults, /test: \["CMD", "curl", "-f", "http:\/\{\{ afterglow_/)
 })
 
+test("Afterglow public endpoint controls every browser-facing origin", () => {
+	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const precheck = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/precheck.yml")
+	const config = readRepoFile("deploy/kolla/ansible/roles/afterglow/templates/afterglow.conf.j2")
+	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+
+	assert.match(defaults, /^afterglow_public_endpoint_url: /m)
+	assert.match(defaults, /ORIGIN: "\{\{ afterglow_public_endpoint_url \}\}"/)
+	assert.match(defaults, /afterglow_instance_health_callback_base_url: "\{\{ afterglow_public_endpoint_url \}\}"/)
+	assert.match(precheck, /afterglow_public_endpoint_url must be an absolute HTTP\(S\) origin/)
+	assert.match(config, /frontend_base_url = "\{\{ afterglow_public_endpoint_url \}\}"/)
+	assert.match(config, /origins = "\{\{ afterglow_public_endpoint_url \}\}"/)
+	assert.match(config, /redirect_uri = "\{\{ afterglow_public_endpoint_url \}\}\/auth\/gitlab\/callback"/)
+	assert.match(sample, /^afterglow_public_endpoint_url: "https:\/\/cloud\.dmslab\.re\.kr"$/m)
+	assert.doesNotMatch(defaults, /afterglow_external_url/)
+})
+
 test("Lumen PostgreSQL modes keep bundled resources separate from external connection inputs", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/lumen/defaults/main.yml")
 	const precheck = readRepoFile("deploy/kolla/ansible/roles/lumen/tasks/precheck.yml")

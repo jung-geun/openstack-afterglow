@@ -44,7 +44,7 @@ afterglow_frontend_listen_port: 18081
 # ── URL 및 엔드포인트 ────────────────────────────────────────────────────────
 afterglow_public_api_base: "http://{{ kolla_internal_vip_address }}:{{ afterglow_backend_port }}"
 afterglow_openstack_interface: "internal"
-afterglow_external_url: "https://{{ kolla_external_fqdn | default('localhost') }}"
+afterglow_public_endpoint_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}"
 afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
 afterglow_palimpsest_hub_path: "/var/lib/afterglow/palimpsest"
 
@@ -100,7 +100,7 @@ afterglow_share_manifest_store_id: ""
 afterglow_share_metadata_store_id: ""
 
 # ── Instance health ───────────────────────────────────────────────────────────
-afterglow_instance_health_callback_base_url: "{{ afterglow_external_url }}"
+afterglow_instance_health_callback_base_url: "{{ afterglow_public_endpoint_url }}"
 
 # ── 통합 서비스 토글 (DMSLab 기본: k3s, waygate, chat, mcp 활성화) ────────────
 afterglow_service_manila_enabled: false
@@ -141,7 +141,7 @@ afterglow_services:
       OS_INTERFACE: "{{ afterglow_openstack_interface }}"
       SECRET_KEY: "{{ afterglow_secret_key }}"
       PUBLIC_API_BASE: "{{ afterglow_public_api_base }}"
-      ORIGIN: "{{ afterglow_external_url }}"
+      ORIGIN: "{{ afterglow_public_endpoint_url }}"
       GITLAB_OIDC_CLIENT_SECRET: "{{ afterglow_oidc_client_secret | default('') }}"
       K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
       LUMEN_MCP_SERVICE_TOKEN: "{{ afterglow_lumen_mcp_service_token }}"
@@ -180,7 +180,7 @@ afterglow_services:
     volumes:
       - "kolla_logs:/var/log/kolla/"
     environment:
-      ORIGIN: "{{ afterglow_external_url }}"
+      ORIGIN: "{{ afterglow_public_endpoint_url }}"
       PUBLIC_API_BASE: "{{ afterglow_public_api_base }}"
       HOST: "{{ afterglow_frontend_listen_address }}"
       PORT: "{{ afterglow_frontend_listen_port | string }}"

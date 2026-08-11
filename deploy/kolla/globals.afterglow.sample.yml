@@ -46,7 +46,9 @@ lumen_worker_image_ref: "ghcr.io/openstack-afterglow/lumen-worker@sha256:<LUMEN_
 # ── 3. HAProxy VIP Listeners and Controller Upstreams ────────────────────────
 # Kolla HAProxy owns the VIP ports. App containers bind only the controller API
 # addresses on private upstream ports; Heat retains VIP port 8000.
-afterglow_external_url: "http://172.30.0.253:3080"
+# Browser-facing frontend origin. Configure the operator-managed public DNS/TLS
+# endpoint here; the internal API base remains separate.
+afterglow_public_endpoint_url: "https://cloud.dmslab.re.kr"
 afterglow_backend_port: 8020
 afterglow_frontend_port: 3080
 afterglow_backend_listen_port: 18020

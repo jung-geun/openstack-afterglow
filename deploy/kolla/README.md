@@ -27,7 +27,7 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`).
    - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
-   - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode never creates a PostgreSQL container and must not use the Kolla MariaDB address.
+   - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode does not create a persistent PostgreSQL server container; it starts a disposable verification client container, runs an authenticated `SELECT 1`, then removes it.
 
 ---
 
@@ -61,6 +61,12 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 3. **Create Secrets (`/etc/kolla/afterglow/secrets.yml`)**:
    Copy `deploy/kolla/passwords.afterglow.additions.yml`, set permissions to `0600`, and populate generated 64-hex keys and database/Keystone passwords.
 
+
+### Afterglow Public Frontend Endpoint
+
+Set `afterglow_public_endpoint_url` to the browser-facing HTTP(S) origin without a path. The role renders it into the frontend `ORIGIN`, backend CORS origin, frontend base URL, OAuth callback, and instance-health callback base. The DMSLab configuration uses `https://cloud.dmslab.re.kr`.
+
+`afterglow_public_api_base` is separate and remains the browser API origin. Configure operator-managed API ingress before changing it to a public HTTPS URL.
 ### Lumen PostgreSQL Mode
 
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:
