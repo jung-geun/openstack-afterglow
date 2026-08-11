@@ -1,8 +1,42 @@
 ---
+- name: HAProxy | Ensure Afterglow custom configuration directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ node_custom_config }}/haproxy-config"
+    state: directory
+    mode: "0750"
+  when: afterglow_public_haproxy_enabled | bool
+
+- name: HAProxy | Render Afterglow public host router
+  become: true
+  ansible.builtin.template:
+    src: afterglow-public.cfg.j2
+    dest: "{{ node_custom_config }}/haproxy-config/afterglow-public.cfg"
+    mode: "0640"
+  when: afterglow_public_haproxy_enabled | bool
+
+- name: HAProxy | Remove disabled Afterglow public host router
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ node_custom_config }}/haproxy-config/afterglow-public.cfg"
+    - "{{ node_config_directory }}/haproxy/services.d/afterglow-public.cfg"
+  when: not (afterglow_public_haproxy_enabled | bool)
+
+- name: HAProxy | Remove disabled Afterglow external frontend map
+  become: true
+  ansible.builtin.blockinfile:
+    path: "{{ node_config_directory }}/haproxy/external-frontend-map"
+    marker: "# {mark} afterglow-public"
+    state: absent
+  when: not (afterglow_public_haproxy_enabled | bool)
+
 - name: Configure loadbalancer for Afterglow
   ansible.builtin.import_role:
     name: loadbalancer-config
   vars:
     project_name: afterglow
-    project_services: "{{ afterglow_services }}"
+    project_services: "{{ afterglow_haproxy_services }}"
   tags: always

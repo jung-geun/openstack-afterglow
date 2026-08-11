@@ -28,6 +28,19 @@
   tags: precheck
   when: enable_afterglow | bool
 
+- name: Precheck | Validate Kolla public route hostname
+  ansible.builtin.assert:
+    that:
+      - afterglow_public_haproxy_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+      - afterglow_public_haproxy_router_port | int > 0
+      - afterglow_public_haproxy_router_port | int < 65536
+    fail_msg: "afterglow_public_haproxy_fqdn must be a hostname and afterglow_public_haproxy_router_port must be a valid TCP port"
+  run_once: true
+  tags: precheck
+  when:
+    - enable_afterglow | bool
+    - afterglow_public_haproxy_enabled | bool
+
 - name: Precheck | Verify Manila microversion support
   become: true
   community.docker.docker_container_exec:

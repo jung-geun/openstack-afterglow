@@ -41,6 +41,28 @@ test("Afterglow public endpoint controls every browser-facing origin", () => {
 	assert.doesNotMatch(defaults, /afterglow_external_url/)
 })
 
+test("Afterglow public hostname is routed by Kolla's external HAProxy frontend", () => {
+	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const precheck = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/precheck.yml")
+	const loadbalancer = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/loadbalancer.yml")
+	const router = readRepoFile("deploy/kolla/ansible/roles/afterglow/templates/afterglow-public.cfg.j2")
+	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+
+	assert.match(defaults, /^afterglow_public_haproxy_enabled: false$/m)
+	assert.match(defaults, /^afterglow_public_haproxy_fqdn: ""$/m)
+	assert.match(defaults, /afterglow_haproxy_services: "\{\{ afterglow_services \| combine\(afterglow_public_haproxy_services, recursive=True\) \}\}"/)
+	assert.match(precheck, /Validate Kolla public route hostname/)
+	assert.match(loadbalancer, /afterglow-public\.cfg/)
+	assert.match(loadbalancer, /external-frontend-map/)
+	assert.match(loadbalancer, /project_services: "\{\{ afterglow_haproxy_services \}\}"/)
+	assert.match(router, /backend afterglow-public_back/)
+	assert.match(router, /frontend afterglow-public-router_front/)
+	assert.match(router, /use_backend afterglow-api_back if \{ path_beg \/api\/ \}/)
+	assert.match(router, /default_backend afterglow-frontend_back/)
+	assert.match(sample, /^afterglow_public_haproxy_enabled: true$/m)
+	assert.match(sample, /^afterglow_public_haproxy_fqdn: "cloud\.dmslab\.re\.kr"$/m)
+})
+
 test("Lumen PostgreSQL modes keep bundled resources separate from external connection inputs", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/lumen/defaults/main.yml")
 	const precheck = readRepoFile("deploy/kolla/ansible/roles/lumen/tasks/precheck.yml")

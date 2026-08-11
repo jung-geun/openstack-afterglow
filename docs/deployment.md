@@ -148,6 +148,10 @@ enable_afterglow_worker: "yes"
 # 브라우저 frontend origin
 afterglow_public_endpoint_url: "https://afterglow.example.com"
 
+# Kolla external VIP/TLS frontend으로 같은 도메인을 배포할 때
+afterglow_public_haproxy_enabled: true
+afterglow_public_haproxy_fqdn: "afterglow.example.com"
+
 # 이미지 설정
 afterglow_backend_image: "ghcr.io/openstack-afterglow/afterglow-api"
 afterglow_frontend_image: "ghcr.io/openstack-afterglow/afterglow"

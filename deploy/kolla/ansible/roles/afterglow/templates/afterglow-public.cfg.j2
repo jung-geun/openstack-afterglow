@@ -1,0 +1,16 @@
+# Plugin-owned public route for {{ afterglow_public_haproxy_fqdn }}.
+# Kolla's single external frontend maps this host to afterglow-public_back.
+backend afterglow-public_back
+    mode http
+    http-request set-header X-Forwarded-For %[src]
+    option httpchk GET /
+    http-check expect status 200
+    server afterglow-public-router 127.0.0.1:{{ afterglow_public_haproxy_router_port }} check
+
+# This loopback frontend preserves the external Host and X-Forwarded-Proto
+# headers, then dispatches API traffic to the existing Kolla-managed backends.
+frontend afterglow-public-router_front
+    mode http
+    bind 127.0.0.1:{{ afterglow_public_haproxy_router_port }}
+    use_backend afterglow-api_back if { path_beg /api/ }
+    default_backend afterglow-frontend_back

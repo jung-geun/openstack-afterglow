@@ -68,6 +68,17 @@ Set `afterglow_public_endpoint_url` to the browser-facing HTTP(S) origin without
 
 `afterglow_public_api_base` is the browser API origin. DMSLab's ingress routes `https://cloud.dmslab.re.kr/api/v1` to the backend, so it uses the same HTTPS origin and avoids mixed-content requests.
 
+### Kolla External HAProxy Route
+
+Set `afterglow_public_haproxy_enabled: true` and
+`afterglow_public_haproxy_fqdn` to publish the configured hostname through
+Kolla's existing external VIP/TLS frontend. The plugin owns the added HAProxy
+fragment and map entry: `/api/` is dispatched to the Afterglow API backend and
+all other paths to the frontend backend. It neither patches stock Kolla
+templates nor changes Kolla's certificate, DNS, external VIP, or global config.
+
+The Kolla external TLS certificate must cover the configured hostname.
+
 ### Lumen PostgreSQL Mode
 
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:

@@ -50,6 +50,11 @@ lumen_worker_image_ref: "ghcr.io/openstack-afterglow/lumen-worker@sha256:<LUMEN_
 # endpoint here. DMSLab's public ingress routes the same origin's `/api/v1`
 # path to the backend, so browser API traffic remains HTTPS and same-origin.
 afterglow_public_endpoint_url: "https://cloud.dmslab.re.kr"
+# Route this hostname through Kolla's existing external VIP/TLS frontend.
+# The plugin forwards /api/ to the API backend and other paths to the frontend.
+afterglow_public_haproxy_enabled: true
+afterglow_public_haproxy_fqdn: "cloud.dmslab.re.kr"
+afterglow_public_haproxy_router_port: 18082
 afterglow_backend_port: 8020
 afterglow_frontend_port: 3080
 afterglow_backend_listen_port: 18020
