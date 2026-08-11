@@ -23,7 +23,7 @@
   no_log: true
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
-  when: enable_lumen_postgres | bool
+  when: lumen_postgres_mode == 'bundled'
 
 - name: Postgres | Wait for managed Lumen PostgreSQL container health
   become: true
@@ -38,7 +38,7 @@
   delay: 5
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
-  when: enable_lumen_postgres | bool
+  when: lumen_postgres_mode == 'bundled'
 
 - name: Postgres | Verify authenticated SELECT 1 on managed Lumen PostgreSQL
   become: true
@@ -51,7 +51,7 @@
     - lumen_postgres_select_check.rc != 0
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
-  when: enable_lumen_postgres | bool
+  when: lumen_postgres_mode == 'bundled'
 
 - name: Postgres | Validate Lumen checkpointer PostgreSQL endpoint connectivity (external)
   ansible.builtin.wait_for:
@@ -63,7 +63,7 @@
   delegate_to: "{{ groups['lumen'][0] }}"
   when:
     - lumen_enable_checkpointer | bool
-    - not (enable_lumen_postgres | bool)
+    - lumen_postgres_mode == 'external'
 
 - name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity (external)
   ansible.builtin.wait_for:
@@ -75,4 +75,4 @@
   delegate_to: "{{ groups['lumen'][0] }}"
   when:
     - lumen_enable_pgvector | bool
-    - not (enable_lumen_postgres | bool)
+    - lumen_postgres_mode == 'external'

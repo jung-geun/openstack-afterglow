@@ -39,8 +39,12 @@ lumen_encryption_key: "{{ afterglow_kubeconfig_encryption_key | default('') }}"
 lumen_mcp_service_token: "{{ afterglow_lumen_mcp_service_token | default('') }}"
 lumen_mcp_control_plane_url: "{{ public_protocol | default('https') }}://{{ kolla_internal_fqdn | default(kolla_internal_vip_address) }}"
 
-# Managed PostgreSQL for Lumen Checkpointer
-enable_lumen_postgres: false
+# PostgreSQL selection for the LangGraph checkpointer. `bundled` creates the
+# plugin-owned lumen_postgres container; `external` creates no PostgreSQL
+# resource and requires the explicit external connection settings below.
+lumen_postgres_mode: "external"
+
+# Bundled PostgreSQL container.
 lumen_postgres_image_ref: "pgvector/pgvector:0.8.6-pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b"
 lumen_postgres_database: "lumen"
 lumen_postgres_user: "lumen"
@@ -49,13 +53,20 @@ lumen_postgres_bind_address: "172.30.0.11"
 lumen_postgres_port: 5432
 lumen_postgres_volume: "lumen_postgres_data"
 
-# Lumen LangGraph Checkpointer
+# Operator-managed external PostgreSQL. No Kolla database address is inferred.
+lumen_external_postgres_host: ""
+lumen_external_postgres_port: 5432
+lumen_external_postgres_database: ""
+lumen_external_postgres_user: ""
+lumen_external_postgres_password: ""
+
+# Lumen LangGraph Checkpointer.
 lumen_enable_checkpointer: true
-lumen_checkpointer_postgres_db: "{{ lumen_postgres_database if (enable_lumen_postgres | bool) else 'lumen_checkpointer' }}"
-lumen_checkpointer_postgres_user: "{{ lumen_postgres_user if (enable_lumen_postgres | bool) else 'lumen_checkpointer' }}"
-lumen_checkpointer_postgres_host: "{{ lumen_postgres_bind_address if (enable_lumen_postgres | bool) else database_address | default(kolla_internal_vip_address) }}"
-lumen_checkpointer_postgres_port: "{{ lumen_postgres_port if (enable_lumen_postgres | bool) else 5432 }}"
-lumen_checkpointer_postgres_url: "postgresql://{{ lumen_checkpointer_postgres_user }}:{{ lumen_postgres_password if (enable_lumen_postgres | bool) else lumen_checkpointer_postgres_password | default('') }}@{{ lumen_checkpointer_postgres_host }}:{{ lumen_checkpointer_postgres_port }}/{{ lumen_checkpointer_postgres_db }}"
+lumen_checkpointer_postgres_db: "{{ lumen_postgres_database if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_database }}"
+lumen_checkpointer_postgres_user: "{{ lumen_postgres_user if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_user }}"
+lumen_checkpointer_postgres_host: "{{ lumen_postgres_bind_address if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_host }}"
+lumen_checkpointer_postgres_port: "{{ lumen_postgres_port if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_port }}"
+lumen_checkpointer_postgres_url: "postgresql://{{ lumen_checkpointer_postgres_user }}:{{ lumen_postgres_password if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_password }}@{{ lumen_checkpointer_postgres_host }}:{{ lumen_checkpointer_postgres_port }}/{{ lumen_checkpointer_postgres_db }}"
 
 # Lumen pgvector Semantic Memory Store
 lumen_enable_pgvector: false

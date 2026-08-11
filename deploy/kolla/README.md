@@ -27,7 +27,7 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`).
    - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
-   - **Managed PostgreSQL**: Starts a single `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on `dms-controller1` for LangGraph checkpointer storage.
+   - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode never creates a PostgreSQL container and must not use the Kolla MariaDB address.
 
 ---
 
@@ -60,6 +60,15 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
    Copy and customize `deploy/kolla/globals.afterglow.sample.yml`.
 3. **Create Secrets (`/etc/kolla/afterglow/secrets.yml`)**:
    Copy `deploy/kolla/passwords.afterglow.additions.yml`, set permissions to `0600`, and populate generated 64-hex keys and database/Keystone passwords.
+
+### Lumen PostgreSQL Mode
+
+`lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:
+
+- `bundled`: configure `lumen_postgres_*` values and `lumen_postgres_password`. The plugin runs its isolated `lumen_postgres` container on the first Lumen controller and verifies an authenticated `SELECT 1`.
+- `external`: configure `lumen_external_postgres_host`, `port`, `database`, `user`, and `lumen_external_postgres_password`. The plugin creates no PostgreSQL resource and fails closed unless the endpoint is reachable.
+
+Do not configure an external Lumen PostgreSQL endpoint as Kolla's MariaDB address. Select one mode and populate only that mode's password.
 
 ---
 

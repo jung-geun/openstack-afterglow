@@ -152,7 +152,7 @@ afterglow_services:
       UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
       UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://{{ afterglow_backend_listen_address }}:{{ afterglow_backend_listen_port }}/api/v1/health"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; response = urlopen('http://{{ afterglow_backend_listen_address }}:{{ afterglow_backend_listen_port }}/api/v1/health', timeout=5); assert response.status == 200"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -185,7 +185,7 @@ afterglow_services:
       HOST: "{{ afterglow_frontend_listen_address }}"
       PORT: "{{ afterglow_frontend_listen_port | string }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://{{ afterglow_frontend_listen_address }}:{{ afterglow_frontend_listen_port }}/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://{{ afterglow_frontend_listen_address }}:{{ afterglow_frontend_listen_port }}/"]
       interval: 30s
       timeout: 10s
       retries: 3
