@@ -252,6 +252,7 @@ afterglow_services:
 # service supplies that backend; it is never passed to the container start loop.
 afterglow_public_haproxy_services:
   afterglow-public:
+    group: afterglow
     enabled: "{{ enable_afterglow | bool and afterglow_public_haproxy_enabled | bool }}"
     haproxy:
       afterglow-public:
