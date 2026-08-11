@@ -54,6 +54,8 @@
       ansible.builtin.include_role:
         name: loadbalancer
         tasks_from: config
+        apply:
+          tags: [afterglow, waygate, drover, lumen, haproxy]
       tags: [afterglow, waygate, drover, lumen, haproxy]
       when: enable_haproxy | default(true) | bool
 
@@ -61,6 +63,8 @@
       ansible.builtin.include_role:
         name: afterglow
         tasks_from: loadbalancer
+        apply:
+          tags: [afterglow, haproxy]
       tags: [afterglow, haproxy]
       when:
         - enable_haproxy | default(true) | bool
@@ -70,6 +74,8 @@
       ansible.builtin.include_role:
         name: waygate
         tasks_from: loadbalancer
+        apply:
+          tags: [waygate, haproxy]
       tags: [waygate, haproxy]
       when:
         - enable_haproxy | default(true) | bool
@@ -79,6 +85,8 @@
       ansible.builtin.include_role:
         name: drover
         tasks_from: loadbalancer
+        apply:
+          tags: [drover, haproxy]
       tags: [drover, haproxy]
       when:
         - enable_haproxy | default(true) | bool
@@ -88,6 +96,8 @@
       ansible.builtin.include_role:
         name: lumen
         tasks_from: loadbalancer
+        apply:
+          tags: [lumen, haproxy]
       tags: [lumen, haproxy]
       when:
         - enable_haproxy | default(true) | bool
@@ -97,5 +107,7 @@
       ansible.builtin.include_role:
         name: loadbalancer
         tasks_from: check-containers
+        apply:
+          tags: [afterglow, waygate, drover, lumen, haproxy]
       tags: [afterglow, waygate, drover, lumen, haproxy]
       when: enable_haproxy | default(true) | bool
