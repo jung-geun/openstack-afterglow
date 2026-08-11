@@ -32,13 +32,13 @@ afterglow_run_preconditions: true
 afterglow_config_dir: "/etc/kolla/afterglow"
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
-afterglow_backend_port: 8000
+afterglow_backend_port: 8020
 afterglow_frontend_port: 3080
 afterglow_backend_listen_port: "{{ afterglow_backend_port }}"
 afterglow_frontend_listen_port: "{{ afterglow_frontend_port }}"
 
 # ── URL 및 엔드포인트 ────────────────────────────────────────────────────────
-afterglow_public_api_base: "http://{{ kolla_internal_vip_address }}:8000"
+afterglow_public_api_base: "http://{{ kolla_internal_vip_address }}:{{ afterglow_backend_port }}"
 afterglow_openstack_interface: "internal"
 afterglow_external_url: "https://{{ kolla_external_fqdn | default('localhost') }}"
 afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
@@ -51,7 +51,7 @@ afterglow_database_name: "afterglow"
 afterglow_database_user: "afterglow"
 afterglow_database_url: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ afterglow_database_address }}:{{ afterglow_database_port }}/{{ afterglow_database_name }}"
 
-afterglow_valkey_host: "{{ kolla_internal_vip_address }}"
+afterglow_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
 afterglow_valkey_port: "{{ redis_port | default(6379) }}"
 afterglow_valkey_password: "{{ valkey_master_password | default('') }}"
 afterglow_redis_db_index: 5

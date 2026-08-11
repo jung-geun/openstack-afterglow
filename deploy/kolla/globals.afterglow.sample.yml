@@ -62,7 +62,8 @@ lumen_worker_image_ref: "afterglow-local/lumen-worker:c7d59a255148"
 # ── 3. Direct Internal VIP Listeners ──────────────────────────────────────────
 # Bind API/UI host ports to kolla_internal_vip_address (172.30.0.253)
 afterglow_external_url: "http://172.30.0.253:3080"
-afterglow_public_api_base: "http://172.30.0.253:8000"
+afterglow_backend_port: 8020
+afterglow_public_api_base: "http://172.30.0.253:8020"
 afterglow_openstack_interface: "internal"
 
 # Preserve public DNS/TLS catalog URLs while internal and admin clients use VIP.
@@ -103,8 +104,9 @@ waygate_database_user: "waygate_kolla"
 waygate_keystone_user: "waygate"
 waygate_service_project_name: "waygate-service"
 
-# ── 5. Kolla Valkey (Redis) Reuse ─────────────────────────────────────────────
-# Reuse Kolla Valkey master at internal VIP with explicit plugin DB indexes
+# Reuse Kolla's current Valkey primary with explicit plugin DB indexes. Kolla
+# binds Valkey to controller API addresses, not the VIP; promotion requires an
+# explicit plugin-config update because this direct connection has no failover.
 afterglow_redis_db_index: 5
 waygate_redis_db_index: 6
 drover_redis_db_index: 7

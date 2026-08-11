@@ -15,7 +15,7 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
 3. **Direct Internal-VIP Listeners**:
    - Services bind directly to `kolla_internal_vip_address` (e.g. `172.30.0.253`):
      - **Afterglow UI**: `3080`
-     - **Afterglow API**: `8000`
+     - **Afterglow API**: `8020` on the host/VIP; the container keeps port `8000`.
      - **Waygate**: `8010`
      - **Drover**: `8011`
      - **Lumen**: `8012`
@@ -28,7 +28,7 @@ This guide describes how to deploy **Afterglow**, **Drover**, **Lumen**, and **W
      - **Waygate**: `openstack-afterglow/waygate` at `e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3` (`waygate-api`, `waygate-worker`)
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`).
-   - **Valkey (Redis)**: Reuses Kolla's Valkey master with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen).
+   - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
    - **Managed PostgreSQL**: Starts a single `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on `dms-controller1` for LangGraph checkpointer storage.
 
 ---
