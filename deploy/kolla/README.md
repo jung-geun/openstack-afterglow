@@ -64,24 +64,25 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 
 ### Afterglow Operator Configuration Handoff
 
-Keep the existing `afterglow.conf` on the Kolla deployment host, outside the
-repository and the Kolla globals files. Validate it locally, copy it with
-owner-only permissions, then point `globals.yml` at that deployed file:
+Place the operator source at
+`/etc/kolla/config/afterglow/afterglow.conf` on the Kolla deployment host.
+Keep it outside the repository and Kolla globals files, mode `0600`:
 
 ```bash
-# Python 3.11+ is required; the Kolla virtualenv supplies it on the deployment host.
-/etc/kolla/.venv/bin/python -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' ./afterglow.conf
-sudo install -d -m 0700 /etc/kolla/afterglow/operator
-sudo install -m 0600 ./afterglow.conf /etc/kolla/afterglow/operator/afterglow.operator.conf
+sudo install -d -m 0700 /etc/kolla/config/afterglow
+sudo install -m 0600 ./afterglow.conf /etc/kolla/config/afterglow/afterglow.conf
 ```
 
 ```yaml
 # /etc/kolla/afterglow/globals.yml
-afterglow_operator_config_source: "/etc/kolla/afterglow/operator/afterglow.operator.conf"
+afterglow_operator_config_source: "/etc/kolla/config/afterglow/afterglow.conf"
 ```
 
-The role sanitizes this source into a protected staging file without logging
-it: `[builder].ssh_private_key` is removed before TOML validation and copying.
+The role reads this file only to produce a protected short-lived staging
+artifact. It removes `[builder].ssh_private_key` before TOML validation and
+copies only the sanitized artifact into the Afterglow configuration directory;
+the raw file is never mounted into a container.
+
 It then mounts three TOML layers into the backend and workers, in this order:
 
 1. generated `afterglow.conf` base;

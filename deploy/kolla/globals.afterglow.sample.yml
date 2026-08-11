@@ -62,9 +62,10 @@ afterglow_frontend_listen_port: 18081
 afterglow_public_api_base: "https://cloud.dmslab.re.kr"
 afterglow_openstack_interface: "internal"
 
-# Optional deploy-host TOML overlay. Keep this file outside the repository,
-# mode 0600; Kolla reapplies topology and secret-backed values after it.
-afterglow_operator_config_source: "/etc/kolla/afterglow/operator/afterglow.operator.conf"
+# Optional deploy-host TOML source. Keep this file outside the repository,
+# mode 0600; Kolla strips the unsupported builder private key and reapplies
+# topology and secret-backed values after it.
+afterglow_operator_config_source: "/etc/kolla/config/afterglow/afterglow.conf"
 
 waygate_api_port: 8010
 waygate_api_listen_port: 18010
