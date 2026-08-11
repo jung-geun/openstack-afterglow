@@ -86,14 +86,12 @@ drover_admin_endpoint_url: "http://172.30.0.253:8011"
 drover_public_haproxy_enabled: true
 drover_public_haproxy_fqdn: "drover.dmslab.re.kr"
 
-lumen_external_url: "http://172.30.0.253:8012"
-lumen_public_endpoint_url: "http://172.30.0.253:8012"
+lumen_external_url: "https://lumen.dmslab.re.kr"
+lumen_public_endpoint_url: "https://lumen.dmslab.re.kr"
 lumen_internal_endpoint_url: "http://172.30.0.253:8012"
 lumen_admin_endpoint_url: "http://172.30.0.253:8012"
-# No Lumen public DNS/TLS record exists yet; leave its Kolla external route
-# disabled until one is provisioned.
-lumen_public_haproxy_enabled: false
-lumen_public_haproxy_fqdn: ""
+lumen_public_haproxy_enabled: true
+lumen_public_haproxy_fqdn: "lumen.dmslab.re.kr"
 
 # ── 4. MariaDB _kolla Schemas & Keystone Contracts ───────────────────────────
 # Use dedicated plugin schemas to leave stock afterglow schema untouched

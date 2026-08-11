@@ -86,11 +86,8 @@ test("Lumen PostgreSQL modes keep bundled resources separate from external conne
 })
 
 test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external HAProxy frontend without disturbing internal endpoints", () => {
-	for (const [service, port] of [
-		["drover", "8011"],
-		["waygate", "8010"],
-		["lumen", "8012"],
-	]) {
+	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+	for (const service of ["drover", "waygate", "lumen"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		const precheck = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/precheck.yml`)
 		const loadbalancer = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/loadbalancer.yml`)
@@ -112,5 +109,10 @@ test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external
 		assert.match(loadbalancer, new RegExp(`${service}-public\\.cfg`))
 		assert.match(loadbalancer, /external-frontend-map/)
 		assert.match(loadbalancer, new RegExp(`project_services: "\\{\\{ ${service}_haproxy_services \\}\\}"`))
+	}
+
+	for (const service of ["drover", "waygate", "lumen"]) {
+		assert.match(sample, new RegExp(`^${service}_public_haproxy_enabled: true$`, "m"))
+		assert.match(sample, new RegExp(`^${service}_public_haproxy_fqdn: "${service}\\.dmslab\\.re\\.kr"$`, "m"))
 	}
 })
