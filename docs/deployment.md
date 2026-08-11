@@ -145,8 +145,8 @@ enable_afterglow: "yes"
 enable_afterglow_frontend: "yes"
 enable_afterglow_worker: "yes"
 
-# 접근 URL (외부에서 접근 가능한 주소)
-afterglow_external_url: "https://afterglow.example.com"
+# 브라우저 frontend origin
+afterglow_public_endpoint_url: "https://afterglow.example.com"
 
 # 이미지 설정
 afterglow_backend_image: "ghcr.io/openstack-afterglow/afterglow-api"
