@@ -9,8 +9,7 @@ Lumen currently overloads the boolean `enable_lumen_postgres` to choose between 
 ## What Changes
 
 - Replace Afterglow image-internal `curl` health checks with tools confirmed to exist in the published images: `wget` for the frontend and Python's standard library for the API.
-- Replace `enable_lumen_postgres` with the explicit `lumen_postgres_mode` setting: `bundled` creates the plugin-owned `lumen_postgres` container; `external` requires explicit PostgreSQL host, port, database, user, and password values and never creates that container.
-- Validate the selected mode fail-closed before deploy or reconfigure; preserve the bundled authenticated probe and require external TCP reachability.
+- Validate the selected mode fail-closed before deploy or reconfigure; preserve the bundled authenticated probe and require an authenticated external `SELECT 1` before Lumen starts.
 - Document both configurations in the Kolla sample globals and secrets files.
 
 ## Scope

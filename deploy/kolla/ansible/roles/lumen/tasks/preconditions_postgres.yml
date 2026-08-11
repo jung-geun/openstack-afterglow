@@ -65,6 +65,36 @@
     - lumen_enable_checkpointer | bool
     - lumen_postgres_mode == 'external'
 
+- name: Postgres | Verify authenticated external Lumen PostgreSQL SELECT 1
+  become: true
+  community.docker.docker_container:
+    name: lumen_external_postgres_probe
+    image: "{{ lumen_postgres_image_ref }}"
+    command:
+      - psql
+      - -h
+      - "{{ lumen_external_postgres_host }}"
+      - -p
+      - "{{ lumen_external_postgres_port | string }}"
+      - -U
+      - "{{ lumen_external_postgres_user }}"
+      - -d
+      - "{{ lumen_external_postgres_database }}"
+      - -c
+      - "SELECT 1;"
+    env:
+      PGPASSWORD: "{{ lumen_external_postgres_password }}"
+    state: started
+    detach: false
+    cleanup: true
+    network_mode: host
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['lumen'][0] }}"
+  when:
+    - lumen_enable_checkpointer | bool
+    - lumen_postgres_mode == 'external'
+
 - name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity (external)
   ansible.builtin.wait_for:
     host: "{{ lumen_memory_pgvector_host }}"

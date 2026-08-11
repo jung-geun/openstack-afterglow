@@ -66,7 +66,7 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:
 
 - `bundled`: configure `lumen_postgres_*` values and `lumen_postgres_password`. The plugin runs its isolated `lumen_postgres` container on the first Lumen controller and verifies an authenticated `SELECT 1`.
-- `external`: configure `lumen_external_postgres_host`, `port`, `database`, `user`, and `lumen_external_postgres_password`. The plugin creates no PostgreSQL resource and fails closed unless the endpoint is reachable.
+- `external`: configure `lumen_external_postgres_host`, `port`, `database`, `user`, and `lumen_external_postgres_password`. The plugin creates no persistent PostgreSQL resource and fails closed unless the endpoint accepts an authenticated `SELECT 1`.
 
 Do not configure an external Lumen PostgreSQL endpoint as Kolla's MariaDB address. Select one mode and populate only that mode's password.
 
