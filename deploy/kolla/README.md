@@ -69,7 +69,8 @@ repository and the Kolla globals files. Validate it locally, copy it with
 owner-only permissions, then point `globals.yml` at that deployed file:
 
 ```bash
-python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' ./afterglow.conf
+# Python 3.11+ is required; the Kolla virtualenv supplies it on the deployment host.
+/etc/kolla/.venv/bin/python -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' ./afterglow.conf
 sudo install -d -m 0700 /etc/kolla/afterglow/operator
 sudo install -m 0600 ./afterglow.conf /etc/kolla/afterglow/operator/afterglow.operator.conf
 ```
@@ -79,8 +80,9 @@ sudo install -m 0600 ./afterglow.conf /etc/kolla/afterglow/operator/afterglow.op
 afterglow_operator_config_source: "/etc/kolla/afterglow/operator/afterglow.operator.conf"
 ```
 
-The role copies this source without logging it and mounts three TOML layers
-into the backend and workers, in this order:
+The role sanitizes this source into a protected staging file without logging
+it: `[builder].ssh_private_key` is removed before TOML validation and copying.
+It then mounts three TOML layers into the backend and workers, in this order:
 
 1. generated `afterglow.conf` base;
 2. operator-managed `afterglow.operator.conf`;

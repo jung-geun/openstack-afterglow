@@ -59,14 +59,14 @@
   run_once: true
   when: afterglow_operator_config_source | length > 0
 
-- name: Config | Validate operator configuration TOML
+- name: Config | Stage and validate sanitized operator configuration
   become: true
   ansible.builtin.command:
     argv:
-      - python3
-      - -c
-      - "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))"
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/sanitize_operator_config.py"
       - "{{ afterglow_operator_config_source }}"
+      - "{{ afterglow_operator_config_staging_path }}"
   changed_when: false
   no_log: true
   run_once: true
@@ -76,7 +76,7 @@
 - name: Config | Copy operator configuration override
   become: true
   ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.file', afterglow_operator_config_source) }}"
+    content: "{{ lookup('ansible.builtin.file', afterglow_operator_config_staging_path) }}"
     dest: "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}"
     mode: "0640"
     owner: root
@@ -85,6 +85,16 @@
   when:
     - inventory_hostname in groups['afterglow']
     - afterglow_operator_config_source | length > 0
+
+- name: Config | Remove sanitized operator configuration staging file
+  become: true
+  ansible.builtin.file:
+    path: "{{ afterglow_operator_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_config_source | length > 0
 
 - name: Config | Clear disabled operator configuration override
   become: true
