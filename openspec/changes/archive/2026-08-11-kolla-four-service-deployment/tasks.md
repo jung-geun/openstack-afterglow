@@ -8,7 +8,7 @@
 - [x] Add managed Lumen PostgreSQL and fail-closed Afterglow bootstrap coverage.
 - [x] Make installer and uninstaller additive exact-symlink operations.
 - [x] Document isolated source-mode custom-playbook operation and DMSLab inputs.
-- [ ] Add and document plugin-owned Kolla HAProxy internal-VIP routes with controller-local upstream ports.
-- [ ] Replace DMSLab source-build inputs with exact GHCR linux/amd64 image digests.
-- [ ] Re-run repository Kolla syntax/task-list checks and full test/lint gates for the revised topology.
-- [ ] Repair Keystone registration after the failed DMSLab deploy, then deploy, reconfigure, and prove the plugin, including HAProxy fragments and unchanged reconfigure behavior.
+- [x] Add and document plugin-owned Kolla HAProxy internal-VIP routes with controller-local upstream ports.
+- [x] Replace DMSLab source-build inputs with exact GHCR linux/amd64 image digests.
+- [x] Re-run repository Kolla syntax/task-list checks and full test/lint gates for the revised topology.
+- [x] Repair Keystone registration after the failed DMSLab deploy, then deploy, reconfigure, and prove the plugin, including HAProxy fragments and unchanged reconfigure behavior.
