@@ -22,6 +22,11 @@ lumen_api_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
 lumen_api_listen_port: 18012
 lumen_database_name: "lumen"
 lumen_database_user: "lumen"
+lumen_database_address: "{{ database_address }}"
+lumen_database_port: "{{ database_port }}"
+lumen_database_admin_user: "{{ database_user }}"
+lumen_database_admin_password: "{{ database_password }}"
+lumen_database_url: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ lumen_database_address }}:{{ lumen_database_port }}/{{ lumen_database_name }}"
 lumen_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
 lumen_valkey_port: "{{ redis_port | default(6379) }}"
 lumen_valkey_password: "{{ valkey_master_password }}"
@@ -29,6 +34,11 @@ lumen_redis_db_index: 8
 lumen_redis_url: "redis://default:{{ lumen_valkey_password }}@{{ lumen_valkey_host }}:{{ lumen_valkey_port }}/{{ lumen_redis_db_index }}"
 
 lumen_keystone_user: "lumen"
+lumen_keystone_auth_url: "{{ keystone_internal_url }}"
+lumen_keystone_project_domain_name: "{{ default_project_domain_name }}"
+lumen_keystone_user_domain_name: "{{ default_user_domain_name }}"
+lumen_keystone_region_name: "{{ openstack_region_name }}"
+lumen_keystone_interface: "internal"
 lumen_service_project_name: "lumen-service"
 lumen_external_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}:{{ lumen_api_port }}"
 lumen_public_endpoint_url: "{{ lumen_external_url }}"
@@ -58,27 +68,16 @@ lumen_postgres_bind_address: "172.30.0.11"
 lumen_postgres_port: 5432
 lumen_postgres_volume: "lumen_postgres_data"
 
-# Operator-managed external PostgreSQL. No Kolla database address is inferred.
-lumen_external_postgres_host: ""
-lumen_external_postgres_port: 5432
-lumen_external_postgres_database: ""
-lumen_external_postgres_user: ""
-lumen_external_postgres_password: ""
+# Kolla 2025.2 has no PostgreSQL role. `bundled` is a plugin-owned container
+# managed by this Kolla role; `external` uses one operator-provided URL.
+lumen_external_postgres_url: ""
 
 # Lumen LangGraph Checkpointer.
 lumen_enable_checkpointer: true
-lumen_checkpointer_postgres_db: "{{ lumen_postgres_database if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_database }}"
-lumen_checkpointer_postgres_user: "{{ lumen_postgres_user if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_user }}"
-lumen_checkpointer_postgres_host: "{{ lumen_postgres_bind_address if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_host }}"
-lumen_checkpointer_postgres_port: "{{ lumen_postgres_port if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_port }}"
-lumen_checkpointer_postgres_url: "postgresql://{{ lumen_checkpointer_postgres_user }}:{{ lumen_postgres_password if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_password }}@{{ lumen_checkpointer_postgres_host }}:{{ lumen_checkpointer_postgres_port }}/{{ lumen_checkpointer_postgres_db }}"
+lumen_checkpointer_postgres_url: "{{ 'postgresql://' ~ lumen_postgres_user ~ ':' ~ lumen_postgres_password ~ '@' ~ lumen_postgres_bind_address ~ ':' ~ lumen_postgres_port ~ '/' ~ lumen_postgres_database if (lumen_postgres_mode == 'bundled') else lumen_external_postgres_url }}"
 
 # Lumen pgvector Semantic Memory Store
 lumen_enable_pgvector: false
-lumen_memory_pgvector_db: "lumen_pgvector"
-lumen_memory_pgvector_user: "lumen_pgvector"
-lumen_memory_pgvector_host: "{{ database_address | default(kolla_internal_vip_address) }}"
-lumen_memory_pgvector_port: 5432
 lumen_memory_pgvector_url: ""
 chat_semantic_memory_enabled: false
 
@@ -107,9 +106,9 @@ lumen_services:
       - "kolla_logs:/var/log/kolla/"
     environment:
       LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
-      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      DATABASE_URL: "{{ lumen_database_url }}"
       REDIS_URL: "{{ lumen_redis_url }}"
-      KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
+      KEYSTONE_AUTH_URL: "{{ lumen_keystone_auth_url }}"
       KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
       KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"
       KEYSTONE_ADMIN_PROJECT: "{{ lumen_service_project_name }}"
@@ -156,9 +155,9 @@ lumen_services:
       - "kolla_logs:/var/log/kolla/"
     environment:
       LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
-      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      DATABASE_URL: "{{ lumen_database_url }}"
       REDIS_URL: "{{ lumen_redis_url }}"
-      KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
+      KEYSTONE_AUTH_URL: "{{ lumen_keystone_auth_url }}"
       KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
       KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"
       KEYSTONE_ADMIN_PROJECT: "{{ lumen_service_project_name }}"

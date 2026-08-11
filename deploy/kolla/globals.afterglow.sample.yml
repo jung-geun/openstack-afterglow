@@ -61,6 +61,7 @@ afterglow_backend_listen_port: 18020
 afterglow_frontend_listen_port: 18081
 afterglow_public_api_base: "https://cloud.dmslab.re.kr"
 afterglow_openstack_interface: "internal"
+afterglow_ceph_monitors: "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
 
 # Optional deploy-host TOML source. Keep this file outside the repository,
 # mode 0600; Kolla strips the unsupported builder private key and reapplies
@@ -120,9 +121,9 @@ waygate_database_user: "waygate_kolla"
 waygate_keystone_user: "waygate"
 waygate_service_project_name: "waygate-service"
 
-# Reuse Kolla's current Valkey primary with explicit plugin DB indexes. Kolla
-# binds Valkey to controller API addresses, not the VIP; promotion requires an
-# explicit plugin-config update because this direct connection has no failover.
+# Reuse Kolla's Valkey endpoint: controller API address, `redis_port`, and
+# `valkey_master_password` from the normal Kolla password file. Only these
+# plugin database indexes are configured here.
 afterglow_redis_db_index: 5
 waygate_redis_db_index: 6
 drover_redis_db_index: 7
@@ -142,16 +143,14 @@ lumen_postgres_user: "lumen"
 lumen_postgres_bind_address: "172.30.0.11"
 lumen_postgres_port: 5432
 
-# External mode (uncomment and set all fields when lumen_postgres_mode is
-# "external"; do not point these at the Kolla MariaDB endpoint).
-# lumen_external_postgres_host: "postgres.example.internal"
-# lumen_external_postgres_port: 5432
-# lumen_external_postgres_database: "lumen"
-# lumen_external_postgres_user: "lumen"
+# External mode receives one secret `postgresql://` (or `postgres://`) URL from
+# `/etc/kolla/afterglow/secrets.yml`. It is never placed in globals.yml and
+# must not point to Kolla MariaDB.
 
 lumen_enable_checkpointer: true
 
-# Semantic memory disabled (no embedding provider configured in DMSLab)
+# Semantic memory disabled (no embedding provider configured in DMSLab). When
+# enabled, set lumen_memory_pgvector_url to a PostgreSQL URL in the secret file.
 lumen_enable_pgvector: false
 lumen_memory_pgvector_url: ""
 chat_semantic_memory_enabled: false

@@ -23,9 +23,9 @@
       - "{{ lumen_config_dir }}/lumen.conf:/etc/lumen/lumen.conf:ro"
     env:
       LUMEN_CONFIG_FILE: "/etc/lumen/lumen.conf"
-      DATABASE_URL: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ lumen_database_name }}"
+      DATABASE_URL: "{{ lumen_database_url }}"
       REDIS_URL: "{{ lumen_redis_url }}"
-      KEYSTONE_AUTH_URL: "{{ keystone_internal_url | default('http://' ~ kolla_internal_vip_address ~ ':5000/v3') }}"
+      KEYSTONE_AUTH_URL: "{{ lumen_keystone_auth_url }}"
       KEYSTONE_ADMIN_USERNAME: "{{ lumen_keystone_user }}"
       KEYSTONE_ADMIN_PASSWORD: "{{ lumen_keystone_password }}"
       KEYSTONE_ADMIN_PROJECT: "{{ lumen_service_project_name }}"

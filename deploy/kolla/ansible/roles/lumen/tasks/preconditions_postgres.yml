@@ -53,56 +53,50 @@
   delegate_to: "{{ groups['lumen'][0] }}"
   when: lumen_postgres_mode == 'bundled'
 
-- name: Postgres | Validate Lumen checkpointer PostgreSQL endpoint connectivity (external)
-  ansible.builtin.wait_for:
-    host: "{{ lumen_checkpointer_postgres_host }}"
-    port: "{{ lumen_checkpointer_postgres_port | int }}"
-    timeout: 10
-    state: started
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-  when:
-    - lumen_enable_checkpointer | bool
-    - lumen_postgres_mode == 'external'
 
 - name: Postgres | Verify authenticated external Lumen PostgreSQL SELECT 1
   become: true
-  community.docker.docker_container:
-    name: lumen_external_postgres_probe
-    image: "{{ lumen_postgres_image_ref }}"
-    command:
-      - psql
-      - -h
-      - "{{ lumen_external_postgres_host }}"
-      - -p
-      - "{{ lumen_external_postgres_port | string }}"
-      - -U
-      - "{{ lumen_external_postgres_user }}"
-      - -d
-      - "{{ lumen_external_postgres_database }}"
-      - -c
-      - "SELECT 1;"
-    env:
-      PGPASSWORD: "{{ lumen_external_postgres_password }}"
-    state: started
-    detach: false
-    cleanup: true
-    network_mode: host
+  block:
+    - name: Postgres | Render external PostgreSQL libpq service
+      ansible.builtin.script: render_postgres_service.py
+      environment:
+        LUMEN_EXTERNAL_POSTGRES_URL: "{{ lumen_external_postgres_url }}"
+      register: lumen_external_postgres_service_render
+      changed_when: false
+
+    - name: Postgres | Stage external PostgreSQL libpq service
+      ansible.builtin.copy:
+        content: "{{ (lumen_external_postgres_service_render.stdout | from_json).service }}"
+        dest: /tmp/lumen-external-postgres.conf
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Postgres | Run authenticated external Lumen PostgreSQL SELECT 1
+      community.docker.docker_container:
+        name: lumen_external_postgres_probe
+        image: "{{ lumen_postgres_image_ref }}"
+        command:
+          - psql
+          - -c
+          - "SELECT 1;"
+        env:
+          PGSERVICEFILE: /tmp/lumen-external-postgres.conf
+          PGSERVICE: external
+        volumes:
+          - /tmp/lumen-external-postgres.conf:/tmp/lumen-external-postgres.conf:ro
+        state: started
+        detach: false
+        cleanup: true
+        network_mode: host
+  always:
+    - name: Postgres | Remove external PostgreSQL libpq service
+      ansible.builtin.file:
+        path: /tmp/lumen-external-postgres.conf
+        state: absent
   no_log: true
   run_once: true
   delegate_to: "{{ groups['lumen'][0] }}"
   when:
     - lumen_enable_checkpointer | bool
-    - lumen_postgres_mode == 'external'
-
-- name: Postgres | Validate Lumen pgvector PostgreSQL endpoint connectivity (external)
-  ansible.builtin.wait_for:
-    host: "{{ lumen_memory_pgvector_host }}"
-    port: "{{ lumen_memory_pgvector_port | int }}"
-    timeout: 10
-    state: started
-  run_once: true
-  delegate_to: "{{ groups['lumen'][0] }}"
-  when:
-    - lumen_enable_pgvector | bool
     - lumen_postgres_mode == 'external'

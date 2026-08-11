@@ -39,7 +39,6 @@
   when: inventory_hostname in groups['afterglow']
 
 - name: Config | Check operator configuration source
-  become: true
   ansible.builtin.stat:
     path: "{{ afterglow_operator_config_source }}"
   register: afterglow_operator_config_source_stat
@@ -59,8 +58,17 @@
   run_once: true
   when: afterglow_operator_config_source | length > 0
 
-- name: Config | Stage and validate sanitized operator configuration
+- name: Config | Clear stale sanitized operator configuration staging file
   become: true
+  ansible.builtin.file:
+    path: "{{ afterglow_operator_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_config_source | length > 0
+
+- name: Config | Stage and validate sanitized operator configuration
   ansible.builtin.command:
     argv:
       - "{{ ansible_playbook_python }}"

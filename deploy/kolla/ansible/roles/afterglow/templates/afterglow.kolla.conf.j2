@@ -3,12 +3,12 @@
 # Deployment topology, credentials, storage bindings, and browser origins remain Kolla-owned.
 
 [openstack]
-auth_url = "{{ keystone_public_url | default('http://localhost:5000/v3') }}"
+auth_url = "{{ afterglow_keystone_auth_url }}"
 project_name = "{{ afterglow_service_project_name }}"
-project_domain_name = "Default"
-user_domain_name = "Default"
-region_name = "{{ openstack_region_name | default('RegionOne') }}"
-interface = "{{ afterglow_openstack_interface }}"
+project_domain_name = "{{ afterglow_keystone_project_domain_name }}"
+user_domain_name = "{{ afterglow_keystone_user_domain_name }}"
+region_name = "{{ afterglow_keystone_region_name }}"
+interface = "{{ afterglow_keystone_interface }}"
 username = "{{ afterglow_admin_keystone_user }}"
 password = "{{ afterglow_admin_keystone_password }}"
 service_project_id = "{{ afterglow_service_project_id }}"

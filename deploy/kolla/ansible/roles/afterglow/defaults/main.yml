@@ -62,8 +62,12 @@ afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
 afterglow_palimpsest_hub_path: "/var/lib/afterglow/palimpsest"
 
 # ── DB / Valkey 캐시 ──────────────────────────────────────────────────────────
-afterglow_database_address: "{{ database_address | default(kolla_internal_vip_address) }}"
-afterglow_database_port: "{{ database_port | default(3306) }}"
+# Kolla-owned MariaDB topology and administrative credentials. The service
+# schema user/password remain plugin secrets.
+afterglow_database_address: "{{ database_address }}"
+afterglow_database_port: "{{ database_port }}"
+afterglow_database_admin_user: "{{ database_user }}"
+afterglow_database_admin_password: "{{ database_password }}"
 afterglow_database_name: "afterglow"
 afterglow_database_user: "afterglow"
 afterglow_database_url: "mysql+aiomysql://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ afterglow_database_address }}:{{ afterglow_database_port }}/{{ afterglow_database_name }}"
@@ -78,6 +82,11 @@ afterglow_redis_url: "redis://default:{{ afterglow_valkey_password }}@{{ aftergl
 afterglow_admin_keystone_user: "afterglow_admin"
 afterglow_service_project_name: "afterglow-service"
 afterglow_service_project_id: ""  # preconditions_keystone에서 자동 채워짐
+afterglow_keystone_auth_url: "{{ keystone_internal_url }}"
+afterglow_keystone_project_domain_name: "{{ default_project_domain_name }}"
+afterglow_keystone_user_domain_name: "{{ default_user_domain_name }}"
+afterglow_keystone_region_name: "{{ openstack_region_name }}"
+afterglow_keystone_interface: "internal"
 
 # ── Manila ────────────────────────────────────────────────────────────────────
 afterglow_manila_microversion: "2.65"

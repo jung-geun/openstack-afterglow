@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
+const { spawnSync } = require("node:child_process")
 const test = require("node:test")
 
 const rootDir = path.resolve(__dirname, "..")
@@ -73,16 +74,90 @@ test("Lumen PostgreSQL modes keep bundled resources separate from external conne
 	const lifecycle = readRepoFile("deploy/kolla/ansible/roles/lumen/tasks/preconditions_postgres.yml")
 
 	assert.match(defaults, /^lumen_postgres_mode: "external"$/m)
-	assert.match(defaults, /^lumen_external_postgres_host: ""$/m)
-	assert.match(defaults, /^lumen_external_postgres_password: ""$/m)
+	assert.match(defaults, /^lumen_external_postgres_url: ""$/m)
+	assert.doesNotMatch(defaults, /lumen_external_postgres_host/)
+	assert.doesNotMatch(defaults, /lumen_external_postgres_password/)
 	assert.doesNotMatch(defaults, /enable_lumen_postgres/)
+	assert.doesNotMatch(defaults, /lumen_memory_pgvector_(db|user|host|port)/)
+	assert.match(defaults, /^lumen_memory_pgvector_url: ""$/m)
 	assert.match(precheck, /lumen_postgres_mode in \['bundled', 'external'\]/)
-	assert.match(precheck, /lumen_external_postgres host, port, database, user, and password must be set/)
+	assert.match(precheck, /lumen_external_postgres_url must be a postgresql:\/\/ or postgres:\/\/ URL/)
+	assert.match(precheck, /lumen_memory_pgvector_url must be a postgresql:\/\/ or postgres:\/\/ URL/)
 	assert.match(lifecycle, /when: lumen_postgres_mode == 'bundled'/)
 	assert.match(lifecycle, /lumen_postgres_mode == 'external'/)
 	assert.match(lifecycle, /name: lumen_external_postgres_probe/)
-	assert.match(lifecycle, /PGPASSWORD: "{{ lumen_external_postgres_password }}"/)
-	assert.match(lifecycle, /- "SELECT 1;"/)
+	assert.match(lifecycle, /render_postgres_service\.py/)
+	assert.match(lifecycle, /PGSERVICEFILE: \/tmp\/lumen-external-postgres\.conf/)
+	assert.match(lifecycle, /PGSERVICE: external/)
+	assert.doesNotMatch(lifecycle, /PG_URL:/)
+	assert.doesNotMatch(lifecycle, /- "\{\{ lumen_external_postgres_url \}\}"/)
+	assert.doesNotMatch(lifecycle, /lumen_memory_pgvector_host/)
+})
+
+test("Lumen external PostgreSQL renderer emits libpq service syntax", () => {
+	const renderer = path.join(
+		rootDir,
+		"deploy/kolla/ansible/roles/lumen/files/render_postgres_service.py"
+	)
+	const result = spawnSync("python3", [renderer], {
+		env: {
+			...process.env,
+			LUMEN_EXTERNAL_POSTGRES_URL:
+				"postgresql://lumen%40user:pa%23ss@db.example:5433/lumen%2Fmemory?sslmode=require&application_name=afterglow"
+		},
+		encoding: "utf8"
+	})
+
+	assert.equal(result.status, 0, result.stderr)
+	assert.deepEqual(JSON.parse(result.stdout), {
+		service:
+			"[external]\n" +
+			"host=db.example\n" +
+			"port=5433\n" +
+			"user=lumen@user\n" +
+			"password=pa#ss\n" +
+			"dbname=lumen/memory\n" +
+			"sslmode=require\n" +
+			"application_name=afterglow\n"
+	})
+})
+
+test("Plugin services derive data-plane and OpenStack topology from Kolla variables", () => {
+	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const afterglowConfig = readRepoFile("deploy/kolla/ansible/roles/afterglow/templates/afterglow.kolla.conf.j2")
+	const afterglowDatabase = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/preconditions_db.yml")
+
+	assert.match(afterglowDefaults, /afterglow_database_address: "\{\{ database_address \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_database_admin_user: "\{\{ database_user \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_valkey_password: "\{\{ valkey_master_password \| default\(''\) \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_keystone_auth_url: "\{\{ keystone_internal_url \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_keystone_project_domain_name: "\{\{ default_project_domain_name \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_keystone_user_domain_name: "\{\{ default_user_domain_name \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_keystone_region_name: "\{\{ openstack_region_name \}\}"/)
+	assert.match(afterglowConfig, /auth_url = "\{\{ afterglow_keystone_auth_url \}\}"/)
+	assert.match(afterglowConfig, /project_domain_name = "\{\{ afterglow_keystone_project_domain_name \}\}"/)
+	assert.match(afterglowDatabase, /login_host: "\{\{ afterglow_database_address \}\}"/)
+
+	for (const service of ["drover", "waygate", "lumen"]) {
+		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
+		const template = readRepoFile(`deploy/kolla/ansible/roles/${service}/templates/${service}.conf.j2`)
+		const database = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/preconditions_db.yml`)
+
+		assert.match(defaults, new RegExp(`${service}_database_address: "\\{\\{ database_address \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_database_port: "\\{\\{ database_port \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_database_admin_user: "\\{\\{ database_user \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_host: "\\{\\{ 'api' \\| kolla_address\\(groups\\['valkey'\\]\\[0\\]\\) \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_port: "\\{\\{ redis_port \\| default\\(6379\\) \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_password: "\\{\\{ valkey_master_password`))
+		assert.match(defaults, new RegExp(`${service}_keystone_auth_url: "\\{\\{ keystone_internal_url \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_keystone_project_domain_name: "\\{\\{ default_project_domain_name \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_keystone_user_domain_name: "\\{\\{ default_user_domain_name \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_keystone_region_name: "\\{\\{ openstack_region_name \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_keystone_interface: "internal"`))
+		assert.match(template, new RegExp(`${service === "lumen" ? "keystone_auth_url" : "auth_url"} = "\\{\\{ ${service}_keystone_auth_url \\}\\}"`))
+		assert.match(template, new RegExp(`${service === "lumen" ? "database_url" : "url"} = "\\{\\{ ${service}_database_url \\}\\}"`))
+		assert.match(database, new RegExp(`login_host: "\\{\\{ ${service}_database_address \\}\\}"`))
+	}
 })
 
 test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external HAProxy frontend without disturbing internal endpoints", () => {
@@ -141,6 +216,7 @@ test("Afterglow hands operator TOML to containers without surrendering Kolla-own
 	assert.equal((defaults.match(/:\/app\/\{\{ afterglow_kolla_config_name \}\}:ro/g) || []).length, 3)
 	assert.match(configTask, /Config \| Stage and validate sanitized operator configuration/)
 	assert.match(configTask, /sanitize_operator_config\.py/)
+	assert.match(configTask, /Config \| Clear stale sanitized operator configuration staging file/)
 	assert.match(configTask, /afterglow_operator_config_staging_path/)
 	assert.match(configTask, /Config \| Remove sanitized operator configuration staging file/)
 	assert.match(configTask, /Config \| Copy operator configuration override/)
@@ -155,7 +231,7 @@ test("Afterglow hands operator TOML to containers without surrendering Kolla-own
 	assert.equal((start.match(/config_hash:/g) || []).length, 1)
 	assert.match(readme, /\/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
 	assert.match(readme, /raw file is never mounted into a container/)
-	assert.match(readme, /install -m 0600 \.\/afterglow\.conf \/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
+	assert.match(readme, /install -m 0600 -o .* \.\/afterglow\.conf \/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
 	assert.match(finalConfig, /^\[openstack\]$/m)
 	assert.match(finalConfig, /^\[union\]$/m)
 	assert.match(finalConfig, /metadata_store_share_id/)

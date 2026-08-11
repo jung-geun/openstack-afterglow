@@ -69,8 +69,9 @@ Place the operator source at
 Keep it outside the repository and Kolla globals files, mode `0600`:
 
 ```bash
-sudo install -d -m 0700 /etc/kolla/config/afterglow
-sudo install -m 0600 ./afterglow.conf /etc/kolla/config/afterglow/afterglow.conf
+# The Kolla deployment user must be able to read this 0600 source file.
+sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" /etc/kolla/config/afterglow
+sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf /etc/kolla/config/afterglow/afterglow.conf
 ```
 
 ```yaml
@@ -82,6 +83,10 @@ The role reads this file only to produce a protected short-lived staging
 artifact. It removes `[builder].ssh_private_key` before TOML validation and
 copies only the sanitized artifact into the Afterglow configuration directory;
 the raw file is never mounted into a container.
+
+Set `afterglow_ceph_monitors` in `globals.yml` from the `mon_host` value in
+the deployed `/etc/kolla/config/ceph/ceph.conf`; this value is required by the
+Afterglow precheck and final Kolla configuration layer.
 
 It then mounts three TOML layers into the backend and workers, in this order:
 
@@ -95,6 +100,26 @@ service toggles, public API/origin and CORS values, encryption keys, Manila
 storage bindings, and application ports. The operator layer owns
 application-level configuration such as branding, cache/session policy,
 monitoring, chat, SMTP, GitLab OIDC non-secret settings, and GPU settings.
+
+### Kolla Shared Connection Inputs
+
+Do not duplicate Kolla control-plane topology or administrative credentials in
+the plugin files. Each service derives its MariaDB host, port, administrative
+user, and administrative password from Kolla's `database_address`,
+`database_port`, `database_user`, and `database_password`. The plugin secrets
+file contains only each service's own schema-user password.
+
+Likewise, each service derives its Redis/Valkey endpoint from the first
+Kolla Valkey controller API address, `redis_port`, and
+`valkey_master_password`; `*_redis_db_index` is the only cache connection
+setting in `globals.yml`. This matches the topology used by Kolla's services
+and keeps the password in Kolla's existing password file.
+
+Runtime OpenStack settings use Kolla's `keystone_internal_url`, project/user
+domain, region, and internal interface variables. Kolla's `openstack_auth`
+provisions service projects/users; the matching runtime service-user passwords
+remain in `/etc/kolla/afterglow/secrets.yml`. This follows the internal
+Keystone configuration pattern used by Nova and Glance.
 Secrets remain in `/etc/kolla/afterglow/secrets.yml`; do not put them in
 `globals.yml` or commit the operator file.
 
@@ -152,10 +177,22 @@ certificate must cover each enabled hostname.
 
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:
 
-- `bundled`: configure `lumen_postgres_*` values and `lumen_postgres_password`. The plugin runs its isolated `lumen_postgres` container on the first Lumen controller and verifies an authenticated `SELECT 1`.
-- `external`: configure `lumen_external_postgres_host`, `port`, `database`, `user`, and `lumen_external_postgres_password`. The plugin creates no persistent PostgreSQL resource and fails closed unless the endpoint accepts an authenticated `SELECT 1`.
+- `bundled`: this Kolla plugin role runs its isolated `lumen_postgres`
+  container on the first Lumen controller and verifies an authenticated
+  `SELECT 1`. Kolla 2025.2 has no stock PostgreSQL role.
+- `external`: set `lumen_external_postgres_url` in
+  `/etc/kolla/afterglow/secrets.yml` to one `postgresql://` (or `postgres://`)
+  URL. The role creates no PostgreSQL resource, validates the URL, writes a
+  temporary mode-0600 libpq service file, runs an authenticated `SELECT 1`,
+  then deletes that file. The URL never appears in the `psql` command line.
 
-Do not configure an external Lumen PostgreSQL endpoint as Kolla's MariaDB address. Select one mode and populate only that mode's password.
+`lumen_memory_pgvector_url` is a separate optional PostgreSQL URL for semantic
+memory. It is required only when `lumen_enable_pgvector: true`; provide it in
+the same secret file rather than splitting it into host, port, and password
+variables.
+
+Do not configure an external Lumen PostgreSQL URL with the Kolla MariaDB
+endpoint. Select one mode and set only that mode's secret input.
 
 ---
 

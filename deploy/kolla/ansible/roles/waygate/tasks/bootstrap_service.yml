@@ -22,7 +22,7 @@
     volumes:
       - "{{ waygate_config_dir }}/waygate.conf:/app/waygate.conf:ro"
     env:
-      DATABASE_URL: "mysql+aiomysql://{{ waygate_database_user }}:{{ waygate_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ waygate_database_name }}"
+      DATABASE_URL: "{{ waygate_database_url }}"
       REDIS_URL: "{{ waygate_redis_url }}"
       WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
   no_log: true

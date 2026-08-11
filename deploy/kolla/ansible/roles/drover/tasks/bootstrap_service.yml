@@ -22,7 +22,7 @@
     volumes:
       - "{{ drover_config_dir }}/drover.conf:/app/drover.conf:ro"
     env:
-      DATABASE_URL: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ database_address | default(kolla_internal_vip_address) }}:{{ database_port | default(3306) }}/{{ drover_database_name }}"
+      DATABASE_URL: "{{ drover_database_url }}"
       REDIS_URL: "{{ drover_redis_url }}"
       DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
   no_log: true
