@@ -17,7 +17,7 @@
     command: ["python", "-m", "waygate.scripts.migrate", "--apply"]
     state: started
     detach: false
-    auto_remove: true
+    cleanup: true
     volumes:
       - "{{ waygate_config_dir }}/waygate.conf:/app/waygate.conf:ro"
     env:

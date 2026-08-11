@@ -17,7 +17,7 @@
     command: ["python", "-m", "lumen.scripts.migrate", "--apply"]
     state: started
     detach: false
-    auto_remove: true
+    cleanup: true
     volumes:
       - "{{ lumen_config_dir }}/lumen.conf:/etc/lumen/lumen.conf:ro"
     env:

@@ -17,7 +17,7 @@
     command: ["python", "-m", "drover.scripts.migrate", "--apply"]
     state: started
     detach: false
-    auto_remove: true
+    cleanup: true
     volumes:
       - "{{ drover_config_dir }}/drover.conf:/app/drover.conf:ro"
     env:

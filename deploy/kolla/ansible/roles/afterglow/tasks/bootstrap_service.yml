@@ -7,7 +7,7 @@
     command: ["python", "-m", "app.bootstrap"]
     state: started
     detach: false
-    auto_remove: true
+    cleanup: true
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
     env:
