@@ -23,6 +23,7 @@
     state: started
     detach: false
     network_mode: host
+    groups: ["0"]
     cleanup: true
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"

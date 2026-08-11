@@ -129,6 +129,7 @@ afterglow_services:
     network_mode: host
     command: ["uvicorn", "app.main:app", "--host", "{{ afterglow_backend_listen_address }}", "--port", "{{ afterglow_backend_listen_port | string }}"]
     restart_policy: unless-stopped
+    groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
@@ -210,6 +211,7 @@ afterglow_services:
     command: ["python", "-m", "app.palimpsest_worker"]
     network_mode: host
     restart_policy: unless-stopped
+    groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
       - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
@@ -227,6 +229,7 @@ afterglow_services:
     command: ["python", "-m", "app.notion_worker"]
     network_mode: host
     restart_policy: unless-stopped
+    groups: ["0"]
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"

@@ -19,6 +19,7 @@
     healthcheck: "{{ item.value.healthcheck | default(omit) }}"
     ports: "{{ item.value.ports | default([]) }}"
     network_mode: "{{ item.value.network_mode | default(omit) }}"
+    groups: "{{ item.value.groups | default(omit) }}"
     labels:
       kolla_version: "2025.2"
       service: afterglow
