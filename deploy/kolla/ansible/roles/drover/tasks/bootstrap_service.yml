@@ -18,6 +18,7 @@
     state: started
     detach: false
     cleanup: true
+    network_mode: host
     volumes:
       - "{{ drover_config_dir }}/drover.conf:/app/drover.conf:ro"
     env:

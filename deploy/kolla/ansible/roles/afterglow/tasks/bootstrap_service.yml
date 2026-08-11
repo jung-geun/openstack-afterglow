@@ -22,6 +22,7 @@
         asyncio.run(main())
     state: started
     detach: false
+    network_mode: host
     cleanup: true
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"

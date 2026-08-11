@@ -48,6 +48,8 @@ waygate_services:
     group: waygate
     enabled: "{{ enable_waygate_api | bool }}"
     image: "{{ waygate_api_image_ref }}"
+    network_mode: host
+    command: ["uvicorn", "waygate.main:app", "--host", "{{ waygate_api_listen_address }}", "--port", "{{ waygate_api_listen_port | string }}"]
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/waygate/waygate.conf:/app/waygate.conf:ro"
@@ -58,13 +60,11 @@ waygate_services:
       OS_PASSWORD: "{{ waygate_keystone_password }}"
       WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8010/v1/health"]
+      test: ["CMD", "curl", "-f", "http://{{ waygate_api_listen_address }}:{{ waygate_api_listen_port }}/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    ports:
-      - "{{ waygate_api_listen_address }}:{{ waygate_api_listen_port }}:8010"
     haproxy:
       waygate-api:
         enabled: "{{ enable_waygate_api | bool }}"
@@ -84,6 +84,7 @@ waygate_services:
     enabled: "{{ enable_waygate_worker | bool }}"
     image: "{{ waygate_worker_image_ref }}"
     command: ["python", "-m", "waygate.worker"]
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/waygate/waygate.conf:/app/waygate.conf:ro"

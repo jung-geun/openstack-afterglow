@@ -83,6 +83,8 @@ lumen_services:
     group: lumen
     enabled: "{{ enable_lumen_api | bool }}"
     image: "{{ lumen_api_image_ref }}"
+    network_mode: host
+    command: ["uvicorn", "lumen.main:app", "--host", "{{ lumen_api_listen_address }}", "--port", "{{ lumen_api_listen_port | string }}"]
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/lumen/lumen.conf:/etc/lumen/lumen.conf:ro"
@@ -107,13 +109,11 @@ lumen_services:
       CHAT_ASSET_S3_SECRET_KEY: "{{ lumen_s3_secret_key }}"
       CHAT_SANDBOX_API_KEY: "{{ lumen_sandbox_api_key }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8012/v1/health"]
+      test: ["CMD", "curl", "-f", "http://{{ lumen_api_listen_address }}:{{ lumen_api_listen_port }}/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    ports:
-      - "{{ lumen_api_listen_address }}:{{ lumen_api_listen_port }}:8012"
     haproxy:
       lumen-api:
         enabled: "{{ enable_lumen_api | bool }}"
@@ -133,6 +133,7 @@ lumen_services:
     enabled: "{{ enable_lumen_worker | bool }}"
     image: "{{ lumen_worker_image_ref }}"
     command: ["python", "-m", "lumen.worker"]
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/lumen/lumen.conf:/etc/lumen/lumen.conf:ro"

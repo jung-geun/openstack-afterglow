@@ -18,6 +18,7 @@
     state: started
     detach: false
     cleanup: true
+    network_mode: host
     volumes:
       - "{{ lumen_config_dir }}/lumen.conf:/etc/lumen/lumen.conf:ro"
     env:

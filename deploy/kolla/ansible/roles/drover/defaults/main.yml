@@ -79,6 +79,8 @@ drover_services:
     group: drover
     enabled: "{{ enable_drover_api | bool }}"
     image: "{{ drover_api_image_ref }}"
+    network_mode: host
+    command: ["uvicorn", "drover.main:app", "--host", "{{ drover_api_listen_address }}", "--port", "{{ drover_api_listen_port | string }}"]
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"
@@ -89,13 +91,11 @@ drover_services:
       OS_PASSWORD: "{{ drover_keystone_password }}"
       DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8011/v1/health"]
+      test: ["CMD", "curl", "-f", "http://{{ drover_api_listen_address }}:{{ drover_api_listen_port }}/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    ports:
-      - "{{ drover_api_listen_address }}:{{ drover_api_listen_port }}:8011"
     haproxy:
       drover-api:
         enabled: "{{ enable_drover_api | bool }}"
@@ -115,6 +115,7 @@ drover_services:
     enabled: "{{ enable_drover_worker | bool }}"
     image: "{{ drover_worker_image_ref }}"
     command: ["python", "-m", "drover.worker"]
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"

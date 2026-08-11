@@ -126,6 +126,8 @@ afterglow_services:
     group: afterglow
     enabled: "{{ enable_afterglow_backend | bool }}"
     image: "{{ afterglow_backend_image_ref }}"
+    network_mode: host
+    command: ["uvicorn", "app.main:app", "--host", "{{ afterglow_backend_listen_address }}", "--port", "{{ afterglow_backend_listen_port | string }}"]
     restart_policy: unless-stopped
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
@@ -149,13 +151,11 @@ afterglow_services:
       UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
       UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://{{ afterglow_backend_listen_address }}:{{ afterglow_backend_listen_port }}/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    ports:
-      - "{{ afterglow_backend_listen_address }}:{{ afterglow_backend_listen_port }}:8000"
     haproxy:
       afterglow-api:
         enabled: "{{ enable_afterglow_backend | bool }}"
@@ -174,20 +174,21 @@ afterglow_services:
     group: afterglow
     enabled: "{{ enable_afterglow_frontend | bool }}"
     image: "{{ afterglow_frontend_image_ref }}"
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "kolla_logs:/var/log/kolla/"
     environment:
       ORIGIN: "{{ afterglow_external_url }}"
       PUBLIC_API_BASE: "{{ afterglow_public_api_base }}"
+      HOST: "{{ afterglow_frontend_listen_address }}"
+      PORT: "{{ afterglow_frontend_listen_port | string }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3080/"]
+      test: ["CMD", "curl", "-f", "http://{{ afterglow_frontend_listen_address }}:{{ afterglow_frontend_listen_port }}/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
-    ports:
-      - "{{ afterglow_frontend_listen_address }}:{{ afterglow_frontend_listen_port }}:3080"
     haproxy:
       afterglow-frontend:
         enabled: "{{ enable_afterglow_frontend | bool }}"
@@ -207,6 +208,7 @@ afterglow_services:
     enabled: "{{ enable_afterglow_palimpsest_worker | bool }}"
     image: "{{ afterglow_backend_image_ref }}"
     command: ["python", "-m", "app.palimpsest_worker"]
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
@@ -223,6 +225,7 @@ afterglow_services:
     enabled: "{{ enable_afterglow_notion_worker | bool }}"
     image: "{{ afterglow_worker_image_ref }}"
     command: ["python", "-m", "app.notion_worker"]
+    network_mode: host
     restart_policy: unless-stopped
     volumes:
       - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
