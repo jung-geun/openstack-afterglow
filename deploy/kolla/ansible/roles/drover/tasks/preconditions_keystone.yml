@@ -4,7 +4,7 @@
     name: service-ks-register
   vars:
     project_name: drover
-    service_ks_register_auth: "{{ openstack_keystone_auth }}"
+    service_ks_register_auth: "{{ openstack_auth }}"
     service_ks_register_services:
       - name: drover
         type: drover

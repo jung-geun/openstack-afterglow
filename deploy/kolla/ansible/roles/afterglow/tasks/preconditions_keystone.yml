@@ -4,7 +4,7 @@
     name: service-ks-register
   vars:
     project_name: afterglow
-    service_ks_register_auth: "{{ openstack_keystone_auth }}"
+    service_ks_register_auth: "{{ openstack_auth }}"
     service_ks_register_users:
       - project: "{{ afterglow_service_project_name }}"
         user: "{{ afterglow_admin_keystone_user }}"
