@@ -106,6 +106,11 @@ test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external
 		assert.match(defaults, new RegExp(`${service}-api:\\n\\s+enabled: "\\{\\{ enable_${service}_api \\| bool \\}\\}"\\n\\s+external: false`))
 
 		assert.match(precheck, new RegExp(`Validate ${service[0].toUpperCase()}${service.slice(1)} public route hostname`))
+		assert.ok(
+			precheck.includes(
+				`- (${service}_public_endpoint_url | regex_replace('/$', '')) == ('https://' ~ ${service}_public_haproxy_fqdn)`
+			)
+		)
 		assert.match(loadbalancer, new RegExp(`${service}-public\\.cfg`))
 		assert.match(loadbalancer, /external-frontend-map/)
 		assert.match(loadbalancer, new RegExp(`project_services: "\\{\\{ ${service}_haproxy_services \\}\\}"`))
