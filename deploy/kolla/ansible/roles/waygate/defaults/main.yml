@@ -36,6 +36,11 @@ waygate_public_endpoint_url: "{{ waygate_external_url }}"
 waygate_internal_endpoint_url: "http://{{ kolla_internal_vip_address }}:{{ waygate_api_port }}"
 waygate_admin_endpoint_url: "{{ waygate_internal_endpoint_url }}"
 waygate_default_tunnel_cidr: "10.8.0.0/24"
+
+# Optional Kolla external-VIP route. Keep waygate-api internal so Afterglow
+# and Keystone's internal/admin endpoints keep their existing VIP listener.
+waygate_public_haproxy_enabled: false
+waygate_public_haproxy_fqdn: ""
 waygate_default_listen_port: 51820
 waygate_key_name: ""
 
@@ -94,3 +99,26 @@ waygate_services:
       REDIS_URL: "{{ waygate_redis_url }}"
       OS_PASSWORD: "{{ waygate_keystone_password }}"
       WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
+
+waygate_public_haproxy_services:
+  waygate-public:
+    group: waygate
+    enabled: "{{ enable_waygate_api | bool and waygate_public_haproxy_enabled | bool }}"
+    haproxy:
+      waygate-public:
+        enabled: "{{ enable_waygate_api | bool and waygate_public_haproxy_enabled | bool }}"
+        external: true
+        external_fqdn: "{{ waygate_public_haproxy_fqdn }}"
+        mode: http
+        with_frontend: true
+        with_backend: true
+        host_group: waygate
+        port: "{{ waygate_api_port }}"
+        listen_port: "{{ waygate_api_listen_port }}"
+        frontend_http_extra:
+          - "option forwardfor"
+        backend_http_extra:
+          - "option httpchk GET /v1/health"
+          - "http-check expect status 200"
+
+waygate_haproxy_services: "{{ waygate_services | combine(waygate_public_haproxy_services, recursive=True) }}"

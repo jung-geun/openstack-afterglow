@@ -79,6 +79,19 @@ templates nor changes Kolla's certificate, DNS, external VIP, or global config.
 
 The Kolla external TLS certificate must cover the configured hostname.
 
+### Drover, Waygate, and Lumen Public HAProxy Routes
+
+Each service's `<service>-api` HAProxy entry stays internal (bound to the
+internal VIP), so `<service>_internal_endpoint_url`/`<service>_admin_endpoint_url`
+keep working unchanged. Set `drover_public_haproxy_enabled: true` /
+`waygate_public_haproxy_enabled: true` / `lumen_public_haproxy_enabled: true`
+with the matching `*_public_haproxy_fqdn` to add a second `<service>-public`
+HAProxy entry that publishes the API directly on Kolla's external VIP/TLS
+frontend (no loopback router is needed since each service exposes a single
+API path). Disabling the toggle removes the plugin-owned `.cfg` fragment and
+external-frontend-map entry on the next `reconfigure`. The Kolla external TLS
+certificate must cover each enabled hostname.
+
 ### Lumen PostgreSQL Mode
 
 `lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:

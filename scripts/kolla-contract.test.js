@@ -84,3 +84,33 @@ test("Lumen PostgreSQL modes keep bundled resources separate from external conne
 	assert.match(lifecycle, /PGPASSWORD: "{{ lumen_external_postgres_password }}"/)
 	assert.match(lifecycle, /- "SELECT 1;"/)
 })
+
+test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external HAProxy frontend without disturbing internal endpoints", () => {
+	for (const [service, port] of [
+		["drover", "8011"],
+		["waygate", "8010"],
+		["lumen", "8012"],
+	]) {
+		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
+		const precheck = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/precheck.yml`)
+		const loadbalancer = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/loadbalancer.yml`)
+
+		assert.match(defaults, new RegExp(`^${service}_public_haproxy_enabled: false$`, "m"))
+		assert.match(defaults, new RegExp(`^${service}_public_haproxy_fqdn: ""$`, "m"))
+		assert.match(
+			defaults,
+			new RegExp(`${service}_haproxy_services: "\\{\\{ ${service}_services \\| combine\\(${service}_public_haproxy_services, recursive=True\\) \\}\\}"`)
+		)
+		assert.match(defaults, new RegExp(`${service}-public:\\n\\s+group: ${service}`))
+		assert.match(defaults, new RegExp(`external_fqdn: "\\{\\{ ${service}_public_haproxy_fqdn \\}\\}"`))
+		assert.match(defaults, new RegExp(`port: "\\{\\{ ${service}_api_port \\}\\}"`))
+		// The internal <service>-api entry must remain non-external so
+		// internal/admin Keystone endpoints keep the internal VIP listener.
+		assert.match(defaults, new RegExp(`${service}-api:\\n\\s+enabled: "\\{\\{ enable_${service}_api \\| bool \\}\\}"\\n\\s+external: false`))
+
+		assert.match(precheck, new RegExp(`Validate ${service[0].toUpperCase()}${service.slice(1)} public route hostname`))
+		assert.match(loadbalancer, new RegExp(`${service}-public\\.cfg`))
+		assert.match(loadbalancer, /external-frontend-map/)
+		assert.match(loadbalancer, new RegExp(`project_services: "\\{\\{ ${service}_haproxy_services \\}\\}"`))
+	}
+})

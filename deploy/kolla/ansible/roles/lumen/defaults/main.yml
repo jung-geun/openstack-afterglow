@@ -35,6 +35,11 @@ lumen_public_endpoint_url: "{{ lumen_external_url }}"
 lumen_internal_endpoint_url: "http://{{ kolla_internal_vip_address }}:{{ lumen_api_port }}"
 lumen_admin_endpoint_url: "{{ lumen_internal_endpoint_url }}"
 
+# Optional Kolla external-VIP route. Keep lumen-api internal so the internal
+# and admin Keystone endpoints continue to use the internal VIP listener.
+lumen_public_haproxy_enabled: false
+lumen_public_haproxy_fqdn: ""
+
 lumen_encryption_key: "{{ afterglow_kubeconfig_encryption_key | default('') }}"
 lumen_mcp_service_token: "{{ afterglow_lumen_mcp_service_token | default('') }}"
 lumen_mcp_control_plane_url: "{{ public_protocol | default('https') }}://{{ kolla_internal_fqdn | default(kolla_internal_vip_address) }}"
@@ -168,3 +173,26 @@ lumen_services:
       CHAT_ASSET_S3_ACCESS_KEY: "{{ lumen_s3_access_key }}"
       CHAT_ASSET_S3_SECRET_KEY: "{{ lumen_s3_secret_key }}"
       CHAT_SANDBOX_API_KEY: "{{ lumen_sandbox_api_key }}"
+
+lumen_public_haproxy_services:
+  lumen-public:
+    group: lumen
+    enabled: "{{ enable_lumen_api | bool and lumen_public_haproxy_enabled | bool }}"
+    haproxy:
+      lumen-public:
+        enabled: "{{ enable_lumen_api | bool and lumen_public_haproxy_enabled | bool }}"
+        external: true
+        external_fqdn: "{{ lumen_public_haproxy_fqdn }}"
+        mode: http
+        with_frontend: true
+        with_backend: true
+        host_group: lumen
+        port: "{{ lumen_api_port }}"
+        listen_port: "{{ lumen_api_listen_port }}"
+        frontend_http_extra:
+          - "option forwardfor"
+        backend_http_extra:
+          - "option httpchk GET /v1/health"
+          - "http-check expect status 200"
+
+lumen_haproxy_services: "{{ lumen_services | combine(lumen_public_haproxy_services, recursive=True) }}"

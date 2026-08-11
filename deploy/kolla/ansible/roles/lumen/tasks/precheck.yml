@@ -18,6 +18,17 @@
   tags: precheck
   when: enable_lumen | bool
 
+- name: Precheck | Validate Lumen public route hostname
+  ansible.builtin.assert:
+    that:
+      - lumen_public_haproxy_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+    fail_msg: "lumen_public_haproxy_fqdn must be a hostname"
+  run_once: true
+  tags: precheck
+  when:
+    - enable_lumen | bool
+    - lumen_public_haproxy_enabled | bool
+
 - name: Precheck | Verify Lumen PostgreSQL mode
   ansible.builtin.assert:
     that:

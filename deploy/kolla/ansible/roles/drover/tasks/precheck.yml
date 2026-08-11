@@ -18,6 +18,17 @@
   tags: precheck
   when: enable_drover | bool
 
+- name: Precheck | Validate Drover public route hostname
+  ansible.builtin.assert:
+    that:
+      - drover_public_haproxy_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+    fail_msg: "drover_public_haproxy_fqdn must be a hostname"
+  run_once: true
+  tags: precheck
+  when:
+    - enable_drover | bool
+    - drover_public_haproxy_enabled | bool
+
 - name: Precheck | Verify Drover API image accessibility
   become: true
   ansible.builtin.command:

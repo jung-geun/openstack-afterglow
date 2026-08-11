@@ -69,24 +69,31 @@ drover_api_listen_port: 18011
 lumen_api_port: 8012
 lumen_api_listen_port: 18012
 
-
-# Preserve the existing catalog public URLs. This plugin deliberately creates
-# only internal-VIP HAProxy routes; DNS, certificates, and external-VIP routing
-# are separate operator-owned ingress work.
+# Preserve the existing catalog public URLs. drover-api/waygate-api/lumen-api
+# stay internal-VIP-only; a separate `<service>-public` HAProxy entry is added
+# only when the matching `*_public_haproxy_enabled` toggle below is true.
 waygate_external_url: "https://waygate.dmslab.re.kr"
 waygate_public_endpoint_url: "https://waygate.dmslab.re.kr"
 waygate_internal_endpoint_url: "http://172.30.0.253:8010"
 waygate_admin_endpoint_url: "http://172.30.0.253:8010"
+waygate_public_haproxy_enabled: true
+waygate_public_haproxy_fqdn: "waygate.dmslab.re.kr"
 
 drover_external_url: "https://drover.dmslab.re.kr"
 drover_public_endpoint_url: "https://drover.dmslab.re.kr"
 drover_internal_endpoint_url: "http://172.30.0.253:8011"
 drover_admin_endpoint_url: "http://172.30.0.253:8011"
+drover_public_haproxy_enabled: true
+drover_public_haproxy_fqdn: "drover.dmslab.re.kr"
 
 lumen_external_url: "http://172.30.0.253:8012"
 lumen_public_endpoint_url: "http://172.30.0.253:8012"
 lumen_internal_endpoint_url: "http://172.30.0.253:8012"
 lumen_admin_endpoint_url: "http://172.30.0.253:8012"
+# No Lumen public DNS/TLS record exists yet; leave its Kolla external route
+# disabled until one is provisioned.
+lumen_public_haproxy_enabled: false
+lumen_public_haproxy_fqdn: ""
 
 # ── 4. MariaDB _kolla Schemas & Keystone Contracts ───────────────────────────
 # Use dedicated plugin schemas to leave stock afterglow schema untouched
