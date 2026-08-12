@@ -356,6 +356,29 @@ test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external
 	}
 })
 
+test("Waygate validates every configured runtime image reference before mutation", () => {
+	const deploy = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/deploy.yml")
+	const precheck = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/precheck.yml")
+	const validator = readRepoFile(
+		"deploy/kolla/ansible/roles/waygate/files/validate_image_ref.py"
+	)
+
+	assert.ok(
+		deploy.indexOf("Include precheck tasks") <
+			deploy.indexOf("Include precondition tasks")
+	)
+	assert.match(precheck, /Validate enabled Waygate image references/)
+	assert.match(precheck, /Inspect enabled remote Waygate image manifests/)
+	assert.match(precheck, /loop: "\{\{ waygate_services \| dict2items \}\}"/)
+	assert.match(precheck, /- "\{\{ item\.value\.image \}\}"/)
+	assert.match(precheck, /- "\{\{ waygate_source_mode \| bool \| lower \}\}"/)
+	assert.match(precheck, /- manifest/)
+	assert.match(precheck, /- inspect/)
+	assert.doesNotMatch(precheck, /failed_when: false/)
+	assert.doesNotMatch(precheck, /waygate_api_image \}\}:\{\{ waygate_image_tag/)
+	assert.match(validator, /@sha256:\[0-9a-f\]\{64\}/)
+	assert.match(validator, /afterglow-local\/waygate-/)
+})
 
 test("Afterglow hands operator TOML to containers without surrendering Kolla-owned settings", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
