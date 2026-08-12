@@ -358,7 +358,15 @@ test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external
 
 test("Waygate validates every configured runtime image reference before mutation", () => {
 	const deploy = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/deploy.yml")
+	const reconfigure = readRepoFile(
+		"deploy/kolla/ansible/roles/waygate/tasks/reconfigure.yml"
+	)
+	const upgrade = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/upgrade.yml")
+	const pull = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/pull.yml")
 	const precheck = readRepoFile("deploy/kolla/ansible/roles/waygate/tasks/precheck.yml")
+	const imagePrecheck = readRepoFile(
+		"deploy/kolla/ansible/roles/waygate/tasks/image_precheck.yml"
+	)
 	const validator = readRepoFile(
 		"deploy/kolla/ansible/roles/waygate/files/validate_image_ref.py"
 	)
@@ -367,15 +375,32 @@ test("Waygate validates every configured runtime image reference before mutation
 		deploy.indexOf("Include precheck tasks") <
 			deploy.indexOf("Include precondition tasks")
 	)
-	assert.match(precheck, /Validate enabled Waygate image references/)
-	assert.match(precheck, /Inspect enabled remote Waygate image manifests/)
-	assert.match(precheck, /loop: "\{\{ waygate_services \| dict2items \}\}"/)
-	assert.match(precheck, /- "\{\{ item\.value\.image \}\}"/)
-	assert.match(precheck, /- "\{\{ waygate_source_mode \| bool \| lower \}\}"/)
-	assert.match(precheck, /- manifest/)
-	assert.match(precheck, /- inspect/)
-	assert.doesNotMatch(precheck, /failed_when: false/)
-	assert.doesNotMatch(precheck, /waygate_api_image \}\}:\{\{ waygate_image_tag/)
+	assert.ok(
+		reconfigure.indexOf("Include precheck tasks") <
+			reconfigure.indexOf("Include config tasks")
+	)
+	assert.ok(
+		upgrade.indexOf("Include pull tasks") <
+			upgrade.indexOf("Include bootstrap service tasks")
+	)
+	assert.ok(
+		pull.indexOf("Include Waygate image precheck tasks") <
+			pull.indexOf("Pull | Pull Waygate images")
+	)
+	assert.match(precheck, /include_tasks: image_precheck\.yml/)
+	assert.match(pull, /include_tasks: image_precheck\.yml/)
+	assert.match(imagePrecheck, /Validate enabled Waygate image references/)
+	assert.match(imagePrecheck, /Inspect enabled remote Waygate image manifests/)
+	assert.match(imagePrecheck, /loop: "\{\{ waygate_services \| dict2items \}\}"/)
+	assert.match(imagePrecheck, /- "\{\{ item\.value\.image \}\}"/)
+	assert.match(
+		imagePrecheck,
+		/- "\{\{ waygate_source_mode \| default\(false\) \| bool \| lower \}\}"/
+	)
+	assert.match(imagePrecheck, /- manifest/)
+	assert.match(imagePrecheck, /- inspect/)
+	assert.doesNotMatch(imagePrecheck, /failed_when: false/)
+	assert.doesNotMatch(imagePrecheck, /waygate_api_image \}\}:\{\{ waygate_image_tag/)
 	assert.match(validator, /@sha256:\[0-9a-f\]\{64\}/)
 	assert.match(validator, /afterglow-local\/waygate-/)
 })

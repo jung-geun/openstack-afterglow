@@ -4,7 +4,7 @@ Waygate deployment accepted an invalid 62-hex worker digest and did not validate
 
 ## What Changes
 
-- Validate enabled Waygate API and worker image references before any database, Keystone, migration, or container task.
+- Validate enabled Waygate API and worker image references before any deploy, reconfigure, upgrade, pull, database, Keystone, migration, or container mutation.
 - Require remote immutable images to use canonical `registry/repository@sha256:<64 lowercase hex>` syntax.
 - Inspect each exact configured image reference and fail closed when a manifest is missing or malformed.
 - Keep local source-build references on the existing immutable local tag contract.

@@ -1,4 +1,7 @@
 ---
+- name: Include Waygate image precheck tasks
+  ansible.builtin.include_tasks: image_precheck.yml
+
 - name: Pull | Pull Waygate images
   become: true
   community.docker.docker_image:
