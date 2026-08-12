@@ -6,5 +6,5 @@
 - [x] Guard direct pull and upgrade image mutations with the same exact-reference precheck.
 - [x] Add regression coverage for malformed digest length and exact configured references.
 - [x] Run focused Waygate/Kolla tests, the complete suite, and backend lint.
-- [ ] Correct the deployed worker digest, reconfigure Waygate, and verify both controllers.
-- [ ] Archive the completed change.
+- [x] Correct the deployed worker digest, reconfigure Waygate, and verify both controllers.
+- [x] Archive the completed change.
