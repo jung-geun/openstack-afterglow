@@ -37,6 +37,7 @@ afterglow_operator_config_source: ""
 afterglow_operator_config_name: "afterglow.operator.conf"
 afterglow_kolla_config_name: "afterglow.zz-kolla.conf"
 afterglow_operator_config_staging_path: "/tmp/{{ afterglow_operator_config_name }}.sanitized"
+afterglow_frontend_config_name: "afterglow.frontend.conf"
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
 afterglow_backend_port: 8020
@@ -202,6 +203,7 @@ afterglow_services:
     network_mode: host
     restart_policy: unless-stopped
     volumes:
+      - "{{ afterglow_config_dir }}/{{ afterglow_frontend_config_name }}:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       ORIGIN: "{{ afterglow_public_endpoint_url }}"

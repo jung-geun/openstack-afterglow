@@ -127,6 +127,16 @@
   no_log: true
   when: inventory_hostname in groups['afterglow']
 
+- name: Config | Render public frontend configuration
+  become: true
+  ansible.builtin.template:
+    src: afterglow.frontend.conf.j2
+    dest: "{{ afterglow_config_dir }}/{{ afterglow_frontend_config_name }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: inventory_hostname in groups['afterglow']
+
 - name: Config | Render final Kolla configuration override
   become: true
   ansible.builtin.template:

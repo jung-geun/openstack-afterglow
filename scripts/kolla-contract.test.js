@@ -55,6 +55,26 @@ test("Afterglow public endpoint controls every browser-facing origin", () => {
 	assert.doesNotMatch(defaults, /afterglow_external_url/)
 })
 
+test("Afterglow frontend receives only a public runtime configuration", () => {
+	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const config = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/config.yml")
+	const publicConfig = readRepoFile(
+		"deploy/kolla/ansible/roles/afterglow/templates/afterglow.frontend.conf.j2"
+	)
+
+	assert.match(defaults, /^afterglow_frontend_config_name: "afterglow\.frontend\.conf"$/m)
+	assert.match(
+		defaults,
+		/\{\{ afterglow_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}:\s*\/app\/afterglow\.conf:ro/
+	)
+	assert.match(config, /Config \| Render public frontend configuration/)
+	assert.match(config, /mode: "0644"/)
+	assert.match(publicConfig, /public_api_base = "\{\{ afterglow_public_api_base \}\}"/)
+	assert.match(publicConfig, /frontend_base_url = "\{\{ afterglow_public_endpoint_url \}\}"/)
+	assert.match(publicConfig, /\[services\]/)
+	assert.doesNotMatch(publicConfig, /(password|secret|redis_url|database|ceph)/i)
+})
+
 test("Afterglow public hostname is routed by Kolla's external HAProxy frontend", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
 	const precheck = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/precheck.yml")
