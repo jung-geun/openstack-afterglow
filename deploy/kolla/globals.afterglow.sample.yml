@@ -63,9 +63,12 @@ afterglow_public_api_base: "https://cloud.dmslab.re.kr"
 afterglow_openstack_interface: "internal"
 afterglow_ceph_monitors: "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
 
-# Optional deploy-host TOML source. Keep this file outside the repository,
-# mode 0600; Kolla strips the unsupported builder private key and reapplies
-# topology and secret-backed values after it.
+# Optional partial or complete deploy-host TOML for detailed application
+# settings such as branding, cache/session policy, monitoring, and chat. Omit
+# this variable or set it to "" when globals/secrets are sufficient. Keep the
+# file outside the repository, mode 0600; Kolla strips the unsupported builder
+# private key, reapplies topology and secret-backed values, and exposes only a
+# strict public projection to the frontend.
 afterglow_operator_config_source: "/etc/kolla/config/afterglow/afterglow.conf"
 
 waygate_api_port: 8010

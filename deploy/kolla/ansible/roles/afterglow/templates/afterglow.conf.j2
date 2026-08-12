@@ -23,6 +23,8 @@ frontend_base_url = "{{ afterglow_public_endpoint_url }}"
 site_name = "Afterglow"
 site_description = "OpenStack VM + OverlayFS 배포 플랫폼"
 logo_path = "/logo.png"
+logo_dark_path = "/logo-white.png"
+logo_light_path = "/logo-dark.png"
 favicon_path = "/favicon.ico"
 refresh_interval_ms = 5000
 
@@ -49,16 +51,16 @@ default_network_cidr = "192.168.0.0/24"
 default_network_external_id = ""
 
 [services]
-magnum = {{ afterglow_service_magnum_enabled | lower }}
-manila = {{ afterglow_service_manila_enabled | lower }}
-zun = {{ afterglow_service_zun_enabled | lower }}
-k3s = {{ afterglow_service_k3s_enabled | lower }}
-swift = {{ afterglow_service_swift_enabled | lower }}
-trove = {{ afterglow_service_trove_enabled | lower }}
-barbican = {{ afterglow_service_barbican_enabled | lower }}
-waygate = {{ afterglow_service_waygate_enabled | lower }}
-chat = {{ afterglow_service_chat_enabled | lower }}
-mcp = {{ afterglow_service_mcp_enabled | lower }}
+magnum = {{ afterglow_service_magnum_enabled | bool | lower }}
+manila = {{ afterglow_service_manila_enabled | bool | lower }}
+zun = {{ afterglow_service_zun_enabled | bool | lower }}
+k3s = {{ afterglow_service_k3s_enabled | bool | lower }}
+swift = {{ afterglow_service_swift_enabled | bool | lower }}
+trove = {{ afterglow_service_trove_enabled | bool | lower }}
+barbican = {{ afterglow_service_barbican_enabled | bool | lower }}
+waygate = {{ afterglow_service_waygate_enabled | bool | lower }}
+chat = {{ afterglow_service_chat_enabled | bool | lower }}
+mcp = {{ afterglow_service_mcp_enabled | bool | lower }}
 
 [instance_health]
 callback_base_url = "{{ afterglow_instance_health_callback_base_url }}"

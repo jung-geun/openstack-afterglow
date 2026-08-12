@@ -91,12 +91,20 @@ unexpected, `install.sh` aborts rather than replacing it.
 3. **Create Secrets (`/etc/kolla/afterglow/secrets.yml`)**:
    Copy `deploy/kolla/passwords.afterglow.additions.yml`, set permissions to `0600`, and populate generated 64-hex keys and database/Keystone passwords.
 
+These two files are sufficient for a normal deployment. The role derives the
+service topology and required runtime values from Kolla plus the plugin
+globals/secrets, then generates and mounts the configuration needed by each
+Afterglow process. A separate operator TOML is optional.
 
-### Afterglow Operator Configuration Handoff
 
-Place the operator source at
-`/etc/kolla/config/afterglow/afterglow.conf` on the Kolla deployment host.
-Keep it outside the repository and Kolla globals files, mode `0600`:
+### Optional Detailed Afterglow Configuration
+
+For settings not modeled as Kolla variables, place a partial or complete
+operator TOML at `/etc/kolla/config/afterglow/afterglow.conf` on the Kolla
+deployment host. The file may contain only the detailed keys being overridden;
+it does not need to repeat generated OpenStack, database, Redis, port, URL, or
+service-toggle values. Keep it outside the repository and Kolla globals files,
+mode `0600`:
 
 ```bash
 # The Kolla deployment user must be able to read this 0600 source file.
@@ -109,6 +117,10 @@ sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf /etc/kolla/c
 afterglow_operator_config_source: "/etc/kolla/config/afterglow/afterglow.conf"
 ```
 
+Omit `afterglow_operator_config_source` or leave it empty when globals and
+secrets cover the deployment. The role generates an empty operator layer so
+the same deterministic merge contract is used in both modes.
+
 The role reads this file only to produce a protected short-lived staging
 artifact. It removes `[builder].ssh_private_key` before TOML validation and
 copies only the sanitized artifact into the Afterglow configuration directory;
@@ -118,18 +130,25 @@ Set `afterglow_ceph_monitors` in `globals.yml` from the `mon_host` value in
 the deployed `/etc/kolla/config/ceph/ceph.conf`; this value is required by the
 Afterglow precheck and final Kolla configuration layer.
 
-It then mounts three TOML layers into the backend and workers, in this order:
+The role produces process-specific configuration artifacts:
 
-1. generated `afterglow.conf` base;
-2. operator-managed `afterglow.operator.conf`;
-3. generated `afterglow.zz-kolla.conf` final override.
+1. generated `afterglow.conf` base from Kolla and plugin globals/secrets;
+2. optional sanitized `afterglow.operator.conf` with detailed application overrides;
+3. generated `afterglow.zz-kolla.conf` final override;
+4. generated `afterglow.frontend.conf`, a closed public projection of the merged
+   base → operator → final result.
 
-The final layer intentionally reasserts deployment-owned OpenStack
-credentials/project/region/interface, database and Redis connections,
-service toggles, public API/origin and CORS values, encryption keys, Manila
-storage bindings, and application ports. The operator layer owns
-application-level configuration such as branding, cache/session policy,
-monitoring, chat, SMTP, GitLab OIDC non-secret settings, and GPU settings.
+The backend and workers mount the first three protected layers and apply them
+in that order. The final layer intentionally reasserts deployment-owned
+OpenStack credentials/project/region/interface, database and Redis
+connections, service toggles, public API/origin and CORS values, encryption
+keys, Manila storage bindings, and application ports.
+
+The frontend mounts only `afterglow.frontend.conf`. Its allowlist includes
+branding, refresh interval, public API/UI origins, service flags, public
+S3/Grafana/chat/GitLab/MCP origins, and no credentials. Detailed operator
+branding and browser-facing integration settings therefore reach the frontend
+without exposing the rest of the operator or backend configuration.
 
 ### Kolla Shared Connection Inputs
 
@@ -159,9 +178,10 @@ only through a future declared secret mount that is consumed by the runtime.
 `config.gpu.toml` is also not copied independently; place its supported
 settings in the operator TOML file until that file has an explicit handoff.
 
-Re-run Afterglow with the standard Kolla command after changing the operator
-file. Its checksum is included in the container configuration hash, so the
-backend and workers are recreated with the updated settings:
+Re-run Afterglow with the standard Kolla command after changing globals,
+secrets, or the optional operator file. All generated and imported
+configuration artifacts participate in the container configuration hash, so
+the affected processes are recreated with the updated settings:
 
 ```bash
 cd /etc/kolla

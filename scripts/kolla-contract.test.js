@@ -58,8 +58,14 @@ test("Afterglow public endpoint controls every browser-facing origin", () => {
 test("Afterglow frontend receives only a public runtime configuration", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
 	const config = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/config.yml")
-	const publicConfig = readRepoFile(
-		"deploy/kolla/ansible/roles/afterglow/templates/afterglow.frontend.conf.j2"
+	const publicRenderer = readRepoFile(
+		"deploy/kolla/ansible/roles/afterglow/files/render_frontend_config.py"
+	)
+	const baseConfig = readRepoFile(
+		"deploy/kolla/ansible/roles/afterglow/templates/afterglow.conf.j2"
+	)
+	const finalConfig = readRepoFile(
+		"deploy/kolla/ansible/roles/afterglow/templates/afterglow.kolla.conf.j2"
 	)
 	const frontendService = defaults.slice(
 		defaults.indexOf("  afterglow-frontend:"),
@@ -75,15 +81,31 @@ test("Afterglow frontend receives only a public runtime configuration", () => {
 		frontendService,
 		/(?:afterglow\.operator\.conf|afterglow\.zz-kolla\.conf):\/app\/afterglow(?:\.operator|\.zz-kolla)?\.conf:ro/,
 	)
-	assert.match(
-		config,
-		/- name: Config \| Render public frontend configuration[\s\S]*?dest: "\{\{ afterglow_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}"[\s\S]*?mode: "0644"/,
+	assert.match(config, /Config \| Render final Kolla configuration override/)
+	assert.match(config, /Config \| Render merged public frontend configuration/)
+	assert.ok(
+		config.indexOf("Config | Render final Kolla configuration override") <
+			config.indexOf("Config | Render merged public frontend configuration")
 	)
-	assert.match(publicConfig, /public_api_base = "\{\{ afterglow_public_api_base \}\}"/)
-	assert.match(publicConfig, /frontend_base_url = "\{\{ afterglow_public_endpoint_url \}\}"/)
-	assert.match(publicConfig, /\[services\]/)
-	assert.match(publicConfig, /k3s = \{\{ afterglow_service_k3s_enabled \| bool \| lower \}\}/)
-	assert.doesNotMatch(publicConfig, /(password|secret|redis_url|database|ceph)/i)
+	assert.doesNotMatch(config, /executable:.*ansible_python_interpreter/)
+	assert.match(config, /afterglow_frontend_config_render\.rc == 0 and/)
+	assert.match(config, /render_frontend_config\.py/)
+	assert.match(config, /afterglow_operator_config_name/)
+	assert.match(config, /afterglow_kolla_config_name/)
+	assert.match(config, /afterglow_frontend_config_name/)
+	assert.match(baseConfig, /chat = \{\{ afterglow_service_chat_enabled \| bool \| lower \}\}/)
+	assert.match(finalConfig, /chat = \{\{ afterglow_service_chat_enabled \| bool \| lower \}\}/)
+	assert.match(publicRenderer, /_PUBLIC_SCHEMA/)
+	assert.match(publicRenderer, /"public_api_base": str/)
+	assert.match(publicRenderer, /"grafana_base_url": str/)
+	assert.match(publicRenderer, /"base_url": str/)
+	assert.match(publicRenderer, /"gitlab_url": str/)
+	assert.match(publicRenderer, /"public_url": str/)
+	assert.match(publicRenderer, /os\.chmod\(staging_path, 0o644\)/)
+	assert.doesNotMatch(
+		publicRenderer,
+		/"(?:secret_key|password|redis_url|database_url)":/
+	)
 })
 
 test("Afterglow public hostname is routed by Kolla's external HAProxy frontend", () => {
