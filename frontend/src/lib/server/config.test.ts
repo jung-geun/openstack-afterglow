@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveBrowserApiBase } from './config';
 
+afterEach(() => {
+	vi.resetModules();
+	vi.doUnmock('fs');
+	vi.unstubAllEnvs();
+});
+
 describe('deriveBrowserApiBase', () => {
 	it('prefers explicit public_api_base over frontend_base_url', () => {
 		expect(
@@ -45,6 +51,24 @@ describe('deriveBrowserApiBase', () => {
 	it('uses backend_port for local development when no public origin is configured', () => {
 		expect(deriveBrowserApiBase({ backend_port: 8123 }, {})).toBe('http://localhost:8123');
 	});
+});
+
+describe('loadPublicSiteConfig fallback', () => {
+	it('uses PUBLIC_API_BASE when the frontend config mount is unavailable', async () => {
+		vi.stubEnv('PUBLIC_API_BASE', 'https://cloud.dmslab.re.kr');
+		vi.doMock('fs', async (importOriginal) => ({
+			...(await importOriginal()),
+			readFileSync: vi.fn(() => {
+				throw new Error('ENOENT');
+			}),
+		}));
+
+		// The module must be loaded after the filesystem mock to exercise its no-config boundary.
+		const { loadPublicSiteConfig } = await import('./config');
+
+		expect(loadPublicSiteConfig().runtime.api_base).toBe('https://cloud.dmslab.re.kr');
+	});
+
 });
 
 describe('frontend CSP branding origins', () => {

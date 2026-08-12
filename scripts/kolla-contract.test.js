@@ -61,17 +61,28 @@ test("Afterglow frontend receives only a public runtime configuration", () => {
 	const publicConfig = readRepoFile(
 		"deploy/kolla/ansible/roles/afterglow/templates/afterglow.frontend.conf.j2"
 	)
+	const frontendService = defaults.slice(
+		defaults.indexOf("  afterglow-frontend:"),
+		defaults.indexOf("  afterglow-palimpsest-worker:"),
+	)
 
 	assert.match(defaults, /^afterglow_frontend_config_name: "afterglow\.frontend\.conf"$/m)
 	assert.match(
-		defaults,
+		frontendService,
 		/\{\{ afterglow_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}:\s*\/app\/afterglow\.conf:ro/
 	)
-	assert.match(config, /Config \| Render public frontend configuration/)
-	assert.match(config, /mode: "0644"/)
+	assert.doesNotMatch(
+		frontendService,
+		/(?:afterglow\.operator\.conf|afterglow\.zz-kolla\.conf):\/app\/afterglow(?:\.operator|\.zz-kolla)?\.conf:ro/,
+	)
+	assert.match(
+		config,
+		/- name: Config \| Render public frontend configuration[\s\S]*?dest: "\{\{ afterglow_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}"[\s\S]*?mode: "0644"/,
+	)
 	assert.match(publicConfig, /public_api_base = "\{\{ afterglow_public_api_base \}\}"/)
 	assert.match(publicConfig, /frontend_base_url = "\{\{ afterglow_public_endpoint_url \}\}"/)
 	assert.match(publicConfig, /\[services\]/)
+	assert.match(publicConfig, /k3s = \{\{ afterglow_service_k3s_enabled \| bool \| lower \}\}/)
 	assert.doesNotMatch(publicConfig, /(password|secret|redis_url|database|ceph)/i)
 })
 
