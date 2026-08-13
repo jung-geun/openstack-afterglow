@@ -26,9 +26,9 @@
     groups: ["0"]
     cleanup: true
     volumes:
-      - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
     env:
       DATABASE_URL: "{{ afterglow_database_url }}"
       REDIS_URL: "{{ afterglow_redis_url }}"

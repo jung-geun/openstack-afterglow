@@ -101,10 +101,10 @@ Afterglow process. A separate operator TOML is optional.
 
 For settings not modeled as Kolla variables, place a partial or complete
 operator TOML at `/etc/kolla/config/afterglow/afterglow.conf` on the Kolla
-deployment host. The file may contain only the detailed keys being overridden;
-it does not need to repeat generated OpenStack, database, Redis, port, URL, or
-service-toggle values. Keep it outside the repository and Kolla globals files,
-mode `0600`:
+deployment host. The role uses this path by default. The file may contain only
+the detailed keys being overridden; it does not need to repeat generated
+OpenStack, database, Redis, port, URL, or service-toggle values. Keep it outside
+the repository and Kolla globals files, mode `0600`:
 
 ```bash
 # The Kolla deployment user must be able to read this 0600 source file.
@@ -112,43 +112,43 @@ sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" /etc/kolla/config/afterglo
 sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf /etc/kolla/config/afterglow/afterglow.conf
 ```
 
-```yaml
-# /etc/kolla/afterglow/globals.yml
-afterglow_operator_config_source: "/etc/kolla/config/afterglow/afterglow.conf"
-```
+An optional `/etc/kolla/config/afterglow/afterglow.frontend.conf` supplies
+additional browser-safe values. Both default source files are discovered by
+existence; no globals override is required. Override
+`afterglow_operator_config_source` or
+`afterglow_operator_frontend_config_source` only when an input lives elsewhere.
+Missing inputs produce empty generated layers.
 
-Omit `afterglow_operator_config_source` or leave it empty when globals and
-secrets cover the deployment. The role generates an empty operator layer so
-the same deterministic merge contract is used in both modes.
-
-The role reads this file only to produce a protected short-lived staging
-artifact. It removes `[builder].ssh_private_key` before TOML validation and
-copies only the sanitized artifact into the Afterglow configuration directory;
-the raw file is never mounted into a container.
+The role reads the backend source only to produce a protected short-lived
+staging artifact. It removes `[builder].ssh_private_key` before TOML validation.
+The frontend source is projected through the same closed browser-safe allowlist
+as the final frontend configuration. Raw operator files are never mounted into
+containers.
 
 Set `afterglow_ceph_monitors` in `globals.yml` from the `mon_host` value in
 the deployed `/etc/kolla/config/ceph/ceph.conf`; this value is required by the
 Afterglow precheck and final Kolla configuration layer.
 
-The role produces process-specific configuration artifacts:
+The role writes process-specific runtime artifacts under
+`/etc/kolla/config/afterglow/generated`:
 
-1. generated `afterglow.conf` base from Kolla and plugin globals/secrets;
-2. optional sanitized `afterglow.operator.conf` with detailed application overrides;
-3. generated `afterglow.zz-kolla.conf` final override;
-4. generated `afterglow.frontend.conf`, a closed public projection of the merged
-   base → operator → final result.
+1. generated `afterglow.generated.conf` base from Kolla and plugin globals/secrets;
+2. sanitized `afterglow.operator.generated.conf` application override;
+3. projected `afterglow.frontend.operator.generated.conf` public override;
+4. generated `afterglow.zz-kolla.generated.conf` final override;
+5. generated `afterglow.frontend.generated.conf`, a closed public projection of
+   the merged base → backend operator → frontend operator → final result.
 
-The backend and workers mount the first three protected layers and apply them
-in that order. The final layer intentionally reasserts deployment-owned
-OpenStack credentials/project/region/interface, database and Redis
-connections, service toggles, public API/origin and CORS values, encryption
-keys, Manila storage bindings, and application ports.
+The backend and workers mount the generated base, sanitized backend operator,
+and final override in that order. The final layer intentionally reasserts
+deployment-owned OpenStack credentials/project/region/interface, database and
+Redis connections, service toggles, public API/origin and CORS values,
+encryption keys, Manila storage bindings, and application ports.
 
-The frontend mounts only `afterglow.frontend.conf`. Its allowlist includes
-branding, refresh interval, public API/UI origins, service flags, public
-S3/Grafana/chat/GitLab/MCP origins, and no credentials. Detailed operator
-branding and browser-facing integration settings therefore reach the frontend
-without exposing the rest of the operator or backend configuration.
+The frontend mounts only `afterglow.frontend.generated.conf`. Its allowlist
+includes branding, refresh interval, public API/UI origins, service flags,
+public S3/Grafana/chat/GitLab/MCP origins, and no credentials. Kolla-owned final
+values win over both operator inputs.
 
 ### Kolla Shared Connection Inputs
 

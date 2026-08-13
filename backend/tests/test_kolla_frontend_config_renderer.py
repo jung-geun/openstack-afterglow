@@ -16,6 +16,7 @@ _SPEC.loader.exec_module(_RENDERER)
 def test_renderer_merges_layers_and_emits_only_public_fields(tmp_path: Path) -> None:
     base = tmp_path / "afterglow.conf"
     operator = tmp_path / "afterglow.operator.conf"
+    frontend_operator = tmp_path / "afterglow.frontend.operator.conf"
     final = tmp_path / "afterglow.zz-kolla.conf"
     destination = tmp_path / "afterglow.frontend.conf"
 
@@ -38,26 +39,41 @@ def test_renderer_merges_layers_and_emits_only_public_fields(tmp_path: Path) -> 
         'lumen_service_token = "mcp-secret"\n'
         '\n[database]\nurl = "mysql://database-secret"\n'
     )
+    frontend_operator.write_text(
+        '[app]\nsite_name = "Frontend Cloud"\nlogo_light_path = "/frontend-light.png"\n'
+        'public_api_base = "https://operator.example.com/api"\nsecret_key = "frontend-secret"\n'
+        "\n[services]\nmanila = true\nk3s = false\n"
+    )
     final.write_text(
         '[app]\npublic_api_base = "https://cloud.example.com"\n'
         'frontend_base_url = "https://cloud.example.com"\nsecret_key = "final-secret"\n'
         "\n[services]\nk3s = true\nchat = true\nmcp = true\n"
     )
 
-    assert _RENDERER.main(str(base), str(operator), str(final), str(destination)) is True
+    assert (
+        _RENDERER.main(
+            str(base),
+            str(operator),
+            str(frontend_operator),
+            str(final),
+            str(destination),
+        )
+        is True
+    )
 
     rendered = tomllib.loads(destination.read_text())
     assert rendered == {
         "app": {
             "backend_port": 8020,
-            "site_name": "Operator Cloud",
+            "site_name": "Frontend Cloud",
             "site_description": "Cloud",
             "logo_path": "/logo.png",
             "logo_dark_path": "/operator-dark.png",
+            "logo_light_path": "/frontend-light.png",
             "frontend_base_url": "https://cloud.example.com",
             "public_api_base": "https://cloud.example.com",
         },
-        "services": {"k3s": True, "chat": True, "mcp": True},
+        "services": {"k3s": True, "chat": True, "mcp": True, "manila": True},
         "openstack": {"s3_endpoint": "https://s3.example.com"},
         "monitoring": {"grafana_base_url": "https://grafana.example.com"},
         "chat": {"base_url": "https://chat.example.com"},
@@ -66,7 +82,16 @@ def test_renderer_merges_layers_and_emits_only_public_fields(tmp_path: Path) -> 
     }
     assert "secret" not in destination.read_text()
     assert destination.stat().st_mode & 0o777 == 0o644
-    assert _RENDERER.main(str(base), str(operator), str(final), str(destination)) is False
+    assert (
+        _RENDERER.main(
+            str(base),
+            str(operator),
+            str(frontend_operator),
+            str(final),
+            str(destination),
+        )
+        is False
+    )
 
 
 def test_renderer_rejects_invalid_public_field_type(tmp_path: Path) -> None:

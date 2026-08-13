@@ -5,10 +5,11 @@
     path: "{{ item }}"
   register: afterglow_config_stats
   loop:
-    - "{{ afterglow_config_dir }}/afterglow.conf"
-    - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}"
-    - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}"
-    - "{{ afterglow_config_dir }}/{{ afterglow_frontend_config_name }}"
+    - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}"
+    - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}"
+    - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_frontend_config_name }}"
+    - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}"
+    - "{{ afterglow_runtime_config_dir }}/{{ afterglow_frontend_config_name }}"
   when: inventory_hostname in groups['afterglow']
 
 - name: Start | Start Afterglow containers

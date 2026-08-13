@@ -57,6 +57,7 @@ test("Afterglow public endpoint controls every browser-facing origin", () => {
 
 test("Afterglow frontend receives only a public runtime configuration", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const vars = readRepoFile("deploy/kolla/ansible/roles/afterglow/vars/main.yml")
 	const config = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/config.yml")
 	const publicRenderer = readRepoFile(
 		"deploy/kolla/ansible/roles/afterglow/files/render_frontend_config.py"
@@ -72,10 +73,27 @@ test("Afterglow frontend receives only a public runtime configuration", () => {
 		defaults.indexOf("  afterglow-palimpsest-worker:"),
 	)
 
-	assert.match(defaults, /^afterglow_frontend_config_name: "afterglow\.frontend\.conf"$/m)
+	assert.match(defaults, /^afterglow_config_dir: "\{\{ node_custom_config \}\}\/afterglow"$/m)
+	assert.match(
+		defaults,
+		/^afterglow_runtime_config_dir: "\{\{ afterglow_config_dir \}\}\/generated"$/m
+	)
+	assert.match(
+		defaults,
+		/^afterglow_operator_config_source: "\{\{ afterglow_config_dir \}\}\/afterglow\.conf"$/m
+	)
+	assert.match(
+		defaults,
+		/^afterglow_operator_frontend_config_source: "\{\{ afterglow_config_dir \}\}\/afterglow\.frontend\.conf"$/m
+	)
+	assert.match(
+		defaults,
+		/^afterglow_frontend_config_name: "afterglow\.frontend\.generated\.conf"$/m
+	)
+	assert.doesNotMatch(vars, /^afterglow_config_dir:/m)
 	assert.match(
 		frontendService,
-		/\{\{ afterglow_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}:\s*\/app\/afterglow\.conf:ro/
+		/\{\{ afterglow_runtime_config_dir \}\}\/\{\{ afterglow_frontend_config_name \}\}:\s*\/app\/afterglow\.conf:ro/
 	)
 	assert.doesNotMatch(
 		frontendService,
@@ -90,9 +108,12 @@ test("Afterglow frontend receives only a public runtime configuration", () => {
 	assert.doesNotMatch(config, /executable:.*ansible_python_interpreter/)
 	assert.match(config, /afterglow_frontend_config_render\.rc == 0 and/)
 	assert.match(config, /render_frontend_config\.py/)
-	assert.match(config, /afterglow_operator_config_name/)
+	assert.match(config, /afterglow_operator_config_source_stat\.stat\.exists/)
+	assert.match(config, /afterglow_operator_frontend_config_source_stat\.stat\.exists/)
+	assert.match(config, /afterglow_operator_frontend_config_name/)
 	assert.match(config, /afterglow_kolla_config_name/)
 	assert.match(config, /afterglow_frontend_config_name/)
+	assert.match(config, /Afterglow operator source paths must not overlap generated runtime artifacts/)
 	assert.match(baseConfig, /chat = \{\{ afterglow_service_chat_enabled \| bool \| lower \}\}/)
 	assert.match(finalConfig, /chat = \{\{ afterglow_service_chat_enabled \| bool \| lower \}\}/)
 	assert.match(publicRenderer, /_PUBLIC_SCHEMA/)
@@ -102,6 +123,7 @@ test("Afterglow frontend receives only a public runtime configuration", () => {
 	assert.match(publicRenderer, /"gitlab_url": str/)
 	assert.match(publicRenderer, /"public_url": str/)
 	assert.match(publicRenderer, /os\.chmod\(staging_path, 0o644\)/)
+	assert.match(publicRenderer, /def main\(\*path_args: str\)/)
 	assert.doesNotMatch(
 		publicRenderer,
 		/"(?:secret_key|password|redis_url|database_url)":/
@@ -407,6 +429,7 @@ test("Waygate validates every configured runtime image reference before mutation
 
 test("Afterglow hands operator TOML to containers without surrendering Kolla-owned settings", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const vars = readRepoFile("deploy/kolla/ansible/roles/afterglow/vars/main.yml")
 	const configTask = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/config.yml")
 	const bootstrap = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/bootstrap_service.yml")
 	const start = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/start.yml")
@@ -415,34 +438,61 @@ test("Afterglow hands operator TOML to containers without surrendering Kolla-own
 	const sanitizer = readRepoFile("deploy/kolla/ansible/roles/afterglow/files/sanitize_operator_config.py")
 	const readme = readRepoFile("deploy/kolla/README.md")
 
-	assert.match(defaults, /^afterglow_operator_config_source: ""$/m)
-	assert.match(defaults, /^afterglow_operator_config_name: "afterglow\.operator\.conf"$/m)
-	assert.match(defaults, /^afterglow_kolla_config_name: "afterglow\.zz-kolla\.conf"$/m)
+	assert.match(defaults, /^afterglow_config_dir: "\{\{ node_custom_config \}\}\/afterglow"$/m)
+	assert.match(defaults, /^afterglow_runtime_config_dir: "\{\{ afterglow_config_dir \}\}\/generated"$/m)
+	assert.match(defaults, /^afterglow_operator_config_source: "\{\{ afterglow_config_dir \}\}\/afterglow\.conf"$/m)
+	assert.match(defaults, /^afterglow_operator_frontend_config_source: "\{\{ afterglow_config_dir \}\}\/afterglow\.frontend\.conf"$/m)
+	assert.match(defaults, /^afterglow_operator_config_name: "afterglow\.operator\.generated\.conf"$/m)
+	assert.match(defaults, /^afterglow_kolla_config_name: "afterglow\.zz-kolla\.generated\.conf"$/m)
 	assert.match(defaults, /^afterglow_operator_config_staging_path: "\/tmp\/\{\{ afterglow_operator_config_name \}\}\.sanitized"$/m)
-	assert.equal((defaults.match(/:\/app\/\{\{ afterglow_operator_config_name \}\}:ro/g) || []).length, 3)
-	assert.equal((defaults.match(/:\/app\/\{\{ afterglow_kolla_config_name \}\}:ro/g) || []).length, 3)
+	assert.doesNotMatch(vars, /^afterglow_config_dir:/m)
+	const runtimeMountSources = [
+		...defaults.matchAll(/^\s+- "([^"]+):\/app\/[^"]+:ro"$/gm),
+	].map((match) => match[1])
+	assert.equal(runtimeMountSources.length, 10)
+	for (const source of runtimeMountSources) {
+		assert.ok(source.startsWith("{{ afterglow_runtime_config_dir }}/"))
+	}
 	assert.match(configTask, /Config \| Stage and validate sanitized operator configuration/)
 	assert.match(configTask, /sanitize_operator_config\.py/)
 	assert.match(configTask, /Config \| Clear stale sanitized operator configuration staging file/)
 	assert.match(configTask, /afterglow_operator_config_staging_path/)
 	assert.match(configTask, /Config \| Remove sanitized operator configuration staging file/)
 	assert.match(configTask, /Config \| Copy operator configuration override/)
+	assert.match(configTask, /Config \| Project frontend source onto the public allowlist/)
+	assert.match(configTask, /afterglow_operator_config_source_stat\.stat\.exists/)
+	assert.match(configTask, /afterglow_operator_frontend_config_source_stat\.stat\.exists/)
+	assert.match(configTask, /Afterglow operator source paths must not overlap generated runtime artifacts/)
 	assert.match(configTask, /- "\{\{ ansible_playbook_python \}\}"/)
 	assert.match(configTask, /src: afterglow\.kolla\.conf\.j2/)
 	assert.match(sanitizer, /tomllib\.loads\(sanitized\)/)
 	assert.match(sanitizer, /builder\.ssh_private_key must not be staged/)
 	assert.match(bootstrap, /afterglow_operator_config_name/)
 	assert.match(bootstrap, /afterglow_kolla_config_name/)
+	const bootstrapMountSources = [
+		...bootstrap.matchAll(/^\s+- "([^"]+):\/app\/[^"]+:ro"$/gm),
+	].map((match) => match[1])
+	assert.equal(bootstrapMountSources.length, 3)
+	for (const source of bootstrapMountSources) {
+		assert.ok(source.startsWith("{{ afterglow_runtime_config_dir }}/"))
+	}
 	assert.match(start, /Stat Afterglow configuration layers/)
 	assert.match(start, /afterglow_config_stats\.results \| map\(attribute='stat\.checksum'\) \| join\(':'\)/)
 	assert.equal((start.match(/config_hash:/g) || []).length, 1)
+	const startConfigPaths = [...start.matchAll(/^\s+- "([^"]+)"$/gm)].map((match) => match[1])
+	assert.equal(startConfigPaths.length, 5)
+	for (const source of startConfigPaths) {
+		assert.ok(source.startsWith("{{ afterglow_runtime_config_dir }}/"))
+	}
 	assert.match(readme, /\/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
-	assert.match(readme, /raw file is never mounted into a container/)
+	assert.match(readme, /Raw operator files are never mounted into\s+containers/)
 	assert.match(readme, /install -m 0600 -o .* \.\/afterglow\.conf \/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
 	assert.match(finalConfig, /^\[openstack\]$/m)
 	assert.match(finalConfig, /^\[union\]$/m)
 	assert.match(finalConfig, /metadata_store_share_id/)
 	assert.match(finalConfig, /^\[cors\]$/m)
 	assert.doesNotMatch(finalConfig, /^\[gitlab_oidc\]$/m)
-	assert.match(sample, /^afterglow_operator_config_source: "\/etc\/kolla\/config\/afterglow\/afterglow\.conf"$/m)
+	assert.doesNotMatch(sample, /^afterglow_operator_config_source:/m)
+	assert.match(sample, /\/etc\/kolla\/config\/afterglow\/afterglow\.conf/)
+	assert.match(sample, /\/etc\/kolla\/config\/afterglow\/afterglow\.frontend\.conf/)
 })

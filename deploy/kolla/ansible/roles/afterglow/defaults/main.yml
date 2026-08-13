@@ -29,15 +29,20 @@ enable_afterglow_palimpsest_worker: "no"
 afterglow_run_preconditions: true
 
 # ── 설정 디렉토리 ────────────────────────────────────────────────────────────
-afterglow_config_dir: "/etc/kolla/afterglow"
-# Operator TOML source lives on the Kolla deployment host. It is copied as an
-# active `afterglow.*.conf` override while `afterglow.zz-kolla.conf` reasserts
-# deployment-owned values after it.
-afterglow_operator_config_source: ""
-afterglow_operator_config_name: "afterglow.operator.conf"
-afterglow_kolla_config_name: "afterglow.zz-kolla.conf"
+# Kolla's custom service directory is the authoritative operator input tree.
+# Generated runtime layers use distinct names under a private subdirectory so
+# all-in-one deployments never overwrite operator-owned source files.
+afterglow_config_dir: "{{ node_custom_config }}/afterglow"
+afterglow_runtime_config_dir: "{{ afterglow_config_dir }}/generated"
+afterglow_operator_config_source: "{{ afterglow_config_dir }}/afterglow.conf"
+afterglow_operator_frontend_config_source: "{{ afterglow_config_dir }}/afterglow.frontend.conf"
+afterglow_generated_config_name: "afterglow.generated.conf"
+afterglow_operator_config_name: "afterglow.operator.generated.conf"
+afterglow_kolla_config_name: "afterglow.zz-kolla.generated.conf"
 afterglow_operator_config_staging_path: "/tmp/{{ afterglow_operator_config_name }}.sanitized"
-afterglow_frontend_config_name: "afterglow.frontend.conf"
+afterglow_operator_frontend_config_name: "afterglow.frontend.operator.generated.conf"
+afterglow_operator_frontend_config_staging_path: "/tmp/{{ afterglow_operator_frontend_config_name }}.projected"
+afterglow_frontend_config_name: "afterglow.frontend.generated.conf"
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
 afterglow_backend_port: 8020
@@ -154,9 +159,9 @@ afterglow_services:
     restart_policy: unless-stopped
     groups: ["0"]
     volumes:
-      - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "kolla_logs:/var/log/kolla/"
       - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
     environment:
@@ -194,7 +199,6 @@ afterglow_services:
         backend_http_extra:
           - "option httpchk GET /api/v1/health"
           - "http-check expect status 200"
-
   afterglow-frontend:
     container_name: afterglow_frontend
     group: afterglow
@@ -203,7 +207,7 @@ afterglow_services:
     network_mode: host
     restart_policy: unless-stopped
     volumes:
-      - "{{ afterglow_config_dir }}/{{ afterglow_frontend_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_frontend_config_name }}:/app/afterglow.conf:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       ORIGIN: "{{ afterglow_public_endpoint_url }}"
@@ -228,7 +232,6 @@ afterglow_services:
         backend_http_extra:
           - "option httpchk GET /"
           - "http-check expect status 200"
-
   afterglow-palimpsest-worker:
     container_name: afterglow_palimpsest_worker
     group: afterglow
@@ -239,16 +242,15 @@ afterglow_services:
     restart_policy: unless-stopped
     groups: ["0"]
     volumes:
-      - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "{{ afterglow_database_url }}"
       REDIS_URL: "{{ afterglow_redis_url }}"
       PALIMPSEST_HUB_LOCAL_PATH: "{{ afterglow_palimpsest_hub_path }}"
-
   afterglow-notion-worker:
     container_name: afterglow_notion_worker
     group: afterglow
@@ -259,9 +261,9 @@ afterglow_services:
     restart_policy: unless-stopped
     groups: ["0"]
     volumes:
-      - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
-      - "{{ afterglow_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "kolla_logs:/var/log/kolla/"
     environment:
       DATABASE_URL: "{{ afterglow_database_url }}"

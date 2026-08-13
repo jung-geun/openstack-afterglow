@@ -4,7 +4,7 @@
     "restart_policy": "unless-stopped",
     "volumes": [
         "kolla_logs:/var/log/kolla/",
-        "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro"
+        "/etc/kolla/config/afterglow/generated/afterglow.frontend.generated.conf:/app/afterglow.conf:ro"
     ],
     "environment": {
         "ORIGIN": "{{ afterglow_public_endpoint_url }}",

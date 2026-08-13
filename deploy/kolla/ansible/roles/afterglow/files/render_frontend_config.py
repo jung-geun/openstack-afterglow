@@ -134,18 +134,19 @@ def write_if_changed(destination: Path, content: str) -> bool:
     return True
 
 
-def main(
-    base_arg: str, operator_arg: str, final_arg: str, destination_arg: str
-) -> bool:
-    merged = load_merged([Path(base_arg), Path(operator_arg), Path(final_arg)])
+def main(*path_args: str) -> bool:
+    if len(path_args) < 2:
+        raise ValueError("at least one input and one destination are required")
+    *input_args, destination_arg = path_args
+    merged = load_merged([Path(input_arg) for input_arg in input_args])
     projected = project_public_config(merged)
     return write_if_changed(Path(destination_arg), render_toml(projected))
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
+    if len(sys.argv) < 3:
         raise SystemExit(
-            "usage: render_frontend_config.py BASE OPERATOR FINAL DESTINATION"
+            "usage: render_frontend_config.py INPUT [INPUT ...] DESTINATION"
         )
     changed = main(*sys.argv[1:])
     print(json.dumps({"changed": changed}))
