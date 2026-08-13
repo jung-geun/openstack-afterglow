@@ -6,5 +6,5 @@
 - [x] Add Kolla contract regression coverage for effective paths.
 - [x] Run focused Kolla tests.
 - [x] Run full tests and backend lint.
-- [ ] Reconfigure live Afterglow and verify both controller mounts and health.
-- [ ] Archive the completed change.
+- [x] Reconfigure live Afterglow and verify both controller mounts and health.
+- [x] Archive the completed change.
