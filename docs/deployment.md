@@ -57,7 +57,7 @@ Docker Compose 로컬 개발에서는 `.env`도 함께 읽습니다. `.env.examp
 ### 1-b. 설정 오버라이드 (선택)
 
 긴 옵션 섹션(GPU 디바이스 맵 등)은 별도 오버라이드 파일로 분리할 수 있습니다.  
-`afterglow.conf`와 같은 디렉토리에 `afterglow.<name>.conf`, `afterglow.<name>.toml` 또는 레거시 `config.<name>.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다.
+`afterglow.conf`와 같은 디렉토리에 `afterglow.<name>.conf` 또는 `config.gpu.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다. 브라우저 공개 projection인 `afterglow.frontend.conf`은 백엔드 오버라이드에서 제외됩니다.
 
 **머지 규칙**: `dict`는 재귀 병합, `list`와 스칼라는 오버라이드 파일이 덮어씁니다.
 

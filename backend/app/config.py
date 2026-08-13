@@ -69,7 +69,7 @@ def _config_override_paths(base_path: Path) -> list[Path]:
         for p in base_path.parent.glob(pattern):
             if p.name == base_path.name:
                 continue
-            if not p.is_file() or p.stat().st_size == 0:
+            if not p.is_file() or p.stat().st_size == 0 or p.name == "afterglow.frontend.conf":
                 continue
             overrides[p.resolve()] = p
     return [overrides[key] for key in sorted(overrides)]

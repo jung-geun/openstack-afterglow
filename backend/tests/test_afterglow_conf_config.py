@@ -227,6 +227,35 @@ ttl_fast = 3
     assert flat["cache_ttl_fast"] == 3
 
 
+def test_app_config_ignores_frontend_public_projection(isolated_config_dir):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[app]
+public_api_base = ""
+site_name = "Backend Site"
+""".strip(),
+        encoding="utf-8",
+    )
+    (isolated_config_dir / "afterglow.frontend.conf").write_text(
+        """
+[app]
+public_api_base = "http://localhost:8000"
+site_name = "Frontend Site"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    raw = app_config.load_raw_toml()
+    flat = app_config._load_toml()
+
+    assert raw["app"] == {
+        "public_api_base": "",
+        "site_name": "Backend Site",
+    }
+    assert flat["public_api_base"] == ""
+    assert flat["site_name"] == "Backend Site"
+
+
 def test_app_config_ignores_legacy_config_toml_files(isolated_config_dir):
     (isolated_config_dir / "afterglow.conf").write_text(
         """
