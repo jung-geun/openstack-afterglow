@@ -248,6 +248,155 @@ test("Kolla installer safely patches the standard playbook import", () => {
 		assert.match(readRepoFile("deploy/kolla/install.sh"), /globals\.d/)
 		assert.match(readRepoFile("deploy/kolla/install.sh"), /patch_stock_site\.py" install/)
 		assert.match(uninstall, /patch_stock_site\.py" remove/)
+		assert.match(installer, /PLUGIN_CONFIG_ROOT="\$KOLLA_CONFIG_DIR\/config\/afterglow"/)
+		assert.match(installer, /PLUGIN_GLOBALS="\$PLUGIN_CONFIG_ROOT\/globals\.yml"/)
+		assert.match(installer, /PLUGIN_SECRETS="\$PLUGIN_CONFIG_ROOT\/secrets\.yml"/)
+		assert.match(uninstall, /PLUGIN_CONFIG_ROOT="\$KOLLA_CONFIG_DIR\/config\/afterglow"/)
+		assert.match(uninstall, /PLUGIN_GLOBALS="\$PLUGIN_CONFIG_ROOT\/globals\.yml"/)
+		assert.match(uninstall, /PLUGIN_SECRETS="\$PLUGIN_CONFIG_ROOT\/secrets\.yml"/)
+		for (const script of [installer, uninstall]) {
+			assert.doesNotMatch(
+				script,
+				/PLUGIN_(?:GLOBALS|SECRETS)="[^"\n]*\/afterglow\//,
+				"plugin variable sources must derive from the standard config root"
+			)
+		}
+		assert.match(
+			installer,
+			/create_symlink_safe "\$PLUGIN_GLOBALS" "\$GLOBALS_D\/90-openstack-afterglow-globals\.yml"/
+		)
+		assert.match(
+			installer,
+			/create_symlink_safe "\$PLUGIN_SECRETS" "\$GLOBALS_D\/91-openstack-afterglow-secrets\.yml"/
+		)
+		assert.match(
+			uninstall,
+			/remove_symlink_safe "\$PLUGIN_GLOBALS" "\$GLOBALS_D\/90-openstack-afterglow-globals\.yml"/
+		)
+		assert.match(
+			uninstall,
+			/remove_symlink_safe "\$PLUGIN_SECRETS" "\$GLOBALS_D\/91-openstack-afterglow-secrets\.yml"/
+		)
+		for (const relativePath of [
+			"deploy/kolla/README.md",
+			"deploy/kolla/globals.afterglow.sample.yml",
+			"deploy/kolla/passwords.afterglow.additions.yml",
+		]) {
+			assert.doesNotMatch(
+				readRepoFile(relativePath),
+				/\/etc\/kolla\/afterglow/,
+				`${relativePath} still references the legacy /etc/kolla/afterglow path`
+			)
+		}
+	} finally {
+		fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+	}
+})
+
+test("Kolla installer loads plugin variables from the standard config root", () => {
+	const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "afterglow-kolla-install-"))
+	const kollaConfigPath = path.join(temporaryDirectory, "etc", "kolla")
+	const kollaAnsiblePath = path.join(temporaryDirectory, "share", "kolla-ansible")
+	const pluginConfigRoot = path.join(kollaConfigPath, "config", "afterglow")
+	const legacyConfigRoot = path.join(kollaConfigPath, "afterglow")
+	const pluginGlobals = path.join(pluginConfigRoot, "globals.yml")
+	const pluginSecrets = path.join(pluginConfigRoot, "secrets.yml")
+	const legacyGlobals = path.join(legacyConfigRoot, "globals.yml")
+	const legacySecrets = path.join(legacyConfigRoot, "secrets.yml")
+	const globalsLink = path.join(
+		kollaConfigPath,
+		"globals.d",
+		"90-openstack-afterglow-globals.yml"
+	)
+	const secretsLink = path.join(
+		kollaConfigPath,
+		"globals.d",
+		"91-openstack-afterglow-secrets.yml"
+	)
+	const installer = path.join(rootDir, "deploy", "kolla", "install.sh")
+	const uninstaller = path.join(rootDir, "deploy", "kolla", "uninstall.sh")
+	const kollaBinDirectory = path.join(temporaryDirectory, "bin")
+	const fakeKollaBinary = path.join(kollaBinDirectory, "kolla-ansible")
+	const fakeKollaPython = path.join(kollaBinDirectory, "python")
+	const pythonResult = spawnSync(
+		"uv",
+		[
+			"run",
+			"--project",
+			path.join(rootDir, "backend"),
+			"python",
+			"-c",
+			"import sys; print(sys.executable)",
+		],
+		{ encoding: "utf8" }
+	)
+	assert.equal(pythonResult.status, 0, pythonResult.stderr)
+	const commandEnvironment = {
+		...process.env,
+		AFTERGLOW_REPO_DIR: rootDir,
+		KOLLA_ANSIBLE_BIN: fakeKollaBinary,
+		KOLLA_TEST_PYTHON: pythonResult.stdout.trim(),
+		KOLLA_ANSIBLE_DIR: kollaAnsiblePath,
+		KOLLA_CONFIG_PATH: kollaConfigPath,
+	}
+
+	try {
+		fs.mkdirSync(path.join(kollaAnsiblePath, "ansible", "roles"), { recursive: true })
+		fs.mkdirSync(pluginConfigRoot, { recursive: true })
+		fs.mkdirSync(legacyConfigRoot, { recursive: true })
+		fs.mkdirSync(kollaBinDirectory, { recursive: true })
+		fs.writeFileSync(fakeKollaBinary, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 })
+		fs.writeFileSync(
+			fakeKollaPython,
+			'#!/usr/bin/env bash\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
+			{ mode: 0o755 }
+		)
+		fs.writeFileSync(
+			path.join(kollaAnsiblePath, "ansible", "site.yml"),
+			"---\n- import_playbook: gather-facts.yml\n"
+		)
+		fs.writeFileSync(path.join(kollaConfigPath, "multinode"), "[control]\ncontroller\n")
+		fs.writeFileSync(path.join(kollaConfigPath, "globals.yml"), "kolla_base: true\n")
+		fs.writeFileSync(pluginGlobals, "enable_afterglow: true\n", { mode: 0o640 })
+		fs.writeFileSync(pluginSecrets, "afterglow_secret_key: test\n", { mode: 0o600 })
+		fs.writeFileSync(legacyGlobals, "legacy: [\n", { mode: 0o640 })
+		fs.writeFileSync(legacySecrets, "legacy: {\n", { mode: 0o600 })
+
+		for (const command of [installer, installer]) {
+			const result = spawnSync("bash", [command], {
+				encoding: "utf8",
+				env: commandEnvironment,
+			})
+			assert.equal(result.status, 0, result.stderr)
+		}
+
+		assert.equal(fs.readlinkSync(globalsLink), pluginGlobals)
+		assert.equal(fs.readlinkSync(secretsLink), pluginSecrets)
+		assert.equal(fs.realpathSync(globalsLink), fs.realpathSync(pluginGlobals))
+		assert.equal(fs.realpathSync(secretsLink), fs.realpathSync(pluginSecrets))
+		assert.equal(fs.statSync(pluginGlobals).mode & 0o777, 0o640)
+		assert.equal(fs.statSync(pluginSecrets).mode & 0o777, 0o600)
+
+		const uninstallResult = spawnSync("bash", [uninstaller], {
+			encoding: "utf8",
+			env: commandEnvironment,
+		})
+		assert.equal(uninstallResult.status, 0, uninstallResult.stderr)
+		assert.throws(() => fs.lstatSync(globalsLink), { code: "ENOENT" })
+		assert.throws(() => fs.lstatSync(secretsLink), { code: "ENOENT" })
+		assert.equal(fs.existsSync(pluginGlobals), true)
+		assert.equal(fs.existsSync(pluginSecrets), true)
+		assert.equal(fs.statSync(pluginGlobals).mode & 0o777, 0o640)
+		assert.equal(fs.statSync(pluginSecrets).mode & 0o777, 0o600)
+
+		fs.symlinkSync(legacyGlobals, globalsLink)
+		const conflictResult = spawnSync("bash", [installer], {
+			encoding: "utf8",
+			env: commandEnvironment,
+		})
+		assert.notEqual(conflictResult.status, 0)
+		assert.equal(fs.readlinkSync(globalsLink), legacyGlobals)
+		assert.throws(() => fs.lstatSync(secretsLink), { code: "ENOENT" })
 	} finally {
 		fs.rmSync(temporaryDirectory, { recursive: true, force: true })
 	}

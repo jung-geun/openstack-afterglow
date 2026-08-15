@@ -133,8 +133,9 @@ create_symlink_safe() {
 KOLLA_CONFIG_DIR="${KOLLA_CONFIG_PATH:-/etc/kolla}"
 MULTINODE_INVENTORY="$KOLLA_CONFIG_DIR/multinode"
 DEFAULT_INVENTORY="$KOLLA_CONFIG_DIR/ansible/inventory/all-in-one"
-PLUGIN_GLOBALS="$KOLLA_CONFIG_DIR/afterglow/globals.yml"
-PLUGIN_SECRETS="$KOLLA_CONFIG_DIR/afterglow/secrets.yml"
+PLUGIN_CONFIG_ROOT="$KOLLA_CONFIG_DIR/config/afterglow"
+PLUGIN_GLOBALS="$PLUGIN_CONFIG_ROOT/globals.yml"
+PLUGIN_SECRETS="$PLUGIN_CONFIG_ROOT/secrets.yml"
 GLOBALS_D="$KOLLA_CONFIG_DIR/globals.d"
 STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
 

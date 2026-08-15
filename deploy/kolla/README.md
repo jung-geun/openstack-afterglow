@@ -14,8 +14,8 @@ the ordinary Kolla command line from `/etc/kolla`.
      and also links `group_vars` and `host_vars`, preserving normal Kolla
      inventory variable discovery.
 2. **Plugin-owned Variables**:
-   - Settings and secrets remain in `/etc/kolla/afterglow/globals.yml` and
-     `/etc/kolla/afterglow/secrets.yml`.
+   - Settings and secrets remain in `/etc/kolla/config/afterglow/globals.yml`
+     (mode `0640`) and `/etc/kolla/config/afterglow/secrets.yml` (mode `0600`).
    - The installer links both files into Kolla's native `globals.d` loader;
      no `-e @...` arguments are required. It does not copy secret values.
    - Both files must be readable by the user that runs `kolla-ansible`; run
@@ -82,19 +82,37 @@ unexpected, `install.sh` aborts rather than replacing it.
 
 ## Configuration Setup
 
-1. **Create Additive Directory**:
+1. **Create Plugin Configuration Root**:
    ```bash
-   sudo mkdir -p /etc/kolla/afterglow
+   sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" \
+     /etc/kolla/config/afterglow
    ```
-2. **Create Globals (`/etc/kolla/afterglow/globals.yml`)**:
-   Copy and customize `deploy/kolla/globals.afterglow.sample.yml`.
-3. **Create Secrets (`/etc/kolla/afterglow/secrets.yml`)**:
-   Copy `deploy/kolla/passwords.afterglow.additions.yml`, set permissions to `0600`, and populate generated 64-hex keys and database/Keystone passwords.
+2. **Create Globals (`/etc/kolla/config/afterglow/globals.yml`, mode `0640`)**:
+   ```bash
+   sudo install -m 0640 -o "$(id -un)" -g "$(id -gn)" \
+     deploy/kolla/globals.afterglow.sample.yml \
+     /etc/kolla/config/afterglow/globals.yml
+   ```
+   Customize the installed file for the deployment.
+3. **Create Secrets (`/etc/kolla/config/afterglow/secrets.yml`, mode `0600`)**:
+   ```bash
+   sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" \
+     deploy/kolla/passwords.afterglow.additions.yml \
+     /etc/kolla/config/afterglow/secrets.yml
+   ```
+   Populate generated 64-hex keys and database/Keystone passwords without
+   printing or committing them.
 
 These two files are sufficient for a normal deployment. The role derives the
 service topology and required runtime values from Kolla plus the plugin
 globals/secrets, then generates and mounts the configuration needed by each
 Afterglow process. A separate operator TOML is optional.
+On the Kolla deployment host, `/etc/kolla/config/afterglow` is the single
+plugin input root: `globals.yml` and `secrets.yml` sit at its top level, while
+`backend/` and `frontend/` hold the optional operator TOML inputs described
+below. On each Afterglow target host, the role separately renders runtime
+layers under `/etc/kolla/config/afterglow/generated/`; do not copy the
+deployment-host variable files to target hosts.
 
 
 ### Optional Detailed Afterglow Configuration
@@ -170,9 +188,9 @@ and keeps the password in Kolla's existing password file.
 Runtime OpenStack settings use Kolla's `keystone_internal_url`, project/user
 domain, region, and internal interface variables. Kolla's `openstack_auth`
 provisions service projects/users; the matching runtime service-user passwords
-remain in `/etc/kolla/afterglow/secrets.yml`. This follows the internal
+remain in `/etc/kolla/config/afterglow/secrets.yml`. This follows the internal
 Keystone configuration pattern used by Nova and Glance.
-Secrets remain in `/etc/kolla/afterglow/secrets.yml`; do not put them in
+Secrets remain in `/etc/kolla/config/afterglow/secrets.yml`; do not put them in
 `globals.yml` or commit the operator file.
 
 `[builder].ssh_private_key` in legacy configuration files is not a supported
@@ -229,7 +247,7 @@ certificate must cover each enabled hostname.
   container on the first Lumen controller and verifies an authenticated
   `SELECT 1`. Kolla 2025.2 has no stock PostgreSQL role.
 - `external`: set `lumen_external_postgres_url` in
-  `/etc/kolla/afterglow/secrets.yml` to one `postgresql://` (or `postgres://`)
+  `/etc/kolla/config/afterglow/secrets.yml` to one `postgresql://` (or `postgres://`)
   URL. The role creates no PostgreSQL resource, validates the URL, writes a
   temporary mode-0600 libpq service file, runs an authenticated `SELECT 1`,
   then deletes that file. The URL never appears in the `psql` command line.
@@ -257,7 +275,7 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 The installer fails rather than replacing conflicting links or unexpected
 `site.yml` marker content. If it finds a legacy second YAML document in
 `/etc/kolla/globals.yml`, it removes it only when its parsed mapping exactly
-matches `/etc/kolla/afterglow/globals.yml`, preserving a backup beside the
+matches `/etc/kolla/config/afterglow/globals.yml`, preserving a backup beside the
 stock file.
 
 ### Deploy Services

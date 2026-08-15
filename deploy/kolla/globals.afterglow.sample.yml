@@ -1,7 +1,7 @@
 ---
 # Additive Plugin Override Sample for DMSLab Kolla-Ansible Deployment
-# Place as `/etc/kolla/afterglow/globals.yml`. After the plugin installer has
-# added the standard Kolla wiring, run from `/etc/kolla`:
+# Place as `/etc/kolla/config/afterglow/globals.yml` (mode 0640). After the
+# plugin installer has added the standard Kolla wiring, run from `/etc/kolla`:
 #   kolla-ansible deploy --tags afterglow,waygate,drover,lumen
 # The plugin globals and secrets load from globals.d; do not add `-i`, `-p`,
 # or `-e @...` arguments for normal operations.
@@ -147,7 +147,7 @@ lumen_postgres_bind_address: "172.30.0.11"
 lumen_postgres_port: 5432
 
 # External mode receives one secret `postgresql://` (or `postgres://`) URL from
-# `/etc/kolla/afterglow/secrets.yml`. It is never placed in globals.yml and
+# `/etc/kolla/config/afterglow/secrets.yml`. It is never placed in globals.yml and
 # must not point to Kolla MariaDB.
 
 lumen_enable_checkpointer: true
