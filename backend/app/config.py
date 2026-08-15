@@ -14,6 +14,7 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_EMPTY_ENV_TOML_FALLBACK_KEYS = frozenset({"GITLAB_OIDC_CLIENT_SECRET"})
 
 
 def is_development_loopback_http_url(value: str) -> bool:
@@ -848,11 +849,14 @@ def get_settings() -> Settings:
         if val.startswith("tcp://") or val.startswith("udp://"):
             del os.environ[key]
 
-    # TOML 값으로 환경변수를 채워 Settings가 이를 읽도록 함
-    # (환경변수 > .env 이므로, TOML 값을 환경변수로 주입하되 이미 설정된 값은 덮어쓰지 않음)
+    # TOML values seed missing environment settings. Secret mounts commonly
+    # materialize optional values as an empty string; that must not erase a
+    # configured GitLab client secret from a protected TOML layer.
     toml_data = _load_toml()
     for key, value in toml_data.items():
         env_key = key.upper()
-        if env_key not in os.environ:
+        if env_key not in os.environ or (
+            env_key in _EMPTY_ENV_TOML_FALLBACK_KEYS and os.environ[env_key] == "" and value != ""
+        ):
             os.environ[env_key] = str(value)
     return Settings()

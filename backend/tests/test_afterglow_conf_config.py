@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -185,6 +186,40 @@ oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"
 
     assert settings.mcp_public_url == "https://mcp.example.test/control-plane/mcp"
     assert settings.mcp_oauth_consent_url == "https://app.example.test/oauth/mcp/authorize"
+
+
+def test_empty_gitlab_oidc_secret_env_does_not_mask_toml(isolated_config_dir, monkeypatch):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[app]
+secret_key = "0123456789abcdef0123456789abcdef"
+
+[gitlab_oidc]
+enabled = true
+client_id = "configured-client"
+client_secret = "configured-secret"
+""".strip(),
+        encoding="utf-8",
+    )
+    for key in (
+        "GITLAB_OIDC_ENABLED",
+        "GITLAB_OIDC_GITLAB_URL",
+        "GITLAB_OIDC_CLIENT_ID",
+        "GITLAB_OIDC_CLIENT_SECRET",
+        "GITLAB_OIDC_IDP_ID",
+        "GITLAB_OIDC_PROTOCOL_ID",
+        "GITLAB_OIDC_REDIRECT_URI",
+        "GITLAB_OIDC_SCOPES",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GITLAB_OIDC_CLIENT_SECRET", "")
+
+    settings = app_config.get_settings()
+
+    assert settings.gitlab_oidc_enabled is True
+    assert settings.gitlab_oidc_client_id == "configured-client"
+    assert settings.gitlab_oidc_client_secret == "configured-secret"
+    assert os.environ["GITLAB_OIDC_CLIENT_SECRET"] == "configured-secret"
 
 
 def test_app_config_applies_matching_afterglow_conf_overrides(isolated_config_dir):

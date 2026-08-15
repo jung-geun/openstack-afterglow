@@ -7,7 +7,7 @@ Afterglow's Kolla role still discovers operator inputs at flat paths under `/etc
 - Default the backend operator source to `/etc/kolla/config/afterglow/backend/afterglow.conf`.
 - Default the frontend public source to `/etc/kolla/config/afterglow/frontend/afterglow.conf`.
 - Keep generated runtime artifacts isolated under `/etc/kolla/config/afterglow/generated`.
-- Stop injecting an empty `GITLAB_OIDC_CLIENT_SECRET` environment variable into backend containers; the generated/sanitized TOML layers remain the sole Kolla handoff for this secret.
+- Stop injecting an empty `GITLAB_OIDC_CLIENT_SECRET` environment variable into backend containers, and treat any stale empty value as absent when protected backend TOML provides a non-empty secret.
 - Preserve Kolla-owned final settings and the frontend closed public projection.
 - Add regression coverage for the split source layout and OIDC secret precedence.
 
