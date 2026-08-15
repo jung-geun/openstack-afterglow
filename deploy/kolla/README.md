@@ -100,19 +100,21 @@ Afterglow process. A separate operator TOML is optional.
 ### Optional Detailed Afterglow Configuration
 
 For settings not modeled as Kolla variables, place a partial or complete
-operator TOML at `/etc/kolla/config/afterglow/afterglow.conf` on the Kolla
-deployment host. The role uses this path by default. The file may contain only
-the detailed keys being overridden; it does not need to repeat generated
+backend TOML at `/etc/kolla/config/afterglow/backend/afterglow.conf` on the
+Kolla deployment host. The role uses this path by default. The file may contain
+only the detailed keys being overridden; it does not need to repeat generated
 OpenStack, database, Redis, port, URL, or service-toggle values. Keep it outside
 the repository and Kolla globals files, mode `0600`:
 
 ```bash
 # The Kolla deployment user must be able to read this 0600 source file.
-sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" /etc/kolla/config/afterglow
-sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf /etc/kolla/config/afterglow/afterglow.conf
+sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" \
+  /etc/kolla/config/afterglow/backend /etc/kolla/config/afterglow/frontend
+sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf \
+  /etc/kolla/config/afterglow/backend/afterglow.conf
 ```
 
-An optional `/etc/kolla/config/afterglow/afterglow.frontend.conf` supplies
+An optional `/etc/kolla/config/afterglow/frontend/afterglow.conf` supplies
 additional browser-safe values. Both default source files are discovered by
 existence; no globals override is required. Override
 `afterglow_operator_config_source` or
@@ -121,9 +123,10 @@ Missing inputs produce empty generated layers.
 
 The role reads the backend source only to produce a protected short-lived
 staging artifact. It removes `[builder].ssh_private_key` before TOML validation.
-The frontend source is projected through the same closed browser-safe allowlist
-as the final frontend configuration. Raw operator files are never mounted into
-containers.
+The GitLab OIDC client secret remains in this protected TOML flow and is not
+shadowed by an empty container environment variable. The frontend source is
+projected through the same closed browser-safe allowlist as the final frontend
+configuration. Raw operator files are never mounted into containers.
 
 Set `afterglow_ceph_monitors` in `globals.yml` from the `mon_host` value in
 the deployed `/etc/kolla/config/ceph/ceph.conf`; this value is required by the

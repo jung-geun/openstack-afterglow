@@ -64,8 +64,8 @@ afterglow_openstack_interface: "internal"
 afterglow_ceph_monitors: "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
 
 # Optional deploy-host TOML files default to
-# /etc/kolla/config/afterglow/afterglow.conf and
-# /etc/kolla/config/afterglow/afterglow.frontend.conf. Keep the backend source
+# /etc/kolla/config/afterglow/backend/afterglow.conf and
+# /etc/kolla/config/afterglow/frontend/afterglow.conf. Keep the backend source
 # mode 0600. Override afterglow_operator_config_source or
 # afterglow_operator_frontend_config_source only when the source lives
 # elsewhere. Kolla sanitizes backend input, projects frontend input through a

@@ -30,12 +30,13 @@ afterglow_run_preconditions: true
 
 # ── 설정 디렉토리 ────────────────────────────────────────────────────────────
 # Kolla's custom service directory is the authoritative operator input tree.
-# Generated runtime layers use distinct names under a private subdirectory so
-# all-in-one deployments never overwrite operator-owned source files.
+# Backend and frontend inputs stay separate; generated runtime layers use
+# distinct names under a private subdirectory so all-in-one deployments never
+# overwrite operator-owned source files.
 afterglow_config_dir: "{{ node_custom_config }}/afterglow"
 afterglow_runtime_config_dir: "{{ afterglow_config_dir }}/generated"
-afterglow_operator_config_source: "{{ afterglow_config_dir }}/afterglow.conf"
-afterglow_operator_frontend_config_source: "{{ afterglow_config_dir }}/afterglow.frontend.conf"
+afterglow_operator_config_source: "{{ afterglow_config_dir }}/backend/afterglow.conf"
+afterglow_operator_frontend_config_source: "{{ afterglow_config_dir }}/frontend/afterglow.conf"
 afterglow_generated_config_name: "afterglow.generated.conf"
 afterglow_operator_config_name: "afterglow.operator.generated.conf"
 afterglow_kolla_config_name: "afterglow.zz-kolla.generated.conf"
@@ -172,7 +173,6 @@ afterglow_services:
       SECRET_KEY: "{{ afterglow_secret_key }}"
       PUBLIC_API_BASE: "{{ afterglow_public_api_base }}"
       ORIGIN: "{{ afterglow_public_endpoint_url }}"
-      GITLAB_OIDC_CLIENT_SECRET: "{{ afterglow_oidc_client_secret | default('') }}"
       K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
       LUMEN_MCP_SERVICE_TOKEN: "{{ afterglow_lumen_mcp_service_token }}"
       OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
