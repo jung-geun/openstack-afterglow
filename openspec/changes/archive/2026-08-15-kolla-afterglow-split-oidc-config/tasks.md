@@ -6,5 +6,5 @@
 - [x] Add contract tests for split source paths and TOML-owned OIDC secret precedence.
 - [x] Run focused Kolla and configuration tests.
 - [x] Run full tests and backend lint.
-- [ ] Reconfigure live Afterglow and verify effective OIDC settings without exposing secrets.
-- [ ] Archive the completed change.
+- [x] Reconfigure live Afterglow and verify effective OIDC settings without exposing secrets.
+- [x] Archive the completed change.
