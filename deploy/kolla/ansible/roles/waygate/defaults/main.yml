@@ -7,7 +7,7 @@ waygate_worker_image: "{{ afterglow_image_namespace | default('ghcr.io/openstack
 
 waygate_source_mode: "{{ enable_waygate_source_build | default(enable_source_build | default(waygate_dev_mode | default(false))) | bool }}"
 waygate_source_repo: "https://github.com/openstack-afterglow/waygate.git"
-waygate_source_version: "e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3"
+waygate_source_version: "1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03"
 waygate_source_dir: "{{ waygate_source_checkout_path | default('/opt/afterglow/src/waygate') }}"
 waygate_api_image_ref: "{{ 'afterglow-local/waygate-api:' ~ (waygate_source_version | truncate(12, True, '')) if (waygate_source_mode | bool) else (waygate_api_image ~ ':' ~ waygate_image_tag) }}"
 waygate_worker_image_ref: "{{ 'afterglow-local/waygate-worker:' ~ (waygate_source_version | truncate(12, True, '')) if (waygate_source_mode | bool) else (waygate_worker_image ~ ':' ~ waygate_image_tag) }}"
@@ -75,7 +75,7 @@ waygate_services:
       OS_PASSWORD: "{{ waygate_keystone_password }}"
       WAYGATE_ENCRYPTION_KEY: "{{ waygate_encryption_key }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://{{ waygate_api_listen_address }}:{{ waygate_api_listen_port }}/v1/health"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; response = urlopen('http://{{ waygate_api_listen_address }}:{{ waygate_api_listen_port }}/v1/health', timeout=5); assert response.status == 200"]
       interval: 30s
       timeout: 10s
       retries: 3

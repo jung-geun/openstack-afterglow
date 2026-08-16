@@ -249,11 +249,10 @@ const targets = {
 		}
 	},
 	k3s: {
-		description: "Drover API, worker, migration, security, plugin, and nodegroup tests",
+		description: "Drover BFF proxy, cluster management, and nodegroup UI integration tests",
 		liveServices: "none",
 		backend: {
-			root: "services/drover",
-			selectors: ["tests"]
+			selectors: ["tests/test_drover_proxy.py", "tests/test_k3s_shell_proxy.py"]
 		},
 		frontend: {
 			selectors: [
@@ -275,11 +274,37 @@ const targets = {
 		}
 	},
 	waygate: {
-		description: "Extracted Waygate API, worker, migrations, and security contracts",
+		description: "Waygate BFF proxy, agent proxy, and VPN UI integration tests",
 		liveServices: "none",
 		backend: {
-			root: "services/waygate",
-			selectors: ["tests"]
+			selectors: ["tests/test_waygate_proxy.py", "tests/test_waygate_agent.py"]
+		}
+	},
+	lumen: {
+		description: "Lumen BFF proxy, SSE streaming, and chat stream integration tests",
+		liveServices: "none",
+		backend: {
+			selectors: ["tests/test_lumen_proxy.py"]
+		},
+		frontend: {
+			selectors: [
+				"src/lib/api/__tests__/chatStream.test.ts",
+				"src/lib/api/__tests__/chatContracts.test.ts",
+				"src/lib/api/__tests__/chatRunReducer.test.ts"
+			]
+		}
+	},
+	palimpsest: {
+		description: "Palimpsest BFF proxy, layer management, and digest tests",
+		liveServices: "none",
+		backend: {
+			selectors: [
+				"tests/test_palimpsest_hub_proxy.py",
+				"tests/test_palimpsest_api.py",
+				"tests/test_palimpsest_kvm.py",
+				"tests/test_palimpsest_dockerfile.py",
+				"tests/test_palimpsest_digest.py"
+			]
 		}
 	},
 	design: {

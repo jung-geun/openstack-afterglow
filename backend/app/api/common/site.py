@@ -30,6 +30,7 @@ class SiteServicesResponse(BaseModel):
     waygate: bool
     chat: bool
     mcp: bool
+    palimpsest: bool
 
 
 class PublicSiteConfigResponse(BaseModel):

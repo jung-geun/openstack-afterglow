@@ -1,23 +1,29 @@
-# Standalone service repositories and DMSlab deployment
+# Standalone service API contracts and DMSLab deployment
 
 ## Goal
-Move Drover, Waygate, and Palimpsest service delivery out of the Afterglow monorepo. Each service must be developed in its own repository and workspace, test and publish its own OCI images, and be deployed into DMSlab by explicit image reference without changing unrelated OpenStack services.
+Make Drover, Lumen, Waygate, and Palimpsest independently owned services with runtime-authoritative API contracts. Afterglow remains the dashboard/BFF: it discovers project-scoped service endpoints, forwards caller authority, and contains no duplicate service implementation or image build stage.
 
 ## Scope
-- Treat `openstack-afterglow/drover` and `openstack-afterglow/waygate` as the source of truth: verify their promotion parity, give each an independent `dev` CI/CD pipeline, and publish API/worker images from that repository only.
-- Stop the Afterglow GitHub workflow from selecting, building, or publishing Drover and Waygate images. Afterglow continues to publish only its API, frontend, and worker.
-- Extract the server-side Palimpsest Hub API/worker into `openstack-afterglow/palimpsest`, where the existing local CLI already lives, with a versioned client boundary for Afterglow.
-- Replace Afterglow implementation dependencies with immutable SDK/client revisions. Remove duplicate service source and image stages only after every caller has cut over.
-- Configure Kolla roles with explicit standalone image references and deploy only the custom roles once the images and service contracts are verified.
+- Treat `openstack-afterglow/drover`, `openstack-afterglow/lumen`, `openstack-afterglow/waygate`, and `openstack-afterglow/palimpsest` as the only service source repositories.
+- Make each FastAPI `/openapi.json` describe its real authentication, discovery, health, request, response, and asynchronous-operation contract; focused tests prevent runtime schema drift.
+- Keep service-native HTTP under `/v1`, use project-scoped Keystone tokens for user/API calls, and keep machine-only callback credentials scoped to their owning service.
+- Make each shipped SDK/client use only service-native routes and payloads. Afterglow preserves browser compatibility paths under `/api/v1` at its BFF boundary.
+- Finish the dedicated Palimpsest Hub API/worker and direct client boundary already present in the Palimpsest repository, including safe resumable uploads.
+- Migrate Afterglow Hub callers to the catalog-discovered Palimpsest service and remove embedded Hub API, worker, persistence ownership, service source copies, and service image stages after caller cutover.
+- Stop the Afterglow CI/test workflow from validating dead in-repository service copies. Each standalone repository owns its service and SDK tests; Afterglow tests only BFF/client integration.
+- Configure Kolla roles with immutable standalone image references and deploy only the custom service roles without changing unrelated OpenStack services.
 
 ## Constraints
-- Work only from `dev`; publish only committed, verified source.
+- Work only from each repository's `dev` branch; publish only committed, verified source.
 - Preserve the existing Kolla inventory, services, passwords, and databases. No `destroy`, global `reconfigure`, or unscoped Kolla deployment.
 - Do not expose or commit secrets.
-- Public Drover/Waygate endpoints must keep the existing `drover.dmslab.re.kr` and `waygate.dmslab.re.kr` catalog contract.
-- Palimpsest authorization, immutable blob digest storage, and project isolation must be preserved across the service boundary; no direct database-model import from Afterglow may remain.
+- Browser compatibility paths remain stable at Afterglow; native service specifications must not advertise Afterglow-owned paths.
+- Palimpsest authorization, immutable blob digests, project isolation, and upload offset integrity remain fail-closed across the boundary.
+- Public Drover and Waygate catalog records remain unchanged unless a separately verified ingress change is required.
 
 ## Risks
-- A GitHub token can publish a package owned by its service repository but cannot publish it from the Afterglow repository; the root workflow already proved this restriction.
-- The existing Palimpsest repository is a local KVM CLI, while the Hub API/worker currently share Afterglow models, database, and OpenStack services. Its extraction requires an explicit authenticated client and migration plan, not an image rename.
-- The existing DMSlab catalog endpoints do not prove public DNS/proxy reachability; deployment remains blocked until standalone images and endpoint routing both work.
+- The existing service SDKs are handwritten, so route/payload tests must bind them to the runtime OpenAPI rather than relying on duplicated documentation.
+- Lumen has separate Keystone-user and API-key surfaces plus durable SSE URLs; confusing native and BFF paths breaks resumable chat runs.
+- Palimpsest Hub exists as a separate API/worker but its former HMAC-only auth, old Afterglow client prefix, and missing upload-offset endpoint make the current client/service pair unusable.
+- Removing monorepo service trees before their repository tests and immutable dependency pins pass would make the required repository gate falsely green.
+- The existing DMSLab catalog endpoints do not prove public DNS/proxy reachability; deployment remains scoped and fail-closed until standalone images, catalog discovery, and endpoint routing all pass.

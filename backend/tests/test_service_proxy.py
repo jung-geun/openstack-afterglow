@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.services.service_proxy import (
@@ -118,6 +119,7 @@ async def test_proxy_forwarding():
             "Cookie": "session_id=abc123",
             "Idempotency-Key": "ik-888",
             "Last-Event-ID": "evt-999",
+            "X-Project-Id": "attacker-project",
         },
         body=b'{"name": "gateway-1"}',
         token_info={"token": "ks-token-secret", "project_id": "proj-uuid-1"},
@@ -143,15 +145,33 @@ async def test_proxy_forwarding():
             assert str(sent_req.url) == "http://waygate.internal:8010/v1/servers?filter=active&sort=asc"
             assert sent_req.headers.get("x-auth-token") == "ks-token-secret"
             assert sent_req.headers.get("x-project-id") == "proj-uuid-1"
-            assert sent_req.headers.get("cookie") == "session_id=abc123"
+            assert sent_req.headers.get("cookie") is None
             assert sent_req.headers.get("idempotency-key") == "ik-888"
             assert sent_req.headers.get("last-event-id") == "evt-999"
+
+
+@pytest.mark.asyncio
+async def test_proxy_rejects_unvalidated_auth_headers():
+    req = _make_request(
+        headers={
+            "X-Auth-Token": "unvalidated-token",
+            "X-Project-Id": "unvalidated-project",
+        },
+    )
+
+    with patch("app.services.service_proxy._get_internal_endpoint") as mock_endpoint:
+        with pytest.raises(HTTPException) as exc_info:
+            await proxy("waygate", req, "/v1/servers")
+
+    assert exc_info.value.status_code == 401
+    mock_endpoint.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_json_uses_caller_catalog_and_keystone_headers():
     req = _make_request(
         path="/api/v1/admin/resource-policies",
+        headers={"X-Project-Id": "attacker-project"},
         token_info={"token": "ks-token-secret", "project_id": "proj-uuid-1"},
     )
     upstream_response = httpx.Response(200, json=[{"key": "waygate.image"}])
@@ -164,8 +184,8 @@ async def test_get_json_uses_caller_catalog_and_keystone_headers():
     url = mock_get.await_args.args[0]
     headers = mock_get.await_args.kwargs["headers"]
     assert url == "http://waygate.internal:8010/v1/admin/resource-policies"
-    assert headers["X-Auth-Token"] == "ks-token-secret"
-    assert headers["X-Project-Id"] == "proj-uuid-1"
+    assert headers["x-auth-token"] == "ks-token-secret"
+    assert headers["x-project-id"] == "proj-uuid-1"
 
 
 @pytest.mark.asyncio
@@ -176,6 +196,8 @@ async def test_machine_proxy_forwards_authorization_without_keystone_interpretat
         headers={
             "Authorization": "Bearer durable-agent-token",
             "Content-Type": "application/json",
+            "Cookie": "session_id=secret",
+            "X-Project-Id": "attacker-project",
         },
         body=b'{"peers": []}',
     )
@@ -197,6 +219,8 @@ async def test_machine_proxy_forwards_authorization_without_keystone_interpretat
     assert sent_request.headers["authorization"] == "Bearer durable-agent-token"
     assert sent_request.headers.get("x-auth-token") is None
     assert sent_request.headers["x-forwarded-for"] == "203.0.113.10"
+    assert sent_request.headers.get("cookie") is None
+    assert sent_request.headers.get("x-project-id") is None
 
 
 @pytest.mark.asyncio
@@ -231,6 +255,7 @@ async def test_proxy_upstream_error_verbatim():
         method="DELETE",
         path="/api/v1/drover/clusters/c1",
         token_info={"token": "ks-token-secret", "project_id": "proj-uuid-1"},
+        body=b'{"force": true}',
     )
 
     upstream_response = httpx.Response(
@@ -240,43 +265,16 @@ async def test_proxy_upstream_error_verbatim():
     )
 
     with patch("app.services.service_proxy._get_internal_endpoint", return_value="http://drover.internal:8011"):
-        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response):
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
             resp = await proxy("drover", req, "/v1/clusters/c1")
             assert resp.status_code == 404
 
             body_chunks = [chunk async for chunk in resp.body_iterator]
             body_bytes = b"".join(body_chunks)
             assert json.loads(body_bytes) == {"detail": "Cluster not found"}
-
-
-@pytest.mark.asyncio
-async def test_proxy_cookie_propagation():
-    req = _make_request(
-        method="GET",
-        path="/api/v1/chat/mcp-oauth/callback",
-        headers={"Cookie": "oauth_state=state123"},
-        token_info={"token": "ks-token-secret", "project_id": "proj-uuid-1"},
-    )
-
-    upstream_response = httpx.Response(
-        302,
-        headers=[
-            ("Location", "/chat"),
-            ("Set-Cookie", "session=s1; Path=/"),
-            ("Set-Cookie", "token=t1; Path=/"),
-        ],
-    )
-
-    with patch("app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal:8012"):
-        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
-            resp = await proxy("lumen", req, "/v1/mcp-oauth/callback")
-            assert resp.status_code == 302
-
-            sent_req = mock_send.call_args[0][0]
-            assert sent_req.headers.get("cookie") == "oauth_state=state123"
-
-            set_cookies = [v.decode("latin-1") for k, v in resp.raw_headers if k == b"set-cookie"]
-            assert set_cookies == ["session=s1; Path=/", "token=t1; Path=/"]
+    sent_request = mock_send.call_args.args[0]
+    sent_body = b"".join([chunk async for chunk in sent_request.stream])
+    assert sent_body == b'{"force": true}'
 
 
 @pytest.mark.asyncio

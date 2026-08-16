@@ -109,11 +109,12 @@ python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" remove "$STOCK_SITE" ||
 # Remove aggregate playbook link after its stock import is gone.
 remove_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
 
-# Remove the four plugin role links.
+# Remove the five plugin role links.
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
+remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
 remove_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
 remove_symlink_safe "$KOLLA_CONFIG_DIR/group_vars" "$KOLLA_CONFIG_DIR/ansible/inventory/group_vars" "Kolla default group_vars"

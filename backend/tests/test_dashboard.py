@@ -347,7 +347,7 @@ async def test_dashboard_k3s_stats_uses_caller_catalog_sdk(client):
     assert response.status_code == 200
     assert response.json() == {"total": 3, "active": 2, "available": True}
     register.assert_called_once()
-    drover.cluster_stats.assert_called_once_with(project_id="test-project-123")
+    drover.cluster_stats.assert_called_once_with()
 
 
 @pytest.mark.asyncio

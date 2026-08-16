@@ -1,1 +1,0 @@
-"""Drover data models package."""

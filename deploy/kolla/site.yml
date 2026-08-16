@@ -42,6 +42,13 @@
   roles:
     - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }
 
+- name: Apply role palimpsest
+  gather_facts: false
+  hosts: palimpsest
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: palimpsest, tags: palimpsest, when: enable_palimpsest | default(false) | bool }
+
 - name: Configure plugin HAProxy routes
   gather_facts: false
   hosts: loadbalancer
@@ -55,8 +62,8 @@
         name: loadbalancer
         tasks_from: config
         apply:
-          tags: [afterglow, waygate, drover, lumen, haproxy]
-      tags: [afterglow, waygate, drover, lumen, haproxy]
+          tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
       when:
         - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
         - enable_haproxy | default(true) | bool
@@ -109,13 +116,25 @@
         - enable_haproxy | default(true) | bool
         - enable_lumen | default(false) | bool
 
+    - name: Render Palimpsest HAProxy routes
+      ansible.builtin.include_role:
+        name: palimpsest
+        tasks_from: loadbalancer
+        apply:
+          tags: [palimpsest, haproxy]
+      tags: [palimpsest, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_palimpsest | default(false) | bool
+
     - name: Reconcile Kolla HAProxy after plugin route changes
       ansible.builtin.include_role:
         name: loadbalancer
         tasks_from: check-containers
         apply:
-          tags: [afterglow, waygate, drover, lumen, haproxy]
-      tags: [afterglow, waygate, drover, lumen, haproxy]
+          tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
       when:
         - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade']
         - enable_haproxy | default(true) | bool

@@ -564,14 +564,9 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         lines.append("")
 
 
-    # [palimpsest] (선택) — 허브 blob store. 비밀 값 없음이므로 configmap 인라인.
+    # [palimpsest] (선택) — 로컬 KVM 런타임. Hub 저장소는 별도 서비스가 소유한다.
     if palimpsest:
         lines.append("[palimpsest]")
-        if "hub_local_path" in palimpsest:
-            lines.append(f"hub_local_path = {_toml_str(palimpsest['hub_local_path'])}")
-        for key in ("hub_max_blob_bytes", "hub_upload_ttl_seconds"):
-            if key in palimpsest:
-                lines.append(f"{key} = {int(palimpsest[key])}")
         for key in ("kvm_uri", "kvm_layer_root", "kvm_state_dir"):
             if key in palimpsest:
                 lines.append(f"{key} = {_toml_str(palimpsest[key])}")
@@ -596,15 +591,15 @@ def _render_toml_for_k8s(cfg: dict, namespace: str | None = None) -> str:
         "trove",
         "barbican",
         "waygate",
+        "palimpsest",
         "chat",
         "mcp",
     ):
         if svc_name in svc:
             lines.append(f"{svc_name} = {_toml_bool(svc[svc_name])}")
-    for endpoint_name in ("waygate_internal_url", "drover_internal_url", "lumen_internal_url"):
+    for endpoint_name in ("waygate_internal_url", "drover_internal_url", "lumen_internal_url", "palimpsest_internal_url"):
         if endpoint_name in svc:
             lines.append(f"{endpoint_name} = {_toml_str(svc[endpoint_name])}")
-    lines.append("")
     if mcp:
         lines.append("[mcp]")
         for key in ("public_url", "oauth_consent_url"):

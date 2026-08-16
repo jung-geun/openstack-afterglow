@@ -16,7 +16,7 @@ services:
         max-file: "3"
 
   # Local databases for all extracted services. Start the service stack with:
-  # docker compose --env-file docker-compose.services.env --profile services up --build service-mariadb waygate-api waygate-worker drover-api drover-worker lumen-api lumen-worker
+  # docker compose --env-file docker-compose.services.env --profile services up service-mariadb waygate-api waygate-worker drover-api drover-worker lumen-api lumen-worker palimpsest-api palimpsest-worker
   service-mariadb:
     profiles: ["services"]
     image: mariadb:11.4
@@ -35,11 +35,7 @@ services:
 
   waygate-api:
     profiles: ["services", "waygate"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: waygate-api
-    image: ghcr.io/openstack-afterglow/waygate-api:dev
+    image: ${WAYGATE_API_IMAGE:-ghcr.io/openstack-afterglow/waygate-api:dev}
     ports:
       - "8010:8010"
     env_file:
@@ -75,11 +71,7 @@ services:
 
   waygate-worker:
     profiles: ["services", "waygate"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: waygate-worker
-    image: ghcr.io/openstack-afterglow/waygate-worker:dev
+    image: ${WAYGATE_WORKER_IMAGE:-ghcr.io/openstack-afterglow/waygate-worker:dev}
     env_file:
       - path: .env
         required: false
@@ -107,11 +99,7 @@ services:
 
   waygate-migrate:
     profiles: ["services", "waygate"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: waygate-api
-    image: ghcr.io/openstack-afterglow/waygate-api:dev
+    image: ${WAYGATE_API_IMAGE:-ghcr.io/openstack-afterglow/waygate-api:dev}
     environment:
       DATABASE_URL: ${WAYGATE_DATABASE_URL:-mysql+aiomysql://waygate:dev@service-mariadb:3306/waygate}
       REDIS_URL: redis://redis:6379/6
@@ -155,16 +143,15 @@ services:
       - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
-      - palimpsest-hub:/var/lib/afterglow/palimpsest
     env_file:
       - path: .env
         required: false
     environment:
-      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
       - LUMEN_MCP_SERVICE_TOKEN=${LUMEN_MCP_SERVICE_TOKEN:-}
       - SERVICE_WAYGATE_INTERNAL_URL=${SERVICE_WAYGATE_INTERNAL_URL:-}
       - SERVICE_DROVER_INTERNAL_URL=${SERVICE_DROVER_INTERNAL_URL:-}
       - SERVICE_LUMEN_INTERNAL_URL=${SERVICE_LUMEN_INTERNAL_URL:-}
+      - SERVICE_PALIMPSEST_INTERNAL_URL=${SERVICE_PALIMPSEST_INTERNAL_URL:-http://palimpsest-api:8020}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -181,35 +168,6 @@ services:
       retries: 5
       start_period: 10s
 
-
-  palimpsest-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: backend
-    image: ghcr.io/openstack-afterglow/afterglow-api:dev
-    command: python -m app.palimpsest_worker
-    volumes:
-      - ./afterglow.conf:/app/afterglow.conf:ro
-      - ./config.gpu.toml:/app/config.gpu.toml:ro
-      - ./logs:/app/logs
-      - palimpsest-hub:/var/lib/afterglow/palimpsest
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
-    depends_on:
-      redis:
-        condition: service_started
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "3"
 
   frontend:
     build:
@@ -246,11 +204,7 @@ services:
   # ── Drover migration bootstrap ──────────────────────────────────────────────
   drover-migrate:
     profiles: ["services", "drover"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: drover-api
-    image: ghcr.io/openstack-afterglow/drover-api:dev
+    image: ${DROVER_API_IMAGE:-ghcr.io/openstack-afterglow/drover-api:dev}
     env_file:
       - path: .env
         required: false
@@ -281,11 +235,7 @@ services:
   # ── Drover API ───────────────────────────────────────────────────────────────
   drover-api:
     profiles: ["services", "drover"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: drover-api
-    image: ghcr.io/openstack-afterglow/drover-api:dev
+    image: ${DROVER_API_IMAGE:-ghcr.io/openstack-afterglow/drover-api:dev}
     ports:
       - "8011:8011"
     env_file:
@@ -323,11 +273,7 @@ services:
   # ── Drover worker ────────────────────────────────────────────────────────────
   drover-worker:
     profiles: ["services", "drover"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: drover-worker
-    image: ghcr.io/openstack-afterglow/drover-worker:dev
+    image: ${DROVER_WORKER_IMAGE:-ghcr.io/openstack-afterglow/drover-worker:dev}
     env_file:
       - path: .env
         required: false
@@ -355,11 +301,7 @@ services:
     restart: unless-stopped
   lumen-migrate:
     profiles: ["services", "lumen"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: lumen-api
-    image: ghcr.io/openstack-afterglow/lumen-api:dev
+    image: ${LUMEN_API_IMAGE:-ghcr.io/openstack-afterglow/lumen-api:dev}
     environment:
       DATABASE_URL: ${LUMEN_DATABASE_URL:-mysql+aiomysql://lumen:dev@service-mariadb:3306/lumen}
       REDIS_URL: redis://redis:6379/8
@@ -386,11 +328,7 @@ services:
   # ── Lumen API ───────────────────────────────────────────────────────────────
   lumen-api:
     profiles: ["services", "lumen"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: lumen-api
-    image: ghcr.io/openstack-afterglow/lumen-api:dev
+    image: ${LUMEN_API_IMAGE:-ghcr.io/openstack-afterglow/lumen-api:dev}
     ports:
       - "8012:8012"
     env_file:
@@ -430,11 +368,7 @@ services:
   # ── Lumen worker ────────────────────────────────────────────────────────────
   lumen-worker:
     profiles: ["services", "lumen"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: lumen-worker
-    image: ghcr.io/openstack-afterglow/lumen-worker:dev
+    image: ${LUMEN_WORKER_IMAGE:-ghcr.io/openstack-afterglow/lumen-worker:dev}
     env_file:
       - path: .env
         required: false
@@ -459,6 +393,100 @@ services:
       - ./afterglow.conf:/etc/afterglow/afterglow.conf:ro
     depends_on:
       lumen-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ── Palimpsest Hub ──────────────────────────────────────────────────────────
+  palimpsest-bootstrap:
+    profiles: ["services", "palimpsest"]
+    image: ${PALIMPSEST_API_IMAGE:-ghcr.io/openstack-afterglow/palimpsest-hub-api:dev}
+    command: palimpsest-hub-bootstrap
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-mysql+asyncmy://palimpsest:dev@service-mariadb:3306/palimpsest}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      redis:
+        condition: service_started
+      service-mariadb:
+        condition: service_healthy
+    restart: "no"
+
+  palimpsest-api:
+    profiles: ["services", "palimpsest"]
+    image: ${PALIMPSEST_API_IMAGE:-ghcr.io/openstack-afterglow/palimpsest-hub-api:dev}
+    ports:
+      - "8020:8020"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-mysql+asyncmy://palimpsest:dev@service-mariadb:3306/palimpsest}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      redis:
+        condition: service_started
+      palimpsest-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/v1/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  palimpsest-worker:
+    profiles: ["services", "palimpsest"]
+    image: ${PALIMPSEST_WORKER_IMAGE:-ghcr.io/openstack-afterglow/palimpsest-hub-worker:dev}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-mysql+asyncmy://palimpsest:dev@service-mariadb:3306/palimpsest}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      redis:
+        condition: service_started
+      palimpsest-bootstrap:
         condition: service_completed_successfully
     restart: unless-stopped
 

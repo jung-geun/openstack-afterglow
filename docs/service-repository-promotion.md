@@ -1,6 +1,6 @@
 # Service repository promotion
 
-Waygate, Drover, and Lumen are self-contained service repositories under `services/`; each service tree includes its OpenStack SDK at `sdk/`. Promotion to standalone repositories is a history-preserving directory split; it does not require moving or rewriting service source code.
+Waygate, Drover, Lumen, and Palimpsest Hub are standalone service repositories. The duplicate in-tree service directories under `services/` and root Dockerfile build stages have been removed from Afterglow. Afterglow operates as a pure dashboard and BFF consumer, consuming extracted services via Keystone catalog discovery and immutable `#subdirectory=sdk` Git dependencies.
 
 ## Preconditions
 

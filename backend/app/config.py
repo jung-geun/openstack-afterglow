@@ -150,11 +150,13 @@ def _load_toml() -> dict:
     flat["service_swift_enabled"] = svc.get("swift", False)
     flat["service_barbican_enabled"] = svc.get("barbican", False)
     flat["service_waygate_enabled"] = svc.get("waygate", False)
+    flat["service_palimpsest_enabled"] = svc.get("palimpsest", False)
     flat["service_chat_enabled"] = svc.get("chat", False)
     flat["service_mcp_enabled"] = svc.get("mcp", False)
     flat["service_waygate_internal_url"] = svc.get("waygate_internal_url", "")
     flat["service_drover_internal_url"] = svc.get("drover_internal_url", "")
     flat["service_lumen_internal_url"] = svc.get("lumen_internal_url", "")
+    flat["service_palimpsest_internal_url"] = svc.get("palimpsest_internal_url", "")
     mcp = data.get("mcp", {})
     flat["mcp_public_url"] = mcp.get("public_url", "")
     flat["mcp_oauth_consent_url"] = mcp.get("oauth_consent_url", "")
@@ -239,9 +241,6 @@ def _load_toml() -> dict:
     flat["builder_layer_share_size_gb"] = builder.get("layer_share_size_gb", 20)
 
     palimpsest = data.get("palimpsest", {})
-    flat["palimpsest_hub_local_path"] = palimpsest.get("hub_local_path", "")
-    flat["palimpsest_hub_max_blob_bytes"] = palimpsest.get("hub_max_blob_bytes", 34359738368)
-    flat["palimpsest_hub_upload_ttl_seconds"] = palimpsest.get("hub_upload_ttl_seconds", 86400)
     flat["palimpsest_kvm_uri"] = palimpsest.get("kvm_uri", "")
     flat["palimpsest_kvm_layer_root"] = palimpsest.get("kvm_layer_root", "/var/lib/palimpsest/layers")
     flat["palimpsest_kvm_state_dir"] = palimpsest.get("kvm_state_dir", "/var/lib/palimpsest/domains")
@@ -445,6 +444,7 @@ class Settings(BaseSettings):
     service_swift_enabled: bool = False
     service_barbican_enabled: bool = False
     service_waygate_enabled: bool = False  # Waygate service proxy mount
+    service_palimpsest_enabled: bool = False  # Palimpsest Hub service proxy mount
     service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
     service_mcp_enabled: bool = False  # inbound consumer MCP control plane (Stage 2 rollout gate)
     # Trusted deployment overrides for extracted-service discovery. Empty values
@@ -452,7 +452,7 @@ class Settings(BaseSettings):
     service_waygate_internal_url: str = ""
     service_drover_internal_url: str = ""
     service_lumen_internal_url: str = ""
-
+    service_palimpsest_internal_url: str = ""
     # Generic instance health-report callback.
     instance_health_callback_base_url: str = ""
 
@@ -496,15 +496,6 @@ class Settings(BaseSettings):
         if v < 0:
             raise ValueError("worker runtime replica counts and intervals must be non-negative")
         return v
-
-    # --- Palimpsest 허브 (레이어 레지스트리) — docs/palimpsest.md ---
-    # 허브는 백엔드가 blob 을 직접 스트리밍 read/write 해야 성립하므로 Manila share 가 아니라
-    # 별도 blob store 를 쓴다. 비어 있으면 허브 기능이 비활성(503)이다.
-    # K8s 는 PVC, compose 는 볼륨을 이 경로에 마운트한다. 배치는 OCI image-layout 그대로:
-    #   <hub_local_path>/blobs/sha256/<hex>
-    palimpsest_hub_local_path: str = ""
-    palimpsest_hub_max_blob_bytes: int = 34359738368  # 32 GiB — torch 급 레이어를 수용
-    palimpsest_hub_upload_ttl_seconds: int = 86400  # 방치된 업로드 세션 정리 기준(초)
 
     # --- Palimpsest 로컬 KVM 런타임 (선택) ---
     # 비어 있으면 기능 비활성(503). `qemu:///system` 또는 `qemu+ssh://user@host/system`.
@@ -643,7 +634,7 @@ class Settings(BaseSettings):
         "service_waygate_internal_url",
         "service_drover_internal_url",
         "service_lumen_internal_url",
-        mode="after",
+        "service_palimpsest_internal_url",
     )
     @classmethod
     def _norm_service_endpoint(cls, v: str) -> str:
@@ -699,6 +690,7 @@ class Settings(BaseSettings):
             ("services.waygate_internal_url", self.service_waygate_internal_url),
             ("services.drover_internal_url", self.service_drover_internal_url),
             ("services.lumen_internal_url", self.service_lumen_internal_url),
+            ("services.palimpsest_internal_url", self.service_palimpsest_internal_url),
         ):
             if not endpoint:
                 continue

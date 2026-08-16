@@ -2,7 +2,7 @@
 # Additive Plugin Override Sample for DMSLab Kolla-Ansible Deployment
 # Place as `/etc/kolla/config/afterglow/globals.yml` (mode 0640). After the
 # plugin installer has added the standard Kolla wiring, run from `/etc/kolla`:
-#   kolla-ansible deploy --tags afterglow,waygate,drover,lumen
+#   kolla-ansible deploy --tags afterglow,waygate,drover,lumen,palimpsest
 # The plugin globals and secrets load from globals.d; do not add `-i`, `-p`,
 # or `-e @...` arguments for normal operations.
 
@@ -11,7 +11,9 @@ enable_afterglow: "yes"
 enable_afterglow_backend: "yes"
 enable_afterglow_frontend: "yes"
 enable_afterglow_notion_worker: "no"
-enable_afterglow_palimpsest_worker: "no"
+enable_palimpsest: "yes"
+enable_palimpsest_hub_api: "yes"
+enable_palimpsest_hub_worker: "yes"
 
 enable_waygate: "yes"
 enable_waygate_api: "yes"
@@ -33,6 +35,7 @@ enable_afterglow_source_build: false
 enable_drover_source_build: false
 enable_lumen_source_build: false
 enable_waygate_source_build: false
+enable_palimpsest_source_build: false
 
 afterglow_backend_image_ref: "ghcr.io/openstack-afterglow/afterglow-api@sha256:<AFTERGLOW_API_AMD64_DIGEST>"
 afterglow_frontend_image_ref: "ghcr.io/openstack-afterglow/afterglow@sha256:<AFTERGLOW_FRONTEND_AMD64_DIGEST>"
@@ -42,6 +45,8 @@ waygate_api_image_ref: "ghcr.io/openstack-afterglow/waygate-api@sha256:<WAYGATE_
 waygate_worker_image_ref: "ghcr.io/openstack-afterglow/waygate-worker@sha256:<WAYGATE_WORKER_AMD64_DIGEST>"
 lumen_api_image_ref: "ghcr.io/openstack-afterglow/lumen-api@sha256:<LUMEN_API_AMD64_DIGEST>"
 lumen_worker_image_ref: "ghcr.io/openstack-afterglow/lumen-worker@sha256:<LUMEN_WORKER_AMD64_DIGEST>"
+palimpsest_api_image_ref: "ghcr.io/openstack-afterglow/palimpsest-hub-api@sha256:<PALIMPSEST_HUB_API_AMD64_DIGEST>"
+palimpsest_worker_image_ref: "ghcr.io/openstack-afterglow/palimpsest-hub-worker@sha256:<PALIMPSEST_HUB_WORKER_AMD64_DIGEST>"
 
 # ── 3. HAProxy VIP Listeners and Controller Upstreams ────────────────────────
 # Kolla HAProxy owns the VIP ports. App containers bind only the controller API
@@ -55,9 +60,9 @@ afterglow_public_endpoint_url: "https://cloud.dmslab.re.kr"
 afterglow_public_haproxy_enabled: true
 afterglow_public_haproxy_fqdn: "cloud.dmslab.re.kr"
 afterglow_public_haproxy_router_port: 18082
-afterglow_backend_port: 8020
+afterglow_backend_port: 8000
 afterglow_frontend_port: 3080
-afterglow_backend_listen_port: 18020
+afterglow_backend_listen_port: 18000
 afterglow_frontend_listen_port: 18081
 afterglow_public_api_base: "https://cloud.dmslab.re.kr"
 afterglow_openstack_interface: "internal"
@@ -77,6 +82,8 @@ drover_api_port: 8011
 drover_api_listen_port: 18011
 lumen_api_port: 8012
 lumen_api_listen_port: 18012
+palimpsest_api_port: 8020
+palimpsest_api_listen_port: 18020
 
 # Preserve the existing catalog public URLs. drover-api/waygate-api/lumen-api
 # stay internal-VIP-only; a separate `<service>-public` HAProxy entry is added
@@ -102,6 +109,13 @@ lumen_admin_endpoint_url: "http://172.30.0.253:8012"
 lumen_public_haproxy_enabled: true
 lumen_public_haproxy_fqdn: "lumen.dmslab.re.kr"
 
+palimpsest_external_url: "https://palimpsest.dmslab.re.kr"
+palimpsest_public_endpoint_url: "https://palimpsest.dmslab.re.kr"
+palimpsest_internal_endpoint_url: "http://172.30.0.253:8020"
+palimpsest_admin_endpoint_url: "http://172.30.0.253:8020"
+palimpsest_public_haproxy_enabled: true
+palimpsest_public_haproxy_fqdn: "palimpsest.dmslab.re.kr"
+
 # ── 4. MariaDB _kolla Schemas & Keystone Contracts ───────────────────────────
 # Use dedicated plugin schemas to leave stock afterglow schema untouched
 afterglow_database_name: "afterglow_kolla"
@@ -124,6 +138,11 @@ waygate_database_user: "waygate_kolla"
 waygate_keystone_user: "waygate"
 waygate_service_project_name: "waygate-service"
 
+palimpsest_database_name: "palimpsest_kolla"
+palimpsest_database_user: "palimpsest_kolla"
+palimpsest_keystone_user: "palimpsest"
+palimpsest_service_project_name: "palimpsest-service"
+
 # Reuse Kolla's Valkey endpoint: controller API address, `redis_port`, and
 # `valkey_master_password` from the normal Kolla password file. Only these
 # plugin database indexes are configured here.
@@ -131,6 +150,10 @@ afterglow_redis_db_index: 5
 waygate_redis_db_index: 6
 drover_redis_db_index: 7
 lumen_redis_db_index: 8
+palimpsest_redis_db_index: 9
+
+palimpsest_hub_volume: "palimpsest_hub"
+palimpsest_hub_path: "/var/lib/palimpsest/hub"
 
 # ── 6. Lumen PostgreSQL Datastore ─────────────────────────────────────────────
 # Select exactly one checkpointer datastore mode:
@@ -162,6 +185,7 @@ chat_semantic_memory_enabled: false
 # Enable active Afterglow features
 afterglow_service_k3s_enabled: true
 afterglow_service_waygate_enabled: true
+afterglow_service_palimpsest_enabled: true
 afterglow_service_chat_enabled: true
 afterglow_service_mcp_enabled: true
 

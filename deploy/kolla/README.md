@@ -1,8 +1,7 @@
-# Afterglow Four-Service Kolla-Ansible Deployment Guide
+# Afterglow Kolla-Ansible Service Deployment Guide
 
-This guide deploys **Afterglow**, **Drover**, **Lumen**, and **Waygate** through
+This guide deploys **Afterglow**, **Drover**, **Lumen**, **Waygate**, and **Palimpsest** through
 the ordinary Kolla command line from `/etc/kolla`.
-
 ---
 
 ## Architecture & Integration Principles
@@ -23,11 +22,12 @@ the ordinary Kolla command line from `/etc/kolla`.
 3. **Kolla HAProxy Internal-VIP Listeners**:
    - HAProxy owns the internal-VIP frontend ports:
      - **Afterglow UI**: `3080`
-     - **Afterglow API**: `8020`; Heat CFN retains `8000`.
+     - **Afterglow API**: `8000`
      - **Waygate**: `8010`
      - **Drover**: `8011`
      - **Lumen**: `8012`
-   - App containers bind the controller API addresses only, using private upstream ports `18081`, `18020`, `18010`, `18011`, and `18012`. HAProxy balances each frontend across its matching controller group.
+     - **Palimpsest**: `8020`
+   - App containers bind the controller API addresses only, using private upstream ports `18081`, `18000`, `18010`, `18011`, `18012`, and `18020`. HAProxy balances each frontend across its matching controller group.
    - A tag-selected plugin run reconciles the matching Kolla HAProxy fragments.
      Kolla recreates HAProxy only if their resulting configuration hash changes.
    - The plugin does not create external-VIP routes, DNS records, or TLS certificates. Existing Drover and Waygate public catalog URLs remain operator-owned ingress contracts.
@@ -35,8 +35,9 @@ the ordinary Kolla command line from `/etc/kolla`.
    - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Do not use mutable `latest` or `dev` tags.
    - Source-build mode remains an optional development path; it is not used for the DMSLab deployment.
 5. **Datastores & Credential Reuse**:
-   - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`).
-   - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
+   - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`, `palimpsest_kolla`).
+   - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen, 9: Palimpsest). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
+   - **Palimpsest Hub**: Standalone layer repository service (API & worker) separate from Afterglow-owned layer build/consume APIs. Bootstrap executes `palimpsest-hub-bootstrap`; data migration (`palimpsest-hub-migrate-data`) is not run automatically and requires an empty-destination precondition.
    - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode does not create a persistent PostgreSQL server container; it starts a disposable verification client container, runs an authenticated `SELECT 1`, then removes it.
 
 ---
@@ -58,7 +59,7 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 
 ### Installer-managed artifacts
 - Role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`, `drover`,
-  `lumen`, and `waygate`.
+  `lumen`, `waygate`, and `palimpsest`.
 - Aggregate playbook: `$KOLLA_DIR/ansible/afterglow-site.yml` ->
   `deploy/kolla/site.yml`.
 - One marker-delimited `afterglow-site.yml` import in
@@ -283,7 +284,7 @@ stock file.
 From `/etc/kolla`:
 
 ```bash
-kolla-ansible deploy --tags afterglow,waygate,drover,lumen
+kolla-ansible deploy --tags afterglow,waygate,drover,lumen,palimpsest
 ```
 
 ### Reconfigure Services
@@ -294,10 +295,10 @@ Reconfigure only Afterglow:
 kolla-ansible reconfigure --tags afterglow
 ```
 
-Reconfigure all four plugin services:
+Reconfigure all five plugin services:
 
 ```bash
-kolla-ansible reconfigure --tags afterglow,waygate,drover,lumen
+kolla-ansible reconfigure --tags afterglow,waygate,drover,lumen,palimpsest
 ```
 
 The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis;

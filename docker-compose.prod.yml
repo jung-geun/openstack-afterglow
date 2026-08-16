@@ -31,14 +31,16 @@ services:
     volumes:
       - ./afterglow.conf:/app/afterglow.conf:ro
       - ./logs:/app/logs
-      - palimpsest-hub:/var/lib/afterglow/palimpsest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
       - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
       - AFTERGLOW_ENV=production
-      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
       - LUMEN_MCP_SERVICE_TOKEN=${LUMEN_MCP_SERVICE_TOKEN:-}
+      - SERVICE_WAYGATE_INTERNAL_URL=${SERVICE_WAYGATE_INTERNAL_URL:-http://waygate-api:8010}
+      - SERVICE_DROVER_INTERNAL_URL=${SERVICE_DROVER_INTERNAL_URL:-http://drover-api:8011}
+      - SERVICE_LUMEN_INTERNAL_URL=${SERVICE_LUMEN_INTERNAL_URL:-http://lumen-api:8012}
+      - SERVICE_PALIMPSEST_INTERNAL_URL=${SERVICE_PALIMPSEST_INTERNAL_URL:-http://palimpsest-api:8020}
     depends_on:
       - redis
     restart: always
@@ -297,6 +299,96 @@ services:
         max-size: "20m"
         max-file: "3"
 
+  # ── Palimpsest Hub ──────────────────────────────────────────────────────────
+  palimpsest-bootstrap:
+    profiles: ["palimpsest"]
+    image: ${REGISTRY}/palimpsest-hub-api:${IMAGE_TAG:-latest}
+    pull_policy: always
+    command: palimpsest-hub-bootstrap
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      - redis
+    restart: "no"
+
+  palimpsest-api:
+    profiles: ["palimpsest"]
+    image: ${REGISTRY}/palimpsest-hub-api:${IMAGE_TAG:-latest}
+    pull_policy: always
+    ports:
+      - "127.0.0.1:8020:8020"
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      redis:
+        condition: service_started
+      palimpsest-bootstrap:
+        condition: service_completed_successfully
+    restart: always
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/v1/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  palimpsest-worker:
+    profiles: ["palimpsest"]
+    image: ${REGISTRY}/palimpsest-hub-worker:${IMAGE_TAG:-latest}
+    pull_policy: always
+    environment:
+      DATABASE_URL: ${PALIMPSEST_DATABASE_URL:-}
+      REDIS_URL: redis://redis:6379/9
+      PALIMPSEST_HUB_LOCAL_PATH: /var/lib/palimpsest/hub
+      OS_AUTH_URL: ${PALIMPSEST_OS_AUTH_URL:-${OS_AUTH_URL:-}}
+      OS_USERNAME: ${PALIMPSEST_OS_USERNAME:-palimpsest}
+      OS_PASSWORD: ${PALIMPSEST_OS_PASSWORD:-${OS_PASSWORD:-}}
+      OS_PROJECT_NAME: ${PALIMPSEST_OS_PROJECT_NAME:-palimpsest-service}
+      OS_PROJECT_DOMAIN_NAME: ${PALIMPSEST_OS_PROJECT_DOMAIN_NAME:-Default}
+      OS_USER_DOMAIN_NAME: ${PALIMPSEST_OS_USER_DOMAIN_NAME:-Default}
+      OS_REGION_NAME: ${PALIMPSEST_OS_REGION_NAME:-RegionOne}
+      OS_INTERFACE: ${PALIMPSEST_OS_INTERFACE:-internal}
+      SSL_VERIFY: ${PALIMPSEST_SSL_VERIFY:-true}
+    volumes:
+      - palimpsest-hub:/var/lib/palimpsest/hub
+    depends_on:
+      redis:
+        condition: service_started
+      palimpsest-bootstrap:
+        condition: service_completed_successfully
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   # ── Notion Sync Worker ────────────────────────────────────────────────────────
   notion-worker:
     build:
@@ -323,33 +415,6 @@ services:
         max-size: "20m"
         max-file: "3"
 
-  # ── Palimpsest Image Export Worker ──────────────────────────────────────────
-  palimpsest-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: backend
-    image: ${REGISTRY}/afterglow-api:${IMAGE_TAG:-latest}
-    pull_policy: always
-    command: python -m app.palimpsest_worker
-    volumes:
-      - ./afterglow.conf:/app/afterglow.conf:ro
-      - ./logs:/app/logs
-      - palimpsest-hub:/var/lib/afterglow/palimpsest
-    environment:
-      - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
-      - SECRET_KEY=${SECRET_KEY}
-      - AFTERGLOW_ENV=production
-      - PALIMPSEST_HUB_LOCAL_PATH=/var/lib/afterglow/palimpsest
-    depends_on:
-      - redis
-      - backend
-    restart: always
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "3"
 
   # ── 프록시 프로필 (docker compose --profile proxy -f docker-compose.prod.yml up -d) ────────
   # HAProxy를 사용하면 80 포트 하나로 프론트(/)와 백엔드(/api/)를 모두 서빙

@@ -286,16 +286,45 @@ test("--validate checks the complete target catalog", async () => {
 	}
 });
 
-test("service target runs from its declared project root", async () => {
+test("waygate target runs from backend root", async () => {
 	const result = await runCli(["--dry-run", "waygate"])
 	try {
 		assert.equal(result.signal, null)
 		assert.equal(result.code, 0, result.stderr || result.stdout)
 		assert.match(result.stdout, /waygate \[backend\]/)
-		assert.match(result.stdout, /cwd: services\/waygate/)
-		assert.match(result.stdout, /cmd: uv run --extra dev python -m pytest tests -v/)
+		assert.match(result.stdout, /cwd: backend/)
+		assert.match(result.stdout, /cmd: uv run python -m pytest tests\/test_waygate_proxy\.py tests\/test_waygate_agent\.py -v/)
 		assert.deepEqual(result.events, [])
 	} finally {
 		cleanupRun(result)
+	}
+})
+
+test("service source dirs and root Docker stages cannot return and SDK dependencies use immutable subdirectories", () => {
+	for (const service of ["drover", "lumen", "waygate"]) {
+		const serviceDir = path.join(rootDir, "services", service);
+		assert.equal(
+			fs.existsSync(serviceDir),
+			false,
+			`services/${service} directory must be removed`
+		);
+	}
+
+	const dockerfileContent = fs.readFileSync(path.join(rootDir, "Dockerfile"), "utf-8");
+	for (const stage of ["waygate-builder", "drover-builder", "lumen-builder"]) {
+		assert.equal(
+			dockerfileContent.includes(`AS ${stage}`),
+			false,
+			`Dockerfile must not contain stage AS ${stage}`
+		);
+	}
+
+	const pyprojectContent = fs.readFileSync(path.join(rootDir, "backend", "pyproject.toml"), "utf-8");
+	for (const sdk of ["waygate-sdk", "drover-sdk", "lumen-sdk"]) {
+		const pattern = new RegExp(`${sdk} @ git\\+https://github\\.com/openstack-afterglow/[a-z-]+\\.git@[0-9a-f]{40}#subdirectory=sdk`);
+		assert.ok(
+			pattern.test(pyprojectContent),
+			`pyproject.toml must declare ${sdk} with immutable SHA and #subdirectory=sdk`
+		);
 	}
 })

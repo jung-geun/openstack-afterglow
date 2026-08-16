@@ -148,7 +148,7 @@ async def test_lumen_mcp_oauth_callback_proxies_unauthenticated_with_cookies():
 
     with patch("app.services.service_proxy.resolve_service_endpoint", return_value="http://lumen.internal"):
         with patch("httpx.AsyncClient", return_value=mock_client):
-            response = await proxy_passthrough("lumen", req, "/v1/mcp-oauth/callback")
+            response = await proxy_passthrough("lumen", req, "/v1/mcp-oauth/callback", forward_cookie=True)
 
     assert len(sent_requests) == 1
     sent_req, stream = sent_requests[0]

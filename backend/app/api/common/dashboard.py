@@ -270,7 +270,7 @@ async def get_dashboard_k3s_stats(
         raise HTTPException(status_code=400, detail="유효하지 않은 프로젝트 ID")
 
     try:
-        stats = await asyncio.to_thread(register_drover(conn).cluster_stats, project_id=project_id)
+        stats = await asyncio.to_thread(register_drover(conn).cluster_stats)
         return {
             "total": int(stats.get("total", 0)),
             "active": int(stats.get("active", 0)),
@@ -751,7 +751,7 @@ async def get_dashboard_overview(
     k3s_available = settings.service_k3s_enabled
     if k3s_available:
         try:
-            stats = await asyncio.to_thread(register_drover(conn).cluster_stats, project_id=project_id)
+            stats = await asyncio.to_thread(register_drover(conn).cluster_stats)
             k3s_count = int(stats.get("total", 0))
             k3s_active = int(stats.get("active", 0))
         except Exception:

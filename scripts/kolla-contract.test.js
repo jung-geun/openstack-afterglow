@@ -37,6 +37,17 @@ test("Afterglow health checks use probe tools present in published images", () =
 	assert.doesNotMatch(defaults, /test: \["CMD", "curl", "-f", "http:\/\{\{ afterglow_/)
 })
 
+test("Extracted service health checks use Python available in published images", () => {
+	for (const service of ["drover", "waygate", "lumen", "palimpsest"]) {
+		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
+		assert.match(
+			defaults,
+			/healthcheck:\n\s+test: \["CMD", "python", "-c", "from urllib\.request import urlopen;/
+		)
+		assert.doesNotMatch(defaults, /test: \["CMD", "curl", "-f"/)
+	}
+})
+
 test("Afterglow public endpoint controls every browser-facing origin", () => {
 	const defaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
 	const precheck = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/precheck.yml")
@@ -438,7 +449,7 @@ test("Kolla helper refusals preserve stock files", () => {
 })
 
 test("Plugin lifecycle dispatchers preserve stock actions and tag isolation", () => {
-	for (const service of ["afterglow", "waygate", "drover", "lumen"]) {
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
 		const dispatcher = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/main.yml`)
 		assert.doesNotMatch(dispatcher, /tags: always/)
 		assert.match(dispatcher, /'config_validate', 'stop', 'deploy-containers', 'check'/)
@@ -468,7 +479,7 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 	assert.match(afterglowConfig, /project_domain_name = "\{\{ afterglow_keystone_project_domain_name \}\}"/)
 	assert.match(afterglowDatabase, /login_host: "\{\{ afterglow_database_address \}\}"/)
 
-	for (const service of ["drover", "waygate", "lumen"]) {
+	for (const service of ["drover", "waygate", "lumen", "palimpsest"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		const template = readRepoFile(`deploy/kolla/ansible/roles/${service}/templates/${service}.conf.j2`)
 		const database = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/preconditions_db.yml`)
@@ -614,7 +625,7 @@ test("Afterglow hands operator TOML to containers without surrendering Kolla-own
 	const runtimeMountSources = [
 		...defaults.matchAll(/^\s+- "([^"]+):\/app\/[^"]+:ro"$/gm),
 	].map((match) => match[1])
-	assert.equal(runtimeMountSources.length, 10)
+	assert.equal(runtimeMountSources.length, 7)
 	for (const source of runtimeMountSources) {
 		assert.ok(source.startsWith("{{ afterglow_runtime_config_dir }}/"))
 	}
@@ -664,4 +675,63 @@ test("Afterglow hands operator TOML to containers without surrendering Kolla-own
 	assert.doesNotMatch(sample, /^afterglow_operator_config_source:/m)
 	assert.match(sample, /\/etc\/kolla\/config\/afterglow\/backend\/afterglow\.conf/)
 	assert.match(sample, /\/etc\/kolla\/config\/afterglow\/frontend\/afterglow\.conf/)
+})
+test("Palimpsest Hub standalone Kolla role structure and contracts", () => {
+	const defaults = readRepoFile("deploy/kolla/ansible/roles/palimpsest/defaults/main.yml")
+	const precheck = readRepoFile("deploy/kolla/ansible/roles/palimpsest/tasks/precheck.yml")
+	const imagePrecheck = readRepoFile("deploy/kolla/ansible/roles/palimpsest/tasks/image_precheck.yml")
+	const sourceBuild = readRepoFile("deploy/kolla/ansible/roles/palimpsest/tasks/source_build.yml")
+	const bootstrap = readRepoFile("deploy/kolla/ansible/roles/palimpsest/tasks/bootstrap_service.yml")
+	const keystone = readRepoFile("deploy/kolla/ansible/roles/palimpsest/tasks/preconditions_keystone.yml")
+	const validator = readRepoFile("deploy/kolla/ansible/roles/palimpsest/files/validate_image_ref.py")
+	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+
+	// 1. Immutable source SHA & repo
+	assert.match(defaults, /palimpsest_source_version: "98f6dc920af43d0ce906750d918a60ca2f3eacd9"/)
+	assert.match(afterglowDefaults, /^afterglow_backend_port: 8000$/m)
+	assert.match(afterglowDefaults, /^afterglow_backend_listen_port: 18000$/m)
+	assert.match(defaults, /palimpsest_source_repo: "https:\/\/github\.com\/openstack-afterglow\/palimpsest\.git"/)
+
+	// 2. Exact image targets
+	assert.match(sourceBuild, /path: "\{\{ palimpsest_source_dir \}\}\/hub"/)
+	assert.match(sourceBuild, /dockerfile: "Dockerfile"/)
+	assert.match(sourceBuild, /- palimpsest-hub-api/)
+	assert.match(sourceBuild, /- palimpsest-hub-worker/)
+	assert.match(defaults, /palimpsest-hub-api/)
+	assert.match(defaults, /palimpsest-hub-worker/)
+
+	// 3. Ports, commands, health path
+	assert.match(defaults, /palimpsest_api_port: 8020/)
+	assert.match(defaults, /palimpsest_api_listen_port: 18020/)
+	assert.match(defaults, /command: \["uvicorn", "palimpsest_hub\.main:app".*"--port", "\{\{ palimpsest_api_listen_port \| string \}\}"/)
+	assert.match(defaults, /command: \["palimpsest-hub-worker"\]/)
+	assert.match(defaults, /\/v1\/health/)
+
+	// 4. Redis DB index 9 & volume
+	assert.match(defaults, /palimpsest_redis_db_index: 9/)
+	assert.match(defaults, /palimpsest_hub_volume: "palimpsest_hub"/)
+	assert.match(defaults, /palimpsest_hub_path: "\/var\/lib\/palimpsest\/hub"/)
+
+	// 5. Keystone project/user/service/type
+	assert.match(keystone, /type: palimpsest/)
+	assert.match(keystone, /name: palimpsest/)
+	assert.match(defaults, /palimpsest_service_project_name: "palimpsest-service"/)
+	assert.match(defaults, /palimpsest_keystone_user: "palimpsest"/)
+	assert.match(defaults, /OS_PROJECT_NAME: "\{\{ palimpsest_service_project_name \}\}"/)
+	assert.match(defaults, /mysql\+asyncmy:/)
+
+	// 6. Bootstrap command & no automatic data migration
+	assert.match(bootstrap, /command: \["palimpsest-hub-bootstrap"\]/)
+	assert.match(bootstrap, /OS_PROJECT_NAME: "\{\{ palimpsest_service_project_name \}\}"/)
+	assert.doesNotMatch(bootstrap, /palimpsest-hub-migrate-data/)
+
+	// 7. No old embedded worker in Afterglow role/defaults
+	assert.doesNotMatch(afterglowDefaults, /enable_afterglow_palimpsest_worker/)
+	assert.doesNotMatch(afterglowDefaults, /python.*app\.palimpsest_worker/)
+	assert.doesNotMatch(sample, /enable_afterglow_palimpsest_worker/)
+	assert.doesNotMatch(readRepoFile("Dockerfile"), /\/var\/lib\/afterglow\/palimpsest/)
+
+	// 8. Image reference validator
+	assert.match(validator, /afterglow-local\/palimpsest-hub-/)
 })

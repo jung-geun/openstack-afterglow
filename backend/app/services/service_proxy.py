@@ -31,12 +31,17 @@ EXCLUDED_RESPONSE_HEADERS: set[str] = {
 }
 
 FORWARDED_REQUEST_HEADERS: tuple[str, ...] = (
-    "x-project-id",
     "idempotency-key",
     "last-event-id",
-    "cookie",
     "content-type",
     "accept",
+    "range",
+    "upload-offset",
+    "upload-length",
+    "upload-metadata",
+    "tus-resumable",
+    "upload-checksum",
+    "content-length",
 )
 
 
@@ -44,6 +49,7 @@ _SERVICE_OVERRIDE_FIELDS: dict[str, str] = {
     "waygate": "service_waygate_internal_url",
     "drover": "service_drover_internal_url",
     "lumen": "service_lumen_internal_url",
+    "palimpsest": "service_palimpsest_internal_url",
 }
 
 
@@ -124,7 +130,7 @@ async def _forward(
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
-    body = await request.body()
+    content = request.stream() if request.method in {"POST", "PUT", "PATCH", "DELETE"} else None
     settings = get_settings()
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=5.0),
@@ -135,7 +141,7 @@ async def _forward(
             method=request.method,
             url=upstream_url,
             headers=headers,
-            content=body,
+            content=content,
         )
         upstream_response = await client.send(outgoing, stream=True)
     except Exception as exc:
@@ -166,38 +172,17 @@ async def _forward(
 
 
 async def proxy(service_type: str, request: Request, upstream_path: str) -> Response:
-    """Proxy a browser request using its caller-scoped Keystone token."""
+    """Proxy a browser request using its validated caller-scoped Keystone token."""
     token_info = getattr(request.state, "token_info", None)
-    if not token_info:
-        authorization = request.headers.get("authorization")
-        project_header = request.headers.get("x-project-id")
-        if authorization or project_header:
-            try:
-                from app.api.deps import get_token_info
-
-                token_info = await get_token_info(
-                    request=request,
-                    authorization=authorization,
-                    x_project_id=project_header,
-                )
-            except HTTPException:
-                raise
-            except Exception:
-                token_info = None
-
     token = token_info.get("token") if token_info else None
     project_id = token_info.get("project_id") if token_info else None
-    if not token:
-        token = request.headers.get("x-auth-token")
-    if not project_id:
-        project_id = request.headers.get("x-project-id")
+    if not token or not project_id:
+        raise HTTPException(status_code=401, detail="인증이 필요합니다")
 
-    endpoint = await asyncio.to_thread(_get_internal_endpoint, token or "", project_id or "", service_type)
+    endpoint = await asyncio.to_thread(_get_internal_endpoint, token, project_id, service_type)
     headers = _forwarded_headers(request)
-    if token:
-        headers["X-Auth-Token"] = token
-    if project_id and "x-project-id" not in headers:
-        headers["X-Project-Id"] = project_id
+    headers["x-auth-token"] = token
+    headers["x-project-id"] = project_id
     return await _forward(service_type, request, upstream_path, endpoint=endpoint, headers=headers)
 
 
@@ -219,9 +204,8 @@ async def get_json(service_type: str, request: Request, upstream_path: str) -> A
         upstream_url = f"{upstream_url}?{request.url.query}"
 
     headers = _forwarded_headers(request)
-    headers["X-Auth-Token"] = token
-    if "x-project-id" not in headers:
-        headers["X-Project-Id"] = project_id
+    headers["x-auth-token"] = token
+    headers["x-project-id"] = project_id
     settings = get_settings()
     try:
         async with httpx.AsyncClient(
@@ -254,17 +238,38 @@ async def resolve_service_endpoint(service_type: str) -> str | None:
     return await asyncio.to_thread(_get_service_internal_endpoint, service_type)
 
 
-async def proxy_passthrough(service_type: str, request: Request, upstream_path: str) -> Response:
+async def proxy_passthrough(
+    service_type: str,
+    request: Request,
+    upstream_path: str,
+    *,
+    forward_cookie: bool = False,
+) -> Response:
     """Proxy a machine-authenticated route without interpreting its bearer token.
 
     The service-account catalog resolves the endpoint. ``Authorization`` is forwarded
     verbatim so the extracted service remains the sole authority for machine tokens.
+    A browser cookie is forwarded only when the caller opts into a cookie-bound flow.
     """
     endpoint = await resolve_service_endpoint(service_type)
     headers = _forwarded_headers(request)
     authorization = request.headers.get("authorization")
     if authorization is not None:
-        headers["Authorization"] = authorization
+        headers["authorization"] = authorization
+    if forward_cookie:
+        cookie = request.headers.get("cookie")
+        if cookie is not None:
+            headers["cookie"] = cookie
+    from app.rate_limit import _get_real_ip
+
+    headers["X-Forwarded-For"] = _get_real_ip(request)
+    return await _forward(service_type, request, upstream_path, endpoint=endpoint, headers=headers)
+
+
+async def proxy_unauthenticated(service_type: str, request: Request, upstream_path: str) -> Response:
+    """Proxy an unauthenticated browser route without requiring a Keystone token."""
+    endpoint = await resolve_service_endpoint(service_type)
+    headers = _forwarded_headers(request)
     from app.rate_limit import _get_real_ip
 
     headers["X-Forwarded-For"] = _get_real_ip(request)

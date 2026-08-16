@@ -1,0 +1,7 @@
+---
+- name: Apply role palimpsest
+  gather_facts: false
+  hosts: palimpsest
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: palimpsest, tags: palimpsest, when: enable_palimpsest | default(false) | bool }

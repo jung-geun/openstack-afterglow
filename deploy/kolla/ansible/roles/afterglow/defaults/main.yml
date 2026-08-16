@@ -23,7 +23,6 @@ enable_afterglow: "no"
 enable_afterglow_backend: "{{ enable_afterglow }}"
 enable_afterglow_frontend: "{{ enable_afterglow }}"
 enable_afterglow_notion_worker: "no"
-enable_afterglow_palimpsest_worker: "no"
 
 # ── 사전조건 실행 여부 ────────────────────────────────────────────────────────
 afterglow_run_preconditions: true
@@ -46,13 +45,13 @@ afterglow_operator_frontend_config_staging_path: "/tmp/{{ afterglow_operator_fro
 afterglow_frontend_config_name: "afterglow.frontend.generated.conf"
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
-afterglow_backend_port: 8020
+afterglow_backend_port: 8000
 afterglow_frontend_port: 3080
 # Kolla HAProxy owns the VIP listeners. Application containers bind each
 # controller's API address on private upstream ports.
 afterglow_backend_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
 afterglow_frontend_listen_address: "{{ 'api' | kolla_address(inventory_hostname) }}"
-afterglow_backend_listen_port: 18020
+afterglow_backend_listen_port: 18000
 afterglow_frontend_listen_port: 18081
 
 # ── URL 및 엔드포인트 ────────────────────────────────────────────────────────
@@ -65,8 +64,6 @@ afterglow_public_endpoint_url: "{{ public_protocol | default('https') }}://{{ ko
 afterglow_public_haproxy_enabled: false
 afterglow_public_haproxy_fqdn: ""
 afterglow_public_haproxy_router_port: 18082
-afterglow_palimpsest_hub_volume: "afterglow_palimpsest_hub"
-afterglow_palimpsest_hub_path: "/var/lib/afterglow/palimpsest"
 
 # ── DB / Valkey 캐시 ──────────────────────────────────────────────────────────
 # Kolla-owned MariaDB topology and administrative credentials. The service
@@ -140,6 +137,7 @@ afterglow_service_trove_enabled: false
 afterglow_service_magnum_enabled: false
 afterglow_service_barbican_enabled: false
 afterglow_service_waygate_enabled: true
+afterglow_service_palimpsest_enabled: false
 afterglow_service_chat_enabled: true
 afterglow_service_mcp_enabled: true
 # Shared only with the Lumen workload for the internal delegated-MCP bridge.
@@ -164,7 +162,6 @@ afterglow_services:
       - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
       - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
       - "kolla_logs:/var/log/kolla/"
-      - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
     environment:
       DATABASE_URL: "{{ afterglow_database_url }}"
       REDIS_URL: "{{ afterglow_redis_url }}"
@@ -176,7 +173,6 @@ afterglow_services:
       K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
       LUMEN_MCP_SERVICE_TOKEN: "{{ afterglow_lumen_mcp_service_token }}"
       OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
-      PALIMPSEST_HUB_LOCAL_PATH: "{{ afterglow_palimpsest_hub_path }}"
       UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
       UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
       UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
@@ -232,25 +228,6 @@ afterglow_services:
         backend_http_extra:
           - "option httpchk GET /"
           - "http-check expect status 200"
-  afterglow-palimpsest-worker:
-    container_name: afterglow_palimpsest_worker
-    group: afterglow
-    enabled: "{{ enable_afterglow_palimpsest_worker | bool }}"
-    image: "{{ afterglow_backend_image_ref }}"
-    command: ["python", "-m", "app.palimpsest_worker"]
-    network_mode: host
-    restart_policy: unless-stopped
-    groups: ["0"]
-    volumes:
-      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
-      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
-      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
-      - "{{ afterglow_palimpsest_hub_volume }}:{{ afterglow_palimpsest_hub_path }}"
-      - "kolla_logs:/var/log/kolla/"
-    environment:
-      DATABASE_URL: "{{ afterglow_database_url }}"
-      REDIS_URL: "{{ afterglow_redis_url }}"
-      PALIMPSEST_HUB_LOCAL_PATH: "{{ afterglow_palimpsest_hub_path }}"
   afterglow-notion-worker:
     container_name: afterglow_notion_worker
     group: afterglow

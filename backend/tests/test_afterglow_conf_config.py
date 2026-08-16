@@ -382,8 +382,10 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
         "waygate-worker",
         "drover-api",
         "drover-worker",
-        "notion-worker",
+        "palimpsest-bootstrap",
+        "palimpsest-api",
         "palimpsest-worker",
+        "notion-worker",
     ):
         service = services[service_name]
         assert service["env_file"] == expected_env_file
@@ -394,6 +396,40 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
             else {str(entry).partition("=")[0] for entry in environment}
         )
         assert "SECRET_KEY" not in names
+
+
+def test_compose_uses_standalone_palimpsest_services():
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    backend = services["backend"]
+    backend_environment = {
+        str(entry).partition("=")[0]: str(entry).partition("=")[2] for entry in backend["environment"]
+    }
+    assert backend_environment["SERVICE_PALIMPSEST_INTERNAL_URL"].endswith("http://palimpsest-api:8020}")
+    assert "PALIMPSEST_HUB_LOCAL_PATH" not in backend_environment
+    assert "palimpsest-hub:/var/lib/afterglow/palimpsest" not in backend.get("volumes", [])
+
+    for name in ("palimpsest-bootstrap", "palimpsest-api", "palimpsest-worker"):
+        service = services[name]
+        assert "services" in service["profiles"]
+        assert service["environment"]["DATABASE_URL"].startswith("${PALIMPSEST_DATABASE_URL:-mysql+asyncmy://")
+        assert service["environment"]["OS_PROJECT_NAME"].endswith("palimpsest-service}")
+        assert "palimpsest-hub:/var/lib/palimpsest/hub" in service["volumes"]
+
+    production = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8"))
+    assert {
+        "palimpsest-bootstrap",
+        "palimpsest-api",
+        "palimpsest-worker",
+    } <= production["services"].keys()
+
+    database_init = (ROOT / "docker/mariadb/service-init.sql").read_text(encoding="utf-8")
+    assert "CREATE DATABASE IF NOT EXISTS palimpsest" in database_init
+    assert "GRANT ALL PRIVILEGES ON palimpsest.*" in database_init
+
+    backend_manifest = (ROOT / "deploy/k8s-template/base/backend/deployment.yaml").read_text(encoding="utf-8")
+    assert "PALIMPSEST_HUB_LOCAL_PATH" not in backend_manifest
+    assert "name: palimpsest-hub" not in backend_manifest
 
 
 def test_env_example_allows_local_default_secret_for_compose_workers():
@@ -413,9 +449,7 @@ def test_k8s_python_manifests_use_production_secret_contract():
         ROOT / "deploy/k8s-template/base/backend/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/notion-deployment.yaml",
-        ROOT / "deploy/k8s-template/base/backend/palimpsest-worker-deployment.yaml",
     ]
-
     for path in paths:
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         env = doc["spec"]["template"]["spec"]["containers"][0]["env"]

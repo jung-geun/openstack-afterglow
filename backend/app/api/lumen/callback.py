@@ -10,4 +10,4 @@ router = APIRouter()
 
 @router.get("/mcp-oauth/callback")
 async def proxy_lumen_mcp_oauth_callback(*, request: Request) -> Response:
-    return await proxy_passthrough("lumen", request, "/v1/mcp-oauth/callback")
+    return await proxy_passthrough("lumen", request, "/v1/mcp-oauth/callback", forward_cookie=True)

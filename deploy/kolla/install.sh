@@ -93,7 +93,7 @@ if [[ ! -d "$ROLES_DIR" ]]; then
   die "kolla-ansible roles 디렉토리를 찾을 수 없습니다: $ROLES_DIR"
 fi
 
-# ── 2. 심볼릭 링크 생성 (4개 Role + 1개 Aggregate Playbook) ─────────────────
+# ── 2. 심볼릭 링크 생성 (5개 Role + 1개 Aggregate Playbook) ─────────────────
 #
 # 규칙: 대상 경로가 이미 존재하는 경우,
 #   - 심볼릭 링크이고 정산 대상($expected_target)을 가리키면 유지 (skip)
@@ -149,6 +149,7 @@ create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
 # Aggregate playbook symlink (afterglow-site.yml)
 create_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
@@ -188,7 +189,7 @@ python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" ||
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Afterglow, Waygate, Drover, and Lumen integration wiring installed."
+echo " Afterglow, Waygate, Drover, Lumen, and Palimpsest integration wiring installed."
 echo " The installer owns only its marked stock site.yml import, default"
 echo " inventory link, globals.d links, role links, and aggregate playbook link."
 echo ""

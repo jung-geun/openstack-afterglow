@@ -44,9 +44,9 @@ dependencies = [
     "psycopg[binary]==3.3.4",  # AsyncPostgresSaver 용 — [binary]로 libpq 번들(시스템 의존 불요)
     "langchain-mcp-adapters==0.3.1",
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
-    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3#subdirectory=sdk",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@2b82bc16fc432ce84b21390a67106f3afcc593a1#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@c7d59a255148173232e5a4b32e90498dea5cee29#subdirectory=sdk",
+    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@274f39c6fb21eb95a9a4ea4840bd263280335a54#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 
 [build-system]
@@ -125,10 +125,9 @@ worker = [
     "idna>=3.15",
     "langchain-mcp-adapters==0.3.1",
     "apscheduler>=3.10",
-    "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
-    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@e83ce559e3e3b08a4f28d7a46818b6c69b6c4cf3#subdirectory=sdk",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@2b82bc16fc432ce84b21390a67106f3afcc593a1#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@c7d59a255148173232e5a4b32e90498dea5cee29#subdirectory=sdk",
+    "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@274f39c6fb21eb95a9a4ea4840bd263280335a54#subdirectory=sdk",
+    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 
 [tool.hatch.build.targets.wheel]
