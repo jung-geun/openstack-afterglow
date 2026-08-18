@@ -3,10 +3,11 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ToggleGroup from '$lib/components/ui/ToggleGroup.svelte';
+	import { prefersReducedMotion } from '$lib/utils/motion';
 	import LandingFigure from './LandingFigure.svelte';
+	import LandingOpsBoard from './LandingOpsBoard.svelte';
 	import PlateGraphic from './PlateGraphic.svelte';
 	import type { PlateName } from './plateGraphics';
-	import { prefersReducedMotion } from '$lib/utils/motion';
 
 	interface Props {
 		siteName: string;
@@ -32,44 +33,44 @@
 	];
 
 	const capabilities: Array<{
-		num: string;
 		tag: string;
 		name: PlateName;
 		alt: string;
 		title: string;
 		body: string;
+		proof: string;
 	}> = [
 		{
-			num: '01',
 			tag: 'Compute',
 			name: 'compute-allocation',
 			alt: 'VM 서버, GPU 칩, vCPU, 스토리지 자원 배정 콜라주',
 			title: 'VM·GPU·vCPU·스토리지 자원 배정',
 			body: 'GPU 가속 VM에 필요한 GPU, vCPU, 메모리, 스토리지를 프로젝트 쿼터 안에서 배정해 개별 실험 환경을 바로 준비합니다.',
+			proof: '프로젝트 쿼터 안에서',
 		},
 		{
-			num: '02',
 			tag: 'Cluster',
 			name: 'kubernetes',
 			alt: 'K8s 클러스터 프로비저닝 콜라주',
 			title: 'Kubernetes 실습과 실험 환경',
 			body: 'K8s 클러스터 노드를 구성한 뒤 수업·연구 프로젝트의 Pod와 워크로드를 배포하고 상태를 콘솔에서 추적합니다.',
+			proof: '노드부터 워크로드까지',
 		},
 		{
-			num: '03',
 			tag: 'Library',
 			name: 'layer',
 			alt: 'AI ML 라이브러리 레이어 콜라주',
 			title: 'AI/ML 라이브러리 레이어',
 			body: '반복 설치가 필요한 프레임워크와 데이터 처리 도구를 불변 레이어로 관리해 팀별 환경을 재사용하고 포크합니다.',
+			proof: '설치 대신 재사용',
 		},
 		{
-			num: '04',
 			tag: 'Governance',
 			name: 'security',
 			alt: '보안과 거버넌스 콜라주',
 			title: '교수자와 관리자용 운영 제어',
 			body: '프로젝트, 사용자, 역할, 쿼터, 모니터링, 감사 로그를 묶어 연구실 단위 운영 기준을 유지합니다.',
+			proof: '역할과 경계를 한곳에서',
 		},
 	];
 
@@ -89,6 +90,7 @@
 		alt: string;
 		title: string;
 		body: string;
+		meta: string;
 	}> = [
 		{
 			kind: 'compute',
@@ -96,6 +98,7 @@
 			alt: 'API 자동화 콜라주',
 			title: '컴퓨팅 자원 신청',
 			body: '연구원이 필요한 이미지, flavor, 네트워크, 키를 선택해 실험 인스턴스를 준비합니다.',
+			meta: 'VM · GPU · Network',
 		},
 		{
 			kind: 'data',
@@ -103,6 +106,7 @@
 			alt: '공유 데이터 공간과 스냅샷 흐름 콜라주',
 			title: '공유 데이터 공간',
 			body: '파일 스토리지와 스냅샷으로 팀 데이터와 실험 산출물을 안전하게 이어갑니다.',
+			meta: 'Share · Snapshot',
 		},
 		{
 			kind: 'compute',
@@ -110,6 +114,7 @@
 			alt: 'K8s 클러스터 프로비저닝 콜라주',
 			title: '클러스터 실습',
 			body: '수업이나 프로젝트별 Kubernetes 클러스터를 만들고 노드 구성을 추적합니다.',
+			meta: 'Cluster · Node',
 		},
 		{
 			kind: 'ops',
@@ -117,6 +122,7 @@
 			alt: '모니터링과 관측성 콜라주',
 			title: '관측 가능한 운영',
 			body: '지표 기반 화면을 통해 사용량과 병목을 빠르게 확인합니다.',
+			meta: 'Metric · Log',
 		},
 		{
 			kind: 'ops',
@@ -124,38 +130,27 @@
 			alt: '클라우드 배포 흐름 콜라주',
 			title: '보안과 감사',
 			body: '권한 경계, 키 분리 암호화, 작업 로그로 멀티테넌트 위험을 줄입니다.',
+			meta: 'Role · Audit',
 		},
 	];
 
-	type MethodStep = {
-		step: string;
-		title: string;
-		alt: string;
-		name?: PlateName;
-		icon?: 'observability' | 'reuse';
-	};
-
-	const methodSteps: MethodStep[] = [
-		{ step: 'STEP 01', title: '연구 목적에 맞는 프로젝트를 만든다', name: 'professor', alt: '연구팀별 클라우드 제공 콜라주' },
-		{ step: 'STEP 02', title: '컴퓨팅과 데이터 자원을 배정한다', name: 'quota', alt: '쿼터와 자원 배분 콜라주' },
-		{ step: 'STEP 03', title: '실험 환경을 실행하고 관측한다', icon: 'observability', alt: '실험 실행, 지표, 로그 관측 아이콘' },
-		{ step: 'STEP 04', title: '레이어와 스냅샷으로 다시 쓴다', icon: 'reuse', alt: '레이어와 스냅샷 재사용 아이콘' },
+	const methodSteps = [
+		{ step: '01', label: 'Project', title: '연구 목적에 맞는 프로젝트를 만든다', detail: '사용자와 역할, 자원 경계를 먼저 정합니다.' },
+		{ step: '02', label: 'Allocate', title: '컴퓨팅과 데이터 자원을 배정한다', detail: '정해진 쿼터 안에서 필요한 환경을 제공합니다.' },
+		{ step: '03', label: 'Observe', title: '실험 환경을 실행하고 관측한다', detail: '상태와 사용량, 연결 관계를 한 흐름에서 봅니다.' },
+		{ step: '04', label: 'Reuse', title: '레이어와 스냅샷으로 다시 쓴다', detail: '검증한 환경과 데이터를 다음 연구에 이어줍니다.' },
 	];
 
 	const email = 'pieroot@konkuk.ac.kr';
 	const sectionIds = ['overview', 'capabilities', 'workflow', 'work', 'contact'];
 
 	let landingRoot: HTMLElement;
+	let navLinksElement: HTMLDivElement;
 	let selectedFilter: WorkflowFilter = $state('all');
 	let activeSection = $state('overview');
-	let navLinksElement: HTMLDivElement;
-	let progressWidth = $derived(
-		selectedFilter === 'all' ? '25%' : selectedFilter === 'compute' ? '50%' : selectedFilter === 'data' ? '75%' : '100%',
-	);
 	let visibleCount = $derived(
 		workflowCards.filter((card) => selectedFilter === 'all' || card.kind === selectedFilter).length,
 	);
-
 	let revealObserver: IntersectionObserver | undefined;
 	let revealReadyFrame: number | undefined;
 
@@ -165,7 +160,10 @@
 		if (!activeLink) return;
 		const linkRect = activeLink.getBoundingClientRect();
 		const navRect = navLinksElement.getBoundingClientRect();
-		navLinksElement.scrollLeft = Math.max(0, navLinksElement.scrollLeft + linkRect.left - navRect.left - (navLinksElement.clientWidth - linkRect.width) / 2);
+		navLinksElement.scrollLeft = Math.max(
+			0,
+			navLinksElement.scrollLeft + linkRect.left - navRect.left - (navLinksElement.clientWidth - linkRect.width) / 2,
+		);
 	});
 
 	function isWorkflowFilter(value: string): value is WorkflowFilter {
@@ -181,7 +179,8 @@
 	}
 
 	function updateActiveSection() {
-		const activationLine = 148;
+		const navigationBottom = landingRoot.querySelector<HTMLElement>('.top-strip')?.getBoundingClientRect().bottom ?? 0;
+		const activationLine = navigationBottom + 16;
 		let current = 'overview';
 		for (const id of sectionIds) {
 			const section = document.getElementById(id);
@@ -215,9 +214,7 @@
 				{ threshold: 0.18, rootMargin: '0px 0px -8% 0px' },
 			);
 			revealItems.forEach((item) => revealObserver?.observe(item));
-			revealReadyFrame = window.requestAnimationFrame(() => {
-				landingRoot.classList.add('reveal-ready');
-			});
+			revealReadyFrame = window.requestAnimationFrame(() => landingRoot.classList.add('reveal-ready'));
 		}
 
 		return () => {
@@ -240,6 +237,7 @@
 			<a class="brand" href="/">
 				<img src={logoPath} alt="" />
 				<span>{siteName}</span>
+				<small>Research cloud</small>
 			</a>
 			<div class="nav-links" bind:this={navLinksElement}>
 				{#each navLinks as link}
@@ -256,50 +254,47 @@
 
 	<div id="landing-content" tabindex="-1">
 		<section class="hero">
-			<div class="container hero-grid">
-				<div data-reveal>
-					<span class="eyebrow">I / Research cloud delivery console</span>
-					<h1 class="dot">연구실 클라우드를 더 쉽게 제공하는 <span class="em">운영 콘솔</span></h1>
+			<div class="container hero-layout">
+				<div class="hero-copy" data-reveal>
+					<div class="eyebrow"><span aria-hidden="true"></span>Research infrastructure, delivered</div>
+					<h1>연구실 클라우드를<br />더 쉽게 제공하는 <em>운영 콘솔</em></h1>
 					<p class="lead">Afterglow는 교수, 연구원, 실습팀이 필요한 컴퓨팅 자원과 공유 스토리지, Kubernetes 환경, AI/ML 라이브러리 레이어를 한 곳에서 신청하고 운영하도록 설계된 클라우드 포털입니다.</p>
 					<div class="hero-actions">
 						<Button variant="primary" size="lg" class="landing-btn" href={consoleHref}>콘솔 접속</Button>
 						<Button variant="outline" size="lg" class="landing-btn" href="#capabilities">기능 보기</Button>
 					</div>
-					<div class="stat-rings">
-						<div class="ring"><strong>VM</strong><span>연구용 인스턴스 배정</span></div>
-						<div class="ring"><strong>K8s</strong><span>클러스터 제공과 상태 추적</span></div>
-						<div class="ring"><strong>Layer</strong><span>AI/ML 환경 재사용</span></div>
-					</div>
+					<ul class="hero-facts" aria-label="Afterglow 핵심 운영 범위">
+						<li><b>Project</b><span>연구팀별 자원 경계</span></li>
+						<li><b>Policy</b><span>역할과 쿼터 제어</span></li>
+						<li><b>Reuse</b><span>환경과 데이터 재사용</span></li>
+					</ul>
 				</div>
-				<div class="collage" data-reveal>
-					<LandingFigure class="plate hero-main" name="lab-cloud" alt="연구실 클라우드 콜라주" />
-					<LandingFigure class="plate hero-side" name="quota" alt="쿼터와 자원 배분 콜라주" />
-					<LandingFigure class="plate hero-wide" name="console" alt="Afterglow 프로젝트 대시보드 화면" />
-				</div>
+				<div class="hero-board" data-reveal><LandingOpsBoard /></div>
 			</div>
 		</section>
 
-		<section id="overview" class="section">
+		<section id="overview" class="section overview-section">
 			<div class="container">
-				<div class="section-kicker" data-reveal>
-					<span class="roman">II</span>
+				<div class="section-head" data-reveal>
+					<div class="section-label"><span>운영의 범위</span><b>From request to reuse</b></div>
 					<div>
-						<h2 class="dot">클라우드를 제공하는 일은 자원 생성보다 넓습니다</h2>
-						<p class="section-copy">연구실에서는 사용자 초대, 프로젝트 쿼터, 이미지와 네트워크, 데이터 공유, GPU 사용량, 실습 클러스터, 감사 로그가 한꺼번에 얽힙니다. Afterglow는 이 흐름을 연구 조직이 이해할 수 있는 콘솔로 묶습니다.</p>
+						<h2>클라우드를 제공하는 일은<br />자원 생성보다 넓습니다</h2>
+						<p>연구실에서는 사용자 초대, 프로젝트 쿼터, 이미지와 네트워크, 데이터 공유, GPU 사용량, 실습 클러스터, 감사 로그가 한꺼번에 얽힙니다. Afterglow는 이 흐름을 연구 조직이 이해할 수 있는 콘솔로 묶습니다.</p>
 					</div>
 				</div>
-				<div class="about-layout" data-reveal>
-					<Card surface="subtle" padding="none" class="index-card">
+				<div class="overview-layout" data-reveal>
+					<Card surface="subtle" padding="none" class="overview-ledger">
 						{#each overviewRows as row}
-							<div class="index-row">
+							<article class="overview-row">
 								<b>{row.num}</b>
-								<div><strong>{row.title}</strong><p>{row.body}</p></div>
-							</div>
+								<div><h3>{row.title}</h3><p>{row.body}</p></div>
+								<span aria-hidden="true">↗</span>
+							</article>
 						{/each}
 					</Card>
-					<div class="about-collage">
-						<LandingFigure class="plate" name="professor" alt="교수와 연구원 협업 콜라주" />
-						<LandingFigure class="plate" name="console" alt="클라우드 콘솔 콜라주" />
+					<div class="overview-proof">
+						<LandingFigure class="overview-screen" name="console" fit="cover" alt="Afterglow 프로젝트 대시보드 화면">프로젝트 대시보드 / 자원과 사용량</LandingFigure>
+						<div class="proof-note"><span>하나의 프로젝트 안에서</span><strong>사람 · 정책 · 인프라</strong><p>운영자는 전체 흐름을 읽고, 연구자는 필요한 환경에 바로 접근합니다.</p></div>
 					</div>
 				</div>
 			</div>
@@ -307,105 +302,78 @@
 
 		<section id="capabilities" class="section">
 			<div class="container">
-				<div class="section-kicker" data-reveal>
-					<span class="roman">III</span>
+				<div class="section-head" data-reveal>
+					<div class="section-label"><span>제공 기능</span><b>Operational surfaces</b></div>
 					<div>
-						<h2 class="dot">연구 클라우드 제공에 필요한 표면을 한데 모읍니다</h2>
-						<p class="section-copy">사용자는 실험을 시작하고, 운영자는 경계를 유지하고, 교수자는 팀 단위 자원 흐름을 확인할 수 있어야 합니다.</p>
+						<h2>연구 클라우드 제공에 필요한<br />표면을 한데 모읍니다</h2>
+						<p>사용자는 실험을 시작하고, 운영자는 경계를 유지하고, 교수자는 팀 단위 자원 흐름을 확인할 수 있어야 합니다.</p>
 					</div>
 				</div>
-				<div class="card-grid" data-reveal>
-					{#each capabilities as card}
-						<article class="cap-card">
-							<Card surface="subtle" padding="none" class="cap-card-surface">
-								<PlateGraphic name={card.name} alt={card.alt} fit="cover" class="cap-card-media" />
-								<div class="cap-body">
-									<div class="cap-meta"><span>{card.num}</span><span>{card.tag}</span></div>
-									<h3>{card.title}</h3>
-									<p>{card.body}</p>
+				<div data-reveal>
+					<Card surface="subtle" padding="none" class="capability-grid">
+						{#each capabilities as capability}
+							<article class="cap-card">
+								<div class="cap-media"><PlateGraphic name={capability.name} alt={capability.alt} fit="contain" /></div>
+								<div class="cap-content">
+									<div class="cap-meta"><span>{capability.tag}</span><b>{capability.proof}</b></div>
+									<h3>{capability.title}</h3>
+									<p>{capability.body}</p>
 								</div>
-							</Card>
-						</article>
-					{/each}
+							</article>
+						{/each}
+					</Card>
 				</div>
 			</div>
 		</section>
 
-		<section id="workflow" class="section">
+		<section id="workflow" class="section workflow-section">
 			<div class="container">
-				<div class="section-kicker" data-reveal>
-					<span class="roman">IV</span>
+				<div class="section-head" data-reveal>
+					<div class="section-label"><span>워크플로우</span><b>Choose a context</b></div>
 					<div>
-						<h2 class="dot">연구실마다 다른 사용 흐름을 필터처럼 꺼내 봅니다</h2>
-						<p class="section-copy">아래 항목을 누르면 관련 워크플로우가 강조됩니다. 실제 서비스 화면에서도 이런 식으로 자원, 상태, 작업 흐름이 연결됩니다.</p>
+						<h2>연구실마다 다른 사용 흐름을<br />필터처럼 꺼내 봅니다</h2>
+						<p>컴퓨팅, 데이터, 운영 맥락을 전환하며 필요한 자원과 상태를 한 흐름에서 확인합니다.</p>
 					</div>
 				</div>
-				<div class="labs-layout" data-reveal>
+				<div class="workflow-layout" data-reveal>
 					<aside class="filter-panel">
-						<Card surface="subtle" padding="none" class="filter-panel-surface">
-							<h3 class="dot">워크플로우 인덱스</h3>
-							<ToggleGroup value={selectedFilter} options={filters} onchange={selectFilter} size="sm" class="landing-workflow-filter" ariaLabel="워크플로우 필터" />
-							<div class="progress-track" aria-hidden="true"><span class="progress-fill" id="workflow-progress" style={`width: ${progressWidth}`}></span></div>
+						<Card surface="subtle" padding="lg" class="filter-panel-surface">
+							<span class="filter-kicker">View by domain</span>
+							<h3>필요한 운영 맥락을<br />선택하세요</h3>
+							<ToggleGroup value={selectedFilter} options={filters} onchange={selectFilter} size="sm" fullWidth class="landing-workflow-filter" ariaLabel="워크플로우 필터" />
+							<p><b>{visibleCount}</b>개의 관련 흐름이 표시됩니다.</p>
 						</Card>
 					</aside>
-					<div class="lab-list">
-						{#each workflowCards as card}
+					<Card surface="subtle" padding="none" class="workflow-list">
+						{#each workflowCards as card, index}
 							{@const matches = selectedFilter === 'all' || card.kind === selectedFilter}
 							<article class="lab-card" class:is-muted={!matches} data-kind={card.kind}>
-								<Card surface="subtle" padding="none" class="lab-card-surface">
-									<PlateGraphic name={card.name} alt={card.alt} fit="cover" class="lab-card-media" />
-									<div><h3>{card.title}</h3><p>{card.body}</p></div>
-								</Card>
+								<div class="workflow-index">{String(index + 1).padStart(2, '0')}</div>
+								<PlateGraphic name={card.name} alt={card.alt} fit="cover" class="lab-card-media" />
+								<div class="workflow-copy"><span>{card.meta}</span><h3>{card.title}</h3><p>{card.body}</p></div>
 							</article>
 						{/each}
 						{#if visibleCount === 0}
-							<p class="empty-state" id="workflow-empty" role="status" aria-live="polite">선택한 조건에 맞는 워크플로우가 없습니다. 전체를 선택해 다시 확인하세요.</p>
+							<p class="empty-state" role="status" aria-live="polite">선택한 조건에 맞는 워크플로우가 없습니다. 전체를 선택해 다시 확인하세요.</p>
 						{/if}
-					</div>
+					</Card>
 				</div>
 			</div>
 		</section>
 
-		<section class="section">
+		<section class="section method-section">
 			<div class="container">
-				<div class="section-kicker" data-reveal>
-					<span class="roman">V</span>
-					<div><h2 class="dot">제공 방식은 네 단계로 정리됩니다</h2></div>
+				<div class="section-head compact-head" data-reveal>
+					<div class="section-label"><span>제공 방식</span><b>Four steps</b></div>
+					<div><h2>제공 방식은 네 단계로 정리됩니다</h2></div>
 				</div>
 				<div data-reveal>
 					<Card surface="subtle" padding="none" class="method-grid">
 						{#each methodSteps as step}
 							<article class="method-step">
-								<div><b>{step.step}</b><h3>{step.title}</h3></div>
-								{#if step.icon === 'observability'}
-									<svg class="method-icon" viewBox="0 0 320 240" role="img" aria-label={step.alt}>
-										<circle cx="48" cy="120" r="28" fill="none" stroke="currentColor" stroke-width="3" />
-										<path d="m41 104 22 16-22 16z" fill="currentColor" />
-										<path d="M76 120h28M222 120h18" fill="none" stroke="currentColor" stroke-dasharray="5 7" stroke-width="2.5" />
-										<rect x="104" y="52" width="118" height="132" rx="10" fill="none" stroke="currentColor" stroke-width="3" />
-										<path d="M124 160V78h78" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".62" />
-										<path d="M128 144c14-8 16-35 30-28s16 37 30 22 16-56 30-42" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" />
-										<path d="M128 154c14-2 20-18 32-12s18 24 32 13 14-30 26-25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" opacity=".55" />
-										<circle cx="158" cy="116" r="4" fill="currentColor" /><circle cx="188" cy="138" r="4" fill="currentColor" /><circle cx="218" cy="96" r="4" fill="currentColor" />
-										<rect x="240" y="58" width="56" height="124" rx="10" fill="none" stroke="currentColor" stroke-width="3" />
-										<path d="M258 84h22M258 108h22M258 132h16M258 156h22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="3" />
-										<circle cx="252" cy="84" r="3" fill="currentColor" /><circle cx="252" cy="132" r="3" fill="currentColor" opacity=".58" /><circle cx="252" cy="156" r="3" fill="currentColor" opacity=".58" />
-									</svg>
-								{:else if step.icon === 'reuse'}
-									<svg class="method-icon" viewBox="0 0 320 240" role="img" aria-label={step.alt}>
-										<rect x="36" y="142" width="128" height="34" rx="8" fill="currentColor" opacity=".28" />
-										<rect x="52" y="108" width="128" height="34" rx="8" fill="currentColor" opacity=".5" />
-										<rect x="68" y="74" width="128" height="34" rx="8" fill="currentColor" opacity=".82" />
-										<path d="M84 91h96M68 125h96M52 159h96" fill="none" stroke="currentColor" stroke-width="3" opacity=".42" />
-										<circle cx="220" cy="92" r="38" fill="none" stroke="currentColor" stroke-width="4" />
-										<path d="M220 70v24l17 10M246 64l-4 18-17-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" />
-										<path d="M180 128h30M210 128l-10-10M210 128l-10 10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" />
-										<rect x="222" y="150" width="56" height="36" rx="8" fill="none" stroke="currentColor" stroke-width="3" opacity=".68" />
-										<circle cx="238" cy="168" r="4" fill="currentColor" /><circle cx="254" cy="168" r="4" fill="currentColor" opacity=".55" /><circle cx="270" cy="168" r="4" fill="currentColor" opacity=".32" />
-									</svg>
-								{:else if step.name}
-									<PlateGraphic name={step.name} alt={step.alt} fit="cover" class="method-graphic" />
-								{/if}
+								<div class="method-meta"><b>{step.step}</b><span>{step.label}</span></div>
+								<div class="method-mark" aria-hidden="true"><span></span></div>
+								<div><h3>{step.title}</h3><p>{step.detail}</p></div>
 							</article>
 						{/each}
 					</Card>
@@ -413,299 +381,291 @@
 			</div>
 		</section>
 
-		<section id="work" class="section">
+		<section id="work" class="section work-section">
 			<div class="container">
-				<div class="section-kicker" data-reveal>
-					<span class="roman">VI</span>
+				<div class="section-head" data-reveal>
+					<div class="section-label"><span>제품 화면</span><b>Operational proof</b></div>
 					<div>
-						<h2 class="dot">실제 콘솔은 운영자가 빠르게 읽을 수 있어야 합니다</h2>
-						<p class="section-copy">랜딩은 편집적으로 보이되, 제품 자체는 고밀도 운영 콘솔입니다. 대시보드, 관리자, 클러스터, 네트워크 화면을 안전한 제품 아트워크로 노출합니다.</p>
+						<h2>실제 콘솔은 운영자가<br />빠르게 읽을 수 있어야 합니다</h2>
+						<p>대시보드, 관리자, 클러스터, 네트워크 화면은 자원 상태와 연결 관계를 같은 운영 문법으로 보여줍니다.</p>
 					</div>
 				</div>
-				<div data-reveal>
-					<Card surface="subtle" padding="none" class="work-slab">
-						<div class="work-grid">
-							<LandingFigure class="screen-main" name="kubernetes" fit="cover" alt="Afterglow Kubernetes 클러스터 화면">Kubernetes 클러스터 / 노드와 워크로드</LandingFigure>
-							<div class="screen-stack">
-								<LandingFigure name="security" fit="cover" alt="Afterglow 관리자 개요 화면">관리자 개요 / 사용량과 서비스 상태</LandingFigure>
-								<LandingFigure name="network-topology" fit="cover" alt="Afterglow 네트워크 토폴로지 화면">네트워크 토폴로지 / 연결 관계</LandingFigure>
-							</div>
+				<div class="product-stage" data-reveal>
+					<div class="stage-bar"><span><i></i><i></i><i></i></span><b>afterglow / project / research-lab</b><em>live console</em></div>
+					<div class="work-grid">
+						<LandingFigure class="screen-main" name="kubernetes" fit="cover" alt="Afterglow Kubernetes 클러스터 화면">Kubernetes 클러스터 / 노드와 워크로드</LandingFigure>
+						<div class="screen-stack">
+							<LandingFigure name="security" fit="cover" alt="Afterglow 관리자 개요 화면">관리자 개요 / 사용량과 서비스 상태</LandingFigure>
+							<LandingFigure name="network-topology" fit="cover" alt="Afterglow 네트워크 토폴로지 화면">네트워크 토폴로지 / 연결 관계</LandingFigure>
 						</div>
-					</Card>
+					</div>
 				</div>
 			</div>
 		</section>
 
-		<section class="section">
-			<div class="container quote-panel">
+		<section class="section audience-section">
+			<div class="container audience-layout">
 				<div data-reveal>
-					<span class="roman">VII</span>
-					<blockquote class="dot">“실험 환경을 만드는 시간이 줄어들면, 연구자는 다시 질문에 집중할 수 있습니다”</blockquote>
-					<ul class="glyphs" aria-label="대상 사용자와 조직">
+					<div class="section-label"><span>사용자</span><b>Built for the lab</b></div>
+					<blockquote>“실험 환경을 만드는 시간이 줄어들면, 연구자는 다시 질문에 집중할 수 있습니다”</blockquote>
+					<ul class="audience-list" aria-label="대상 사용자와 조직">
 						<li class="glyph">연구실</li><li class="glyph">교수자</li><li class="glyph">연구원</li><li class="glyph">실습팀</li><li class="glyph">연구 조직</li>
 					</ul>
 				</div>
 				<div class="quote-visual" data-reveal>
-					<LandingFigure class="plate" name="kubernetes" alt="Afterglow K8s 클러스터 목록 화면" />
-					<LandingFigure class="plate" name="network-topology" alt="프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주" />
+					<LandingFigure class="audience-figure" name="professor" alt="교수자와 연구원이 프로젝트 환경을 함께 운영하는 화면" />
+					<div class="audience-note"><span>Shared context</span><strong>같은 프로젝트를<br />서로 다른 역할로</strong><p>사용자는 환경을 쓰고, 교수자는 흐름을 보고, 운영자는 경계를 지킵니다.</p></div>
 				</div>
 			</div>
 		</section>
 
-		<section id="contact" class="section">
+		<section id="contact" class="section contact-section">
 			<div class="container">
-				<div class="cta" data-reveal>
+				<div class="contact-panel" data-reveal>
 					<div>
-						<span class="eyebrow">VIII / Console ready</span>
-						<h2 class="dot">연구실 클라우드 제공 방식을 정리할 준비가 되셨나요?</h2>
-						<p class="section-copy">데모, PoC, 학내 연구실 배포 논의를 위해 연락 주세요.</p>
+						<div class="eyebrow"><span aria-hidden="true"></span>Console ready</div>
+						<h2>연구실 클라우드 제공 방식을<br />정리할 준비가 되셨나요?</h2>
+						<p>데모, PoC, 학내 연구실 배포 논의를 위해 연락 주세요.</p>
 					</div>
-					<Button variant="outline" size="lg" class="email-pill" href={`mailto:${email}`} ariaLabel="이메일 문의 보내기">문의</Button>
+					<div class="contact-actions">
+						<Button variant="primary" size="lg" class="contact-console" href={consoleHref}>콘솔 접속</Button>
+						<Button variant="outline" size="lg" class="email-pill" href={`mailto:${email}`} ariaLabel="이메일 문의 보내기">{email}</Button>
+					</div>
 				</div>
 			</div>
 		</section>
+	</div>
+
 	<footer class="footer">
-		<div class="container">
+		<div class="container footer-layout">
+			<div class="footer-brand"><img src={logoPath} alt="" /><strong>{siteName}</strong><span>Research cloud operations</span></div>
 			<div class="footer-grid">
 				<div><h3>제품</h3><a href="#overview">개요</a><a href="#capabilities">제공 기능</a><a href="#workflow">워크플로우</a></div>
 				<div><h3>연락</h3><a href={`mailto:${email}`}>{email}</a><a href="https://github.com/openstack-afterglow/openstack-afterglow">GitHub 저장소</a></div>
 			</div>
-			<p class="footer-copyright">© 2026 {siteName}. 연구 클라우드 운영 콘솔.</p>
-			<div class="mega">{siteName}</div>
 		</div>
+		<div class="container footer-bottom"><p>© 2026 {siteName}. 연구 클라우드 운영 콘솔.</p><span>Seoul · Republic of Korea</span></div>
 	</footer>
-	</div>
 </div>
 
 <style>
-.landing-page {
-		--landing-ease: cubic-bezier(.2, .8, .2, 1);
-		--landing-container: 1180px;
-		--landing-gutter: clamp(18px, 4vw, 44px);
-		--landing-radius: 14px;
-		position: relative;
+	.landing-page {
+		--landing-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+		--landing-container: 80rem;
+		--landing-gutter: 1rem;
+		--landing-nav-height: 6.25rem;
 		min-height: 100%;
-		background: var(--gradient-editorial-canvas);
+		padding-top: var(--landing-nav-height);
+		background: var(--color-surface-canvas);
 		color: var(--color-ink-0);
 		font-family: var(--font-sans);
-		font-size: 15px;
-		line-height: 1.6;
+		font-weight: 400;
+		letter-spacing: -0.01em;
+		font-size: 0.9375rem;
+		line-height: 1.65;
 		-webkit-font-smoothing: antialiased;
 		text-rendering: optimizeLegibility;
-		padding-top: 68px;
 	}
-
-	.landing-page::before {
-		content: '';
-		position: fixed;
-		inset: 0;
-		pointer-events: none;
-		z-index: 0;
-		opacity: 0.26;
-		background-image: var(--pattern-editorial-grid);
-		background-size: 72px 72px;
-		mask-image: var(--gradient-editorial-grid-mask);
-	}
-
-	.landing-page > * { position: relative; z-index: 1; }
-	.landing-page :global(img) { max-width: 100%; display: block; }
+	.landing-page :global(img) { display: block; max-width: 100%; }
 	.landing-page :global(a) { color: inherit; }
-	.landing-page :global(button), .landing-page :global(input) { font: inherit; }
+	.landing-page h1, .landing-page h2, .landing-page h3, .landing-page p, .landing-page blockquote { margin: 0; }
 	.landing-page .container { width: min(var(--landing-container), calc(100% - var(--landing-gutter) * 2)); margin-inline: auto; }
-	.landing-page .em { font-family: var(--font-sans); font-style: italic; font-weight: 500; color: var(--color-warm); }
-	.landing-page .dot::after { content: '.'; color: var(--color-warm); }
-	.landing-page h1, .landing-page h2, .landing-page h3, .landing-page p { margin: 0; }
-	.landing-page :global(a:focus-visible), .landing-page :global(button:focus-visible) { outline: 2px solid var(--color-warm); outline-offset: 4px; box-shadow: var(--focus-ring); }
+	.landing-page :global(a:focus-visible), .landing-page :global(button:focus-visible) { outline: none; box-shadow: var(--focus-ring); }
 
-	.landing-page .skip-link {
-		position: fixed; top: 12px; left: 16px; z-index: 80; min-height: 44px; display: inline-flex; align-items: center;
-		padding: 0 14px; border: 1px solid var(--color-warm); border-radius: 999px; background: var(--color-ink-0); color: var(--color-surface-canvas);
-		font-weight: 700; text-decoration: none; transform: translateY(-150%); transition: transform 160ms var(--landing-ease);
-	}
-	.landing-page .skip-link:focus-visible { transform: translateY(0); }
+	.skip-link { position: fixed; top: 0.75rem; left: 1rem; z-index: var(--z-toast); display: inline-flex; min-height: 2.75rem; align-items: center; padding: 0 0.875rem; border: 1px solid var(--color-warm); border-radius: 0.5rem; background: var(--color-ink-0); color: var(--color-surface-canvas); font-weight: 700; text-decoration: none; transform: translateY(-160%); transition: transform var(--motion-duration-fast) var(--landing-ease); }
+	.skip-link:focus-visible { transform: translateY(0); }
 
-	.landing-page .top-strip {
-		position: fixed; inset: 0 0 auto; z-index: 30; border-bottom: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%);
-		background: color-mix(in oklab, var(--color-surface-canvas), transparent 8%); backdrop-filter: blur(18px);
-	}
-	.landing-page .nav { display: flex; min-height: 68px; min-width: 0; align-items: center; justify-content: space-between; gap: 22px; border-top: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
-	.landing-page .brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 12px; text-decoration: none; font-weight: 700; letter-spacing: 0; }
-	.landing-page .brand img { width: 34px; height: 34px; padding: 3px; border-radius: 9px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); background: var(--color-surface-raised); object-fit: contain; }
-	.landing-page .nav-links { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; justify-content: center; gap: 4px; overflow-x: auto; color: var(--color-ink-1); font-size: 13px; scrollbar-width: none; white-space: nowrap; }
-	.landing-page .nav-links::-webkit-scrollbar { display: none; }
-	.landing-page .nav-links a { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 40px; padding: 7px 10px; border-radius: 999px; text-decoration: none; transition: background 160ms var(--landing-ease), color 160ms var(--landing-ease), box-shadow 160ms var(--landing-ease); }
-	.landing-page .nav-links a:hover { background: color-mix(in oklab, var(--color-surface-raised), transparent 18%); color: var(--color-ink-0); }
-	.landing-page .nav-links a.is-active { background: color-mix(in oklab, var(--color-warm), transparent 84%); color: var(--color-ink-0); box-shadow: inset 0 -2px 0 var(--color-warm); }
-	.landing-page :global(.nav-cta), .landing-page :global(.landing-btn) { min-height: 44px; padding-inline: 16px; border-radius: 999px; font-size: 13px; font-weight: 700; }
-	.landing-page :global(.nav-cta) { flex: 0 0 auto; border-color: color-mix(in oklab, var(--color-warm), var(--color-line) 40%); }
-	.landing-page :global(.landing-btn) { min-height: 48px; padding-inline: 20px; }
+	.top-strip { position: fixed; inset: 0 0 auto; z-index: var(--z-sidebar); border-bottom: 1px solid color-mix(in oklab, var(--color-line) 84%, transparent); background: color-mix(in oklab, var(--color-surface-canvas) 88%, transparent); backdrop-filter: blur(1.125rem); }
+	.nav { display: grid; grid-template-areas: 'brand cta' 'links links'; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.75rem; min-height: var(--landing-nav-height); padding-block: 0.5rem; }
+	.brand { grid-area: brand; display: grid; grid-template-columns: 2rem auto; min-height: 2.75rem; align-items: center; column-gap: 0.625rem; width: fit-content; text-decoration: none; }
+	.brand img { grid-row: 1 / 3; width: 2rem; height: 2rem; object-fit: contain; }
+	.brand span { align-self: end; font-size: 0.8125rem; font-weight: 700; line-height: 1; }
+	.brand small { align-self: start; color: var(--color-ink-3); font-family: var(--font-mono); font-size: 0.5625rem; line-height: 1; text-transform: uppercase; }
+	.nav-links { grid-area: links; display: flex; min-width: 0; align-items: center; gap: 0.125rem; overflow-x: auto; scrollbar-width: none; }
+	.nav-links::-webkit-scrollbar { display: none; }
+	.nav-links a { position: relative; display: inline-flex; min-width: 2.75rem; min-height: 2.75rem; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0.5rem 0.625rem; color: var(--color-ink-2); font-size: 0.75rem; text-decoration: none; }
+	.nav-links a::after { content: ''; position: absolute; inset: auto 0.625rem 0.25rem; height: 1px; background: var(--color-warm); transform: scaleX(0); transform-origin: left; transition: transform var(--motion-duration-fast) var(--landing-ease); }
+	.nav-links a:hover, .nav-links a.is-active { color: var(--color-ink-0); }
+	.nav-links a.is-active::after { transform: scaleX(1); }
+	.landing-page :global(.nav-cta) { grid-area: cta; }
+	.landing-page :global(.nav-cta), .landing-page :global(.landing-btn), .landing-page :global(.contact-console), .landing-page :global(.email-pill) { min-height: 2.75rem; border-radius: 0.625rem; font-weight: 700; }
 
-	.landing-page .hero { min-height: calc(100svh - 68px); padding: clamp(56px, 8vw, 96px) 0 56px; display: grid; align-items: center; }
-	.landing-page .hero-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr); gap: clamp(28px, 5vw, 68px); align-items: center; }
-	.landing-page .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--color-warm); font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
-	.landing-page .eyebrow::before { content: ''; width: 36px; height: 1px; border-top: 1px dotted currentColor; }
-	.landing-page h1 { max-width: 940px; margin-top: 22px; font-family: var(--font-sans); font-size: 112px; line-height: .92; font-weight: 700; letter-spacing: 0; text-wrap: balance; word-break: keep-all; overflow-wrap: normal; }
-	.landing-page .lead { max-width: 670px; margin-top: 26px; color: var(--color-ink-1); font-size: 22px; line-height: 1.55; word-break: keep-all; }
-	.landing-page .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
-	.landing-page .stat-rings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 40px; max-width: 650px; }
-	.landing-page .ring { min-height: 150px; padding: 16px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); background: color-mix(in oklab, var(--color-surface-raised), transparent 16%); display: grid; align-content: space-between; position: relative; overflow: hidden; }
-	.landing-page .ring::before { content: ''; position: absolute; right: -32px; top: -42px; width: 126px; height: 126px; border: 18px solid color-mix(in oklab, var(--color-warm), transparent 20%); border-left-color: transparent; border-radius: 50%; transform: rotate(var(--rot, 18deg)); }
-	.landing-page .ring:nth-child(2)::before { border-color: color-mix(in oklab, var(--color-accent), transparent 18%); border-top-color: transparent; --rot: 62deg; }
-	.landing-page .ring:nth-child(3)::before { border-color: color-mix(in oklab, var(--color-accent-2), transparent 20%); border-bottom-color: transparent; --rot: -18deg; }
-	.landing-page .ring strong { font-family: var(--font-sans); font-size: 38px; line-height: 1; }
-	.landing-page .ring span { color: var(--color-ink-2); font-size: 12px; word-break: keep-all; }
-	.landing-page .collage { display: grid; grid-template-columns: .86fr 1fr; gap: 14px; align-items: end; }
-	.landing-page :global(.plate) { position: relative; overflow: hidden; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); background: var(--color-surface-editorial-media); box-shadow: 0 24px 70px color-mix(in oklab, var(--color-surface-canvas), transparent 58%); }
-	.landing-page :global(.plate .plate-graphic) { width: 100%; height: 100%; background: var(--color-surface-editorial-media); }
-	.landing-page :global(.plate.hero-main) { aspect-ratio: 4 / 5; border-radius: 28px 28px 4px 28px; transform: rotate(-2.5deg); }
-	.landing-page :global(.plate.hero-side) { aspect-ratio: 1 / 1; border-radius: 4px 26px 26px 26px; transform: rotate(3deg); margin-bottom: 34px; }
-	.landing-page :global(.plate.hero-wide) { grid-column: 1 / -1; aspect-ratio: 16 / 7; border-radius: 26px 4px 26px 26px; transform: rotate(.8deg); }
+	.hero { position: relative; overflow: hidden; padding: 4.5rem 0 5rem; }
+	.hero::before { content: ''; position: absolute; top: -18rem; left: -10rem; width: 36rem; height: 36rem; border-radius: 999px; background: color-mix(in oklab, var(--color-warm) 12%, transparent); filter: blur(6rem); pointer-events: none; }
+	.hero-layout { position: relative; display: grid; gap: 3rem; align-items: center; }
+	.eyebrow, .section-label, .filter-kicker { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-transform: uppercase; }
+	.eyebrow { display: inline-flex; align-items: center; gap: 0.625rem; color: var(--color-ink-2); font-size: 0.6875rem; letter-spacing: 0.08em; }
+	.eyebrow > span { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--color-warm); box-shadow: 0 0 0 0.25rem var(--warm-soft); }
+	.hero h1, .section h2, .cap-content h3, blockquote, .audience-note strong { font-family: var(--font-display); }
+	.hero h1 { max-width: 48rem; margin-top: 1.5rem; font-size: clamp(2.75rem, 10vw, 4.25rem); font-weight: 500; letter-spacing: -0.04em; line-height: 1.06; text-wrap: balance; word-break: keep-all; }
+	.hero h1 em { display: block; width: fit-content; color: var(--color-warm); font-style: normal; white-space: nowrap; }
+	.lead { max-width: 42rem; margin-top: 1.5rem !important; color: var(--color-ink-1); font-size: clamp(1rem, 2.2vw, 1.125rem); line-height: 1.72; word-break: keep-all; }
+	.hero-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-top: 1.75rem; }
+	.hero-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin: 2.5rem 0 0; padding: 1rem 0 0; border-top: 1px solid var(--color-line); list-style: none; }
+	.hero-facts li { min-width: 0; }
+	.hero-facts b { display: block; color: var(--color-accent); font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500; text-transform: uppercase; }
+	.hero-facts span { display: block; margin-top: 0.25rem; color: var(--color-ink-2); font-size: 0.6875rem; word-break: keep-all; }
+	.hero-board { min-width: 0; }
 
-	.landing-page .section { padding: clamp(66px, 10vw, 126px) 0; border-top: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
-	.landing-page #landing-content, .landing-page .section[id] { scroll-margin-top: 126px; }
-	.landing-page .section-kicker { display: grid; grid-template-columns: 90px 1fr; gap: 20px; align-items: start; margin-bottom: 34px; }
-	.landing-page .roman { color: var(--color-warm); font-family: var(--font-sans); font-style: italic; font-size: 28px; line-height: 1; }
-	.landing-page .section h2 { max-width: 900px; font-family: var(--font-sans); font-size: 68px; line-height: .98; letter-spacing: 0; text-wrap: balance; word-break: keep-all; overflow-wrap: normal; }
-	.landing-page .section-copy { max-width: 700px; margin-top: 18px; color: var(--color-ink-1); font-size: 20px; line-height: 1.65; word-break: keep-all; }
-	.landing-page .about-layout { display: grid; grid-template-columns: minmax(0, .95fr) minmax(340px, 1.05fr); gap: 28px; align-items: stretch; }
-	.landing-page :global(.index-card) { border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); background: color-mix(in oklab, var(--color-surface-raised), transparent 12%); overflow: hidden; }
-	.landing-page .index-row { display: grid; grid-template-columns: 64px 1fr; gap: 16px; padding: 18px; border-bottom: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
-	.landing-page .index-row:last-child { border-bottom: 0; }
-	.landing-page .index-row b { color: var(--color-warm); font-family: var(--font-mono); font-size: 12px; }
-	.landing-page .index-row strong { display: block; margin-bottom: 4px; font-size: 18px; }
-	.landing-page .index-row p { color: var(--color-ink-2); font-size: 14px; word-break: keep-all; }
-	.landing-page .about-collage { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-	.landing-page .about-collage :global(.plate:first-child) { aspect-ratio: 1 / 1.08; border-radius: 26px 4px 26px 26px; }
-	.landing-page .about-collage :global(.plate:nth-child(2)) { aspect-ratio: 1 / 1.08; border-radius: 4px 26px 26px 26px; transform: translateY(34px); }
+	.section { padding: 4.5rem 0; border-top: 1px solid var(--color-line); }
+	#landing-content, .section[id] { scroll-margin-top: calc(var(--landing-nav-height) + 1rem); }
+	.section-head { display: grid; gap: 1.75rem; margin-bottom: 2.5rem; }
+	.section-label { display: flex; align-items: center; gap: 0.75rem; color: var(--color-warm); font-size: 0.6875rem; letter-spacing: 0.08em; }
+	.section-label span { font-weight: 700; }
+	.section-label b { color: var(--color-ink-3); font-weight: 500; }
+	.section h2 { max-width: 58rem; font-size: clamp(2rem, 7vw, 3.75rem); font-weight: 500; letter-spacing: -0.03em; line-height: 1.12; text-wrap: balance; word-break: keep-all; }
+	.section-head > div:last-child > p { max-width: 46rem; margin-top: 1rem; color: var(--color-ink-1); font-size: 1rem; word-break: keep-all; }
 
-	.landing-page .card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-	.landing-page .cap-card { min-height: 460px; display: block; }
-	.landing-page :global(.cap-card-surface) { display: grid; grid-template-rows: 190px auto; height: 100%; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); overflow: hidden; background: color-mix(in oklab, var(--color-surface-raised), transparent 10%); }
-	.landing-page :global(.cap-card-surface .plate-graphic) { height: 190px; width: 100%; border-bottom: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
-	.landing-page .cap-body { padding: 18px; }
-	.landing-page .cap-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; color: var(--color-ink-2); font-family: var(--font-mono); font-size: 12px; }
-	.landing-page .cap-card h3 { font-family: var(--font-sans); font-size: 28px; line-height: 1.05; text-wrap: balance; word-break: keep-all; overflow-wrap: normal; }
-	.landing-page .cap-card p { margin-top: 14px; color: var(--color-ink-1); font-size: 14px; word-break: keep-all; }
+	.overview-section { background: color-mix(in oklab, var(--color-surface-base) 64%, var(--color-surface-canvas)); }
+	.overview-layout { display: grid; gap: 1rem; }
+	.landing-page :global(.overview-ledger) { border-color: var(--color-line); background: color-mix(in oklab, var(--color-surface-raised) 62%, transparent); }
+	.overview-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: 0.75rem; align-items: start; padding: 1.25rem; border-bottom: 1px solid var(--color-line); }
+	.overview-row:last-child { border-bottom: 0; }
+	.overview-row > b { color: var(--color-warm); font-family: var(--font-mono); font-size: 0.6875rem; }
+	.overview-row h3 { font-size: 1rem; }
+	.overview-row p { margin-top: 0.25rem; color: var(--color-ink-2); font-size: 0.8125rem; word-break: keep-all; }
+	.overview-row > span { color: var(--color-ink-3); }
+	.overview-proof { position: relative; min-height: 24rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: 1rem; background: var(--color-surface-editorial-media); }
+	.landing-page :global(.overview-screen) { position: absolute; inset: 0; margin: 0; }
+	.landing-page :global(.overview-screen .plate-graphic) { width: 100%; height: 100%; opacity: 0.74; }
+	.landing-page :global(.overview-screen figcaption) { display: none; }
+	.proof-note { position: absolute; inset: auto 1rem 1rem; max-width: 22rem; padding: 1rem; border: 1px solid var(--color-line-2); border-radius: 0.75rem; background: color-mix(in oklab, var(--color-surface-canvas) 86%, transparent); backdrop-filter: blur(0.75rem); }
+	.proof-note span { color: var(--color-warm); font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; }
+	.proof-note strong { display: block; margin-top: 0.35rem; font-size: 1.25rem; }
+	.proof-note p { margin-top: 0.5rem; color: var(--color-ink-2); font-size: 0.75rem; }
 
-	.landing-page .labs-layout { display: grid; grid-template-columns: minmax(320px, .42fr) minmax(0, .58fr); gap: 20px; align-items: start; }
-	.landing-page .filter-panel { position: sticky; top: 126px; }
-	.landing-page :global(.filter-panel-surface) { border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); padding: 18px; background: color-mix(in oklab, var(--color-surface-raised), transparent 12%); }
-	.landing-page .filter-panel h3 { font-family: var(--font-sans); font-size: 32px; line-height: 1.05; }
-	.landing-page :global(.landing-workflow-filter) { display: flex; margin-top: 20px; border: 0; padding: 0; background: transparent; border-radius: 999px; }
-	.landing-page :global(.landing-workflow-filter .toggle-option) { min-height: 36px; padding: 0 12px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 999px; background: transparent; color: var(--color-ink-1); cursor: pointer; transition: border-color 160ms var(--landing-ease), color 160ms var(--landing-ease), background 160ms var(--landing-ease), transform 160ms var(--landing-ease); }
-	.landing-page :global(.landing-workflow-filter .toggle-option:hover) { border-color: var(--color-warm); color: var(--color-ink-0); }
-	.landing-page :global(.landing-workflow-filter .toggle-option:active) { transform: translateY(1px); }
-	.landing-page :global(.landing-workflow-filter .toggle-option[aria-pressed='true']) { border-color: var(--color-warm); background: color-mix(in oklab, var(--color-warm), transparent 84%); color: var(--color-ink-0); }
-	.landing-page .progress-track { margin-top: 22px; height: 4px; border-radius: 999px; background: var(--color-line); overflow: hidden; }
-	.landing-page .progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--color-warm); transition: width 220ms var(--landing-ease); }
-	.landing-page .lab-list { display: grid; gap: 12px; }
-	.landing-page .lab-card { display: block; transition: opacity 180ms var(--landing-ease), transform 180ms var(--landing-ease), border-color 180ms var(--landing-ease); }
-	.landing-page .lab-card.is-muted { opacity: .38; transform: scale(.985); }
-	.landing-page :global(.lab-card-surface) { display: grid; grid-template-columns: 176px 1fr; gap: 18px; align-items: center; padding: 12px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); background: color-mix(in oklab, var(--color-surface-raised), transparent 14%); }
-	.landing-page :global(.lab-card-surface .plate-graphic) { aspect-ratio: 4 / 3; height: 132px; width: 176px; border-radius: 10px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); }
-	.landing-page .lab-card h3 { font-size: 20px; }
-	.landing-page .lab-card p { color: var(--color-ink-1); word-break: keep-all; }
-	.landing-page .empty-state { margin: 0; padding: 18px; border: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); color: var(--color-ink-2); background: color-mix(in oklab, var(--color-surface-raised), transparent 18%); word-break: keep-all; }
+	.landing-page :global(.capability-grid) { display: grid; border-color: var(--color-line); background: color-mix(in oklab, var(--color-surface-raised) 62%, transparent); }
+	.cap-card { display: grid; grid-template-rows: 12rem minmax(0, 1fr); min-width: 0; border-bottom: 1px solid var(--color-line); }
+	.cap-card:last-child { border-bottom: 0; }
+	.cap-media { overflow: hidden; border-bottom: 1px solid var(--color-line); background: var(--color-surface-editorial-media); }
+	.cap-media :global(.plate-graphic) { width: 100%; height: 100%; padding: 0.5rem; }
+	.cap-content { display: flex; min-width: 0; flex-direction: column; padding: 1.25rem; }
+	.cap-meta { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-family: var(--font-mono); font-size: 0.6875rem; }
+	.cap-meta span { color: var(--color-accent); text-transform: uppercase; }
+	.cap-meta b { color: var(--color-ink-3); font-weight: 500; }
+	.cap-content h3 { margin-top: 1.25rem; font-size: clamp(1.25rem, 4vw, 2rem); font-weight: 500; letter-spacing: -0.022em; line-height: 1.17; text-wrap: balance; word-break: keep-all; }
+	.cap-content p { margin-top: 0.875rem; color: var(--color-ink-1); font-size: 0.8125rem; word-break: keep-all; }
 
-	.landing-page :global(.method-grid) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: var(--landing-radius); overflow: hidden; }
-	.landing-page .method-step { min-height: 300px; padding: 22px; border-right: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); background: color-mix(in oklab, var(--color-surface-raised), transparent 14%); display: grid; align-content: space-between; gap: 28px; }
-	.landing-page .method-step:last-child { border-right: 0; }
-	.landing-page .method-icon { aspect-ratio: 4 / 3; width: 100%; display: block; padding: 16px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 10px; background: color-mix(in oklab, var(--color-surface-canvas), transparent 10%); color: var(--color-accent); }
-	.landing-page :global(.method-graphic) { aspect-ratio: 4 / 3; width: 100%; display: block; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 10px; overflow: hidden; }
-	.landing-page .method-step b { color: var(--color-warm); font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; }
-	.landing-page .method-step h3 { margin-top: 10px; font-family: var(--font-sans); font-size: 25px; line-height: 1.05; }
+	.workflow-section { background: color-mix(in oklab, var(--color-surface-base) 64%, var(--color-surface-canvas)); }
+	.workflow-layout { display: grid; gap: 1rem; align-items: start; }
+	.landing-page :global(.filter-panel-surface) { border-color: var(--color-line); background: color-mix(in oklab, var(--color-surface-raised) 62%, transparent); }
+	.filter-kicker { color: var(--color-accent); font-size: 0.6875rem; letter-spacing: 0.08em; }
+	.filter-panel h3 { margin-top: 0.75rem; font-size: 1.5rem; line-height: 1.15; }
+	.landing-page :global(.landing-workflow-filter) { margin-top: 1.5rem; }
+	.landing-page :global(.landing-workflow-filter .toggle-option) { min-height: 2.75rem; }
+	.filter-panel p { margin-top: 0.75rem; color: var(--color-ink-2); font-size: 0.75rem; }
+	.filter-panel p b { color: var(--color-warm); }
+	.landing-page :global(.workflow-list) { border-color: var(--color-line); background: color-mix(in oklab, var(--color-surface-raised) 62%, transparent); }
+	.lab-card { transition: opacity var(--motion-duration-base) var(--landing-ease), transform var(--motion-duration-base) var(--landing-ease); }
+	.lab-card { display: grid; grid-template-columns: auto minmax(5.5rem, 7rem) minmax(0, 1fr); align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--color-line); }
+	.lab-card:last-of-type { border-bottom: 0; }
+	.lab-card.is-muted { opacity: 0.34; transform: scale(0.99); }
+	.workflow-index { align-self: start; color: var(--color-warm); font-family: var(--font-mono); font-size: 0.6875rem; }
+	.landing-page :global(.lab-card-media) { width: 100%; aspect-ratio: 1 / 1; border-radius: 0.625rem; background: var(--color-surface-editorial-media); }
+	.workflow-copy span { color: var(--color-ink-3); font-family: var(--font-mono); font-size: 0.625rem; text-transform: uppercase; }
+	.workflow-copy h3 { margin-top: 0.25rem; font-size: 1rem; }
+	.workflow-copy p { margin-top: 0.35rem; color: var(--color-ink-2); font-size: 0.75rem; word-break: keep-all; }
+	.empty-state { padding: 1rem; border: 1px dashed var(--color-line-2); border-radius: 0.75rem; color: var(--color-ink-2); }
 
-	.landing-page :global(.work-slab) { padding: clamp(20px, 4vw, 36px); border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 28px; background: color-mix(in oklab, var(--color-surface-canvas), var(--color-surface-raised) 74%); overflow: hidden; }
-	.landing-page .work-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 18px; align-items: center; }
-	.landing-page :global(.screen-main), .landing-page :global(.screen-stack figure) { margin: 0; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); background: var(--color-surface-canvas); overflow: hidden; position: relative; box-shadow: 0 28px 70px color-mix(in oklab, var(--color-surface-canvas), transparent 48%); }
-	.landing-page :global(.screen-main) { border-radius: 18px; transform: rotate(-1.1deg); }
-	.landing-page :global(.screen-main .plate-graphic) { aspect-ratio: 16 / 9; width: 100%; height: 100%; }
-	.landing-page .screen-stack { display: grid; gap: 16px; }
-	.landing-page :global(.screen-stack figure) { border-radius: 18px; transform: rotate(2deg); }
-	.landing-page :global(.screen-stack figure:nth-child(2)) { transform: rotate(-2.2deg); }
-	.landing-page :global(.screen-stack .plate-graphic) { aspect-ratio: 16 / 10; width: 100%; }
-	.landing-page :global(figcaption) { padding: 10px 12px; color: var(--color-ink-2); font-family: var(--font-mono); font-size: 12px; border-top: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); }
+	.landing-page :global(.method-grid) { display: grid; border-color: var(--color-line); background: color-mix(in oklab, var(--color-surface-raised) 62%, transparent); }
+	.method-step { display: grid; grid-template-columns: auto 1fr; gap: 1rem; padding: 1.5rem; border-bottom: 1px solid var(--color-line); }
+	.method-step:last-child { border-bottom: 0; }
+	.method-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; }
+	.method-meta b { color: var(--color-warm); }
+	.method-meta span { color: var(--color-ink-3); }
+	.method-mark { display: none; }
+	.method-step h3 { font-size: 1.125rem; line-height: 1.2; word-break: keep-all; }
+	.method-step p { margin-top: 0.625rem; color: var(--color-ink-2); font-size: 0.75rem; word-break: keep-all; }
 
-	.landing-page .quote-panel { display: grid; grid-template-columns: minmax(0, .9fr) minmax(320px, 1.1fr); gap: 24px; align-items: center; }
-	.landing-page blockquote { margin: 0; font-family: var(--font-sans); font-size: 64px; line-height: 1.02; text-wrap: balance; word-break: keep-all; overflow-wrap: normal; }
-	.landing-page .glyphs { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 0; padding: 0; list-style: none; }
-	.landing-page .glyph { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; padding: 0 18px; border: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 999px; color: var(--color-warm); font-family: var(--font-sans); font-size: 16px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
-	.landing-page .quote-visual { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-	.landing-page .quote-visual :global(.plate) { aspect-ratio: 4 / 3; border-radius: 26px; }
-	.landing-page .quote-visual :global(.plate:nth-child(2)) { transform: translateY(36px) rotate(2deg); }
+	.work-section { overflow: hidden; background: color-mix(in oklab, var(--color-surface-base) 64%, var(--color-surface-canvas)); }
+	.product-stage { overflow: hidden; border: 1px solid var(--color-line-2); border-radius: 1rem; background: var(--color-surface-base); box-shadow: 0 2rem 6rem color-mix(in oklab, var(--color-surface-canvas) 78%, transparent); }
+	.stage-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-line); color: var(--color-ink-3); font-family: var(--font-mono); font-size: 0.625rem; }
+	.stage-bar > span { display: flex; gap: 0.25rem; }
+	.stage-bar i { width: 0.4375rem; height: 0.4375rem; border-radius: 999px; background: var(--color-line-2); }
+	.stage-bar b { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+	.stage-bar em { color: var(--color-state-success); font-style: normal; text-transform: uppercase; }
+	.work-grid { display: grid; gap: 0.75rem; padding: 0.75rem; }
+	.landing-page :global(.screen-main), .landing-page :global(.screen-stack figure) { margin: 0; overflow: hidden; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-surface-editorial-media); }
+	.landing-page :global(.screen-main .plate-graphic) { width: 100%; aspect-ratio: 16 / 10; }
+	.screen-stack { display: grid; gap: 0.75rem; }
+	.landing-page :global(.screen-stack .plate-graphic) { width: 100%; aspect-ratio: 16 / 10; }
+	.landing-page :global(figcaption) { padding: 0.625rem 0.75rem; border-top: 1px solid var(--color-line); color: var(--color-ink-2); font-family: var(--font-mono); font-size: 0.625rem; }
 
-	.landing-page .cta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 22px; align-items: end; padding: clamp(26px, 5vw, 52px); border: 1px solid color-mix(in oklab, var(--color-warm), var(--color-line) 42%); border-radius: 30px; background: var(--gradient-editorial-cta), color-mix(in oklab, var(--color-surface-raised), transparent 8%); position: relative; overflow: hidden; }
-	.landing-page .cta::before { content: 'AFTERGLOW'; position: absolute; right: -20px; bottom: -34px; color: color-mix(in oklab, var(--color-ink-0), transparent 92%); font-family: var(--font-sans); font-size: 180px; font-style: italic; line-height: .8; pointer-events: none; }
-	.landing-page .cta h2 { position: relative; max-width: 780px; font-size: 78px; }
-	.landing-page :global(.email-pill) { position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; border: 1px solid color-mix(in oklab, var(--color-line), transparent 34%); border-radius: 999px; background: var(--color-surface-canvas); color: var(--color-ink-0); font-family: var(--font-mono); }
-	.landing-page :global(.email-pill:hover) { border-color: var(--color-warm); background: color-mix(in oklab, var(--color-surface-raised), transparent 10%); }
-	.landing-page :global(.email-pill:active) { transform: translateY(1px); }
+	.audience-layout { display: grid; gap: 2.5rem; align-items: center; }
+	blockquote { max-width: 47rem; margin-top: 1.75rem !important; font-size: clamp(2rem, 7vw, 3.75rem); font-weight: 500; letter-spacing: -0.03em; line-height: 1.14; text-wrap: balance; word-break: keep-all; }
+	.audience-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 2rem 0 0; padding: 0; list-style: none; }
+	.glyph { padding: 0.5rem 0.75rem; border: 1px solid var(--color-line-2); border-radius: 999px; color: var(--color-ink-1); font-size: 0.75rem; }
+	.quote-visual { display: grid; gap: 0.75rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: 1rem; background: var(--color-surface-base); }
+	.landing-page :global(.audience-figure) { min-height: 18rem; margin: 0; background: var(--color-surface-editorial-media); }
+	.landing-page :global(.audience-figure .plate-graphic) { width: 100%; height: 100%; min-height: 18rem; }
+	.audience-note { padding: 1.25rem; border-top: 1px solid var(--color-line); }
+	.audience-note span { color: var(--color-accent); font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; }
+	.audience-note strong { display: block; margin-top: 0.75rem; font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+	.audience-note p { margin-top: 0.75rem; color: var(--color-ink-2); font-size: 0.8125rem; }
 
-	.landing-page .footer { padding: 46px 0 34px; border-top: 1px dotted color-mix(in oklab, var(--color-line), transparent 34%); color: var(--color-ink-2); }
-	.landing-page .footer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 44px; }
-	.landing-page .footer h3 { color: var(--color-ink-0); font-size: 13px; margin-bottom: 10px; }
-	.landing-page .footer a { display: block; color: inherit; text-decoration: none; font-size: 13px; line-height: 1.9; }
-	.landing-page .footer-copyright { color: var(--color-ink-2); font-family: var(--font-mono); font-size: 12px; }
-	.landing-page .mega { font-family: var(--font-sans); font-style: italic; font-size: 160px; line-height: .78; color: color-mix(in oklab, var(--color-ink-0), transparent 76%); }
+	.contact-section { position: relative; overflow: hidden; }
+	.contact-panel { position: relative; overflow: hidden; display: grid; gap: 2rem; padding: clamp(1.5rem, 5vw, 3rem); border: 1px solid color-mix(in oklab, var(--color-warm) 34%, var(--color-line)); border-radius: 1.25rem; background: var(--gradient-editorial-cta), var(--color-surface-raised); }
+	.contact-panel::after { content: ''; position: absolute; right: -8rem; bottom: -12rem; width: 24rem; height: 24rem; border: 1px solid color-mix(in oklab, var(--color-warm) 18%, transparent); border-radius: 999px; box-shadow: 0 0 0 3rem color-mix(in oklab, var(--color-warm) 4%, transparent), 0 0 0 6rem color-mix(in oklab, var(--color-warm) 3%, transparent); pointer-events: none; }
+	.contact-panel > * { position: relative; z-index: 1; }
+	.contact-panel h2 { margin-top: 1.25rem; }
+	.contact-panel p { margin-top: 1rem; color: var(--color-ink-1); }
+	.contact-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; align-self: end; }
+	.landing-page :global(.email-pill) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
-	.landing-page [data-reveal] { opacity: 1; transform: none; }
-	:global(.landing-page.reveal-enabled) [data-reveal]:not(.is-visible) { opacity: 0; transform: translateY(24px); }
+	.footer { padding: 3rem 0 1.5rem; border-top: 1px solid var(--color-line); background: var(--color-surface-base); }
+	.footer-layout { display: grid; gap: 2.5rem; }
+	.footer-brand { display: grid; grid-template-columns: 2.25rem auto; align-items: center; width: fit-content; column-gap: 0.75rem; }
+	.footer-brand img { grid-row: 1 / 3; width: 2.25rem; height: 2.25rem; object-fit: contain; }
+	.footer-brand strong { align-self: end; }
+	.footer-brand span { align-self: start; color: var(--color-ink-3); font-family: var(--font-mono); font-size: 0.625rem; text-transform: uppercase; }
+	.footer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+	.footer h3 { margin-bottom: 0.75rem; font-size: 0.75rem; }
+	.footer a { display: flex; min-width: 2.75rem; min-height: 2.75rem; width: fit-content; align-items: center; color: var(--color-ink-2); font-size: 0.75rem; line-height: 1.35; text-decoration: none; }
+	.footer a:hover { color: var(--color-ink-0); }
+	.footer-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1rem; margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--color-line); color: var(--color-ink-3); font-family: var(--font-mono); font-size: 0.625rem; }
+
+	[data-reveal] { opacity: 1; transform: none; }
+	:global(.landing-page.reveal-enabled) [data-reveal]:not(.is-visible) { opacity: 0; transform: translateY(1.5rem); }
 	:global(.landing-page.reveal-enabled.reveal-ready) [data-reveal] { transition: opacity 600ms var(--landing-ease), transform 600ms var(--landing-ease); }
+
+	@media (min-width: 768px) {
+		.landing-page { --landing-gutter: 2rem; --landing-nav-height: 4.5rem; }
+		.nav { display: flex; min-height: 4.5rem; padding-block: 0; }
+		.nav-links { flex: 1 1 auto; justify-content: center; }
+		.hero { padding: 5.5rem 0 6rem; }
+		.hero-facts span { font-size: 0.75rem; }
+		.section { padding: 5.5rem 0; }
+		.overview-layout { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+		.landing-page :global(.capability-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.cap-card:nth-child(odd) { border-right: 1px solid var(--color-line); }
+		.cap-card:nth-last-child(-n + 2) { border-bottom: 0; }
+		.workflow-layout { grid-template-columns: minmax(14rem, 0.36fr) minmax(0, 0.64fr); }
+		.filter-panel { position: sticky; top: 5.5rem; }
+		.landing-page :global(.method-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.method-step:nth-child(odd) { border-right: 1px solid var(--color-line); }
+		.method-step:nth-last-child(-n + 2) { border-bottom: 0; }
+		.work-grid { grid-template-columns: minmax(0, 1.25fr) minmax(15rem, 0.75fr); }
+		.audience-layout { grid-template-columns: minmax(0, 1.05fr) minmax(20rem, 0.95fr); }
+		.contact-panel { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+		.footer-layout { grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.7fr); }
+	}
+
+	@media (min-width: 1024px) {
+		.hero h1 { font-size: clamp(3.25rem, 5vw, 4.25rem); }
+		.hero-layout { grid-template-columns: minmax(0, 0.86fr) minmax(32rem, 1.14fr); gap: clamp(2rem, 4vw, 4rem); }
+		.section-head { grid-template-columns: minmax(10rem, 0.3fr) minmax(0, 1fr); gap: 2rem; }
+		.cap-card { grid-template: minmax(20rem, 1fr) / minmax(14rem, 0.82fr) minmax(0, 1.18fr); }
+		.cap-media { border-right: 1px solid var(--color-line); border-bottom: 0; }
+		.landing-page :global(.method-grid) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+		.method-step { grid-template-columns: 1fr; min-height: 23rem; border-right: 1px solid var(--color-line); border-bottom: 0 !important; }
+		.method-step:last-child { border-right: 0; }
+		.method-mark { display: grid; grid-template-columns: 1fr auto 1fr; place-items: center; align-self: center; width: 100%; }
+		.method-mark::before, .method-mark::after { content: ''; width: 100%; border-top: 1px dashed var(--color-line-2); }
+		.method-mark span { width: 0.75rem; height: 0.75rem; border: 2px solid var(--color-warm); border-radius: 999px; box-shadow: 0 0 0 0.35rem var(--warm-soft); }
+	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.landing-page :global(*), .landing-page :global(*::before), .landing-page :global(*::after) { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
-		.landing-page [data-reveal], :global(.landing-page.reveal-enabled) [data-reveal]:not(.is-visible) { opacity: 1; transform: none; transition: none; }
-		.landing-page .top-strip { transition: none; }
-	}
-
-	@media (max-width: 1080px) {
-		.landing-page .hero-grid, .landing-page .about-layout, .landing-page .labs-layout, .landing-page .work-grid, .landing-page .quote-panel { grid-template-columns: 1fr; }
-		.landing-page .card-grid, .landing-page :global(.method-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-		.landing-page .filter-panel { position: static; }
-		.landing-page h1 { font-size: 84px; }
-		.landing-page .section h2 { font-size: 56px; }
-		.landing-page blockquote { font-size: 54px; }
-		.landing-page .cta h2 { font-size: 60px; }
-		.landing-page .cta::before { font-size: 142px; }
-		.landing-page .mega { font-size: 124px; }
-	}
-
-	@media (max-width: 880px) {
-		.landing-page .nav { min-height: 60px; }
-		.landing-page .hero { min-height: auto; }
-		.landing-page .stat-rings, .landing-page .card-grid, .landing-page :global(.method-grid) { grid-template-columns: 1fr; }
-		.landing-page .collage { grid-template-columns: 1fr 1fr; }
-		.landing-page :global(.plate.hero-wide) { grid-column: auto; }
-		.landing-page .section-kicker { grid-template-columns: 1fr; }
-		.landing-page :global(.lab-card-surface) { grid-template-columns: 128px 1fr; }
-		.landing-page :global(.lab-card-surface .plate-graphic) { width: 128px; height: 106px; }
-		.landing-page .cta { grid-template-columns: 1fr; }
-		.landing-page h1 { font-size: 64px; }
-		.landing-page .lead { font-size: 19px; }
-		.landing-page .section h2 { font-size: 44px; }
-		.landing-page .section-copy { font-size: 18px; }
-		.landing-page blockquote { font-size: 42px; }
-		.landing-page .cta h2 { font-size: 44px; }
-		.landing-page .cta::before { font-size: 96px; }
-		.landing-page .mega { font-size: 86px; }
-	}
-
-	@media (max-width: 560px) {
-		.landing-page { --landing-gutter: 16px; font-size: 14px; }
-		.landing-page :global(.nav-cta) { display: none; }
-		.landing-page .nav-links { justify-content: flex-start; }
-		.landing-page h1 { font-size: 46px; }
-		.landing-page .lead { font-size: 17px; }
-		.landing-page .section h2 { font-size: 36px; }
-		.landing-page .section-copy { font-size: 16px; }
-		.landing-page blockquote { font-size: 34px; }
-		.landing-page .cta h2 { font-size: 35px; }
-		.landing-page .cta::before { font-size: 70px; }
-		.landing-page .mega { font-size: 62px; }
-		.landing-page .collage, .landing-page .about-collage, .landing-page .quote-visual { grid-template-columns: 1fr; }
-		.landing-page .about-collage :global(.plate:nth-child(2)), .landing-page .quote-visual :global(.plate:nth-child(2)) { transform: none; }
-		.landing-page :global(.lab-card-surface) { grid-template-columns: 1fr; }
-		.landing-page :global(.lab-card-surface .plate-graphic) { width: 100%; height: auto; aspect-ratio: 4 / 3; }
-		.landing-page :global(.screen-main), .landing-page :global(.screen-stack figure) { transform: none; }
+		[data-reveal], :global(.landing-page.reveal-enabled) [data-reveal]:not(.is-visible) { opacity: 1; transform: none; transition: none; }
 	}
 </style>

@@ -21,6 +21,12 @@ export const SURFACE_CSS_VAR = {
 	scrimSoft: 'var(--color-surface-scrim-soft)',
 } as const;
 
+export const FONT_CSS_VAR = {
+	sans: 'var(--font-sans)',
+	display: 'var(--font-display)',
+	mono: 'var(--font-mono)',
+} as const;
+
 export const LAYER_CSS_VAR = {
 	sidebar: 'var(--z-sidebar)',
 	panel: 'var(--z-panel)',
