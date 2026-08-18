@@ -197,7 +197,7 @@
 		text-transform: uppercase;
 	}
 
-	.board-kicker { color: var(--color-warm); }
+	.board-kicker { color: var(--color-warm-text); }
 	.board-header h2 { margin: 0.125rem 0 0; font-size: 1rem; line-height: 1.25; }
 	.board-health { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--color-ink-2); font-size: 0.75rem; }
 	.board-health > span,
@@ -232,7 +232,7 @@
 	.flow-meta > span:first-child { color: var(--color-accent); }
 	.request-card h3 { margin: 1.75rem 0 0; font-size: 1.375rem; line-height: 1.12; word-break: keep-all; }
 	.request-card p { margin: 0.5rem 0 0; color: var(--color-ink-2); font-size: 0.75rem; }
-	.request-state { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.5rem; color: var(--color-state-success); }
+	.request-state { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 1.5rem; color: var(--color-state-success-text); }
 
 	.flow-rail { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.625rem; min-height: 2.75rem; color: var(--color-ink-2); }
 	.flow-rail::before,
@@ -243,10 +243,10 @@
 	.policy-card ul { display: grid; gap: 0.75rem; margin: 1rem 0 0; padding: 0; list-style: none; }
 	.policy-card li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--color-ink-2); font-size: 0.75rem; }
 	.policy-card li strong { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--color-ink-1); font-weight: 600; }
-	.policy-card li i { display: grid; place-items: center; width: 1rem; height: 1rem; border-radius: 999px; background: color-mix(in oklab, var(--color-state-success) 14%, transparent); color: var(--color-state-success); font-size: 0.625rem; font-style: normal; }
+	.policy-card li i { display: grid; place-items: center; width: 1rem; height: 1rem; border-radius: 999px; background: color-mix(in oklab, var(--color-state-success) 14%, transparent); color: var(--color-state-success-text); font-size: 0.625rem; font-style: normal; }
 
 	.delivery-stack { display: grid; gap: 0.625rem; }
-	.live-label { color: var(--color-state-success); }
+	.live-label { color: var(--color-state-success-text); }
 	.resource-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 1rem; }
 	.resource-grid > div { min-width: 0; padding: 0.75rem; border-radius: 0.625rem; background: var(--color-surface-sunken); }
 	.resource-grid span,
@@ -255,7 +255,7 @@
 
 	.output-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; padding: 0.75rem; border: 1px solid color-mix(in oklab, var(--color-warm) 35%, var(--color-line)); border-radius: 0.875rem; background: color-mix(in oklab, var(--color-warm) 7%, var(--color-surface-raised)); }
 	.output-card strong { display: block; margin-top: 0.125rem; overflow: hidden; font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
-	.output-card > b { color: var(--color-warm); font-weight: 600; }
+	.output-card > b { color: var(--color-warm-text); font-weight: 600; }
 	.output-icon { display: grid; width: 2.25rem; gap: 0.1875rem; }
 	.output-icon span { height: 0.35rem; border: 1px solid var(--color-warm); border-radius: 0.1875rem; background: color-mix(in oklab, var(--color-warm) 10%, transparent); }
 	.output-icon span:nth-child(2) { margin-inline: 0.2rem; opacity: 0.72; }
@@ -263,7 +263,7 @@
 
 	.board-footer { justify-content: center; border-top: 1px solid var(--color-line); color: var(--color-ink-2); }
 	.board-footer i { width: 1.5rem; border-top: 1px solid var(--color-line-2); }
-	.board-footer strong { color: var(--color-warm); }
+	.board-footer strong { color: var(--color-warm-text); }
 
 	@media (min-width: 768px) {
 		.board-flow { grid-template-columns: minmax(0, 0.92fr) 2.75rem minmax(0, 1fr); align-items: stretch; }

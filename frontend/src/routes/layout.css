@@ -63,8 +63,10 @@
   /* Warm */
   --color-warm: #f4976c;
   --color-warm-2: #e8c19a;
+  --color-warm-text: var(--color-warm);
   /* State */
   --color-state-success: #5ddca0;
+  --color-state-success-text: var(--color-state-success);
   --color-state-warning: #f4b85a;
   --color-state-danger: #f06b6b;
   --color-state-info: #5ed4e4;
@@ -170,7 +172,9 @@ body {
   --color-accent-2: #6d28d9;
   --color-warm: #ea580c;
   --color-warm-2: #c2410c;
+  --color-warm-text: #c2410c;
   --color-state-success: #16a34a;
+  --color-state-success-text: #15803d;
   --color-state-warning: #b45309;
   --color-state-danger: #dc2626;
   --color-state-info: #2563eb;

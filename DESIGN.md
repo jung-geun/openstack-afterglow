@@ -23,6 +23,7 @@ New UI follows this authority order: `frontend/src/routes/layout.css` owns theme
 | `--color-accent` / `--color-accent-2` | `#7da3ff` / `#9f7df0` | `#2563eb` / `#6d28d9` | blue action/data and purple secondary data |
 | `--color-warm` / `--color-warm-2` | `#f4976c` / `#e8c19a` | `#ea580c` / `#c2410c` | brand CTA and warm contrast |
 | `--color-state-success` / `--color-state-warning` / `--color-state-danger` / `--color-state-info` / `--color-state-neutral` | `#5ddca0` / `#f4b85a` / `#f06b6b` / `#5ed4e4` / `#8a93a4` | `#16a34a` / `#b45309` / `#dc2626` / `#2563eb` / `#64748b` | operational state tones |
+| `--color-warm-text` / `--color-state-success-text` | `var(--color-warm)` / `var(--color-state-success)` | `#c2410c` / `#15803d` | WCAG AA-safe brand and success text at normal sizes |
 
 Use `SURFACE_CSS_VAR` rather than spelling surface variables in TypeScript-driven styles. Modal/dialog shells use `bg-surface-scrim`; drawers and sidebars use `bg-surface-scrim-soft`. `ConfirmDialog` intentionally keeps its canvas wash (`color-mix(in oklab, var(--color-surface-canvas) 72%, transparent)`) because it is not a black scrim.
 
@@ -101,6 +102,8 @@ Show a checkbox on both desktop and touch for selectable rows/cards. `SelectionC
 ## Accessibility
 
 Never communicate status, selection, loading, or disabled state through color or animation alone: pair visible text and the relevant attribute/reason. Maintain visible keyboard focus with `--focus-ring`. Do not state that Modal/Dialog focus trapping exists beyond the current shell; add it only by extending Modal with tests.
+
+Normal-sized public/editorial labels use `--color-ink-2`, `--color-warm-text`, or `--color-state-success-text` so both themes retain WCAG AA contrast without changing the dark brand palette. Reserve `--color-ink-3` for disabled text and raw `--color-warm` / state tones for large display text or non-text decoration.
 
 ## New UI entity workflow & legacy debt
 
