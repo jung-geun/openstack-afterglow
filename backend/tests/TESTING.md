@@ -168,9 +168,9 @@ AFTERGLOW_ALLOW_INSECURE=1 uv run pytest tests/ --ignore=tests/integration -v -k
 
 GitHub Actions 워크플로 `.github/workflows/test.yml`:
 
-- `version-check`: 태그/버전 정렬과 target runner/Kolla contract 오케스트레이션 확인
+- `version-check`: 태그/버전 정렬과 pure Node target-runner 오케스트레이션 확인
 - `test-backend`: backend unit + ruff
-- `test-contract`: 추출 서비스 소비자 계약 (`test:contract`)
+- `test-contract`: 추출 서비스 소비자 계약과 uv-backed Kolla helper 계약
 - `test-functional`: 실제 MariaDB/PostgreSQL/Redis를 쓰는 local functional (`test:functional -- --no-start`)
 - `test-frontend`: SvelteKit unit
 - `detect-live`: Keystone 토큰 POST 및 network endpoint 도달성 검사

@@ -337,6 +337,9 @@ test("package.json contains exact command contract scripts and no obsolete scrip
 	assert.equal(scripts["test:unit"], "npm run test:target:js && npm run test:unit:backend && npm run test:unit:frontend");
 	assert.equal(scripts["test:contract"], "node scripts/test-target.js contracts");
 	assert.equal(scripts["test:functional"], "node scripts/test-db.js");
+	assert.equal(scripts["test:orchestration"], "node --test scripts/test-target.test.js scripts/test-db.test.js && node scripts/test-target.js --validate");
+	assert.equal(scripts["test:kolla:contract"], "node --test scripts/kolla-contract.test.js");
+	assert.equal(scripts["test:target:js"], "npm run test:orchestration && npm run test:kolla:contract");
 	assert.equal(scripts["test:live"], "cd backend && AFTERGLOW_ALLOW_INSECURE=1 uv run python -m pytest tests/integration -v");
 	assert.equal(scripts["test:all"], "npm run test:unit && npm run test:contract && npm run test:functional");
 	assert.equal(scripts["test:gate"], "npm run test:all && npm run lint:backend");
@@ -349,13 +352,14 @@ test("package.json contains exact command contract scripts and no obsolete scrip
 	}
 });
 
-test("orchestration CI does not require a missing root npm lockfile", () => {
+test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
 	const workflow = fs.readFileSync(path.join(rootDir, ".github", "workflows", "test.yml"), "utf-8");
 	const hasRootLockfile = ["package-lock.json", "npm-shrinkwrap.json"].some((name) =>
 		fs.existsSync(path.join(rootDir, name))
 	);
 
-	assert.match(workflow, /run: npm run test:target:js/);
+	assert.match(workflow, /name: Test target orchestration\s+run: npm run test:orchestration/);
+	assert.match(workflow, /name: Kolla contract tests\s+run: npm run test:kolla:contract/);
 	if (!hasRootLockfile) {
 		assert.doesNotMatch(workflow, /cache:\s*npm/);
 		assert.doesNotMatch(workflow, /run:\s*npm ci/);
