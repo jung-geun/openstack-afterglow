@@ -48,7 +48,7 @@ package.
 An organization administrator may delete each standalone SDK repository only
 after all of the following pass:
 
-1. Run `npm run test:target -- backend:tests/test_service_sdk_dependency_sources.py`.
+1. Run `npm run test:target -- backend:tests/contracts/test_service_sdk_dependency_sources.py`.
    It verifies both Afterglow dependency groups and `backend/uv.lock` resolve
    every SDK from an immutable
    `https://github.com/openstack-afterglow/<service>.git#subdirectory=sdk`

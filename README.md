@@ -82,9 +82,9 @@ cd backend && uv sync && uv run uvicorn app.main:app --reload   # 백엔드 :800
 cd frontend && npm install && npm run dev                       # 프론트엔드 :3000
 npm run test:list                                               # 실행 가능한 국소 테스트 타깃 확인
 npm run test:target -- auth                                     # 예: 인증/세션 관련 국소 기능테스트
-npm run test:db                                                 # 로컬 MariaDB DB 테스트
-npm test                                                        # 백엔드 단위 + 프론트엔드 전체
-npm run test:all                                                # 커밋/PR 전 전체 게이트
+npm run test:functional                                         # 일회용 전용 DB/캐시 기능테스트 (3307/5434/6380)
+npm run test:unit                                               # 오케스트레이터 + 백엔드/프론트엔드 단위 계층
+npm run test:gate                                               # 커밋/PR 전 확정 게이트 (test:all + lint:backend)
 ```
 
 ## 라이선스

@@ -147,10 +147,19 @@ def _reset_rate_limiter():
 
 @pytest.fixture(autouse=True)
 def _fake_redis_global(monkeypatch):
-    """Inject one fakeredis backend for every cache path used by unit tests."""
+    """Use fakeredis by default; functional tests opt into the disposable real Redis."""
+    from app.services import cache as cache_mod
+
+    if os.environ.get("AFTERGLOW_TEST_REAL_REDIS") == "1":
+        cache_mod.set_backend(None)
+        try:
+            yield None
+        finally:
+            cache_mod.set_backend(None)
+        return
+
     import fakeredis.aioredis as _fakeredis
 
-    from app.services import cache as cache_mod
     from app.services.cache.redis_backend import RedisBackend
 
     fake = _fakeredis.FakeRedis(decode_responses=True)

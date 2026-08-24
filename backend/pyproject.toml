@@ -71,10 +71,11 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
-    "slow: 실 인프라(Nova/Manila/Keystone) 필요 — self-hosted runner",
-    "db: MariaDB 컨테이너 필요 — CI test-backend-db 잡에서 실행",
+    "slow: 장시간 또는 리소스 변경을 수행하는 live OpenStack 시나리오",
+    "db: 일회용 MariaDB/PostgreSQL/Redis가 필요한 local functional 테스트",
     "redis: 실 Redis 또는 fakeredis 필요",
     "crypto: AES-GCM 등 암호화 단위 테스트 — 외부 인프라 불요",
+    "contract: 외부/BFF 서비스 프록시 및 SDK 소비자 계약 검증",
 ]
 
 [tool.ruff]

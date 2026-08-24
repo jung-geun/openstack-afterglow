@@ -8,7 +8,7 @@ import yaml
 from app.main import app
 from app.services.mcp_control_plane.transport import MCP_PATH
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 # These routes are nulled when AFTERGLOW_ENV=production, which every k8s backend Deployment sets.
 FASTAPI_DOC_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})

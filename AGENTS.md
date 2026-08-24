@@ -77,28 +77,30 @@ milestone.md          OpenSpec redirect stub; append 대상이 아님
 
 ## 개발, 테스트, OpenSpec
 
-### 테스트 의무
+### 테스트 의무와 4계층 계약
 
 - 백엔드 엔드포인트 구현에는 반드시 `backend/tests/` pytest를 함께 작성한다. 테스트 없는 endpoint는 미완료다.
-- 변경 배치의 테스트 계약을 먼저 정하고, 배치 완료 후 exact selector → named target → cross-cutting target 순서로 검증한다.
+- 계층별 테스트 계약:
+  1. **단위 테스트 (Unit)**: `npm run test:unit:backend`, `npm run test:unit:frontend`, `npm run test:unit` (외부 네트워크·Docker·자격 증명 없음; 전체 unit은 오케스트레이터 회귀 포함)
+  2. **소비자 계약 테스트 (Contract)**: `npm run test:contract` (`backend/tests/contracts/`의 BFF/SDK/catalog/ingress 경계)
+  3. **국소 기능 테스트 (Functional)**: `npm run test:functional` (실제 MariaDB/PostgreSQL/Redis를 쓰는 전용 일회용 Compose). 기본 자동 기동·종료. 재사용은 `--no-start`, 로컬 유지는 `--keep`.
+  4. **실제 환경 테스트 (Live OpenStack)**: `npm run test:live` (`live:{auth,admin,compute,network,storage,layers}`). 자격 증명/도달성 미비는 검증 공백으로 보고하지만, 사전조건 충족 뒤의 테스트 실패는 결함으로 처리한다.
+- 검증 진행 순서: exact selector → named target → cross-cutting target (`npm run test:all`).
 - `npm run test:list`로 target을 확인한다.
 - named target: `npm run test:target -- <target>`
 - backend exact selector: `npm run test:target -- backend:tests/test_file.py::test_name`
 - frontend exact selector: `npm run test:target -- frontend:src/path/file.test.ts`
-- DB test: `npm run test:db`; 이미 실행 중인 DB 재사용은 `npm run test:db -- --no-start`.
 - backend endpoint 변경은 관련 `backend/tests` selector 뒤 도메인 target(`auth`, `access`, `layers` 등)을 실행한다.
 
 ### 커밋 전 필수 검증
 
-순서대로 실행한다.
+확정 게이트 명령 하나로 검증한다.
 
 ```bash
-npm run test:all
-npm run lint:backend
+npm run test:gate
 ```
 
-둘 다 성공한 경우에만 `git add <변경 파일>`, `git commit -m "type: 요약"`, `git push origin dev`를 진행한다. 하나라도 실패하면 커밋하지 않고 원인을 수정한 뒤 같은 순서로 다시 실행한다.
-
+`test:gate` (`npm run test:all` + `npm run lint:backend`)가 성공한 경우에만 `git add <변경 파일>`, `git commit -m "type: 요약"`, `git push origin dev`를 진행한다. 실패하면 커밋하지 않고 원인을 수정한 뒤 다시 실행한다.
 ### OpenSpec
 
 - 신규 작업: `openspec new change <slug> --schema rapid`, then `proposal.md`와 `tasks.md`를 채운다.

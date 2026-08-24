@@ -103,7 +103,7 @@ const targets = {
 		backend: {
 			selectors: [
 				"tests/test_afterglow_conf_config.py",
-				"tests/test_ingress_root_path_coverage.py",
+				"tests/contracts/test_ingress_root_path_coverage.py",
 				"tests/test_config_insecure_guard.py",
 				"tests/test_config_keystone_url.py",
 				"tests/test_config_layer_images.py",
@@ -252,7 +252,7 @@ const targets = {
 		description: "Drover BFF proxy, cluster management, and nodegroup UI integration tests",
 		liveServices: "none",
 		backend: {
-			selectors: ["tests/test_drover_proxy.py", "tests/test_k3s_shell_proxy.py"]
+			selectors: ["tests/contracts/test_drover_proxy.py", "tests/contracts/test_k3s_shell_proxy.py"]
 		},
 		frontend: {
 			selectors: [
@@ -277,14 +277,14 @@ const targets = {
 		description: "Waygate BFF proxy, agent proxy, and VPN UI integration tests",
 		liveServices: "none",
 		backend: {
-			selectors: ["tests/test_waygate_proxy.py", "tests/test_waygate_agent.py"]
+			selectors: ["tests/contracts/test_waygate_proxy.py", "tests/contracts/test_waygate_agent.py"]
 		}
 	},
 	lumen: {
 		description: "Lumen BFF proxy, SSE streaming, and chat stream integration tests",
 		liveServices: "none",
 		backend: {
-			selectors: ["tests/test_lumen_proxy.py"]
+			selectors: ["tests/contracts/test_lumen_proxy.py"]
 		},
 		frontend: {
 			selectors: [
@@ -299,7 +299,7 @@ const targets = {
 		liveServices: "none",
 		backend: {
 			selectors: [
-				"tests/test_palimpsest_hub_proxy.py",
+				"tests/contracts/test_palimpsest_hub_proxy.py",
 				"tests/test_palimpsest_api.py",
 				"tests/test_palimpsest_kvm.py",
 				"tests/test_palimpsest_dockerfile.py",
@@ -318,42 +318,62 @@ const targets = {
 			]
 		}
 	},
-	"integration:auth": {
+	contracts: {
+		description: "Service proxy, SDK dependency, ingress, and MCP bridge contract tests",
+		liveServices: "none",
+		backend: {
+			selectors: [
+				"tests/contracts/test_service_proxy.py",
+				"tests/contracts/test_drover_proxy.py",
+				"tests/contracts/test_waygate_proxy.py",
+				"tests/contracts/test_waygate_agent.py",
+				"tests/contracts/test_lumen_proxy.py",
+				"tests/contracts/test_palimpsest_hub_proxy.py",
+				"tests/contracts/test_service_sdk_dependency_sources.py",
+				"tests/contracts/test_mcp_stage2_adapters.py",
+				"tests/contracts/test_ingress_root_path_coverage.py",
+				"tests/contracts/test_k3s_shell_proxy.py",
+				"tests/contracts/test_mcp_lumen_bridge.py"
+			],
+			extraArgs: ["-m", "contract"]
+		}
+	},
+	"live:auth": {
 		description: "Live OpenStack auth integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_auth.py"]
 		}
 	},
-	"integration:admin": {
+	"live:admin": {
 		description: "Live OpenStack admin integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_admin.py", "tests/integration/test_admin_writes.py"]
 		}
 	},
-	"integration:compute": {
+	"live:compute": {
 		description: "Live OpenStack compute integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_compute.py", "tests/integration/test_user_writes.py"]
 		}
 	},
-	"integration:network": {
+	"live:network": {
 		description: "Live OpenStack network integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_network.py"]
 		}
 	},
-	"integration:storage": {
+	"live:storage": {
 		description: "Live OpenStack storage integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_storage.py", "tests/integration/test_file_storage.py"]
 		}
 	},
-	"integration:layers": {
+	"live:layers": {
 		description: "Live OpenStack union layer integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
@@ -423,7 +443,7 @@ function validateBackendSelectors(targetName, selectors, baseDir = backendDir) {
 	for (const selector of selectors) {
 		const selectorPath = stripSelectorPath(selector);
 		ensureInside(baseDir, selectorPath, targetName);
-		if (baseDir === backendDir && !targetName.startsWith("integration:") && selectorPath.startsWith("tests/integration")) {
+		if (baseDir === backendDir && !targetName.startsWith("live:") && selectorPath.startsWith("tests/integration")) {
 			fail(`Backend unit target ${targetName} cannot include integration selector: ${selectorPath}`);
 		}
 	}
@@ -756,6 +776,7 @@ module.exports = {
 	runStep,
 	runStepAsync,
 	runStepsParallel,
+	targets,
 	runStepsSerial
 };
 

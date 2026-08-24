@@ -4,8 +4,12 @@ const { spawnSync } = require("node:child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const testTargetPath = path.join(__dirname, "test-target.js");
-const localDatabaseUrl = "mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest";
-const localCheckpointerUrl = "postgresql://afterglow:dev@127.0.0.1:5433/afterglow_checkpoints";
+const composeFile = path.join(rootDir, "docker-compose.test.yml");
+const projectName = process.env.AFTERGLOW_TEST_PROJECT_NAME || "afterglow-test";
+
+const localDatabaseUrl = "mysql+aiomysql://afterglow:dev@127.0.0.1:3307/afterglow_functional";
+const localCheckpointerUrl = "postgresql://afterglow:dev@127.0.0.1:5434/afterglow_checkpoints";
+const localRedisUrl = "redis://127.0.0.1:6380/0";
 
 function run(command, args, options = {}) {
 	const result = spawnSync(command, args, {
@@ -20,59 +24,61 @@ function run(command, args, options = {}) {
 	return result.status === null ? 1 : result.status;
 }
 
-function ensureLocalTestDatabase() {
-	return run("docker", [
-		"compose",
-		"exec",
-		"-T",
-		"mariadb",
-		"mariadb",
-		"-uroot",
-		"-pdev",
-		"-e",
-		"CREATE DATABASE IF NOT EXISTS afterglow_pytest; GRANT ALL PRIVILEGES ON afterglow_pytest.* TO 'afterglow'@'%'; FLUSH PRIVILEGES;"
-	]);
+function composeArgs(...args) {
+	return ["compose", "-f", composeFile, "-p", projectName, ...args];
 }
 
-function main(argv) {
+function main(argv, runner = run) {
 	const noStart = argv.includes("--no-start");
-	const targetArgs = argv.filter((arg) => arg !== "--no-start");
-	const autoStartLocalServices = !noStart && !process.env.AFTERGLOW_TEST_DATABASE_URL;
+	const keep = argv.includes("--keep");
+	const targetArgs = argv.filter((arg) => arg !== "--no-start" && arg !== "--keep");
+	const ownsServices = !noStart && !process.env.AFTERGLOW_TEST_DATABASE_URL;
 	const databaseUrl = process.env.AFTERGLOW_TEST_DATABASE_URL || localDatabaseUrl;
-	const checkpointerUrl =
-		process.env.AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL ||
-		(autoStartLocalServices ? localCheckpointerUrl : "");
+	const checkpointerUrl = process.env.AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL || localCheckpointerUrl;
+	const redisUrl = process.env.REDIS_URL || process.env.AFTERGLOW_REDIS_URL || localRedisUrl;
+	let exitCode = 0;
 
-	if (autoStartLocalServices) {
-		console.log("Starting local MariaDB and PostgreSQL test profiles...");
-		const composeExitCode = run("docker", [
-			"compose",
-			"--profile",
-			"test",
-			"up",
-			"-d",
-			"--wait",
-			"mariadb",
-			"postgres"
-		]);
-		if (composeExitCode !== 0) return composeExitCode;
-	}
-	if (!process.env.AFTERGLOW_TEST_DATABASE_URL) {
-		const databaseExitCode = ensureLocalTestDatabase();
-		if (databaseExitCode !== 0) return databaseExitCode;
-	}
-	console.log(`Running DB tests against ${databaseUrl.replace(/:[^:@/]+@/, ":***@")}`);
-	return run(process.execPath, [testTargetPath, "db", ...targetArgs], {
-		env: {
-			...process.env,
-			AFTERGLOW_TEST_DATABASE_URL: databaseUrl,
-			AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL: checkpointerUrl
+	try {
+		if (ownsServices) {
+			console.log("Starting disposable MariaDB, PostgreSQL, and Redis functional services...");
+			exitCode = runner("docker", composeArgs("up", "-d", "--wait"));
 		}
-	});
+
+		if (exitCode === 0) {
+			console.log(`Running functional tests against ${databaseUrl.replace(/:[^:@/]+@/, ":***@")}`);
+			exitCode = runner(process.execPath, [testTargetPath, "db", ...targetArgs], {
+				env: {
+					...process.env,
+					AFTERGLOW_TEST_DATABASE_URL: databaseUrl,
+					AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL: checkpointerUrl,
+					AFTERGLOW_TEST_REAL_REDIS: "1",
+					REDIS_URL: redisUrl,
+					AFTERGLOW_REDIS_URL: redisUrl
+				}
+			});
+		}
+	} finally {
+		if (ownsServices && !keep) {
+			console.log("Tearing down disposable functional services...");
+			const downExitCode = runner("docker", composeArgs("down", "--volumes", "--remove-orphans"));
+			if (exitCode === 0 && downExitCode !== 0) exitCode = downExitCode;
+		}
+	}
+
+	return exitCode;
 }
 
 if (require.main === module) {
 	process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { localDatabaseUrl, localCheckpointerUrl, main, run };
+module.exports = {
+	composeArgs,
+	composeFile,
+	localCheckpointerUrl,
+	localDatabaseUrl,
+	localRedisUrl,
+	main,
+	projectName,
+	run
+};

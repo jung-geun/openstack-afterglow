@@ -25,9 +25,9 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
-  # ─── 테스트: 단위 테스트 통과 후에만 빌드로 진행 ───
+  # ─── 테스트: 레이어드 테스트 통과 후에만 빌드로 진행 ───
   test:
-    name: Unit Tests
+    name: Layered Tests
     uses: ./.github/workflows/test.yml
     secrets: inherit
 

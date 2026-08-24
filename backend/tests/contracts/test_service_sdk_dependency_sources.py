@@ -25,7 +25,7 @@ def _service_sdk_source(dependencies: list[str], package: str) -> str:
 
 
 def test_service_sdks_only_resolve_from_their_own_service_repositories():
-    backend_root = Path(__file__).resolve().parents[1]
+    backend_root = Path(__file__).resolve().parents[2]
     with (backend_root / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
 
@@ -44,7 +44,7 @@ def test_service_sdks_only_resolve_from_their_own_service_repositories():
 
 
 def test_lockfile_preserves_the_service_owned_sdk_sources():
-    backend_root = Path(__file__).resolve().parents[1]
+    backend_root = Path(__file__).resolve().parents[2]
     lockfile = tomllib.loads((backend_root / "uv.lock").read_text())
     locked_sources = {
         package["name"]: package["source"]["git"]
