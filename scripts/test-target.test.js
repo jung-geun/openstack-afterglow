@@ -360,6 +360,8 @@ test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
 
 	assert.match(workflow, /name: Test target orchestration\s+run: npm run test:orchestration/);
 	assert.match(workflow, /name: Kolla contract tests\s+run: npm run test:kolla:contract/);
+	assert.match(workflow, /if ! STATUS=\$\(curl/);
+	assert.match(workflow, /Keystone probe transport failed or timed out/);
 	if (!hasRootLockfile) {
 		assert.doesNotMatch(workflow, /cache:\s*npm/);
 		assert.doesNotMatch(workflow, /run:\s*npm ci/);

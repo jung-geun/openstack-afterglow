@@ -222,11 +222,15 @@ jobs:
           fi
 
           # Keystone v3 token probe (timeout 5s) — 응답 body 저장
-          STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
+          if ! STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
             --max-time 5 \
             -X POST "${_AUTH_URL}/auth/tokens" \
             -H "Content-Type: application/json" \
-            --data "@/tmp/ks_body.json")
+            --data "@/tmp/ks_body.json"); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Live OpenStack tests skipped::Keystone probe transport failed or timed out. Check the OpenStack endpoint."
+            exit 0
+          fi
 
           if [ "$STATUS" != "201" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
