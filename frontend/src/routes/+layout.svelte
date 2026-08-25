@@ -5,7 +5,7 @@
 	import { get } from 'svelte/store';
 	import { auth, authReady, isLoggedIn, isAdmin, clearAuth, logoutInProgress, enterMockAuth, exitMockAuth, getMockupProfile, isMockAuthActive } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
-	import { api, getBaseUrl, refreshSession, beginSessionRevocation, endSessionRevocation } from '$lib/api/client';
+	import { api, ApiError, getBaseUrl, refreshSession, beginSessionRevocation, endSessionRevocation } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig, initSiteConfig, qualifyBackendAssetPaths, replaceSiteConfig } from '$lib/config/site';
 	import { resolveFaviconPath } from '$lib/config/brandAssets';
@@ -45,6 +45,7 @@
 	const mockup = $derived(data.mockup);
 	const mockupAdminActive = $derived(mockup.active && mockup.profile === 'admin');
 	let lastVerifiedToken: string | null = null;
+	let authVerifyNonce = $state(0);
 
 	replaceSiteConfig(initialSiteConfig);
 
@@ -216,10 +217,11 @@
 		}
 	});
 
-	// 토큰이 설정되면 (로그인 직후 포함) 서버에서 권한 검증
+	// 토큰이 설정되면 (로그인 직후 포함) 서버에서 권한 검증. 503/네트워크 오류 시 5초 후 반응형 재시도.
 	$effect(() => {
 		const token = $auth.token;
 		const projectId = $auth.projectId;
+		const _nonce = authVerifyNonce;
 		if (mockup.active || isMockAuthActive() || !token || token === lastVerifiedToken) return;
 		lastVerifiedToken = token;
 		(async () => {
@@ -230,10 +232,19 @@
 				if (get(auth).token !== token || mockup.active || isMockAuthActive()) return;
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === 'federated' }));
 				authReady.set(true);
-			} catch {
+			} catch (err) {
 				if (get(auth).token === token && !mockup.active && !isMockAuthActive()) {
-					authReady.set(false);
-					clearAuth();
+					if (err instanceof ApiError && err.status === 401) {
+						authReady.set(false);
+						clearAuth();
+					} else {
+						setTimeout(() => {
+							if (get(auth).token === token && !mockup.active && !isMockAuthActive() && lastVerifiedToken === token) {
+								lastVerifiedToken = null;
+								authVerifyNonce += 1;
+							}
+						}, 5000);
+					}
 				}
 			}
 		})();

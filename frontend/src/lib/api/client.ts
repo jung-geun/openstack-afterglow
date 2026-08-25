@@ -104,8 +104,12 @@ async function handleUnauthorized(): Promise<void> {
 	_redirectingTo401 = true;
 	try {
 		if (_refreshPromise) {
-			const recovered = await _refreshPromise;
-			if (recovered) return;
+			try {
+				const recovered = await _refreshPromise;
+				if (recovered) return;
+			} catch {
+				return;
+			}
 		}
 
 		if (get(logoutInProgress) || AUTH_PUBLIC_PATHS.has(window.location.pathname)) return;
@@ -124,7 +128,7 @@ async function handleUnauthorized(): Promise<void> {
 }
 
 /**
- * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 실패하면 null.
+ * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 401/인증 누락 시 null, 503/429/네트워크 오류 시 ApiError/예외 발생.
  * 동시 호출은 하나의 Promise로 합산(coalescing).
  */
 /** localStorage에 영속화된 인증 상태를 직접 읽는다 (탭 간 race 대비 최신값 확인용). */
@@ -142,62 +146,68 @@ async function tryRefresh({ allowDuringRevocation = false }: { allowDuringRevoca
 	if (_sessionRevocationInProgress && !allowDuringRevocation) return null;
 	if (_refreshPromise) return _refreshPromise;
 	_refreshPromise = (async () => {
-		try {
-			const { get } = await import('svelte/store');
-			const { auth, setAuth } = await import('$lib/stores/auth');
-			const state = get(auth);
+		const { get } = await import('svelte/store');
+		const { auth, setAuth } = await import('$lib/stores/auth');
+		const state = get(auth);
 
-			// 다른 탭이 이미 토큰을 회전시켰을 수 있다 — storage 이벤트 전파보다
-			// localStorage 직접 읽기가 항상 최신이므로 여기서 한 번 더 확인한다.
-			const persisted = _readPersistedAuth();
-			if (persisted?.token && persisted.token !== state.token) {
-				setAuth({
-					token: persisted.token,
-					refreshToken: persisted.refreshToken ?? state.refreshToken,
-					accessExpiresAt: persisted.accessExpiresAt ?? null,
-				});
-				return persisted.token;
-			}
-
-			const refreshToken = persisted?.refreshToken ?? state.refreshToken;
-			if (!refreshToken) return null;
-
-			const res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ refresh_token: refreshToken }),
-				signal: AbortSignal.timeout(15_000),
+		// 다른 탭이 이미 토큰을 회전시켰을 수 있다 — storage 이벤트 전파보다
+		// localStorage 직접 읽기가 항상 최신이므로 여기서 한 번 더 확인한다.
+		const persisted = _readPersistedAuth();
+		if (persisted?.token && persisted.token !== state.token) {
+			setAuth({
+				token: persisted.token,
+				refreshToken: persisted.refreshToken ?? state.refreshToken,
+				accessExpiresAt: persisted.accessExpiresAt ?? null,
 			});
-			if (!res.ok) {
-				// refresh 토큰은 1회용(회전 시 폐기) — 동시에 다른 탭이 회전에 성공해
-				// 이쪽이 패배한 경우라면 그 탭의 새 토큰을 채택하고 로그아웃하지 않는다.
-				const winner = _readPersistedAuth();
-				if (winner?.token && winner.token !== state.token) {
-					setAuth({
-						token: winner.token,
-						refreshToken: winner.refreshToken ?? null,
-						accessExpiresAt: winner.accessExpiresAt ?? null,
-					});
-					return winner.token;
-				}
+			return persisted.token;
+		}
+
+		const refreshToken = persisted?.refreshToken ?? state.refreshToken;
+		if (!refreshToken) return null;
+
+		const res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ refresh_token: refreshToken }),
+			signal: AbortSignal.timeout(15_000),
+		});
+		if (!res.ok) {
+			// refresh 토큰은 1회용(회전 시 폐기) — 동시에 다른 탭이 회전에 성공해
+			// 이쪽이 패배한 경우라면 그 탭의 새 토큰을 채택하고 로그아웃하지 않는다.
+			const winner = _readPersistedAuth();
+			if (winner?.token && winner.token !== state.token) {
+				setAuth({
+					token: winner.token,
+					refreshToken: winner.refreshToken ?? null,
+					accessExpiresAt: winner.accessExpiresAt ?? null,
+				});
+				return winner.token;
+			}
+			if (res.status === 401) {
 				return null;
 			}
-
-			const data = await res.json();
-
-			const refreshedToken = data.token as string;
-			if (get(auth).token !== state.token) return null;
-			setAuth({
-				token: refreshedToken,
-				refreshToken: data.refresh_token ?? refreshToken,
-				accessExpiresAt: data.expires_at
-					? Math.floor(new Date(data.expires_at).getTime() / 1000)
-					: null,
-			});
-			return refreshedToken;
-		} catch {
-			return null;
+			let detail = res.statusText;
+			try {
+				const body = await res.json();
+				detail = formatErrorDetail(body, res.statusText);
+			} catch {
+				detail = await res.text().catch(() => res.statusText);
+			}
+			throw new ApiError(res.status, detail);
 		}
+
+		const data = await res.json();
+		const refreshedToken = data.token as string;
+		const currentToken = get(auth).token;
+		if (currentToken !== state.token) return currentToken ?? null;
+		setAuth({
+			token: refreshedToken,
+			refreshToken: data.refresh_token ?? refreshToken,
+			accessExpiresAt: data.expires_at
+				? Math.floor(new Date(data.expires_at).getTime() / 1000)
+				: null,
+		});
+		return refreshedToken;
 	})().finally(() => { _refreshPromise = null; });
 	return _refreshPromise;
 }

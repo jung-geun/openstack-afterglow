@@ -334,6 +334,41 @@ async def test_refresh_rotates_tokens(_ks_authenticate, _ks_get_user, _ks_valida
 
 
 @pytest.mark.asyncio
+async def test_refresh_keystone_transient_failure_returns_503_and_preserves_session(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """Keystone 일시적 장애 시 refresh는 503을 반환하고 세션을 유지하여, 장애 복구 후 재시도 시 성공해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        refresh_token = login.json()["refresh_token"]
+
+        # Keystone 일시적 장애 (연결 실패 / 네트워크 예외) 발생
+        with patch(
+            "app.api.identity.auth.keystone.validate_token",
+            side_effect=ConnectionError("Keystone transient connection failure"),
+        ):
+            r_transient = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+
+        # 503 Service Unavailable 이어야 하며 세션이 삭제되지 않아야 함
+        assert r_transient.status_code == 503
+
+        # Keystone 장애 복구 후 동일한 refresh_token으로 재시도 → 성공 (200) 및 토큰 회전
+        with patch("app.api.identity.auth.keystone.validate_token", return_value=dict(_KS_DATA)):
+            r_recovered = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+
+        assert r_recovered.status_code == 200
+        assert "token" in r_recovered.json()
+        assert r_recovered.json()["refresh_token"] != refresh_token
+
+
+@pytest.mark.asyncio
 async def test_logout_revokes_refresh_session(_ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off):
     """로그아웃 후 refresh 토큰으로 갱신 시도 시 401을 반환해야 한다."""
     from httpx import ASGITransport, AsyncClient
@@ -396,3 +431,87 @@ async def test_bearer_jwt_uses_cached_validate_not_payload(_ks_authenticate, _ks
     assert me.status_code == 200
     # JWT payload에는 is_system_admin이 없지만 Keystone mock이 True를 반환하므로 True여야 함
     assert me.json()["is_system_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_protected_request_cached_validate_transient_failure_yields_503_and_preserves_session(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """보호된 엔드포인트 요청 중 _cached_validate 일시적 장애 발생 시 503을 반환하고 refresh 세션을 유지해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+        refresh_token = login.json()["refresh_token"]
+
+        # _cached_validate 일시적 네트워크/연결 장애 발생
+        with patch(
+            "app.api.deps._cached_validate", side_effect=ConnectionError("Keystone validation connection failed")
+        ):
+            resp = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
+
+        # session 401이 아닌 503 Service Unavailable을 반환해야 함
+        assert resp.status_code == 503
+
+        # 세션이 유지되어 복구 후 refresh가 성공해야 함 (200)
+        with patch("app.api.identity.auth.keystone.validate_token", return_value=dict(_KS_DATA)):
+            r_refresh = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+
+        assert r_refresh.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_protected_request_cached_validate_unauthorized_yields_401(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """보호된 엔드포인트 요청 중 _cached_validate에서 keystoneauth Unauthorized 발생 시 401을 반환해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+    from keystoneauth1.exceptions.http import Unauthorized
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+        with patch("app.api.deps._cached_validate", side_effect=Unauthorized("Keystone token unauthorized")):
+            resp = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
+
+        assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_os_conn_constructor_failure_yields_503(
+    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
+):
+    """get_os_conn에서 OpenStack connection 생성 실패 시 401이 아닌 503을 반환해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+        with patch(
+            "app.api.deps.keystone.get_openstack_connection", side_effect=Exception("OpenStack SDK connection failed")
+        ):
+            resp = await ac.get("/api/v1/flavors", headers={"Authorization": f"Bearer {access}"})
+
+        assert resp.status_code == 503
+        assert "detail" in resp.json()

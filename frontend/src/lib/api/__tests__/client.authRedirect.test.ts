@@ -258,4 +258,100 @@ describe('unauthorized API redirect', () => {
 			localStorage.clear();
 		}
 	});
+	it('adopts a cross-tab winner token when current token changes while refresh 200 response is in flight', async () => {
+		let resolveRefresh!: (response: {
+			ok: boolean;
+			json: () => Promise<{ token: string; refresh_token: string; expires_at: string }>;
+		}) => void;
+		mockFetch.mockImplementationOnce(() => new Promise((resolve) => {
+			resolveRefresh = resolve;
+		}));
+		const { refreshSession } = await import('../client');
+
+		const pendingRefresh = refreshSession();
+		await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+
+		session.value = {
+			token: 'cross-tab-winner-token',
+			refreshToken: 'winner-refresh-token',
+			accessExpiresAt: null,
+		};
+
+		resolveRefresh({
+			ok: true,
+			json: async () => ({
+				token: 'stale-token',
+				refresh_token: 'stale-refresh-token',
+				expires_at: '2026-07-11T00:00:00Z',
+			}),
+		});
+
+		const result = await pendingRefresh;
+		expect(result).toBe('cross-tab-winner-token');
+		expect(setAuth).not.toHaveBeenCalled();
+	});
+	it('preserves browser auth and suppresses redirect when refresh endpoint returns 503', async () => {
+		// Protected endpoint returns 401
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 401,
+			statusText: 'Unauthorized',
+			json: async () => ({ detail: 'Access token expired' }),
+			text: async () => 'Access token expired',
+		});
+		// Refresh endpoint returns 503 (transient error)
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 503,
+			statusText: 'Service Unavailable',
+			json: async () => ({ detail: 'Keystone temporarily unavailable' }),
+			text: async () => 'Keystone temporarily unavailable',
+		});
+
+		const { api, ApiError } = await import('../client');
+
+		// Refresh 503 failure must propagate as ApiError with status 503 (current buggy code throws ApiError 401)
+		const err = await api.get('/api/v1/protected-503', 'expired-token', 'project').catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect((err as InstanceType<typeof ApiError>).status).toBe(503);
+
+		// Flush microtasks to ensure any scheduled handleUnauthorized would have run
+		await new Promise((r) => setTimeout(r, 0));
+
+		// Browser auth must NOT be cleared and redirect must NOT be triggered
+		expect(clearAuth).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
+		expect(replace).not.toHaveBeenCalled();
+		expect(session.value.token).toBe('session-token');
+	});
+
+	it('preserves browser auth and suppresses redirect when refresh endpoint encounters a transport/network error', async () => {
+		// Protected endpoint returns 401
+		mockFetch.mockResolvedValueOnce({
+			ok: false,
+			status: 401,
+			statusText: 'Unauthorized',
+			json: async () => ({ detail: 'Access token expired' }),
+			text: async () => 'Access token expired',
+		});
+		// Refresh fetch rejects with network error
+		const networkError = new TypeError('Failed to fetch');
+		mockFetch.mockRejectedValueOnce(networkError);
+
+		const { api } = await import('../client');
+
+		// Transport failure must propagate the original TypeError (current buggy code throws ApiError 401)
+		const err = await api.get('/api/v1/protected-net-err', 'expired-token', 'project').catch((e: unknown) => e);
+		expect(err).toBe(networkError);
+
+		// Flush microtasks to ensure any scheduled handleUnauthorized would have run
+		await new Promise((r) => setTimeout(r, 0));
+
+		// Browser auth must NOT be cleared and redirect must NOT be triggered
+		expect(clearAuth).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
+		expect(replace).not.toHaveBeenCalled();
+		expect(session.value.token).toBe('session-token');
+	});
+
 });

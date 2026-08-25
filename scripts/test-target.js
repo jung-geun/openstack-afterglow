@@ -70,6 +70,7 @@ const targets = {
 				"src/lib/stores/__tests__/auth.test.ts",
 				"src/lib/stores/__tests__/auth.security.test.ts",
 				"src/lib/stores/__tests__/auth.sync.test.ts",
+				"src/lib/api/__tests__/client.authRedirect.test.ts",
 				"src/lib/utils/__tests__/authFlow.test.ts",
 				"src/lib/components/auth/__tests__/LoginBrandHeader.test.ts",
 				"src/routes/__tests__/gitlab-auth-paths.test.ts",
