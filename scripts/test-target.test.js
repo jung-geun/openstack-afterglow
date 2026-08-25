@@ -366,6 +366,12 @@ test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
 		assert.doesNotMatch(workflow, /cache:\s*npm/);
 		assert.doesNotMatch(workflow, /run:\s*npm ci/);
 	}
+
+	const osInterfaceFallbacks = Array.from(
+		workflow.matchAll(/vars\.AFTERGLOW_OS_INTERFACE\s*\|\|\s*'([^']+)'/g),
+		(m) => m[1]
+	);
+	assert.deepEqual(osInterfaceFallbacks, ["public", "public"]);
 });
 
 test("contract tests live in tests/contracts/ and do not overlap with unit collection", () => {

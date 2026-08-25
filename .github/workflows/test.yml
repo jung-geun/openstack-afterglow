@@ -307,7 +307,7 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_PROJECT_DOMAIN_NAME || 'Default' }}
           OS_USER_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_USER_DOMAIN_NAME || 'Default' }}
           OS_REGION_NAME: ${{ vars.AFTERGLOW_OS_REGION_NAME || 'RegionOne' }}
-          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'internal' }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'public' }}
           AFTERGLOW_TEST_ADMIN_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
           AFTERGLOW_TEST_ADMIN_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
           AFTERGLOW_TEST_ADMIN_PROJECT: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
