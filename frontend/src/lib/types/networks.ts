@@ -47,6 +47,12 @@ export interface NetworkDetail {
   project_id?: string | null;
 }
 
+export interface AdminNetworkDetail extends NetworkDetail {
+  provider_network_type: string | null;
+  provider_segmentation_id: number | null;
+  provider_physical_network: string | null;
+}
+
 export interface FloatingIp {
   id: string;
   floating_ip_address: string;

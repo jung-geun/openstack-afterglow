@@ -16,6 +16,7 @@ from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.models.storage import (
+    AdminNetworkDetail,
     FileStorageDeleteDiagnostic,
     FileStorageForceDeleteResult,
     FileStorageInfo,
@@ -2049,11 +2050,11 @@ class UpdatePortRequest(BaseModel):
     name: str | None = None
 
 
-@router.get("/networks/{network_id}", dependencies=[Depends(require_admin)])
+@router.get("/networks/{network_id}", dependencies=[Depends(require_admin)], response_model=AdminNetworkDetail)
 async def get_admin_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """네트워크 상세 조회 (관리자)."""
     try:
-        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
+        return await asyncio.to_thread(neutron.get_admin_network_detail, conn, network_id)
     except Exception:
         raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
 

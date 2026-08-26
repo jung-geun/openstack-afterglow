@@ -238,6 +238,12 @@ class NetworkDetail(BaseModel):
     routers: list[RouterInfo] = []
 
 
+class AdminNetworkDetail(NetworkDetail):
+    provider_network_type: str | None = None
+    provider_segmentation_id: int | None = None
+    provider_physical_network: str | None = None
+
+
 class CreateVolumeRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     size_gb: int = Field(..., ge=1, le=16384)

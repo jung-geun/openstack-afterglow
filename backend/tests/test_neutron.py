@@ -284,3 +284,109 @@ def test_network_quota_preserves_openstacksdk_original_keys_outside_strict_mode(
 
     assert result["floatingip"] == {"limit": 5, "in_use": 2}
     assert result["security_group"] == {"limit": 3, "in_use": 1}
+
+
+def test_get_network_detail_shares_serialization_and_omits_provider_attrs():
+    from app.services.neutron import get_network_detail
+
+    conn = MagicMock()
+    mock_net = MagicMock()
+    mock_net.id = "net-1"
+    mock_net.name = "user-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    conn.network.get_network.return_value = mock_net
+    conn.network.ports.return_value = []
+
+    detail = get_network_detail(conn, "net-1")
+
+    conn.network.get_network.assert_called_once_with("net-1")
+    assert detail.id == "net-1"
+    assert detail.name == "user-net"
+    assert not hasattr(detail, "provider_network_type")
+    assert "provider_network_type" not in detail.model_dump()
+
+
+def test_get_admin_network_detail_vlan():
+    from app.services.neutron import get_admin_network_detail
+
+    conn = MagicMock()
+    mock_net = MagicMock()
+    mock_net.id = "net-vlan"
+    mock_net.name = "admin-vlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    conn.network.get_network.return_value = mock_net
+    conn.network.ports.return_value = []
+
+    detail = get_admin_network_detail(conn, "net-vlan")
+
+    conn.network.get_network.assert_called_once_with("net-vlan")
+    assert detail.id == "net-vlan"
+    assert detail.provider_network_type == "vlan"
+    assert detail.provider_segmentation_id == 100
+    assert detail.provider_physical_network == "physnet1"
+
+
+def test_get_admin_network_detail_vxlan():
+    from app.services.neutron import get_admin_network_detail
+
+    conn = MagicMock()
+    mock_net = MagicMock()
+    mock_net.id = "net-vxlan"
+    mock_net.name = "admin-vxlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vxlan"
+    mock_net.provider_segmentation_id = 5000
+    mock_net.provider_physical_network = None
+
+    conn.network.get_network.return_value = mock_net
+    conn.network.ports.return_value = []
+
+    detail = get_admin_network_detail(conn, "net-vxlan")
+
+    conn.network.get_network.assert_called_once_with("net-vxlan")
+    assert detail.provider_network_type == "vxlan"
+    assert detail.provider_segmentation_id == 5000
+    assert detail.provider_physical_network is None
+
+
+def test_get_admin_network_detail_missing_provider_values():
+    from app.services.neutron import get_admin_network_detail
+
+    conn = MagicMock()
+    mock_net = MagicMock()
+    mock_net.id = "net-flat"
+    mock_net.name = "admin-flat-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = None
+    mock_net.provider_segmentation_id = None
+    mock_net.provider_physical_network = None
+
+    conn.network.get_network.return_value = mock_net
+    conn.network.ports.return_value = []
+
+    detail = get_admin_network_detail(conn, "net-flat")
+
+    conn.network.get_network.assert_called_once_with("net-flat")
+    assert detail.provider_network_type is None
+    assert detail.provider_segmentation_id is None
+    assert detail.provider_physical_network is None

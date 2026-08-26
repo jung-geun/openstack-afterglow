@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging as _logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import openstack
 
 from app.models.storage import (
+    AdminNetworkDetail,
     FloatingIpInfo,
     NetworkDetail,
     NetworkInfo,
@@ -52,11 +53,9 @@ def get_network(conn: openstack.connection.Connection, network_id: str) -> Netwo
     return _net_to_info(n)
 
 
-def get_network_detail(conn: openstack.connection.Connection, network_id: str) -> NetworkDetail:
-    n = conn.network.get_network(network_id)
-
+def _serialize_network_detail(conn: openstack.connection.Connection, n: Any) -> NetworkDetail:
     subnet_details = []
-    for subnet_id in n.subnet_ids or []:
+    for subnet_id in getattr(n, "subnet_ids", None) or []:
         try:
             s = conn.network.get_subnet(subnet_id)
             subnet_details.append(
@@ -74,7 +73,7 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
     # 이 네트워크에 연결된 라우터 찾기 (router_interface 포트 기준)
     router_map: dict[str, RouterInfo] = {}
     try:
-        ports = list(_iter_router_interface_ports(conn, network_id=network_id))
+        ports = list(_iter_router_interface_ports(conn, network_id=n.id))
         for port in ports:
             router_id = port.device_id
             if not router_id:
@@ -105,11 +104,34 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
         id=n.id,
         name=n.name or "",
         status=n.status,
-        subnets=list(n.subnet_ids or []),
-        is_external=bool(n.is_router_external),
-        is_shared=bool(n.is_shared),
+        subnets=list(getattr(n, "subnet_ids", None) or []),
+        is_external=bool(getattr(n, "is_router_external", False)),
+        is_shared=bool(getattr(n, "is_shared", False)),
         subnet_details=subnet_details,
         routers=list(router_map.values()),
+    )
+
+
+def get_network_detail(conn: openstack.connection.Connection, network_id: str) -> NetworkDetail:
+    n = conn.network.get_network(network_id)
+    return _serialize_network_detail(conn, n)
+
+
+def get_admin_network_detail(conn: openstack.connection.Connection, network_id: str) -> AdminNetworkDetail:
+    n = conn.network.get_network(network_id)
+    base_detail = _serialize_network_detail(conn, n)
+    seg_id = getattr(n, "provider_segmentation_id", None)
+    if seg_id is not None:
+        try:
+            seg_id = int(seg_id)
+        except (ValueError, TypeError):
+            seg_id = None
+
+    return AdminNetworkDetail(
+        **base_detail.model_dump(),
+        provider_network_type=getattr(n, "provider_network_type", None),
+        provider_segmentation_id=seg_id,
+        provider_physical_network=getattr(n, "provider_physical_network", None),
     )
 
 

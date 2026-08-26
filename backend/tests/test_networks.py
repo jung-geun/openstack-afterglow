@@ -1,6 +1,6 @@
 """네트워크 및 Floating IP API 테스트."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -179,3 +179,109 @@ async def test_delete_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.delete("/api/v1/networks/floating-ips/fip-1")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_non_admin_returns_403(non_admin_client):
+    resp = await non_admin_client.get("/api/v1/admin/networks/net-1")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_vlan(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-vlan"
+    mock_net.name = "vlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-vlan")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-vlan"
+    assert data["provider_network_type"] == "vlan"
+    assert data["provider_segmentation_id"] == 100
+    assert data["provider_physical_network"] == "physnet1"
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_vxlan(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-vxlan"
+    mock_net.name = "vxlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vxlan"
+    mock_net.provider_segmentation_id = 2000
+    mock_net.provider_physical_network = None
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-vxlan")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-vxlan"
+    assert data["provider_network_type"] == "vxlan"
+    assert data["provider_segmentation_id"] == 2000
+    assert data["provider_physical_network"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_missing_provider_values(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-flat"
+    mock_net.name = "flat-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = None
+    mock_net.provider_segmentation_id = None
+    mock_net.provider_physical_network = None
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-flat")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-flat"
+    assert data["provider_network_type"] is None
+    assert data["provider_segmentation_id"] is None
+    assert data["provider_physical_network"] is None
+
+
+@pytest.mark.asyncio
+async def test_ordinary_user_get_network_detail_does_not_contain_provider_keys(client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-user"
+    mock_net.name = "user-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = True
+    mock_net.is_shared = True
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await client.get("/api/v1/networks/net-user")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-user"
+    assert "provider_network_type" not in data
+    assert "provider_segmentation_id" not in data
+    assert "provider_physical_network" not in data

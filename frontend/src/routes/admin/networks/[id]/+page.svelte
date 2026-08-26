@@ -9,10 +9,10 @@
 	import NetworkInfoCard from '$lib/components/admin/networks/NetworkInfoCard.svelte';
 	import SubnetSection from '$lib/components/admin/networks/SubnetSection.svelte';
 	import RouterTable from '$lib/components/admin/networks/RouterTable.svelte';
-	import type { NetworkDetail } from '$lib/types/networks';
+	import type { AdminNetworkDetail } from '$lib/types/networks';
 	import { toast } from '$lib/stores/toast';
 
-	let network = $state<NetworkDetail | null>(null);
+	let network = $state<AdminNetworkDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
 	let deleting = $state(false);
@@ -35,7 +35,7 @@
 		loading = true;
 		error = '';
 		try {
-			network = await api.get<NetworkDetail>(`/api/v1/admin/networks/${id}`, token, projectId);
+			network = await api.get<AdminNetworkDetail>(`/api/v1/admin/networks/${id}`, token, projectId);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
