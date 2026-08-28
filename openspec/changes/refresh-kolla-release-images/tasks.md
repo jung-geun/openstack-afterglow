@@ -6,4 +6,5 @@
 - [x] Document mutable-tag refresh and immutable release-digest handoff.
 - [x] Suppress service-loop values during plugin image pulls so credential-bearing environments never reach Ansible output.
 - [x] Run focused Kolla contracts, full repository tests, and backend lint.
-- [ ] Update live Afterglow refs to the v1.17.1 linux/amd64 digests and run Kolla pull/upgrade twice.
+- [x] Update live Afterglow refs to the v1.17.1 linux/amd64 digests and force-pull them on both controllers.
+- [ ] After SSH recovery, update the installed plugin to commit `68aa39b9`, then run scoped upgrade twice and verify container digests and health.
