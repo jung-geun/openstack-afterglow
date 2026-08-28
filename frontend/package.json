@@ -48,6 +48,8 @@
 	},
 	"overrides": {
 		"cookie": "^0.7.0",
-		"postcss": "^8.5.25"
+		"esbuild": "^0.28.1",
+		"postcss": "^8.5.25",
+		"vite": "^8.2.0"
 	}
 }
