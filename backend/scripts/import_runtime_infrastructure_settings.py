@@ -35,6 +35,7 @@ _POLICY_SOURCES: dict[str, tuple[str, str, str]] = {
     "nova.default_network": ("nova", "default_network_id", "DEFAULT_NETWORK_ID"),
     "nova.default_external_network": ("nova", "default_network_external_id", "DEFAULT_NETWORK_EXTERNAL_ID"),
     "nova.default_compute_availability_zone": ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE"),
+    "cinder.default_volume_availability_zone": ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE"),
     "builder.flavor": ("builder", "flavor_id", "BUILDER_FLAVOR_ID"),
     "builder.network": ("builder", "network_id", "BUILDER_NETWORK_ID"),
     "builder.floating_network": ("builder", "floating_network_id", "BUILDER_FLOATING_NETWORK_ID"),

@@ -34,6 +34,12 @@ def test_legacy_bool_honors_explicit_environment(monkeypatch):
     assert importer._legacy_bool(config, "notion", "enabled", "NOTION_ENABLED") is None
 
 
+def test_default_availability_zone_seeds_compute_and_volume_policies():
+    source = ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE")
+    assert importer._POLICY_SOURCES["nova.default_compute_availability_zone"] == source
+    assert importer._POLICY_SOURCES["cinder.default_volume_availability_zone"] == source
+
+
 @pytest.fixture(scope="module")
 def importer_database_url():
     database_url = os.environ.get("AFTERGLOW_TEST_DATABASE_URL")
