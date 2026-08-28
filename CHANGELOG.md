@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-08-28
+
+### Added
+
+- **관리자 서브넷 운영 상세** — allocation pool, 할당 IP·포트, Neutron binding host와 DHCP agent 배치를 확인하는 관리자 API·화면을 추가하고 네트워크 목록에 실제 CIDR을 표시한다.
+
+### Changed
+
+- **시스템 관리자 외부 프로젝트 조회** — 홈 프로젝트에서 검증한 시스템 관리자 토큰을 유지하면서 명시한 대상 프로젝트를 논리적 리소스 범위로 사용해 별도 tenant role 없이 관리자 상세 조회를 수행한다.
+- **Kolla 캐시를 stock Valkey로 통일** — Afterglow, Drover, Lumen, Palimpsest, Waygate가 Kolla Valkey를 공용 Redis 호환 캐시로 사용하고, 누락된 서비스·inventory·비밀번호를 배포 전 검사한다.
+- **관리자 Swift 집계에 시간 예산 적용** — 프로젝트별 account metadata를 제한된 동시성과 deadline으로 집계해 Swift 장애가 관리자 overview 전체를 30초 이상 지연하지 않게 한다.
+
+### Fixed
+
+- **동시 401 세션 소실 방지** — 이미 교체된 access token의 늦은 401은 최신 토큰으로 재시도하고, 동일 토큰 세대의 refresh 실패를 합쳐 401 fan-out이 유효한 세션을 반복 회전·삭제하지 않게 한다.
+- **관리자 버전 API 500 제거** — Drover 분리 뒤 삭제된 전역 `k3s_version` 설정을 응답·타입·화면에서 제거해 관리자 overview가 현재 런타임 계약으로 응답한다.
+
 ## [1.17.0] - 2026-07-31
 
 ### Added
