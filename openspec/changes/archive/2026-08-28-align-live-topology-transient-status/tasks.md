@@ -6,5 +6,5 @@
 ## Verification
 
 - [x] Run `npm run test:gate` successfully.
-- [ ] Push the fix to `dev` and verify Docker Build & Push publishes the dev image set.
-- [ ] Archive this change after the remote workflow succeeds.
+- [x] Push the fix to `dev`; Docker Build & Push run `33139071633` published backend, frontend, and worker dev manifests.
+- [x] Archive this change after the remote workflow succeeds.
