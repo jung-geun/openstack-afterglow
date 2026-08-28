@@ -18,9 +18,10 @@
     name: "{{ item.value.container_name }}"
     image: "{{ item.value.image }}"
     state: started
+    restart: "{{ afterglow_start_restart | default(false) | bool }}"
     restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
     volumes: "{{ item.value.volumes | default([]) }}"
-    env: "{{ item.value.environment | default({}) }}"
+    env: "{{ afterglow_service_environments.get(item.key, {}) }}"
     command: "{{ item.value.command | default(omit) }}"
     healthcheck: "{{ item.value.healthcheck | default(omit) }}"
     ports: "{{ item.value.ports | default([]) }}"

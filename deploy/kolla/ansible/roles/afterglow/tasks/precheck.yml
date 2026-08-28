@@ -114,6 +114,7 @@
     that:
       - item.rc == 0
     fail_msg: "Cannot access configured Afterglow image reference. Ensure GHCR credentials are configured."
+  no_log: true
   loop: "{{ image_checks.results | default([]) }}"
   loop_control:
     label: "{{ item.item.key | default('image') }}"
