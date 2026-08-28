@@ -10,4 +10,4 @@
 - [x] Restore SSH access, update the installed plugin, and reproduce two scoped upgrades against the v1.17.1 digest pins.
 - [x] Reuse the complete start specification during upgrade so host networking and supplemental groups cannot drift.
 - [x] Keep credential-bearing runtime environments outside `afterglow_services` and censor manifest assertion results.
-- [ ] Deploy the follow-up fix, run two scoped upgrades, and verify both controllers' image digests and health.
+- [x] Deploy the follow-up fix, run two scoped upgrades, and verify both controllers' image digests and health.
