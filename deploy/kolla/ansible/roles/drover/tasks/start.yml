@@ -14,7 +14,7 @@
     state: started
     restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
     volumes: "{{ item.value.volumes | default([]) }}"
-    env: "{{ item.value.environment | default({}) }}"
+    env: "{{ drover_service_environments.get(item.key, {}) }}"
     command: "{{ item.value.command | default(omit) }}"
     healthcheck: "{{ item.value.healthcheck | default(omit) }}"
     ports: "{{ item.value.ports | default([]) }}"

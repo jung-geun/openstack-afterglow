@@ -944,6 +944,15 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 	assert.match(afterglowStart, /network_mode:\s*"\{\{ item\.value\.network_mode \| default\(omit\) \}\}"/)
 	assert.match(afterglowPrecheck, /Fail if any configured Afterglow image is inaccessible[\s\S]*?no_log:\s*true/)
 
+	const droverDefaults = readRepoFile("deploy/kolla/ansible/roles/drover/defaults/main.yml")
+	const droverStart = readRepoFile("deploy/kolla/ansible/roles/drover/tasks/start.yml")
+	const droverServiceMapStart = droverDefaults.indexOf("drover_services:")
+	const droverEnvironmentMapStart = droverDefaults.indexOf("drover_service_environments:")
+	const droverServiceMap = droverDefaults.slice(droverServiceMapStart, droverEnvironmentMapStart)
+	assert.ok(droverServiceMapStart >= 0 && droverEnvironmentMapStart > droverServiceMapStart)
+	assert.doesNotMatch(droverServiceMap, /^\s+environment:/m)
+	assert.match(droverStart, /env:\s*"\{\{ drover_service_environments\.get\(item\.key, \{\}\) \}\}"/)
+
 	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
 		const pull = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/pull.yml`)
 		assert.match(pull, /community\.docker\.docker_image/)
