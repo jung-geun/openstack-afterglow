@@ -374,6 +374,20 @@ test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
 	assert.deepEqual(osInterfaceFallbacks, ["public", "public"]);
 });
 
+test("pull requests cannot schedule the self-hosted image build matrix", () => {
+	const workflow = fs.readFileSync(path.join(rootDir, ".github", "workflows", "docker-build.yml"), "utf-8");
+	const buildStart = workflow.indexOf("\n  build:");
+	const manifestStart = workflow.indexOf("\n  manifest:");
+	const buildJob = workflow.slice(buildStart, manifestStart);
+
+	assert.ok(buildStart >= 0 && manifestStart > buildStart, "docker workflow build job must exist");
+	assert.match(buildJob, /runs-on: \$\{\{ matrix\.runner \}\}/);
+	assert.match(
+		buildJob,
+		/if: needs\.changes\.outputs\.is_pr != 'true' && needs\.changes\.outputs\.targets != '\[\]'/
+	);
+});
+
 test("contract tests live in tests/contracts/ and do not overlap with unit collection", () => {
 	const contractDir = path.join(rootDir, "backend", "tests", "contracts");
 	assert.ok(fs.existsSync(contractDir), "backend/tests/contracts directory must exist");
