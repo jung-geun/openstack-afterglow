@@ -100,7 +100,7 @@ requires-dist = [
     { name = "asyncssh", specifier = ">=2.18" },
     { name = "beautifulsoup4", specifier = "==4.14.3" },
     { name = "boto3", specifier = ">=1.35.0" },
-    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=274f39c6fb21eb95a9a4ea4840bd263280335a54" },
+    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=0e8bc4407a06ff7aad82be2dba785c353320781a" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.21" },
     { name = "fastapi", specifier = "==0.136.3" },
     { name = "httpcore", specifier = "==1.0.9" },
@@ -148,7 +148,7 @@ provides-extras = ["kvm", "dev"]
 worker = [
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "apscheduler", specifier = ">=3.10" },
-    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=274f39c6fb21eb95a9a4ea4840bd263280335a54" },
+    { name = "drover-sdk", git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=0e8bc4407a06ff7aad82be2dba785c353320781a" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "idna", specifier = ">=3.15" },
     { name = "jinja2", specifier = "==3.1.6" },
@@ -699,7 +699,7 @@ wheels = [
 [[package]]
 name = "drover-sdk"
 version = "0.1.0"
-source = { git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=274f39c6fb21eb95a9a4ea4840bd263280335a54#274f39c6fb21eb95a9a4ea4840bd263280335a54" }
+source = { git = "https://github.com/openstack-afterglow/drover.git?subdirectory=sdk&rev=0e8bc4407a06ff7aad82be2dba785c353320781a#0e8bc4407a06ff7aad82be2dba785c353320781a" }
 dependencies = [
     { name = "openstacksdk" },
 ]
