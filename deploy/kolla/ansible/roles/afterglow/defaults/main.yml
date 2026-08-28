@@ -55,8 +55,8 @@ afterglow_backend_listen_port: 18000
 afterglow_frontend_listen_port: 18081
 
 # ── URL 및 엔드포인트 ────────────────────────────────────────────────────────
-afterglow_public_api_base: "http://{{ kolla_internal_vip_address }}:{{ afterglow_backend_port }}"
-afterglow_openstack_interface: "internal"
+afterglow_public_api_base: "{{ internal_protocol | default('http') }}://{{ kolla_internal_fqdn | default(kolla_internal_vip_address) }}:{{ afterglow_backend_port }}"
+afterglow_openstack_interface: "{{ openstack_interface | default('internal') }}"
 afterglow_public_endpoint_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}"
 # Optional Kolla external-VIP route. The plugin-owned fragment receives the
 # public host and dispatches /api/ to the API backend and all other paths to
@@ -90,7 +90,9 @@ afterglow_keystone_auth_url: "{{ keystone_internal_url }}"
 afterglow_keystone_project_domain_name: "{{ default_project_domain_name }}"
 afterglow_keystone_user_domain_name: "{{ default_user_domain_name }}"
 afterglow_keystone_region_name: "{{ openstack_region_name }}"
-afterglow_keystone_interface: "internal"
+afterglow_keystone_interface: "{{ afterglow_openstack_interface }}"
+afterglow_openstack_insecure: "{{ openstack_insecure | default(false) }}"
+afterglow_openstack_cacert: "{{ openstack_cacert | default('') }}"
 
 # ── Manila ────────────────────────────────────────────────────────────────────
 afterglow_manila_microversion: "2.65"

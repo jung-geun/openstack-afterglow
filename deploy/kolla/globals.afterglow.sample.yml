@@ -57,6 +57,14 @@ palimpsest_worker_image_ref: "ghcr.io/openstack-afterglow/palimpsest-hub-worker@
 # Browser-facing frontend origin. Configure the operator-managed public DNS/TLS
 # endpoint here. DMSLab's public ingress routes the same origin's `/api/v1`
 # path to the backend, so browser API traffic remains HTTPS and same-origin.
+#
+# Standard Kolla globals (`internal_protocol`, `kolla_internal_fqdn`,
+# `openstack_interface`, `openstack_insecure`, `openstack_cacert`) govern
+# internal transport protocol, internal domain/VIP, OpenStack interface selection,
+# and SSL verification across plugin services automatically. Leave internal/admin
+# endpoints and interface settings unpinned here unless custom per-service overrides
+# are required. Plugin-owned settings below define public ingress URLs, HAProxy
+# routing, container listening ports, and service-specific parameters.
 afterglow_public_endpoint_url: "https://cloud.dmslab.re.kr"
 # Route this hostname through Kolla's existing external VIP/TLS frontend.
 # The plugin forwards /api/ to the API backend and other paths to the frontend.
@@ -68,7 +76,6 @@ afterglow_frontend_port: 3080
 afterglow_backend_listen_port: 18000
 afterglow_frontend_listen_port: 18081
 afterglow_public_api_base: "https://cloud.dmslab.re.kr"
-afterglow_openstack_interface: "internal"
 afterglow_ceph_monitors: "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
 
 # Optional deploy-host TOML files default to
@@ -93,29 +100,21 @@ palimpsest_api_listen_port: 18020
 # only when the matching `*_public_haproxy_enabled` toggle below is true.
 waygate_external_url: "https://waygate.dmslab.re.kr"
 waygate_public_endpoint_url: "https://waygate.dmslab.re.kr"
-waygate_internal_endpoint_url: "http://172.30.0.253:8010"
-waygate_admin_endpoint_url: "http://172.30.0.253:8010"
 waygate_public_haproxy_enabled: true
 waygate_public_haproxy_fqdn: "waygate.dmslab.re.kr"
 
 drover_external_url: "https://drover.dmslab.re.kr"
 drover_public_endpoint_url: "https://drover.dmslab.re.kr"
-drover_internal_endpoint_url: "http://172.30.0.253:8011"
-drover_admin_endpoint_url: "http://172.30.0.253:8011"
 drover_public_haproxy_enabled: true
 drover_public_haproxy_fqdn: "drover.dmslab.re.kr"
 
 lumen_external_url: "https://lumen.dmslab.re.kr"
 lumen_public_endpoint_url: "https://lumen.dmslab.re.kr"
-lumen_internal_endpoint_url: "http://172.30.0.253:8012"
-lumen_admin_endpoint_url: "http://172.30.0.253:8012"
 lumen_public_haproxy_enabled: true
 lumen_public_haproxy_fqdn: "lumen.dmslab.re.kr"
 
 palimpsest_external_url: "https://palimpsest.dmslab.re.kr"
 palimpsest_public_endpoint_url: "https://palimpsest.dmslab.re.kr"
-palimpsest_internal_endpoint_url: "http://172.30.0.253:8020"
-palimpsest_admin_endpoint_url: "http://172.30.0.253:8020"
 palimpsest_public_haproxy_enabled: true
 palimpsest_public_haproxy_fqdn: "palimpsest.dmslab.re.kr"
 

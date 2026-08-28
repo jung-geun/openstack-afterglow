@@ -269,9 +269,7 @@ Kolla MariaDB. PostgreSQL is required for these Lumen contracts.
 
 ## Standard Inventory and Commands
 
-Add the four plugin groups directly to `/etc/kolla/multinode`; this is the
-authoritative inventory used by the ordinary Kolla command. Then run the
-installer once from the plugin checkout:
+Add all five plugin groups (`afterglow`, `waygate`, `drover`, `lumen`, `palimpsest`) directly to `/etc/kolla/multinode`; this is the authoritative inventory used by ordinary Kolla commands. Then run the installer once from the plugin checkout:
 
 ```bash
 KOLLA_ANSIBLE_BIN=/etc/kolla/.venv/bin/kolla-ansible \
@@ -279,38 +277,39 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 ./deploy/kolla/install.sh
 ```
 
-The installer fails rather than replacing conflicting links or unexpected
-`site.yml` marker content. If it finds a legacy second YAML document in
-`/etc/kolla/globals.yml`, it removes it only when its parsed mapping exactly
-matches `/etc/kolla/config/afterglow/globals.yml`, preserving a backup beside the
-stock file.
+The installer fails rather than replacing conflicting links or unexpected `site.yml` marker content. If it finds a legacy second YAML document in `/etc/kolla/globals.yml`, it removes it only when its parsed mapping exactly matches `/etc/kolla/config/afterglow/globals.yml`, preserving a backup beside the stock file.
 
-### Deploy Services
+> **Note on Kolla Integration:** Stock Kolla-Ansible site playbooks do not auto-discover custom roles. Custom service roles execute through standard `kolla-ansible` commands only after `install.sh` appends the `afterglow-site.yml` import to Kolla's installed `site.yml`. Uninstalled environments will not execute custom roles automatically.
 
-From `/etc/kolla`, run initial deployment including the stock Valkey service dependency:
+### Post-Installer Bare Kolla Commands
+
+From `/etc/kolla`, once `install.sh` has integrated the plugin import into `site.yml`, standard bare `kolla-ansible` lifecycle commands run custom service operations against `/etc/kolla/multinode`:
 
 ```bash
-kolla-ansible deploy --tags valkey,afterglow,waygate,drover,lumen,palimpsest
+# Pull plugin and stock service images
+kolla-ansible pull -i multinode
+
+# Initial deployment (include valkey tag if Valkey is not yet running)
+kolla-ansible deploy -i multinode
+
+# Reconfigure running services after config/globals changes
+kolla-ansible reconfigure -i multinode
+
+# Upgrade services to new images and run policy seeding
+kolla-ansible upgrade -i multinode
 ```
 
-Plugin-only tags (`--tags afterglow,waygate,drover,lumen,palimpsest`) are valid for deployment or reconfigure operations only after Valkey has been established.
-
-### Reconfigure Services
-
-Reconfigure only Afterglow:
+Tag-filtered operations also remain supported:
 
 ```bash
-kolla-ansible reconfigure --tags afterglow
+# Reconfigure only Afterglow
+kolla-ansible reconfigure -i multinode --tags afterglow
+
+# Reconfigure all five plugin services
+kolla-ansible reconfigure -i multinode --tags afterglow,waygate,drover,lumen,palimpsest
 ```
 
-Reconfigure all five plugin services:
-
-```bash
-kolla-ansible reconfigure --tags afterglow,waygate,drover,lumen,palimpsest
-```
-
-The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis;
-normal operations should use the commands above.
+The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis; normal operations should use the standard commands above.
 
 ---
 

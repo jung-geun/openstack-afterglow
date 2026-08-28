@@ -5,5 +5,8 @@
 - name: Include config tasks
   ansible.builtin.include_tasks: config.yml
 
+- name: Include seed runtime policies tasks
+  ansible.builtin.include_tasks: seed_runtime_policies.yml
+
 - name: Include start tasks
   ansible.builtin.include_tasks: start.yml

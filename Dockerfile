@@ -41,6 +41,7 @@ COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app/ ./app/
 COPY backend/tofu/ ./tofu/
+COPY backend/scripts/ ./scripts/
 
 # .pyc 직접 사용으로 cold start 가속
 RUN python -m compileall -q app/

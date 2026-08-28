@@ -40,6 +40,9 @@ control
 [lumen:children]
 control
 
+[palimpsest:children]
+control
+
 # ── Kolla Logical Groups ──────────────────────────────────────────────────────
 [baremetal:children]
 control

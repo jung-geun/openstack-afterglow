@@ -13,6 +13,46 @@
       when:
         - not ansible_facts
   tags: always
+- name: Custom service inventory preflight check
+  hosts: all
+  gather_facts: false
+  run_once: true
+  tags: [always, afterglow, waygate, drover, lumen, palimpsest]
+  tasks:
+    - name: Assert inventory group for enabled afterglow
+      ansible.builtin.assert:
+        that:
+          - groups.get('afterglow', []) | length > 0
+        fail_msg: "Enabled custom service 'afterglow' requires a non-empty '[afterglow]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_afterglow | default(false) | bool
+
+    - name: Assert inventory group for enabled waygate
+      ansible.builtin.assert:
+        that:
+          - groups.get('waygate', []) | length > 0
+        fail_msg: "Enabled custom service 'waygate' requires a non-empty '[waygate]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_waygate | default(false) | bool
+
+    - name: Assert inventory group for enabled drover
+      ansible.builtin.assert:
+        that:
+          - groups.get('drover', []) | length > 0
+        fail_msg: "Enabled custom service 'drover' requires a non-empty '[drover]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_drover | default(false) | bool
+
+    - name: Assert inventory group for enabled lumen
+      ansible.builtin.assert:
+        that:
+          - groups.get('lumen', []) | length > 0
+        fail_msg: "Enabled custom service 'lumen' requires a non-empty '[lumen]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_lumen | default(false) | bool
+
+    - name: Assert inventory group for enabled palimpsest
+      ansible.builtin.assert:
+        that:
+          - groups.get('palimpsest', []) | length > 0
+        fail_msg: "Enabled custom service 'palimpsest' requires a non-empty '[palimpsest]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_palimpsest | default(false) | bool
 
 - name: Apply role afterglow
   gather_facts: false

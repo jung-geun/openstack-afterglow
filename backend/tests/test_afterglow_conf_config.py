@@ -222,6 +222,36 @@ client_secret = "configured-secret"
     assert os.environ["GITLAB_OIDC_CLIENT_SECRET"] == "configured-secret"
 
 
+def test_app_config_loads_openstack_insecure_and_cacert_from_afterglow_conf(isolated_config_dir, monkeypatch):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[openstack]
+insecure = true
+cacert = "/etc/ssl/certs/custom-ca.crt"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OS_INSECURE", raising=False)
+    monkeypatch.delenv("OS_CACERT", raising=False)
+
+    flat = app_config._load_toml()
+    settings = app_config.Settings(**flat)
+
+    assert flat["os_insecure"] is True
+    assert flat["os_cacert"] == "/etc/ssl/certs/custom-ca.crt"
+    assert settings.os_insecure is True
+    assert settings.os_cacert == "/etc/ssl/certs/custom-ca.crt"
+    assert settings.ssl_verify is False
+
+    monkeypatch.setenv("OS_INSECURE", "false")
+    monkeypatch.setenv("OS_CACERT", "/env/override-ca.crt")
+    app_config.get_settings.cache_clear()
+    settings_override = app_config.get_settings()
+    assert settings_override.os_insecure is False
+    assert settings_override.os_cacert == "/env/override-ca.crt"
+    assert settings_override.ssl_verify == "/env/override-ca.crt"
+
+
 def test_app_config_applies_matching_afterglow_conf_overrides(isolated_config_dir):
     (isolated_config_dir / "afterglow.conf").write_text(
         """

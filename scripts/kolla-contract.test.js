@@ -495,7 +495,7 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 		assert.match(defaults, new RegExp(`${service}_keystone_project_domain_name: "\\{\\{ default_project_domain_name \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_keystone_user_domain_name: "\\{\\{ default_user_domain_name \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_keystone_region_name: "\\{\\{ openstack_region_name \\}\\}"`))
-		assert.match(defaults, new RegExp(`${service}_keystone_interface: "internal"`))
+		assert.match(defaults, new RegExp(`${service}_keystone_interface: "(?:\\{\\{\\s*(?:openstack_interface\\s*\\|\\s*default\\('internal'\\)|afterglow_openstack_interface)\\s*\\}\\}|internal)"`))
 		assert.match(template, new RegExp(`${service === "lumen" ? "keystone_auth_url" : "auth_url"} = "\\{\\{ ${service}_keystone_auth_url \\}\\}"`))
 		assert.match(template, new RegExp(`${service === "lumen" ? "database_url" : "url"} = "\\{\\{ ${service}_database_url \\}\\}"`))
 		assert.match(database, new RegExp(`login_host: "\\{\\{ ${service}_database_address \\}\\}"`))
@@ -815,5 +815,134 @@ test("Kolla plugin requires stock Kolla Valkey dependency and rejects standalone
 				`File ${relPath} matched forbidden Redis pattern ${pattern}`
 			)
 		}
+	}
+})
+test("Afterglow Kolla placement-policy seeding lifecycle and container contract", () => {
+	const deploy = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/deploy.yml")
+	const reconfigure = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/reconfigure.yml")
+	const upgrade = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/upgrade.yml")
+	const seedTask = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/seed_runtime_policies.yml")
+	const dockerfile = readRepoFile("Dockerfile")
+	const backendStageStart = dockerfile.indexOf("FROM python:3.12-slim AS backend")
+	const backendStageEnd = dockerfile.indexOf("FROM backend-builder AS backend-dev")
+	assert.ok(
+		backendStageStart >= 0 && backendStageEnd > backendStageStart,
+		"Dockerfile must contain a bounded backend production stage"
+	)
+	const backendStage = dockerfile.slice(backendStageStart, backendStageEnd)
+
+	assert.match(
+		backendStage,
+		/COPY\s+backend\/scripts\/\s+\.\/scripts\//,
+		"Backend stage in Dockerfile must copy backend/scripts/ to ./scripts/"
+	)
+	assert.match(deploy, /seed_runtime_policies\.yml/)
+	assert.ok(
+		deploy.indexOf("bootstrap_service.yml") < deploy.indexOf("seed_runtime_policies.yml"),
+		"deploy.yml must include seed_runtime_policies.yml after bootstrap_service.yml"
+	)
+
+	assert.match(reconfigure, /seed_runtime_policies\.yml/)
+	assert.ok(
+		reconfigure.indexOf("config.yml") < reconfigure.indexOf("seed_runtime_policies.yml"),
+		"reconfigure.yml must include seed_runtime_policies.yml after config.yml"
+	)
+
+	assert.match(upgrade, /seed_runtime_policies\.yml/)
+	assert.ok(
+		upgrade.indexOf("docker_image") < upgrade.indexOf("seed_runtime_policies.yml"),
+		"upgrade.yml must include seed_runtime_policies.yml after image pull"
+	)
+	assert.ok(
+		upgrade.indexOf("seed_runtime_policies.yml") < upgrade.indexOf("docker_container"),
+		"upgrade.yml must include seed_runtime_policies.yml before container restart"
+	)
+
+	assert.match(seedTask, /image:\s*"\{\{ afterglow_backend_image_ref \}\}"/)
+	assert.match(seedTask, /:\/app\/afterglow\.conf:ro/)
+	assert.match(seedTask, /DATABASE_URL:\s*"\{\{ afterglow_database_url \}\}"/)
+	assert.match(seedTask, /REDIS_URL:\s*"\{\{ afterglow_redis_url \}\}"/)
+	assert.ok(
+		seedTask.includes("python") &&
+			seedTask.includes("scripts/import_runtime_infrastructure_settings.py") &&
+			seedTask.includes("--config") &&
+			seedTask.includes("/app/afterglow.conf") &&
+			seedTask.includes("--apply"),
+		"seed_runtime_policies.yml command must execute python scripts/import_runtime_infrastructure_settings.py --config /app/afterglow.conf --apply"
+	)
+	assert.match(seedTask, /run_once:\s*true/)
+	assert.match(seedTask, /delegate_to:\s*"\{\{ groups\['afterglow'\] \| first \}\}"/)
+})
+test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and upgrade sequence", () => {
+	const site = readRepoFile("deploy/kolla/site.yml")
+	const allInOne = readRepoFile("deploy/kolla/inventory/all-in-one.sample")
+	const multinode = readRepoFile("deploy/kolla/inventory/multinode.sample")
+
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		assert.match(allInOne, new RegExp(`\\[${service}:children\\]`))
+		assert.match(multinode, new RegExp(`\\[${service}:children\\]`))
+	}
+
+	assert.match(site, /Custom service inventory preflight check/)
+	assert.match(site, /tags:\s*\[always,\s*afterglow,\s*waygate,\s*drover,\s*lumen,\s*palimpsest\]/)
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		assert.match(site, new RegExp(`Assert inventory group for enabled ${service}`))
+		assert.match(site, new RegExp(`groups\\.get\\('${service}', \\[\\]\\) \\| length > 0`))
+		assert.match(site, new RegExp(`when: enable_${service} \\| default\\(false\\) \\| bool`))
+	}
+
+	const afterglowUpgrade = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/upgrade.yml")
+	assert.match(afterglowUpgrade, /include_tasks:\s*pull\.yml/)
+	assert.match(afterglowUpgrade, /include_tasks:\s*seed_runtime_policies\.yml/)
+	const pullIndex = afterglowUpgrade.indexOf("pull.yml")
+	const seedIndex = afterglowUpgrade.indexOf("seed_runtime_policies.yml")
+	const restartIndex = afterglowUpgrade.indexOf("docker_container")
+	assert.ok(pullIndex < seedIndex, "upgrade.yml must include pull.yml before seed_runtime_policies.yml")
+	assert.ok(seedIndex < restartIndex, "upgrade.yml must seed runtime policies before container restart")
+
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		const pull = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/pull.yml`)
+		assert.match(pull, /community\.docker\.docker_image/)
+		assert.match(pull, /source:\s*pull/)
+		assert.match(pull, /force_source:\s*true/)
+		assert.match(pull, new RegExp(`loop:\\s*"\\{\\{\\s*${service}_services\\s*\\|\\s*dict2items\\s*\\}\\}"`))
+		assert.match(pull, new RegExp(`not\\s*\\(${service}_source_mode\\s*\\|\\s*default\\(false\\)\\s*\\|\\s*bool\\)`))
+	}
+})
+
+test("Kolla global topology fallbacks, Afterglow TLS settings, and Lumen Keystone aliases", () => {
+	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const afterglowKollaConf = readRepoFile("deploy/kolla/ansible/roles/afterglow/templates/afterglow.kolla.conf.j2")
+	const lumenDefaults = readRepoFile("deploy/kolla/ansible/roles/lumen/defaults/main.yml")
+
+	assert.match(
+		afterglowDefaults,
+		/afterglow_public_api_base: "\{\{ internal_protocol \| default\('http'\) \}\}:\/\/\{\{ kolla_internal_fqdn \| default\(kolla_internal_vip_address\) \}\}:\{\{ afterglow_backend_port \}\}"/
+	)
+	assert.match(afterglowDefaults, /afterglow_openstack_interface: "\{\{ openstack_interface \| default\('internal'\) \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_openstack_insecure: "\{\{ openstack_insecure \| default\(false\) \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_openstack_cacert: "\{\{ openstack_cacert \| default\(''\) \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_keystone_interface: "\{\{ afterglow_openstack_interface \}\}"/)
+
+	assert.match(afterglowKollaConf, /^insecure = \{\{ afterglow_openstack_insecure \| bool \| lower \}\}$/m)
+	assert.match(afterglowKollaConf, /^cacert = "\{\{ afterglow_openstack_cacert \}\}"$/m)
+
+	assert.match(lumenDefaults, /KEYSTONE_AUTH_URL: "\{\{ lumen_keystone_auth_url \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_ADMIN_USERNAME: "\{\{ lumen_keystone_user \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_ADMIN_PASSWORD: "\{\{ lumen_keystone_password \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_ADMIN_PROJECT: "\{\{ lumen_service_project_name \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_DOMAIN: "\{\{ lumen_keystone_user_domain_name \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_REGION_NAME: "\{\{ lumen_keystone_region_name \}\}"/)
+	assert.match(lumenDefaults, /KEYSTONE_INTERFACE: "\{\{ lumen_keystone_interface \}\}"/)
+
+	for (const service of ["drover", "waygate", "palimpsest"]) {
+		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
+		assert.match(defaults, new RegExp(`${service}_keystone_interface: "\\{\\{ openstack_interface \\| default\\('internal'\\) \\}\\}"`))
+		assert.match(
+			defaults,
+			new RegExp(
+				`${service}_internal_endpoint_url: "\\{\\{ internal_protocol \\| default\\('http'\\) \\}\\}:\\/\\/\\{\\{ kolla_internal_fqdn \\| default\\(kolla_internal_vip_address\\) \\}\\}:\\{\\{ ${service}_api_port \\}\\}"`
+			)
+		)
 	}
 })
