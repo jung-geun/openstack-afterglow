@@ -7,6 +7,6 @@
 - [x] Pin Afterglow backend dependencies to the immutable fixed Drover SDK commit and refresh `uv.lock`.
 - [x] Run focused Drover SDK and Afterglow dependency/instance tests.
 - [x] Keep Drover credential environments outside the HAProxy-visible Kolla service map.
-- [ ] Build and deploy the corrected Afterglow API image through the normal release path.
-- [ ] Verify the live GPU quota request uses `/v1/gpu-quotas/check` and VM creation advances past quota validation.
-- [ ] Run required repository gates and archive this change.
+- [x] Build and deploy the corrected Afterglow API and Drover service images through their normal image pipelines.
+- [x] Verify the live GPU quota request uses `/v1/gpu-quotas/check` and the affected project receives the explicit unallocated-quota decision.
+- [x] Run required repository gates and archive this change.
