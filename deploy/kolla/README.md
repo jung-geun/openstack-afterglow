@@ -32,7 +32,8 @@ the ordinary Kolla command line from `/etc/kolla`.
      Kolla recreates HAProxy only if their resulting configuration hash changes.
    - The plugin does not create external-VIP routes, DNS records, or TLS certificates. Existing Drover and Waygate public catalog URLs remain operator-owned ingress contracts.
 4. **Pinned GHCR Images**:
-   - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Do not use mutable `latest` or `dev` tags.
+   - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Production DMSLab stays digest-pinned. Do not use mutable `latest` or `dev` tags in production.
+   - Mutable tags are force-refreshed by `deploy`, `reconfigure`, `pull`, and `upgrade` lifecycle actions. Digest pins remain immutable and must be repinned to the published release's linux/amd64 digests when upgrading release versions.
    - Source-build mode remains an optional development path; it is not used for the DMSLab deployment.
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`, `palimpsest_kolla`).
@@ -286,18 +287,17 @@ The installer fails rather than replacing conflicting links or unexpected `site.
 From `/etc/kolla`, once `install.sh` has integrated the plugin import into `site.yml`, standard bare `kolla-ansible` lifecycle commands run custom service operations against `/etc/kolla/multinode`:
 
 ```bash
-# Pull plugin and stock service images
+# Pull plugin and stock service images (force-refreshes mutable tags)
 kolla-ansible pull -i multinode
 
-# Initial deployment (include valkey tag if Valkey is not yet running)
+# Initial deployment (force-refreshes mutable tags; include valkey tag if Valkey is not yet running)
 kolla-ansible deploy -i multinode
 
-# Reconfigure running services after config/globals changes
+# Reconfigure running services after config/globals changes (force-refreshes mutable tags)
 kolla-ansible reconfigure -i multinode
 
-# Upgrade services to new images and run policy seeding
+# Upgrade services to new images and run policy seeding (force-refreshes mutable tags)
 kolla-ansible upgrade -i multinode
-```
 
 Tag-filtered operations also remain supported:
 

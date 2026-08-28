@@ -5,6 +5,7 @@
     name: "{{ item.value.image }}"
     source: pull
     force_source: true
+  no_log: true
   loop: "{{ afterglow_services | dict2items }}"
   when:
     - inventory_hostname in groups['afterglow']
