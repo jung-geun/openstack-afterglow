@@ -220,6 +220,6 @@ export function allNavItems(isAdmin: boolean, betaFeatures: BetaFeatures): Array
     if (section.beta && !betaFeatures[section.beta]) return [];
     return section.items
       .filter((item) => !item.beta || betaFeatures[item.beta])
-      .map((item) => ({ ...item, section: section.label }));
+      .map((item) => ({ ...item, service: item.service ?? section.service ?? null, section: section.label }));
   });
 }

@@ -14,20 +14,20 @@ on:
   workflow_dispatch:
     inputs:
       targets:
-        description: 'Build targets (backend, frontend, worker, or both)'
+        description: 'Build image set'
         required: false
-        default: 'both'
+        default: 'all'
         type: choice
-        options: [both, backend, frontend, worker]
+        options: [all, afterglow, backend, frontend, worker]
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
-  # ─── 테스트: 단위 테스트 통과 후에만 빌드로 진행 ───
+  # ─── 테스트: 레이어드 테스트 통과 후에만 빌드로 진행 ───
   test:
-    name: Unit Tests
+    name: Layered Tests
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
@@ -65,34 +65,22 @@ jobs:
         id: filter
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "backend=true" >> $GITHUB_OUTPUT
-            echo "frontend=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           CHANGED=$(git diff --name-only HEAD^1 HEAD 2>/dev/null || echo "ALL")
 
-          # 비교 불가(초기 커밋 등) 시 전체 빌드
-          if [[ "$CHANGED" == "ALL" ]]; then
-            echo "backend=true" >> $GITHUB_OUTPUT
-            echo "frontend=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          # 빌드 파이프라인 변경은 모든 이미지 대상으로 검증한다.
-          if echo "$CHANGED" | grep -qE '^\.github/workflows/docker-build\.yml$'; then
-            echo "backend=true" >> $GITHUB_OUTPUT
-            echo "worker=true" >> $GITHUB_OUTPUT
+          # 비교 불가(초기 커밋 등)와 빌드 파이프라인 변경은 Afterglow 이미지를 모두 빌드한다.
+          if [[ "$CHANGED" == "ALL" ]] || echo "$CHANGED" | grep -qE '^\.github/workflows/docker-build\.yml$'; then
+            echo "afterglow=true" >> $GITHUB_OUTPUT
             echo "frontend=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-
-          if echo "$CHANGED" | grep -qE '^(backend/|Dockerfile$|\.dockerignore$)'; then
-            echo "backend=true" >> $GITHUB_OUTPUT
-            echo "worker=true" >> $GITHUB_OUTPUT
+          if echo "$CHANGED" | grep -qE '^(backend/|Dockerfile$|\.dockerignore$|services/afterglow-crypto/)'; then
+            echo "afterglow=true" >> $GITHUB_OUTPUT
           else
-            echo "backend=false" >> $GITHUB_OUTPUT
-            echo "worker=false" >> $GITHUB_OUTPUT
+            echo "afterglow=false" >> $GITHUB_OUTPUT
           fi
 
           if echo "$CHANGED" | grep -qE '^(frontend/|Dockerfile$|\.dockerignore$)'; then
@@ -104,37 +92,34 @@ jobs:
       - name: Build target list
         id: set-targets
         env:
-          CHANGED_BACKEND: ${{ steps.filter.outputs.backend }}
+          CHANGED_AFTERGLOW: ${{ steps.filter.outputs.afterglow }}
           CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
           DISPATCH_TARGETS: ${{ inputs.targets }}
           EFFECTIVE_REF: ${{ steps.eff-ref.outputs.ref }}
         run: |
-          # workflow_dispatch: 입력값으로 타겟 결정
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            if [[ "${DISPATCH_TARGETS}" == "backend" ]]; then
-              echo 'targets=["backend"]' >> $GITHUB_OUTPUT
-            elif [[ "${DISPATCH_TARGETS}" == "frontend" ]]; then
-              echo 'targets=["frontend"]' >> $GITHUB_OUTPUT
-            elif [[ "${DISPATCH_TARGETS}" == "worker" ]]; then
-              echo 'targets=["worker"]' >> $GITHUB_OUTPUT
-            else
-              echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
-            fi
+            case "${DISPATCH_TARGETS}" in
+              backend) echo 'targets=["backend"]' >> $GITHUB_OUTPUT ;;
+              frontend) echo 'targets=["frontend"]' >> $GITHUB_OUTPUT ;;
+              worker) echo 'targets=["worker"]' >> $GITHUB_OUTPUT ;;
+              afterglow|all) echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT ;;
+              *) echo "Unsupported dispatch target: ${DISPATCH_TARGETS}" >&2; exit 1 ;;
+            esac
             exit 0
           fi
-          # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
+
+          # dev 브랜치 이외(main, v* 태그, PR)는 Afterglow 전체 빌드
           if [[ "${EFFECTIVE_REF}" != "refs/heads/dev" ]]; then
             echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
             exit 0
           fi
-          # dev 브랜치: 변경된 타겟만 빌드
+
           TARGETS="[]"
-          if [[ "${CHANGED_BACKEND}" == "true" ]]; then
-            TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
-            TARGETS=$(echo "$TARGETS" | jq -c '. + ["worker"]')
+          if [[ "${CHANGED_AFTERGLOW}" == "true" ]]; then
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend", "worker"]')
           fi
           # Backend/worker와 frontend는 같은 dev 배포 세트로 갱신한다.
-          if [[ "${CHANGED_FRONTEND}" == "true" || "${CHANGED_BACKEND}" == "true" ]]; then
+          if [[ "${CHANGED_FRONTEND}" == "true" || "${CHANGED_AFTERGLOW}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
           fi
           echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
@@ -143,7 +128,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }} (${{ matrix.arch }})
     needs: changes
-    if: needs.changes.outputs.targets != '[]'
+    if: needs.changes.outputs.is_pr != 'true' && needs.changes.outputs.targets != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -201,13 +186,13 @@ jobs:
       - name: Resolve image name
         id: img
         run: |
-          if [ "${{ matrix.target }}" = "backend" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
-          elif [ "${{ matrix.target }}" = "worker" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
-          else
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
-          fi
+          case "${{ matrix.target }}" in
+            backend) image_name="afterglow-api" ;;
+            frontend) image_name="afterglow" ;;
+            worker) image_name="afterglow-worker" ;;
+            *) echo "Unsupported build target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          echo "name=${REGISTRY}/${IMAGE_OWNER}/${image_name}" >> $GITHUB_OUTPUT
 
       # macOS arm64: Docker Desktop이 꺼져 있으면 소켓이 없어 빌드 불가.
       # Docker Desktop 실행 후 daemon 준비 대기 (최대 90초).
@@ -332,13 +317,13 @@ jobs:
       - name: Resolve image name
         id: img
         run: |
-          if [ "${{ matrix.target }}" = "backend" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
-          elif [ "${{ matrix.target }}" = "worker" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
-          else
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
-          fi
+          case "${{ matrix.target }}" in
+            backend) image_name="afterglow-api" ;;
+            frontend) image_name="afterglow" ;;
+            worker) image_name="afterglow-worker" ;;
+            *) echo "Unsupported manifest target: ${{ matrix.target }}" >&2; exit 1 ;;
+          esac
+          echo "name=${REGISTRY}/${IMAGE_OWNER}/${image_name}" >> $GITHUB_OUTPUT
 
       - name: Compute final tags
         id: tags

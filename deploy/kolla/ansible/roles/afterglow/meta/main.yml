@@ -5,6 +5,4 @@ galaxy_info:
   description: Afterglow OpenStack meta-PaaS deployment role for kolla-ansible
   min_ansible_version: "2.14"
 
-dependencies:
-  - role: common
-  - role: haproxy-config
+dependencies: []

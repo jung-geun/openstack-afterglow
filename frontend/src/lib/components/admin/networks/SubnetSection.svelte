@@ -169,7 +169,14 @@
 					<div class="bg-gray-800/50 rounded-lg p-4">
 						<div class="flex items-start justify-between mb-3">
 							<div>
-								<h3 class="text-sm font-medium text-white">{subnet.name || '(이름 없음)'}</h3>
+								<h3 class="text-sm font-medium text-white">
+									<a
+										href="/admin/subnets/{subnet.id}"
+										class="hover:text-accent hover:underline transition-colors"
+									>
+										{subnet.name || '(이름 없음)'}
+									</a>
+								</h3>
 								<span class="text-xs text-gray-500 font-mono">{subnet.id}</span>
 							</div>
 							<div class="flex items-center gap-1">

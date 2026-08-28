@@ -26,9 +26,9 @@ describe('chat-gated feature surfaces', () => {
 		expect(gated.length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('keeps command palette chat entries filtered by services.chat', () => {
+	it('keeps command palette entries filtered by their configured service', () => {
 		const source = readSource('src/lib/components/CmdPalette.svelte');
-		expect(source).toContain("item.service !== 'chat'");
-		expect(source).toContain('services?.chat');
+		expect(source).toContain('.filter((item) => !item.service ||');
+		expect(source).toContain('[item.service] ?? false');
 	});
 });

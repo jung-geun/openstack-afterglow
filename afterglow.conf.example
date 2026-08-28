@@ -2,7 +2,8 @@
 # 이 파일을 afterglow.conf로 복사해 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.
 # 우선순위: 환경변수 > afterglow.conf > 기본값
 #
-# 오버라이드: 같은 디렉터리에 `afterglow.<name>.conf`을 두면 이 파일 위에 딥 머지된다.
+# 오버라이드: 같은 디렉터리의 `afterglow.<name>.conf`을 딥 머지한다.
+# 단, 브라우저 공개 projection인 `afterglow.frontend.conf`은 백엔드에서 제외한다.
 # GPU 디바이스 맵은 필요할 때만 `config.gpu.toml`로 분리할 수 있다.
 # 알파벳순으로 적용되어 뒤 파일이 앞을 이긴다. dict는 재귀 병합, 리스트는 덮어쓰기.
 
@@ -143,9 +144,15 @@ swift = false       # 오브젝트 스토리지
 trove = false       # DBaaS (Database as a Service)
 barbican = false    # Key Manager (시크릿/인증서 관리)
 waygate = false     # Waygate (활성화 시 [waygate] 섹션 설정 필수)
+palimpsest = false   # Palimpsest Hub (활성화 시 [services] palimpsest_internal_url 또는 Keystone 카탈로그 필요)
 chat = false        # 빌트인 AI 채팅 (활성화 시 [chat] 섹션 + 관리자 페이지에서 프로바이더/모델 등록)
 mcp = false         # Consumer MCP control plane (Stage 2 publish gate 전까지 false 유지)
-
+# Extracted service discovery override. Empty keeps the Keystone internal catalog.
+# Set only trusted deployment-internal base URLs; production requires HTTPS.
+waygate_internal_url = ""
+drover_internal_url = ""
+lumen_internal_url = ""
+palimpsest_internal_url = ""
 [mcp]
 # Inbound consumer MCP control plane. Keep services.mcp=false until the Stage 2 publish gate passes.
 # 외부 MCP 클라이언트가 접속하는 정확한 Streamable HTTP resource URL. 비우거나 도메인만
@@ -155,6 +162,9 @@ public_url = ""
 # frontend_base_url + /oauth/mcp/authorize 를 사용한다. 클라이언트의 redirect_uri는
 # DCR/CIMD 등록 값으로만 받고 여기서 지정하지 않는다.
 oauth_consent_url = ""
+# Lumen이 opaque grant snapshot을 재검증하는 내부 MCP bridge workload credential.
+# 개인 MCP token이나 Keystone token이 아니며 secret.yaml으로만 전달한다.
+lumen_service_token = ""
 authorization_ticket_ttl_seconds = 600
 access_token_ttl_seconds = 900
 default_grant_ttl_days = 30
@@ -170,108 +180,15 @@ concurrent_calls_per_grant = 4
 read_rate_per_minute = 120
 mutation_rate_per_minute = 20
 
+[instance_health]
+# VM cloud-init health reports target this Afterglow endpoint. This is unrelated
+# to Drover's K3s guest callback and remains owned by the instance service.
+callback_base_url = ""         # e.g. http://10.0.0.1:8000
+
 [k3s]
-# ─────────────────────────────────────────────────────────────────────────────
-# k3s 자체 관리 Kubernetes 클러스터 설정 (services.k3s = true 시 활성화)
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# 클러스터 생성 UI(Drover)에서 OS 타입을 선택할 수 있습니다:
-#   - Ubuntu  (기본): cloud-init 기반. server_image_id에 Ubuntu 22.04+ 이미지 UUID 입력.
-#   - CoreOS  (FCOS): Ignition 기반. fcos_image_id에 Fedora CoreOS 이미지 UUID 입력.
-#
-# 두 OS 타입을 동시에 지원하려면 server_image_id와 fcos_image_id 모두 설정하면 됩니다.
-# 어느 한쪽만 설정해도 해당 타입 클러스터만 정상 동작합니다.
-#
-# [Ubuntu 이미지 준비]
-#   openstack image list --name ubuntu   # 이미지 UUID 확인
-#
-# [Fedora CoreOS 이미지 준비]
-#   1) https://fedoraproject.org/coreos/download/ 에서 OpenStack QCOW2 다운로드
-#   2) openstack image create --file fedora-coreos-*.qcow2 \
-#        --disk-format qcow2 --container-format bare "fedora-coreos-42" \
-#        --property hw_disk_bus=virtio --property hw_vif_model=virtio
-#   3) 출력된 UUID를 fcos_image_id에 입력
-#
-
-callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
-                               # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
-kubeconfig_encryption_key = "" # AES-256-GCM 키 (32바이트 hex)
-                               # 생성: openssl rand -hex 32
-boot_volume_size_gb = 30       # 노드 루트 볼륨 크기 (GB). FCOS는 30GB 이상 권장.
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Cloud Provider OpenStack 플러그인 (cloud-provider-openstack, Magnum 제외)
-# 각 플러그인은 독립적으로 활성화 가능. OpenStack 인증 정보([openstack] 섹션)를 공유.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# OCCM (OpenStack Cloud Controller Manager)
-# 역할: K8s 노드 초기화, Service LoadBalancer(Octavia), 라우팅
-# 활성화 시: --disable-cloud-controller + --kubelet-arg=cloud-provider=external 자동 설정
-occm_enabled = false
-occm_image = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
-
-# Cinder CSI Plugin
-# 역할: PersistentVolumeClaim → Cinder 블록 스토리지 자동 프로비저닝
-# StorageClass "cinder" (기본값)가 생성됨. OCCM 없이도 독립 동작.
-cinder_csi_enabled = false
-cinder_csi_image = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
-
-# Manila CSI Plugin
-# 역할: ReadWriteMany PVC → Manila NFS 공유 파일시스템 자동 프로비저닝
-# NFS CSI 드라이버가 의존성으로 함께 배포됨. StorageClass "manila-nfs" 생성.
-manila_csi_enabled = false
-manila_csi_image = "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
-manila_csi_nfs_image = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
-manila_csi_share_protocol = "NFS"  # "NFS" 또는 "CEPHFS"
-
-# Keystone Webhook Auth
-# 역할: kubectl → Keystone 토큰으로 K8s 인증 연동 (별도 kubeconfig 불필요)
-# 활성화 시: self-signed TLS 인증서 자동 생성 + K3s API 서버 webhook 설정
-keystone_auth_enabled = false
-keystone_auth_image = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
-# keystone_auth_policy = ""  # JSON 정책 문자열 (빈값 = 인증만 활성화, 인가는 K8s RBAC 사용)
-
-# Octavia Ingress Controller
-# 역할: Ingress → Octavia 로드밸런서 (ingressClassName: openstack). K3s Traefik과 공존.
-# 주의: subnet_id는 LB가 배치될 서브넷 ID (필수)
-octavia_ingress_enabled = false
-octavia_ingress_image = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
-
-# Barbican KMS Plugin
-# 역할: K8s Secret at-rest 암호화 (etcd 데이터를 Barbican KEK으로 봉인)
-#
-# 아키텍처 (§ 26.x — PR0/PR3/PR1/PR2 재설계):
-# - PR3: k3s 외부 systemd service 로 분리 (host static pod 패턴이 K3s 1.34 데드락)
-# - PR1: cluster 별 application credential 인증 (admin password 노출 차단)
-# - PR2: per-project KEK auto-provisioning (cluster 생성 시 owner project 의
-#        Barbican 에서 'afterglow-k8s-kek' 자동 발급/재사용)
-#
-# 사전 조건: 각 사용자 project 의 manager user 가 Barbican secret 발급 권한
-#   (member role + Barbican policy 의 creator 접근). 별도 설정 보통 불필요.
-barbican_kms_enabled = false
-barbican_kms_image = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
-# barbican_kms_kek_id: 비워두면 PR2 동적 발급 (권장 — multi-tenant 보안).
-# 채워두면 ensure_project_kek 실패 시 graceful degrade fallback 으로만 사용.
-# (모든 cluster 가 같은 KEK 공유하게 되어 multi-tenant 의미 약화 → 권장 안 함)
-barbican_kms_kek_id = ""
-
-
-# 인증서 회전 (Certificate Rotation)
-# k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
-# Afterglow는 K8s Job(hostPID + nsenter)으로 SSH 없이 k3s restart를 트리거한다.
-cert_rotation_node_timeout_sec = 300    # 노드당 Ready 대기 최대 시간 (초)
-cert_rotation_job_image = "registry.k8s.io/util-linux/util-linux:latest"  # nsenter 포함 이미지
-
-# Stampede 노드 오토스케일 (GCP Autopilot 유사 모드)
-# 사용자가 pod를 배포하면 드로버가 자동으로 노드(VM)를 확장/축소한다.
-stampede_enabled = false                        # 전역 활성화 여부
-stampede_interval = 60                          # reconcile 주기 (초)
-stampede_scale_down_threshold = 0.5             # 노드 사용률 이 값 미만이면 scale-down 후보
-stampede_scale_down_window = 600                # scale-down 안정화 대기 시간 (초, 연속 유휴 확인)
-stampede_scale_up_cooldown = 120                # scale-up 쿨다운 (초)
-stampede_scale_down_cooldown = 300              # scale-down 쿨다운 (초)
-stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부하 가중치 (0~1)
-
+# Shared legacy AES-256-GCM key for existing encrypted Afterglow records.
+# Drover uses its own [drover] kubeconfig_encryption_key.
+kubeconfig_encryption_key = "" # 32-byte hex; generate: openssl rand -hex 32
 
 [worker_runtime]
 # Background worker runtime manager.
@@ -288,12 +205,6 @@ stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부�
 mode = "static"                  # static | docker | kubernetes
 reconcile_interval = 30           # seconds; 0 disables the backend reconcile loop
 fail_closed = true                # reserved: parsed but not yet consumed by adapters
-
-[worker_runtime.workers.drover]
-enabled = true
-desired_replicas = 1
-max_replicas = 1                  # raise only after verifying parallel drover safety
-module = "app.worker"
 
 [worker_runtime.workers.notion_worker]
 enabled = true
@@ -352,21 +263,7 @@ layer_share_size_gb = 20
 
 
 [palimpsest]
-# Palimpsest 허브 — 레이어를 digest 로 저장·검색·배포하는 레지스트리.
-# 도메인 정의와 digest 규칙은 docs/palimpsest.md 참조.
-#
-# hub_local_path: 허브 blob 저장 경로. **비워 두면 허브 기능이 비활성(503)** 이다.
-#   백엔드가 blob 을 직접 스트리밍 read/write 해야 업로드·다운로드가 성립하므로
-#   Manila share(소비 VM 마운트용)가 아니라 별도 경로를 쓴다.
-#   - K8s: PVC 를 이 경로에 마운트
-#   - Compose: 볼륨을 이 경로에 마운트
-#   배치는 OCI image-layout 그대로 — <hub_local_path>/blobs/sha256/<hex>
-hub_local_path = ""
-# hub_max_blob_bytes: 단일 레이어 blob 최대 크기 (기본 32 GiB).
-#   torch 등 대용량 레이어를 수용하되 디스크 고갈을 막는 상한.
-hub_max_blob_bytes = 34359738368
-# hub_upload_ttl_seconds: 방치된 업로드 세션 정리 기준 (기본 24시간)
-hub_upload_ttl_seconds = 86400
+# Palimpsest 로컬 KVM 런타임 (선택) — docs/palimpsest.md 참조
 
 # --- 로컬 KVM 런타임 (선택) ---
 # OpenStack 없이 로컬/원격 KVM 호스트에 레이어드 VM 을 띄운다. 레이어는 virtio-blk
@@ -383,17 +280,6 @@ kvm_layer_root = "/var/lib/palimpsest/layers"
 # kvm_state_dir: 도메인별 루트 오버레이(qcow2)와 NoCloud seed ISO 를 두는 경로
 kvm_state_dir = "/var/lib/palimpsest/domains"
 
-
-[waygate]
-# Waygate (WireGuard 게이트웨이 — 서버 프로비저닝 + 클라이언트 관리 + 상태 모니터링)
-# 테넌트 프로젝트의 provider 네트워크에 WireGuard bastion VM을 부팅한다. VM 내부 에이전트가
-# 백엔드와 pull/reconcile 로 연동되며 inbound 관리 포트가 없다(공격 표면 = WireGuard UDP 1개).
-#
-callback_base_url = ""         # 에이전트가 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
-                               # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
-default_tunnel_cidr = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값 (신규 서버 생성 시 사용)
-default_listen_port = 51820    # WireGuard UDP 리슨 포트 기본값
-# 클라이언트 private key 암호화 키는 k3s.kubeconfig_encryption_key 를 재사용합니다 (신규 시크릿 불필요)
 
 
 [notion]
@@ -486,67 +372,6 @@ ceph_uid = "afterglow-ceph"
 instance_cpu_uid = "afterglow-instance-cpu"   # CPU 전용 인스턴스 per-VM 대시보드
 instance_gpu_uid = "afterglow-instance-gpu"   # GPU 인스턴스 per-VM 대시보드
 
-
-[chat]
-# 빌트인 AI 채팅 (litellm 라우팅 + 모델별 가중 크레딧 + 월 쿼터).
-# services.chat = true 로 활성화한다. 프로바이더 API 키는 이 파일이 아니라
-# 관리자 페이지에서 등록되어 DB에 AES-256-GCM(k3s_kubeconfig_encryption_key)으로 암호화 저장된다.
-default_model = ""              # 기본 모델명 (활성 llm_models 카탈로그의 model_name과 일치해야 함)
-# Rollout gate for durable executor admission. Keep 1 until all workers understand v2.
-execution_protocol_version = 1  # 1 | 2
-credit_per_usd = 1000.0         # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
-default_monthly_quota = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
-stream_enabled = true           # SSE 스트리밍 응답 사용
-# 외부 OpenAI/Anthropic 호환 API(/v1/chat/completions, /v1/messages)를 허용할 Host 화이트리스트(콤마 구분).
-# 비우면 모든 Host에서 허용(개발). 프로덕션은 전용 서브도메인만 지정해 기본 URL과 충돌·오용을 막는다.
-# 예: api_hosts = "api.cloud.dmslab.re.kr,api.test.cloud.dmslab.re.kr"
-# (해당 서브도메인이 ingress/haproxy에서 백엔드로 라우팅되도록 함께 설정해야 함.)
-api_hosts = ""
-# 원격 MCP OAuth에서 동적 등록·인가·토큰 교환에 쓸 정확한 redirect URI. 비우면
-# public_api_base(또는 frontend_base_url) + /api/v1/chat/mcp-oauth/callback 을 사용한다.
-# 외부 OAuth 제공자에 사전 등록이 필요하면 이 값을 그 URI와 정확히 일치시킨다.
-mcp_oauth_callback_url = ""
-# 추론(thinking) effort — "auto"는 모델/provider 기본값으로 파라미터를 보내지 않는다.
-# "none"은 지원 모델에 명시적 비활성화를 보내며, named 값(low/medium/high/xhigh/max/ultra)은
-# models.dev capability에 그 모델의 reasoning_options로 있을 때만 채팅 UI에서 선택된다.
-reasoning_effort = "auto"
-# LangGraph 전용 Postgres 체크포인터(대화 상태/메모리 영속화). 비밀값 — secret.yaml의
-# CHAT_CHECKPOINTER_POSTGRES_URL로 주입. 연결 role에는 대상 schema의 USAGE, CREATE 권한이 필요하다.
-# 비우거나 schema 준비에 실패하면 일반 텍스트 채팅만 동작하고 승인 대기 도구는 fail-closed로 비활성화된다.
-checkpointer_postgres_url = ""   # 예: postgresql://afterglow:pass@postgres:5432/afterglow_chat
-# Durable run/event retention. Terminal event journals and encrypted checkpoints are pruned by chat-worker.
-run_event_retention_hours = 24
-checkpoint_retention_days = 7
-
-
-# Semantic memory is opt-in. Enabling it requires all three memory_* fields below.
-semantic_memory_enabled = false
-# memory_pgvector_url is a secret and is injected as CHAT_MEMORY_PGVECTOR_URL.
-memory_pgvector_url = ""
-memory_embedding_model = ""
-memory_embedding_dimensions = 0
-memory_candidate_limit = 20
-memory_retrieval_token_budget = 1200
-memory_retention_days = 365
-
-# Chat assets are stored only after scanning. Credentials are secrets injected through secret.yaml.
-asset_s3_endpoint = ""
-asset_s3_bucket = ""
-asset_s3_access_key = ""
-asset_s3_secret_key = ""
-asset_s3_server_side_encryption = "AES256"  # AES256 or aws:kms
-asset_s3_kms_key_id = ""
-asset_signed_url_ttl_seconds = 300
-clamav_host = ""
-clamav_port = 3310
-
-# Provider-managed code/computer sandbox. Incomplete configuration disables only that capability.
-sandbox_url = ""
-sandbox_workspace_url = ""      # Remote workspace runtime; falls back to disabled, never host execution.
-sandbox_api_key = ""
-sandbox_image_digest = ""
-sandbox_policy_version = ""
-sandbox_egress_allowlist = []
 
 
 [smtp]

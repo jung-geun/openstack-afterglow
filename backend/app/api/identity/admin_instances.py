@@ -192,10 +192,11 @@ async def admin_create_instance_async(
             gpu_available = _sse_flavor.is_gpu if _sse_flavor else False
 
             if is_db_available() and _sse_flavor and _sse_flavor.is_gpu:
-                from app.services.gpu_quota import check_gpu_quota
+                from drover_sdk import register as register_drover
 
-                _ok, _msg = await check_gpu_quota(conn, req.project_id, _sse_flavor.extra_specs or {})
-                if not _ok:
+                _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, _sse_flavor.extra_specs or {})
+                if not _res.get("ok"):
+                    _msg = _res.get("detail") or _res.get("message") or "GPU quota 초과"
                     yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
                     raise HTTPException(status_code=409, detail=_msg)
 
@@ -254,7 +255,7 @@ async def admin_create_instance_async(
                 import uuid as _uuid2
 
                 _sse_health_id = str(_uuid2.uuid4())
-                _sse_report_url = settings.k3s_callback_base_url or ""
+                _sse_report_url = settings.instance_health_callback_base_url or ""
                 if _sse_report_url:
                     try:
                         from app.services import instance_health as _ih2

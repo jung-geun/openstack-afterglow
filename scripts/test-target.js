@@ -8,16 +8,6 @@ const backendDir = path.join(rootDir, "backend");
 const frontendDir = path.join(rootDir, "frontend");
 const dbRequirementMessage = "AFTERGLOW_TEST_DATABASE_URL is required for target db. Example: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_pytest";
 
-function expandK3sBackendSelectors() {
-	const testsDir = path.join(backendDir, "tests");
-	const selectors = fs
-		.readdirSync(testsDir, { withFileTypes: true })
-		.filter((entry) => entry.isFile() && /^test_k3s_.*\.py$/.test(entry.name))
-		.map((entry) => `tests/${entry.name}`)
-		.sort();
-	selectors.push("tests/test_clusters.py");
-	return selectors;
-}
 
 function expandChatBackendSelectors() {
 	const testsDir = path.join(backendDir, "tests");
@@ -72,7 +62,6 @@ const targets = {
 				"tests/test_token_binding.py",
 				"tests/test_x_auth_token_removal.py",
 				"tests/test_login_guard.py",
-				"tests/test_keystone_appcred.py",
 				"tests/test_keystone_system_scope.py"
 			]
 		},
@@ -81,6 +70,7 @@ const targets = {
 				"src/lib/stores/__tests__/auth.test.ts",
 				"src/lib/stores/__tests__/auth.security.test.ts",
 				"src/lib/stores/__tests__/auth.sync.test.ts",
+				"src/lib/api/__tests__/client.authRedirect.test.ts",
 				"src/lib/utils/__tests__/authFlow.test.ts",
 				"src/lib/components/auth/__tests__/LoginBrandHeader.test.ts",
 				"src/routes/__tests__/gitlab-auth-paths.test.ts",
@@ -114,6 +104,7 @@ const targets = {
 		backend: {
 			selectors: [
 				"tests/test_afterglow_conf_config.py",
+				"tests/contracts/test_ingress_root_path_coverage.py",
 				"tests/test_config_insecure_guard.py",
 				"tests/test_config_keystone_url.py",
 				"tests/test_config_layer_images.py",
@@ -259,10 +250,10 @@ const targets = {
 		}
 	},
 	k3s: {
-		description: "k3s API, cloud-init, security, plugin, and nodegroup tests",
+		description: "Drover BFF proxy, cluster management, and nodegroup UI integration tests",
 		liveServices: "none",
 		backend: {
-			selectors: expandK3sBackendSelectors
+			selectors: ["tests/contracts/test_drover_proxy.py", "tests/contracts/test_k3s_shell_proxy.py"]
 		},
 		frontend: {
 			selectors: [
@@ -283,6 +274,40 @@ const targets = {
 			]
 		}
 	},
+	waygate: {
+		description: "Waygate BFF proxy, agent proxy, and VPN UI integration tests",
+		liveServices: "none",
+		backend: {
+			selectors: ["tests/contracts/test_waygate_proxy.py", "tests/contracts/test_waygate_agent.py"]
+		}
+	},
+	lumen: {
+		description: "Lumen BFF proxy, SSE streaming, and chat stream integration tests",
+		liveServices: "none",
+		backend: {
+			selectors: ["tests/contracts/test_lumen_proxy.py"]
+		},
+		frontend: {
+			selectors: [
+				"src/lib/api/__tests__/chatStream.test.ts",
+				"src/lib/api/__tests__/chatContracts.test.ts",
+				"src/lib/api/__tests__/chatRunReducer.test.ts"
+			]
+		}
+	},
+	palimpsest: {
+		description: "Palimpsest BFF proxy, layer management, and digest tests",
+		liveServices: "none",
+		backend: {
+			selectors: [
+				"tests/contracts/test_palimpsest_hub_proxy.py",
+				"tests/test_palimpsest_api.py",
+				"tests/test_palimpsest_kvm.py",
+				"tests/test_palimpsest_dockerfile.py",
+				"tests/test_palimpsest_digest.py"
+			]
+		}
+	},
 	design: {
 		description: "Design-system and raw visual debt guardrails",
 		liveServices: "none",
@@ -294,49 +319,62 @@ const targets = {
 			]
 		}
 	},
-	"integration:auth": {
+	contracts: {
+		description: "Service proxy, SDK dependency, ingress, and MCP bridge contract tests",
+		liveServices: "none",
+		backend: {
+			selectors: [
+				"tests/contracts/test_service_proxy.py",
+				"tests/contracts/test_drover_proxy.py",
+				"tests/contracts/test_waygate_proxy.py",
+				"tests/contracts/test_waygate_agent.py",
+				"tests/contracts/test_lumen_proxy.py",
+				"tests/contracts/test_palimpsest_hub_proxy.py",
+				"tests/contracts/test_service_sdk_dependency_sources.py",
+				"tests/contracts/test_mcp_stage2_adapters.py",
+				"tests/contracts/test_ingress_root_path_coverage.py",
+				"tests/contracts/test_k3s_shell_proxy.py",
+				"tests/contracts/test_mcp_lumen_bridge.py"
+			],
+			extraArgs: ["-m", "contract"]
+		}
+	},
+	"live:auth": {
 		description: "Live OpenStack auth integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_auth.py"]
 		}
 	},
-	"integration:admin": {
+	"live:admin": {
 		description: "Live OpenStack admin integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_admin.py", "tests/integration/test_admin_writes.py"]
 		}
 	},
-	"integration:compute": {
+	"live:compute": {
 		description: "Live OpenStack compute integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_compute.py", "tests/integration/test_user_writes.py"]
 		}
 	},
-	"integration:network": {
+	"live:network": {
 		description: "Live OpenStack network integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_network.py"]
 		}
 	},
-	"integration:storage": {
+	"live:storage": {
 		description: "Live OpenStack storage integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
 			selectors: ["tests/integration/test_storage.py", "tests/integration/test_file_storage.py"]
 		}
 	},
-	"integration:k3s": {
-		description: "Live OpenStack k3s integration slice",
-		liveServices: "Redis + OpenStack credentials",
-		backend: {
-			selectors: ["tests/integration/test_k3s.py"]
-		}
-	},
-	"integration:layers": {
+	"live:layers": {
 		description: "Live OpenStack union layer integration slice",
 		liveServices: "Redis + OpenStack credentials",
 		backend: {
@@ -396,11 +434,17 @@ function ensureInside(baseDir, selectorPath, label) {
 	}
 }
 
-function validateBackendSelectors(targetName, selectors) {
+function resolveBackendDir(targetName, config) {
+	if (!config.root) return backendDir;
+	ensureInside(rootDir, config.root, `${targetName} backend root`);
+	return path.resolve(rootDir, config.root);
+}
+
+function validateBackendSelectors(targetName, selectors, baseDir = backendDir) {
 	for (const selector of selectors) {
 		const selectorPath = stripSelectorPath(selector);
-		ensureInside(backendDir, selectorPath, targetName);
-		if (!targetName.startsWith("integration:") && selectorPath.startsWith("tests/integration")) {
+		ensureInside(baseDir, selectorPath, targetName);
+		if (baseDir === backendDir && !targetName.startsWith("live:") && selectorPath.startsWith("tests/integration")) {
 			fail(`Backend unit target ${targetName} cannot include integration selector: ${selectorPath}`);
 		}
 	}
@@ -417,7 +461,8 @@ function getSelectors(selectorsOrFactory) {
 }
 function validateTargetDefinition(targetName, target) {
 	if (target.backend) {
-		validateBackendSelectors(targetName, getSelectors(target.backend.selectors));
+		const baseDir = resolveBackendDir(targetName, target.backend);
+		validateBackendSelectors(targetName, getSelectors(target.backend.selectors), baseDir);
 	}
 	if (target.frontend) {
 		validateFrontendSelectors(targetName, getSelectors(target.frontend.selectors));
@@ -433,14 +478,15 @@ function validateAllTargetDefinitions() {
 
 function buildBackendStep(targetName, config) {
 	const selectors = getSelectors(config.selectors);
-	validateBackendSelectors(targetName, selectors);
+	const baseDir = resolveBackendDir(targetName, config);
+	validateBackendSelectors(targetName, selectors, baseDir);
 	return {
 		targetName,
 		label: `${targetName} [backend]`,
-		cwd: backendDir,
-		cwdLabel: "backend",
+		cwd: baseDir,
+		cwdLabel: config.root || "backend",
 		command: "uv",
-		args: ["run", "python", "-m", "pytest", ...selectors, "-v", ...(config.extraArgs || [])],
+		args: ["run", ...(config.root ? ["--extra", "dev"] : []), "python", "-m", "pytest", ...selectors, "-v", ...(config.extraArgs || [])],
 		envAdditions: { AFTERGLOW_ALLOW_INSECURE: "1" },
 		requiredEnv: targets[targetName].requiredEnv || []
 	};
@@ -731,6 +777,7 @@ module.exports = {
 	runStep,
 	runStepAsync,
 	runStepsParallel,
+	targets,
 	runStepsSerial
 };
 

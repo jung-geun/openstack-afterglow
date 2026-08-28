@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.compute import InstanceInfo
+from app.services.resource_policies import ResourcePolicyValidationError
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +69,26 @@ PAYLOAD = {
     "boot_volume_size_gb": 50,
     "delete_boot_volume_on_termination": False,
 }
+
+
+@pytest.mark.asyncio
+async def test_async_placement_policy_failure_returns_safe_503(client):
+    with (
+        patch("app.services.instance_names.ensure_unique_instance_name", return_value="test-no-libs"),
+        patch(
+            "app.api.compute.instances.instance_orch.resolve_availability_zones",
+            new_callable=AsyncMock,
+            side_effect=ResourcePolicyValidationError(
+                "required resource policies are not configured: cinder.default_volume_availability_zone"
+            ),
+        ),
+    ):
+        resp = await client.post("/api/v1/instances/async", json=PAYLOAD)
+
+    assert resp.status_code == 503
+    assert resp.json() == {
+        "detail": "인스턴스 배치 정책을 사용할 수 없습니다. 관리자에게 문의하세요.",
+    }
 
 
 @pytest.mark.asyncio

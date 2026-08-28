@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -187,6 +188,70 @@ oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"
     assert settings.mcp_oauth_consent_url == "https://app.example.test/oauth/mcp/authorize"
 
 
+def test_empty_gitlab_oidc_secret_env_does_not_mask_toml(isolated_config_dir, monkeypatch):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[app]
+secret_key = "0123456789abcdef0123456789abcdef"
+
+[gitlab_oidc]
+enabled = true
+client_id = "configured-client"
+client_secret = "configured-secret"
+""".strip(),
+        encoding="utf-8",
+    )
+    for key in (
+        "GITLAB_OIDC_ENABLED",
+        "GITLAB_OIDC_GITLAB_URL",
+        "GITLAB_OIDC_CLIENT_ID",
+        "GITLAB_OIDC_CLIENT_SECRET",
+        "GITLAB_OIDC_IDP_ID",
+        "GITLAB_OIDC_PROTOCOL_ID",
+        "GITLAB_OIDC_REDIRECT_URI",
+        "GITLAB_OIDC_SCOPES",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GITLAB_OIDC_CLIENT_SECRET", "")
+
+    settings = app_config.get_settings()
+
+    assert settings.gitlab_oidc_enabled is True
+    assert settings.gitlab_oidc_client_id == "configured-client"
+    assert settings.gitlab_oidc_client_secret == "configured-secret"
+    assert os.environ["GITLAB_OIDC_CLIENT_SECRET"] == "configured-secret"
+
+
+def test_app_config_loads_openstack_insecure_and_cacert_from_afterglow_conf(isolated_config_dir, monkeypatch):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[openstack]
+insecure = true
+cacert = "/etc/ssl/certs/custom-ca.crt"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OS_INSECURE", raising=False)
+    monkeypatch.delenv("OS_CACERT", raising=False)
+
+    flat = app_config._load_toml()
+    settings = app_config.Settings(**flat)
+
+    assert flat["os_insecure"] is True
+    assert flat["os_cacert"] == "/etc/ssl/certs/custom-ca.crt"
+    assert settings.os_insecure is True
+    assert settings.os_cacert == "/etc/ssl/certs/custom-ca.crt"
+    assert settings.ssl_verify is False
+
+    monkeypatch.setenv("OS_INSECURE", "false")
+    monkeypatch.setenv("OS_CACERT", "/env/override-ca.crt")
+    app_config.get_settings.cache_clear()
+    settings_override = app_config.get_settings()
+    assert settings_override.os_insecure is False
+    assert settings_override.os_cacert == "/env/override-ca.crt"
+    assert settings_override.ssl_verify == "/env/override-ca.crt"
+
+
 def test_app_config_applies_matching_afterglow_conf_overrides(isolated_config_dir):
     (isolated_config_dir / "afterglow.conf").write_text(
         """
@@ -225,6 +290,35 @@ ttl_fast = 3
     assert flat["site_name"] == "Override Site"
     assert flat["logo_path"] == "/base-logo.png"
     assert flat["cache_ttl_fast"] == 3
+
+
+def test_app_config_ignores_frontend_public_projection(isolated_config_dir):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[app]
+public_api_base = ""
+site_name = "Backend Site"
+""".strip(),
+        encoding="utf-8",
+    )
+    (isolated_config_dir / "afterglow.frontend.conf").write_text(
+        """
+[app]
+public_api_base = "http://localhost:8000"
+site_name = "Frontend Site"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    raw = app_config.load_raw_toml()
+    flat = app_config._load_toml()
+
+    assert raw["app"] == {
+        "public_api_base": "",
+        "site_name": "Backend Site",
+    }
+    assert flat["public_api_base"] == ""
+    assert flat["site_name"] == "Backend Site"
 
 
 def test_app_config_ignores_legacy_config_toml_files(isolated_config_dir):
@@ -312,7 +406,17 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
     services = compose["services"]
 
     expected_env_file = [{"path": ".env", "required": False}]
-    for service_name in ("backend", "drover", "notion-worker", "palimpsest-worker"):
+    for service_name in (
+        "backend",
+        "waygate-api",
+        "waygate-worker",
+        "drover-api",
+        "drover-worker",
+        "palimpsest-bootstrap",
+        "palimpsest-api",
+        "palimpsest-worker",
+        "notion-worker",
+    ):
         service = services[service_name]
         assert service["env_file"] == expected_env_file
         environment = service.get("environment", {})
@@ -322,6 +426,40 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
             else {str(entry).partition("=")[0] for entry in environment}
         )
         assert "SECRET_KEY" not in names
+
+
+def test_compose_uses_standalone_palimpsest_services():
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    backend = services["backend"]
+    backend_environment = {
+        str(entry).partition("=")[0]: str(entry).partition("=")[2] for entry in backend["environment"]
+    }
+    assert backend_environment["SERVICE_PALIMPSEST_INTERNAL_URL"].endswith("http://palimpsest-api:8020}")
+    assert "PALIMPSEST_HUB_LOCAL_PATH" not in backend_environment
+    assert "palimpsest-hub:/var/lib/afterglow/palimpsest" not in backend.get("volumes", [])
+
+    for name in ("palimpsest-bootstrap", "palimpsest-api", "palimpsest-worker"):
+        service = services[name]
+        assert "services" in service["profiles"]
+        assert service["environment"]["DATABASE_URL"].startswith("${PALIMPSEST_DATABASE_URL:-mysql+asyncmy://")
+        assert service["environment"]["OS_PROJECT_NAME"].endswith("palimpsest-service}")
+        assert "palimpsest-hub:/var/lib/palimpsest/hub" in service["volumes"]
+
+    production = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8"))
+    assert {
+        "palimpsest-bootstrap",
+        "palimpsest-api",
+        "palimpsest-worker",
+    } <= production["services"].keys()
+
+    database_init = (ROOT / "docker/mariadb/service-init.sql").read_text(encoding="utf-8")
+    assert "CREATE DATABASE IF NOT EXISTS palimpsest" in database_init
+    assert "GRANT ALL PRIVILEGES ON palimpsest.*" in database_init
+
+    backend_manifest = (ROOT / "deploy/k8s-template/base/backend/deployment.yaml").read_text(encoding="utf-8")
+    assert "PALIMPSEST_HUB_LOCAL_PATH" not in backend_manifest
+    assert "name: palimpsest-hub" not in backend_manifest
 
 
 def test_env_example_allows_local_default_secret_for_compose_workers():
@@ -341,9 +479,7 @@ def test_k8s_python_manifests_use_production_secret_contract():
         ROOT / "deploy/k8s-template/base/backend/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/deployment.yaml",
         ROOT / "deploy/k8s-template/base/worker/notion-deployment.yaml",
-        ROOT / "deploy/k8s-template/base/backend/palimpsest-worker-deployment.yaml",
     ]
-
     for path in paths:
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         env = doc["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -373,47 +509,3 @@ def test_helm_python_templates_use_production_secret_contract():
         assert "name: afterglow-secrets" in text
         assert "key: SECRET_KEY" in text
         assert "AFTERGLOW_ALLOW_INSECURE" not in text
-
-
-def test_app_config_loads_capability_platform_chat_settings(isolated_config_dir):
-    (isolated_config_dir / "afterglow.conf").write_text(
-        """
-[chat]
-execution_protocol_version = 2
-run_event_retention_hours = 48
-checkpoint_retention_days = 14
-semantic_memory_enabled = true
-memory_pgvector_url = "postgresql://memory.example/afterglow"
-memory_embedding_model = "embedding-model"
-memory_embedding_dimensions = 1536
-memory_candidate_limit = 12
-memory_retrieval_token_budget = 900
-memory_retention_days = 30
-asset_s3_endpoint = "https://objects.example"
-asset_s3_bucket = "chat-assets"
-asset_signed_url_ttl_seconds = 120
-clamav_host = "clamav"
-clamav_port = 3311
-sandbox_url = "https://sandbox.example"
-sandbox_workspace_url = "https://workspace.example"
-sandbox_image_digest = "sha256:abc"
-sandbox_policy_version = "v1"
-sandbox_egress_allowlist = ["api.example"]
-""".strip(),
-        encoding="utf-8",
-    )
-
-    settings = app_config.Settings(**app_config._load_toml())
-
-    assert settings.chat_run_event_retention_hours == 48
-    assert settings.chat_reasoning_effort == "auto"
-    assert settings.chat_memory_embedding_dimensions == 1536
-    assert settings.chat_asset_s3_bucket == "chat-assets"
-    assert settings.chat_sandbox_egress_allowlist == ["api.example"]
-    assert settings.chat_execution_protocol_version == 2
-    assert settings.chat_sandbox_workspace_url == "https://workspace.example"
-
-
-def test_chat_execution_protocol_version_rejects_unrecognized_version():
-    with pytest.raises(ValueError):
-        app_config.Settings(chat_execution_protocol_version=3)

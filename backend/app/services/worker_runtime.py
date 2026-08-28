@@ -76,23 +76,16 @@ class WorkerRuntimeAdapter(Protocol):
 
 
 def build_worker_specs(settings: Settings | None = None) -> list[WorkerSpec]:
-    """Build the known worker registry from settings."""
+    """Build the Afterglow-owned worker registry from settings."""
     cfg = settings or get_settings()
     return [
-        WorkerSpec(
-            name="drover",
-            module=cfg.worker_runtime_drover_module,
-            enabled=cfg.worker_runtime_drover_enabled,
-            desired_replicas=cfg.worker_runtime_drover_desired_replicas,
-            max_replicas=cfg.worker_runtime_drover_max_replicas,
-        ),
         WorkerSpec(
             name="notion_worker",
             module=cfg.worker_runtime_notion_worker_module,
             enabled=cfg.worker_runtime_notion_worker_enabled,
             desired_replicas=cfg.worker_runtime_notion_worker_desired_replicas,
             max_replicas=cfg.worker_runtime_notion_worker_max_replicas,
-        ),
+        )
     ]
 
 

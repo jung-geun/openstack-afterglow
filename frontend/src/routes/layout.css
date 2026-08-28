@@ -1,41 +1,41 @@
 @import 'tailwindcss';
 
 @font-face {
-  font-family: "MaruBuri";
-  src: url('/fonts/maruburi/MaruBuri-ExtraLight.ttf') format('truetype');
-  font-weight: 200;
+  font-family: "Pretendard Variable";
+  src: url('/fonts/pretendard/PretendardVariable.woff2') format('woff2');
+  font-weight: 45 920;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "MaruBuri";
-  src: url('/fonts/maruburi/MaruBuri-Light.ttf') format('truetype');
-  font-weight: 300;
+  font-family: "IBM Plex Sans KR";
+  src: url('/fonts/ibm-plex/IBMPlexSansKR-Medium.woff2') format('woff2');
+  font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "MaruBuri";
-  src: url('/fonts/maruburi/MaruBuri-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "MaruBuri";
-  src: url('/fonts/maruburi/MaruBuri-SemiBold.ttf') format('truetype');
+  font-family: "IBM Plex Sans KR";
+  src: url('/fonts/ibm-plex/IBMPlexSansKR-SemiBold.woff2') format('woff2');
   font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "MaruBuri";
-  src: url('/fonts/maruburi/MaruBuri-Bold.ttf') format('truetype');
-  font-weight: 700;
+  font-family: "IBM Plex Mono";
+  src: url('/fonts/ibm-plex/IBMPlexMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url('/fonts/ibm-plex/IBMPlexMono-Medium.woff2') format('woff2');
+  font-weight: 500;
   font-style: normal;
   font-display: swap;
 }
@@ -63,15 +63,18 @@
   /* Warm */
   --color-warm: #f4976c;
   --color-warm-2: #e8c19a;
+  --color-warm-text: var(--color-warm);
   /* State */
   --color-state-success: #5ddca0;
+  --color-state-success-text: var(--color-state-success);
   --color-state-warning: #f4b85a;
   --color-state-danger: #f06b6b;
   --color-state-info: #5ed4e4;
   --color-state-neutral: #8a93a4;
   /* Font */
-  --font-sans: "MaruBuri", "Geist", Inter, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-sans: "Pretendard Variable", system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --font-display: "IBM Plex Sans KR", "Pretendard Variable", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Pretendard Variable", ui-monospace, monospace;
 }
 
 /* Runtime design variables */
@@ -169,7 +172,9 @@ body {
   --color-accent-2: #6d28d9;
   --color-warm: #ea580c;
   --color-warm-2: #c2410c;
+  --color-warm-text: #c2410c;
   --color-state-success: #16a34a;
+  --color-state-success-text: #15803d;
   --color-state-warning: #b45309;
   --color-state-danger: #dc2626;
   --color-state-info: #2563eb;

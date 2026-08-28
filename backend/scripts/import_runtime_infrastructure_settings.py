@@ -35,37 +35,15 @@ _POLICY_SOURCES: dict[str, tuple[str, str, str]] = {
     "nova.default_network": ("nova", "default_network_id", "DEFAULT_NETWORK_ID"),
     "nova.default_external_network": ("nova", "default_network_external_id", "DEFAULT_NETWORK_EXTERNAL_ID"),
     "nova.default_compute_availability_zone": ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE"),
-    "cinder.default_volume_availability_zone": ("k3s", "cinder_csi_default_az", "K3S_CINDER_CSI_DEFAULT_AZ"),
-    "manila.share_network": ("openstack", "manila_share_network_id", "OS_MANILA_SHARE_NETWORK_ID"),
-    "manila.cephfs_share_type": ("openstack", "manila_share_type", "OS_MANILA_SHARE_TYPE"),
-    "manila.nfs_share_type": ("openstack", "manila_nfs_share_type", "OS_MANILA_NFS_SHARE_TYPE"),
-    "k3s.server_image": ("k3s", "server_image_id", "K3S_SERVER_IMAGE_ID"),
-    "k3s.fcos_image": ("k3s", "fcos_image_id", "K3S_FCOS_IMAGE_ID"),
-    "k3s.server_flavor": ("k3s", "server_flavor_id", "K3S_SERVER_FLAVOR_ID"),
-    "k3s.default_agent_flavor": ("k3s", "default_agent_flavor_id", "K3S_DEFAULT_AGENT_FLAVOR_ID"),
-    "k3s.occm_floating_network": ("k3s", "occm_floating_network_id", "K3S_OCCM_FLOATING_NETWORK_ID"),
-    "k3s.occm_public_network": ("k3s", "occm_public_network_name", "K3S_OCCM_PUBLIC_NETWORK_NAME"),
-    "k3s.lb_subnet": ("k3s", "lb_subnet_id", "K3S_LB_SUBNET_ID"),
-    "k3s.api_lb_vip_network": ("k3s", "api_lb_vip_network_id", "K3S_API_LB_VIP_NETWORK_ID"),
-    "k3s.api_lb_floating_network": ("k3s", "api_lb_floating_network_id", "K3S_API_LB_FLOATING_NETWORK_ID"),
-    "k3s.octavia_ingress_floating_network": (
-        "k3s",
-        "octavia_ingress_floating_network_id",
-        "K3S_OCTAVIA_INGRESS_FLOATING_NETWORK_ID",
-    ),
+    "cinder.default_volume_availability_zone": ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE"),
     "builder.flavor": ("builder", "flavor_id", "BUILDER_FLAVOR_ID"),
     "builder.network": ("builder", "network_id", "BUILDER_NETWORK_ID"),
     "builder.floating_network": ("builder", "floating_network_id", "BUILDER_FLOATING_NETWORK_ID"),
-    "waygate.provider_network": ("waygate", "provider_network_id", "WAYGATE_PROVIDER_NETWORK_ID"),
-    "waygate.image": ("waygate", "image_id", "WAYGATE_IMAGE_ID"),
-    "waygate.flavor": ("waygate", "flavor_id", "WAYGATE_FLAVOR_ID"),
-    "waygate.floating_network": ("waygate", "floating_network_id", "WAYGATE_FLOATING_NETWORK_ID"),
 }
 
 _LEGACY_NAME_SELECTOR_KEYS = {
     "manila.cephfs_share_type",
     "manila.nfs_share_type",
-    "k3s.occm_public_network",
 }
 
 
@@ -192,7 +170,6 @@ async def _collect(
             }
 
         runtime = {
-            "k3s.version": _legacy_value(config, "k3s", "version", "K3S_VERSION"),
             "notion.sync_enabled": _legacy_bool(config, "notion", "enabled", "NOTION_ENABLED"),
         }
         return selected, runtime, base_images
@@ -202,126 +179,11 @@ async def _collect(
         await asyncio.to_thread(admin_conn.close)
 
 
-def _snapshot_entry(resource_id: object) -> dict[str, str] | None:
-    if resource_id is None or not str(resource_id):
-        return None
-    value = str(resource_id)
-    return {"id": value, "name": value}
-
-
-def _backfill_k3s_snapshot(
-    cluster: Any,
-    default_agent_nodegroup: Any | None,
-) -> dict[str, object]:
-    """Backfill only IDs already materialized on an in-flight K3s record."""
-    snapshot: dict[str, object] = {}
-    missing: list[str] = ["cinder.default_volume_availability_zone"]
-
-    for key, value in (
-        ("k3s.server_image", cluster.server_image_id),
-        ("k3s.server_flavor", cluster.server_flavor_id),
-    ):
-        if entry := _snapshot_entry(value):
-            snapshot[key] = entry
-        else:
-            missing.append(key)
-
-    agent_flavor = getattr(default_agent_nodegroup, "flavor_id", None) or cluster.agent_flavor_id
-    agent_image = getattr(default_agent_nodegroup, "image_id", None)
-    if int(cluster.agent_count or 0) > 0:
-        if entry := _snapshot_entry(agent_flavor):
-            snapshot["k3s.default_agent_flavor"] = entry
-        else:
-            missing.append("k3s.default_agent_flavor")
-        if entry := _snapshot_entry(agent_image):
-            snapshot["effective_agent_image"] = entry
-        else:
-            missing.append("effective_agent_image")
-
-    snapshot["_backfill"] = {
-        "state": "unresolved" if missing else "complete",
-        "missing": missing,
-    }
-    return snapshot
-
-
-def _backfill_waygate_snapshot(server: Any) -> dict[str, object]:
-    """Backfill only persisted Waygate resource IDs; optional FIP stays optional."""
-    fields = {
-        "waygate.provider_network": server.provider_network_id,
-        "waygate.image": server.image_id,
-        "waygate.flavor": server.flavor_id,
-        "waygate.floating_network": server.floating_network_id,
-    }
-    snapshot = {key: entry for key, value in fields.items() if (entry := _snapshot_entry(value))}
-    missing = [key for key in ("waygate.provider_network", "waygate.image", "waygate.flavor") if key not in snapshot]
-    snapshot["_backfill"] = {
-        "state": "unresolved" if missing else "complete",
-        "missing": missing,
-    }
-    return snapshot
-
-
-def _snapshot_is_unresolved(snapshot: Mapping[str, object]) -> bool:
-    return (snapshot.get("_backfill") or {}).get("state") != "complete"
-
-
 async def _inflight_snapshot_blockers(session: Any) -> list[str]:
-    """Report rows that cannot be snapshotted without adopting current defaults."""
-    from app.models.db import (
-        K3sCluster,
-        K3sNodegroup,
-        LayerBuild,
-        LayerConsume,
-        LayerImportJob,
-        LibraryBuild,
-        WaygateServer,
-    )
+    """Report non-terminal Afterglow rows without immutable resource snapshots."""
+    from app.models.db import LayerBuild, LayerConsume, LayerImportJob, LibraryBuild
 
     blockers: list[str] = []
-    clusters = (
-        (
-            await session.execute(
-                select(K3sCluster).where(
-                    K3sCluster.status.in_(("CREATING", "PROVISIONING")),
-                    K3sCluster.resource_policy_snapshot.is_(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    default_agent_groups = {
-        row.cluster_id: row
-        for row in (
-            await session.execute(
-                select(K3sNodegroup).where(
-                    K3sNodegroup.role == "agent",
-                    K3sNodegroup.is_default.is_(True),
-                    K3sNodegroup.deleted_at.is_(None),
-                )
-            )
-        ).scalars()
-    }
-    for cluster in clusters:
-        if _snapshot_is_unresolved(_backfill_k3s_snapshot(cluster, default_agent_groups.get(cluster.id))):
-            blockers.append(f"k3s_cluster:{cluster.id}")
-
-    waygate_rows = (
-        (
-            await session.execute(
-                select(WaygateServer).where(
-                    WaygateServer.status.in_(("CREATING", "PROVISIONING")),
-                    WaygateServer.resource_policy_snapshot.is_(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for server in waygate_rows:
-        if _snapshot_is_unresolved(_backfill_waygate_snapshot(server)):
-            blockers.append(f"waygate_server:{server.id}")
 
     model_states = (
         (LibraryBuild, {"complete", "error", "timeout", "cancelled"}, "library_build"),
@@ -359,14 +221,7 @@ async def _apply(
     runtime: dict[str, object],
     base_images: dict[str, dict[str, object]],
 ) -> tuple[int, int, int]:
-    from app.models.db import (
-        K3sCluster,
-        K3sNodegroup,
-        LayerArtifact,
-        ResourcePolicy,
-        RuntimeSetting,
-        WaygateServer,
-    )
+    from app.models.db import LayerArtifact, ResourcePolicy, RuntimeSetting
     from app.services.resource_policies import get_spec
 
     engine = create_async_engine(database_url, pool_pre_ping=True)
@@ -394,47 +249,7 @@ async def _apply(
             blockers = await _inflight_snapshot_blockers(session)
             if blockers:
                 raise ValueError(f"unresolved in-flight resource snapshots: {', '.join(blockers)}")
-            k3s_rows = (
-                (
-                    await session.execute(
-                        select(K3sCluster).where(
-                            K3sCluster.status.in_(("CREATING", "PROVISIONING")),
-                            K3sCluster.resource_policy_snapshot.is_(None),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            default_agent_groups = {
-                row.cluster_id: row
-                for row in (
-                    await session.execute(
-                        select(K3sNodegroup).where(
-                            K3sNodegroup.role == "agent",
-                            K3sNodegroup.is_default.is_(True),
-                            K3sNodegroup.deleted_at.is_(None),
-                        )
-                    )
-                ).scalars()
-            }
-            for cluster in k3s_rows:
-                cluster.resource_policy_snapshot = _backfill_k3s_snapshot(cluster, default_agent_groups.get(cluster.id))
 
-            waygate_rows = (
-                (
-                    await session.execute(
-                        select(WaygateServer).where(
-                            WaygateServer.status.in_(("CREATING", "PROVISIONING")),
-                            WaygateServer.resource_policy_snapshot.is_(None),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for server in waygate_rows:
-                server.resource_policy_snapshot = _backfill_waygate_snapshot(server)
             for key, value in runtime.items():
                 if value is None or key in existing_runtime_keys:
                     continue

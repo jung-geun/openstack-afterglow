@@ -104,8 +104,12 @@ async function handleUnauthorized(): Promise<void> {
 	_redirectingTo401 = true;
 	try {
 		if (_refreshPromise) {
-			const recovered = await _refreshPromise;
-			if (recovered) return;
+			try {
+				const recovered = await _refreshPromise;
+				if (recovered) return;
+			} catch {
+				return;
+			}
 		}
 
 		if (get(logoutInProgress) || AUTH_PUBLIC_PATHS.has(window.location.pathname)) return;
@@ -124,7 +128,7 @@ async function handleUnauthorized(): Promise<void> {
 }
 
 /**
- * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 실패하면 null.
+ * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 401/인증 누락 시 null, 503/429/네트워크 오류 시 ApiError/예외 발생.
  * 동시 호출은 하나의 Promise로 합산(coalescing).
  */
 /** localStorage에 영속화된 인증 상태를 직접 읽는다 (탭 간 race 대비 최신값 확인용). */
@@ -137,67 +141,159 @@ function _readPersistedAuth(): { token?: string; refreshToken?: string; accessEx
 		return null;
 	}
 }
+type RefreshSettledFailure =
+	| { kind: 'terminal'; accessToken: string | undefined; refreshToken: string }
+	| { kind: 'retryable'; accessToken: string | undefined; refreshToken: string; error: unknown; retryAt: number };
+
+let _refreshSettledFailure: RefreshSettledFailure | null = null;
+
+const DEFAULT_REFRESH_RETRY_COOLDOWN_MS = 5_000;
+const MAX_REFRESH_RETRY_COOLDOWN_MS = 60_000;
+
+function computeRetryAt(retryAfterHeader: string | null | undefined, now: number): number {
+	if (!retryAfterHeader) {
+		return now + DEFAULT_REFRESH_RETRY_COOLDOWN_MS;
+	}
+	const trimmed = retryAfterHeader.trim();
+	let guidanceMs: number | null = null;
+	const numericSeconds = Number(trimmed);
+	if (!isNaN(numericSeconds) && numericSeconds >= 0) {
+		guidanceMs = Math.round(numericSeconds * 1000);
+	} else {
+		const parsedDate = Date.parse(trimmed);
+		if (!isNaN(parsedDate)) {
+			guidanceMs = parsedDate - now;
+		}
+	}
+
+	if (guidanceMs === null || isNaN(guidanceMs)) {
+		return now + DEFAULT_REFRESH_RETRY_COOLDOWN_MS;
+	}
+
+	const effectiveCooldownMs = Math.min(
+		MAX_REFRESH_RETRY_COOLDOWN_MS,
+		Math.max(DEFAULT_REFRESH_RETRY_COOLDOWN_MS, guidanceMs)
+	);
+	return now + effectiveCooldownMs;
+}
 
 async function tryRefresh({ allowDuringRevocation = false }: { allowDuringRevocation?: boolean } = {}): Promise<string | null> {
 	if (_sessionRevocationInProgress && !allowDuringRevocation) return null;
 	if (_refreshPromise) return _refreshPromise;
 	_refreshPromise = (async () => {
-		try {
-			const { get } = await import('svelte/store');
-			const { auth, setAuth } = await import('$lib/stores/auth');
-			const state = get(auth);
+		const { get } = await import('svelte/store');
+		const { auth, setAuth } = await import('$lib/stores/auth');
+		const state = get(auth);
 
-			// 다른 탭이 이미 토큰을 회전시켰을 수 있다 — storage 이벤트 전파보다
-			// localStorage 직접 읽기가 항상 최신이므로 여기서 한 번 더 확인한다.
-			const persisted = _readPersistedAuth();
-			if (persisted?.token && persisted.token !== state.token) {
-				setAuth({
-					token: persisted.token,
-					refreshToken: persisted.refreshToken ?? state.refreshToken,
-					accessExpiresAt: persisted.accessExpiresAt ?? null,
-				});
-				return persisted.token;
+		// 다른 탭이 이미 토큰을 회전시켰을 수 있다 — storage 이벤트 전파보다
+		// localStorage 직접 읽기가 항상 최신이므로 여기서 한 번 더 확인한다.
+		const persisted = _readPersistedAuth();
+		if (persisted?.token && persisted.token !== state.token) {
+			setAuth({
+				token: persisted.token,
+				refreshToken: persisted.refreshToken ?? state.refreshToken,
+				accessExpiresAt: persisted.accessExpiresAt ?? null,
+			});
+			_refreshSettledFailure = null;
+			return persisted.token;
+		}
+
+		const refreshToken = persisted?.refreshToken ?? state.refreshToken;
+		if (!refreshToken) return null;
+
+		if (_refreshSettledFailure) {
+			if (
+				_refreshSettledFailure.accessToken === state.token &&
+				_refreshSettledFailure.refreshToken === refreshToken
+			) {
+				if (_refreshSettledFailure.kind === 'terminal') {
+					return null;
+				}
+				if (Date.now() < _refreshSettledFailure.retryAt) {
+					throw _refreshSettledFailure.error;
+				}
 			}
+			_refreshSettledFailure = null;
+		}
 
-			const refreshToken = persisted?.refreshToken ?? state.refreshToken;
-			if (!refreshToken) return null;
-
-			const res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
+		let res: Response;
+		try {
+			res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ refresh_token: refreshToken }),
 				signal: AbortSignal.timeout(15_000),
 			});
-			if (!res.ok) {
-				// refresh 토큰은 1회용(회전 시 폐기) — 동시에 다른 탭이 회전에 성공해
-				// 이쪽이 패배한 경우라면 그 탭의 새 토큰을 채택하고 로그아웃하지 않는다.
-				const winner = _readPersistedAuth();
-				if (winner?.token && winner.token !== state.token) {
-					setAuth({
-						token: winner.token,
-						refreshToken: winner.refreshToken ?? null,
-						accessExpiresAt: winner.accessExpiresAt ?? null,
-					});
-					return winner.token;
-				}
+		} catch (err) {
+			_refreshSettledFailure = {
+				kind: 'retryable',
+				accessToken: state.token,
+				refreshToken,
+				error: err,
+				retryAt: Date.now() + DEFAULT_REFRESH_RETRY_COOLDOWN_MS,
+			};
+			throw err;
+		}
+
+		if (!res.ok) {
+			// refresh 토큰은 1회용(회전 시 폐기) — 동시에 다른 탭이 회전에 성공해
+			// 이쪽이 패배한 경우라면 그 탭의 새 토큰을 채택하고 로그아웃하지 않는다.
+			const winner = _readPersistedAuth();
+			if (winner?.token && winner.token !== state.token) {
+				setAuth({
+					token: winner.token,
+					refreshToken: winner.refreshToken ?? null,
+					accessExpiresAt: winner.accessExpiresAt ?? null,
+				});
+				_refreshSettledFailure = null;
+				return winner.token;
+			}
+			if (res.status === 401) {
+				_refreshSettledFailure = {
+					kind: 'terminal',
+					accessToken: state.token,
+					refreshToken,
+				};
 				return null;
 			}
-
-			const data = await res.json();
-
-			const refreshedToken = data.token as string;
-			if (get(auth).token !== state.token) return null;
-			setAuth({
-				token: refreshedToken,
-				refreshToken: data.refresh_token ?? refreshToken,
-				accessExpiresAt: data.expires_at
-					? Math.floor(new Date(data.expires_at).getTime() / 1000)
-					: null,
-			});
-			return refreshedToken;
-		} catch {
-			return null;
+			let detail = res.statusText;
+			try {
+				const body = await res.json();
+				detail = formatErrorDetail(body, res.statusText);
+			} catch {
+				detail = await res.text().catch(() => res.statusText);
+			}
+			const err = new ApiError(res.status, detail);
+			const retryAfterHeader = res.headers?.get?.('Retry-After') ?? res.headers?.get?.('retry-after');
+			const retryAt = res.status === 429
+				? computeRetryAt(retryAfterHeader, Date.now())
+				: Date.now() + DEFAULT_REFRESH_RETRY_COOLDOWN_MS;
+			_refreshSettledFailure = {
+				kind: 'retryable',
+				accessToken: state.token,
+				refreshToken,
+				error: err,
+				retryAt,
+			};
+			throw err;
 		}
+
+		const data = await res.json();
+		const refreshedToken = data.token as string;
+		const currentToken = get(auth).token;
+		if (currentToken !== state.token) {
+			_refreshSettledFailure = null;
+			return currentToken ?? null;
+		}
+		setAuth({
+			token: refreshedToken,
+			refreshToken: data.refresh_token ?? refreshToken,
+			accessExpiresAt: data.expires_at
+				? Math.floor(new Date(data.expires_at).getTime() / 1000)
+				: null,
+		});
+		_refreshSettledFailure = null;
+		return refreshedToken;
 	})().finally(() => { _refreshPromise = null; });
 	return _refreshPromise;
 }
@@ -268,9 +364,13 @@ async function request<T>(
 	// 401: access JWT 만료 → refresh 후 1회 재시도
 	if (res.status === 401 && token) {
 		const allowDuringRevocation = path === '/api/v1/auth/logout' || path === '/api/v1/auth/logout-all';
-		const newToken = await tryRefresh({ allowDuringRevocation });
-		if (newToken && newToken !== token) {
-			const retryHeaders = _buildHeaders(newToken, projectId, options.headers as Record<string, string>);
+		const liveToken = get(auth).token;
+		const retryToken =
+			liveToken && liveToken !== token
+				? liveToken
+				: await tryRefresh({ allowDuringRevocation });
+		if (retryToken && retryToken !== token) {
+			const retryHeaders = _buildHeaders(retryToken, projectId, options.headers as Record<string, string>);
 			const retry = await fetch(`${requestBaseUrl}${path}`, {
 				...options,
 				headers: retryHeaders,

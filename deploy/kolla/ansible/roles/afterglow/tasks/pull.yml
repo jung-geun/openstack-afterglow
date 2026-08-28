@@ -9,3 +9,4 @@
   when:
     - inventory_hostname in groups['afterglow']
     - item.value.enabled | bool
+    - not (afterglow_source_mode | default(false) | bool)

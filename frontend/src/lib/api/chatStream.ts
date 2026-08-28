@@ -73,25 +73,38 @@ function headers(token?: string, projectId?: string): HeadersInit {
 	return result;
 }
 
+function normalizeDescriptorUrl(url: unknown): string {
+	if (typeof url !== 'string' || !url.startsWith('/') || url.startsWith('//')) {
+		throw new ChatProtocolError('invalid chat run descriptor');
+	}
+	if (url.startsWith('/v1/')) {
+		return `/api/v1/chat${url.slice(3)}`;
+	}
+	if (url.startsWith('/api/v1/chat/')) {
+		return url;
+	}
+	throw new ChatProtocolError('invalid chat run descriptor');
+}
+
 export function parseChatRunDescriptor(value: unknown): ChatRunDescriptor {
 	if (!isRecord(value)) throw new ChatProtocolError('invalid chat run descriptor');
 	if (
 		typeof value.run_id !== 'string' ||
 		(typeof value.conversation_id !== 'string' && value.conversation_id !== null) ||
 		(typeof value.temp_thread_id !== 'string' && value.temp_thread_id !== null) ||
-		typeof value.events_url !== 'string' ||
-		typeof value.cancel_url !== 'string' ||
 		!isRunStatus(value.status)
 	) {
 		throw new ChatProtocolError('invalid chat run descriptor');
 	}
+	const eventsUrl = normalizeDescriptorUrl(value.events_url);
+	const cancelUrl = normalizeDescriptorUrl(value.cancel_url);
 	return {
 		run_id: value.run_id,
 		conversation_id: value.conversation_id,
 		temp_thread_id: value.temp_thread_id,
 		status: value.status,
-		events_url: value.events_url,
-		cancel_url: value.cancel_url
+		events_url: eventsUrl,
+		cancel_url: cancelUrl
 	};
 }
 
@@ -174,6 +187,11 @@ async function* decodeFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<S
 	}
 }
 
+function eventsUrlWithAfterSeq(eventsUrl: string, afterSeq: number): string {
+	const separator = eventsUrl.includes('?') ? '&' : '?';
+	return `${eventsUrl}${separator}after_seq=${afterSeq}`;
+}
+
 /**
  * Replays the durable journal then tails it. Connection loss is never cancellation:
  * only transport failures retry, and every retry resumes at the last accepted seq.
@@ -188,7 +206,7 @@ export async function* followChatRun(
 	while (true) {
 		let response: Response;
 		try {
-			response = await fetch(`${getBaseUrl()}${descriptor.events_url}?after_seq=${lastSeq}`, {
+			response = await fetch(`${getBaseUrl()}${eventsUrlWithAfterSeq(descriptor.events_url, lastSeq)}`, {
 				headers: { ...headers(token, projectId), ...(lastSeq ? { 'Last-Event-ID': `${descriptor.run_id}:${lastSeq}` } : {}) },
 				signal
 			});
@@ -239,4 +257,4 @@ export async function cancelChatRun(
 	if (!response.ok) throw await errorFrom(response);
 }
 
-export const __test__ = { takeFrames };
+export const __test__ = { eventsUrlWithAfterSeq, takeFrames };

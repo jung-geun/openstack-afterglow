@@ -12,6 +12,14 @@ export const TONE_CSS_VAR: Record<DesignTone, string> = {
 	'admin-tone': 'var(--admin-tone)',
 };
 
+export const TEXT_CSS_VAR = {
+	primary: 'var(--color-ink-0)',
+	secondary: 'var(--color-ink-1)',
+	muted: 'var(--color-ink-2)',
+	warm: 'var(--color-warm-text)',
+	success: 'var(--color-state-success-text)',
+} as const;
+
 export const SURFACE_CSS_VAR = {
 	canvas: 'var(--color-surface-canvas)',
 	base: 'var(--color-surface-base)',
@@ -19,6 +27,12 @@ export const SURFACE_CSS_VAR = {
 	sunken: 'var(--color-surface-sunken)',
 	scrim: 'var(--color-surface-scrim)',
 	scrimSoft: 'var(--color-surface-scrim-soft)',
+} as const;
+
+export const FONT_CSS_VAR = {
+	sans: 'var(--font-sans)',
+	display: 'var(--font-display)',
+	mono: 'var(--font-mono)',
 } as const;
 
 export const LAYER_CSS_VAR = {

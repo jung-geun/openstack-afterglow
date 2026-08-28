@@ -33,9 +33,11 @@ async def list_flavors(
         # GPU 쿼터 기반 필터링: 프로젝트에 쿼터가 없는(0) GPU flavor 제외
         if is_db_available():
             try:
-                from app.services.gpu_quota import get_effective_gpu_quotas, normalize_gpu_alias
+                from drover_sdk import register as register_drover
 
-                quotas = await get_effective_gpu_quotas(pid)
+                from app.services.gpu_inventory import normalize_gpu_alias
+
+                quotas = await asyncio.to_thread(register_drover(conn).effective_gpu_quotas)
 
                 def _has_gpu_access(f: FlavorInfo) -> bool:
                     alias_str = f.extra_specs.get("pci_passthrough:alias", "")

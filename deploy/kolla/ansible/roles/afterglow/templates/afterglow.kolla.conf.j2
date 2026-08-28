@@ -1,0 +1,60 @@
+# Final Kolla-managed Afterglow configuration layer.
+# Applied after generated operator layers; do not edit.
+# Deployment topology, credentials, storage bindings, and browser origins remain Kolla-owned.
+
+[openstack]
+auth_url = "{{ afterglow_keystone_auth_url }}"
+project_name = "{{ afterglow_service_project_name }}"
+project_domain_name = "{{ afterglow_keystone_project_domain_name }}"
+user_domain_name = "{{ afterglow_keystone_user_domain_name }}"
+region_name = "{{ afterglow_keystone_region_name }}"
+interface = "{{ afterglow_keystone_interface }}"
+insecure = {{ afterglow_openstack_insecure | bool | lower }}
+cacert = "{{ afterglow_openstack_cacert }}"
+username = "{{ afterglow_admin_keystone_user }}"
+password = "{{ afterglow_admin_keystone_password }}"
+service_project_id = "{{ afterglow_service_project_id }}"
+ceph_monitors = "{{ afterglow_ceph_monitors }}"
+manila_share_type = "{{ afterglow_manila_share_type }}"
+
+[app]
+backend_port = {{ afterglow_backend_port }}
+frontend_port = {{ afterglow_frontend_port }}
+secret_key = "{{ afterglow_secret_key }}"
+public_api_base = "{{ afterglow_public_api_base }}"
+frontend_base_url = "{{ afterglow_public_endpoint_url }}"
+
+[cache]
+redis_url = "{{ afterglow_redis_url }}"
+
+[services]
+magnum = {{ afterglow_service_magnum_enabled | bool | lower }}
+manila = {{ afterglow_service_manila_enabled | bool | lower }}
+zun = {{ afterglow_service_zun_enabled | bool | lower }}
+k3s = {{ afterglow_service_k3s_enabled | bool | lower }}
+swift = {{ afterglow_service_swift_enabled | bool | lower }}
+trove = {{ afterglow_service_trove_enabled | bool | lower }}
+barbican = {{ afterglow_service_barbican_enabled | bool | lower }}
+waygate = {{ afterglow_service_waygate_enabled | bool | lower }}
+palimpsest = {{ afterglow_service_palimpsest_enabled | bool | lower }}
+chat = {{ afterglow_service_chat_enabled | bool | lower }}
+mcp = {{ afterglow_service_mcp_enabled | bool | lower }}
+
+[instance_health]
+callback_base_url = "{{ afterglow_instance_health_callback_base_url }}"
+
+[k3s]
+kubeconfig_encryption_key = "{{ afterglow_kubeconfig_encryption_key | default('') }}"
+
+[union]
+layer_store_rw_share_id = "{{ afterglow_share_layer_store_rw_id }}"
+layer_store_ro_share_id = "{{ afterglow_share_layer_store_ro_id }}"
+manifest_store_share_id = "{{ afterglow_share_manifest_store_id }}"
+metadata_store_share_id = "{{ afterglow_share_metadata_store_id }}"
+
+[database]
+url = "{{ afterglow_database_url }}"
+auto_create_tables = false
+
+[cors]
+origins = "{{ afterglow_public_endpoint_url }}"

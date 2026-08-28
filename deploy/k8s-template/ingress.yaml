@@ -20,6 +20,17 @@ spec:
     - host: afterglow.example.com # 실제 도메인으로 변경
       http:
         paths:
+          # MCP OAuth discovery (RFC 9728 / RFC 8414) lives at the origin root, not under /api —
+          # backend/app/api/mcp.py root_router. cert-manager 의 HTTP-01 solver Ingress 는 더 긴
+          # /.well-known/acme-challenge/<token> 규칙을 쓰므로 Traefik 우선순위에서 앞서고,
+          # 인증서 발급은 이 규칙의 영향을 받지 않는다.
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:
@@ -34,18 +45,28 @@ spec:
                 name: frontend
                 port:
                   number: 3080
-    # 외부 API 전용 서브도메인 — /v1(OpenAI/Anthropic 호환)만 백엔드로.
-    # backend 의 [chat] api_hosts 에 이 호스트를 지정해야 앱에서도 허용된다(이중 방어).
+    # /v1 은 Lumen 서비스(포트 8012)가 제공한다. 이 manifest 는 Lumen 을 배포하지 않으므로, Lumen 을 운영하지 않는다면 이 host 규칙 전체를 삭제한다. Lumen 의 [chat] api_hosts 에 이 호스트를 등록해야 한다(이중 방어).
     - host: api.afterglow.example.com # 실제 API 서브도메인으로 변경 (예: api.cloud.dmslab.re.kr)
       http:
         paths:
-          - path: /v1
+          # MCP OAuth discovery (RFC 9728 / RFC 8414) lives at the origin root, not under /api —
+          # backend/app/api/mcp.py root_router. cert-manager 의 HTTP-01 solver Ingress 는 더 긴
+          # /.well-known/acme-challenge/<token> 규칙을 쓰므로 Traefik 우선순위에서 앞서고,
+          # 인증서 발급은 이 규칙의 영향을 받지 않는다.
+          - path: /.well-known
             pathType: Prefix
             backend:
               service:
                 name: backend
                 port:
                   number: 8000
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: lumen
+                port:
+                  number: 8012
           - path: /api
             pathType: Prefix
             backend:

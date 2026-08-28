@@ -256,7 +256,14 @@ async def refresh_token(request: Request, req: RefreshRequest):
         raise HTTPException(status_code=401, detail="유효하지 않은 refresh 토큰")
 
     r_jti = r_payload["jti"]
-    sess = await session_store.get_session(r_jti)
+    try:
+        sess = await session_store.get_session(r_jti)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Redis session store lookup failure during refresh: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="세션 저장소 연결 실패")
+
     if sess is None:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
 
@@ -277,31 +284,44 @@ async def refresh_token(request: Request, req: RefreshRequest):
     os_name = sess.get("os", "")
 
     # Keystone 토큰 유효성 확인 (만료 시 재로그인 필요)
+    from keystoneauth1.exceptions.http import Unauthorized
+
     try:
         kc_info = await asyncio.to_thread(
             keystone.validate_token, sess["keystone_token"], project_id=sess["project_id"]
         )
-    except Exception:
+    except Unauthorized:
         await session_store.delete_session(r_jti)
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Keystone validation failure during refresh (session preserved): %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
 
-    # 토큰 회전: 기존 refresh 삭제 후 새 쌍 발급
-    await session_store.delete_session(r_jti)
-
-    return await _build_token_response(
-        keystone_token=kc_info["token"],
-        project_id=kc_info["project_id"],
-        project_name=kc_info["project_name"],
-        user_id=kc_info["user_id"],
-        username=kc_info["username"],
-        roles=kc_info.get("roles", []),
-        is_system_admin=kc_info.get("is_system_admin", False),
-        auth_method=sess.get("auth_method", "password"),
-        origin_ip=origin_ip,
-        origin_fp=origin_fp,
-        device_type=device_type,
-        os=os_name,
-    )
+    # 토큰 회전: 새 토큰 발급 및 세션 저장 후 기존 refresh 삭제
+    try:
+        token_resp = await _build_token_response(
+            keystone_token=kc_info["token"],
+            project_id=kc_info["project_id"],
+            project_name=kc_info["project_name"],
+            user_id=kc_info["user_id"],
+            username=kc_info["username"],
+            roles=kc_info.get("roles", []),
+            is_system_admin=kc_info.get("is_system_admin", False),
+            auth_method=sess.get("auth_method", "password"),
+            origin_ip=origin_ip,
+            origin_fp=origin_fp,
+            device_type=device_type,
+            os=os_name,
+        )
+        await session_store.delete_session(r_jti)
+        return token_resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Failed to rotate session during refresh (session preserved): %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="세션 갱신 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
 
 
 @router.post("/token/project", response_model=TokenResponse)

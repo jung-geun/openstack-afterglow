@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import get_session_factory
-from app.models.chat_db import McpLumenSelection, McpToolInvocation
+from app.models.mcp_authority import McpLumenSelection, McpToolInvocation
 from app.services.mcp_control_plane.authentication import McpPrincipal
 from app.services.mcp_control_plane.authority import McpAuthorityError, _as_utc, _lock_grant, _now, lock_owner
 from app.services.mcp_control_plane.registry import REGISTRY_VERSION, RegistryEntry

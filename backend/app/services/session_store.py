@@ -22,6 +22,66 @@ _SENSITIVE_KEYS = {"keystone_token"}  # list_user_sessions에서 제거할 민�
 
 _logger = logging.getLogger(__name__)
 
+_UPDATE_TOKEN_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local data = cjson.decode(raw)
+if data['keystone_token'] == ARGV[1] then
+    return nil
+end
+data['keystone_token'] = ARGV[1]
+local pttl = redis.call('PTTL', KEYS[1])
+local new_raw = cjson.encode(data)
+if pttl > 0 then
+    redis.call('SET', KEYS[1], new_raw, 'PX', pttl)
+elseif pttl == -1 then
+    redis.call('SET', KEYS[1], new_raw)
+end
+return 1
+"""
+
+_BLACKLIST_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local data = cjson.decode(raw)
+if data['blacklisted'] == true and data['blacklist_reason'] == ARGV[1] then
+    return nil
+end
+data['blacklisted'] = true
+data['blacklist_reason'] = ARGV[1]
+local pttl = redis.call('PTTL', KEYS[1])
+local new_raw = cjson.encode(data)
+if pttl > 0 then
+    redis.call('SET', KEYS[1], new_raw, 'PX', pttl)
+elseif pttl == -1 then
+    redis.call('SET', KEYS[1], new_raw)
+end
+return 1
+"""
+
+_TOUCH_SEEN_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local data = cjson.decode(raw)
+local now = tonumber(ARGV[3])
+local throttle = tonumber(ARGV[4])
+local last_seen = tonumber(data['last_seen'] or 0)
+if data['last_ip'] == ARGV[1] and data['last_fp'] == ARGV[2] and (now - last_seen) < throttle then
+    return nil
+end
+data['last_ip'] = ARGV[1]
+data['last_fp'] = ARGV[2]
+data['last_seen'] = now
+local pttl = redis.call('PTTL', KEYS[1])
+local new_raw = cjson.encode(data)
+if pttl > 0 then
+    redis.call('SET', KEYS[1], new_raw, 'PX', pttl)
+elseif pttl == -1 then
+    redis.call('SET', KEYS[1], new_raw)
+end
+return 1
+"""
+
 
 def _key(jti: str) -> str:
     return f"{_PREFIX}{jti}"
@@ -107,17 +167,7 @@ async def update_session_token(jti: str, new_keystone_token: str) -> None:
     원본 토큰이 만료되기 전에 세션을 갱신해 1시간 TTL 문제를 방지.
     """
     r = await _get_redis()
-    key = _key(jti)
-    raw = await r.get(key)
-    if raw is None:
-        return
-    sess = json.loads(raw)
-    if sess.get("keystone_token") == new_keystone_token:
-        return
-    sess["keystone_token"] = new_keystone_token
-    ttl = await r.ttl(key)
-    if ttl > 0:
-        await r.setex(key, ttl, json.dumps(sess))
+    await r.eval(_UPDATE_TOKEN_SCRIPT, 1, _key(jti), new_keystone_token)
 
 
 async def revoke_user_sessions(user_id: str, *, revoke_keystone: bool = True) -> int:
@@ -173,47 +223,17 @@ async def blacklist_session(jti: str, reason: str = "") -> None:
     이미 삭제된 세션이면 no-op.
     """
     r = await _get_redis()
-    key = _key(jti)
-    raw = await r.get(key)
-    if raw is None:
-        return
-    sess = json.loads(raw)
-    sess["blacklisted"] = True
-    sess["blacklist_reason"] = reason
-    ttl = await r.ttl(key)
-    if ttl > 0:
-        await r.setex(key, ttl, json.dumps(sess))
-    elif ttl == -1:
-        # TTL 없는 영구 키(비정상) — 그냥 덮어씀
-        await r.set(key, json.dumps(sess))
+    await r.eval(_BLACKLIST_SCRIPT, 1, _key(jti), reason)
 
 
 async def touch_session_seen(jti: str, ip: str, fp: str) -> None:
     """last_ip / last_fp / last_seen 갱신 (마지막 사용 위치 추적).
 
     쓰로틀: ip·fp가 동일하고 last_seen이 60초 이내면 스킵 (Redis 쓰기 폭증 방지).
-    기존 update_session_token 패턴을 따른다.
     """
     r = await _get_redis()
-    key = _key(jti)
-    raw = await r.get(key)
-    if raw is None:
-        return
-    sess = json.loads(raw)
     now = int(datetime.now(UTC).timestamp())
-    # 쓰로틀: 같은 IP/지문이고 최근 갱신이 60초 이내면 skip
-    if (
-        sess.get("last_ip") == ip
-        and sess.get("last_fp") == fp
-        and now - sess.get("last_seen", 0) < _TOUCH_THROTTLE_SECONDS
-    ):
-        return
-    sess["last_ip"] = ip
-    sess["last_fp"] = fp
-    sess["last_seen"] = now
-    ttl = await r.ttl(key)
-    if ttl > 0:
-        await r.setex(key, ttl, json.dumps(sess))
+    await r.eval(_TOUCH_SEEN_SCRIPT, 1, _key(jti), ip, fp, str(now), str(_TOUCH_THROTTLE_SECONDS))
 
 
 async def delete_session_owned(user_id: str, jti: str, *, revoke_keystone: bool = True) -> bool:

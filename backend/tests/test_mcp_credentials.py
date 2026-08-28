@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api.identity import mcp_access
-from app.models.chat_db import (
+from app.models.mcp_authority import (
     McpDelegatedGrant,
     McpLumenSelection,
     McpOAuthAuthorizationRequest,

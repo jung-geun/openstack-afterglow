@@ -1,10 +1,10 @@
 {
     "name": "afterglow_notion_worker",
-    "image": "{{ afterglow_drover_image }}:{{ afterglow_image_tag }}",
+    "image": "{{ afterglow_worker_image }}:{{ afterglow_image_tag }}",
     "command": ["python", "-m", "app.notion_worker"],
     "restart_policy": "unless-stopped",
     "volumes": [
-        "/etc/kolla/afterglow/afterglow.conf:/app/afterglow.conf:ro",
+        "/etc/kolla/config/afterglow/generated/afterglow.generated.conf:/app/afterglow.conf:ro",
         "kolla_logs:/var/log/kolla/"
     ],
     "environment": {

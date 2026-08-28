@@ -3,44 +3,63 @@ set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────────────────────
 # afterglow × kolla-ansible integration installer
-# Usage: ./deploy/kolla/install.sh [--apply-passwords]
+# Usage: ./deploy/kolla/install.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../.. && pwd)"
-APPLY_PASSWORDS=false
-
-for arg in "$@"; do
-  case "$arg" in
-    --apply-passwords) APPLY_PASSWORDS=true ;;
-    *) echo "Unknown argument: $arg"; exit 1 ;;
-  esac
-done
+REPO_DIR="${AFTERGLOW_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../.. && pwd)}"
 
 log()  { echo "[afterglow-install] $*"; }
 warn() { echo "[afterglow-install] WARNING: $*" >&2; }
 die()  { echo "[afterglow-install] ERROR: $*" >&2; exit 1; }
 
-# ── 1. kolla-ansible 설치 경로 탐지 ──────────────────────────────────────────
+# ── 1. kolla-ansible 설치 경로 및 실행 파일 탐지 ─────────────────────────────
+detect_kolla_bin() {
+  if [[ -n "${KOLLA_ANSIBLE_BIN:-}" ]]; then
+    echo "$KOLLA_ANSIBLE_BIN"
+    return 0
+  fi
+
+  local candidate
+  candidate=$(command -v kolla-ansible || true)
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+
+  for bin_path in /etc/kolla/.venv/bin/kolla-ansible /usr/local/bin/kolla-ansible /usr/bin/kolla-ansible; do
+    if [[ -x "$bin_path" ]]; then
+      echo "$bin_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 detect_kolla_dir() {
-  # 우선순위 1: 환경변수
   if [[ -n "${KOLLA_ANSIBLE_DIR:-}" ]]; then
     echo "$KOLLA_ANSIBLE_DIR"
     return 0
   fi
 
-  # 우선순위 2: python import 경로
+  if [[ -n "${KOLLA_ANSIBLE_BIN:-}" ]]; then
+    local bin_prefix
+    bin_prefix=$(cd "$(dirname "$KOLLA_ANSIBLE_BIN")/.." && pwd)
+    if [[ -d "$bin_prefix/share/kolla-ansible" ]]; then
+      echo "$bin_prefix/share/kolla-ansible"
+      return 0
+    fi
+    if [[ -d "$bin_prefix/local/share/kolla-ansible" ]]; then
+      echo "$bin_prefix/local/share/kolla-ansible"
+      return 0
+    fi
+  fi
+
   local py_path
   py_path=$(python3 -c "
-import importlib.util, os, sys
-spec = importlib.util.find_spec('kolla_ansible')
-if spec is None:
-    # kolla-ansible 패키지명이 다를 수 있으므로 share 경로 시도
-    sys.exit(1)
-# site-packages 내 kolla_ansible 디렉토리에서 share 경로 추론
-pkg_dir = os.path.dirname(spec.origin)
-# 패키지 루트에서 share 경로 찾기
+import sys, os
 for candidate in [
-    os.path.join(sys.prefix, 'share', 'kolla-ansible'),
+    '/etc/kolla/.venv/share/kolla-ansible',
     '/usr/local/share/kolla-ansible',
     '/usr/share/kolla-ansible',
 ]:
@@ -50,8 +69,7 @@ for candidate in [
 sys.exit(1)
 " 2>/dev/null) && echo "$py_path" && return 0
 
-  # 우선순위 3: 표준 경로
-  for candidate in /usr/local/share/kolla-ansible /usr/share/kolla-ansible; do
+  for candidate in /etc/kolla/.venv/share/kolla-ansible /usr/local/share/kolla-ansible /usr/share/kolla-ansible; do
     if [[ -d "$candidate" ]]; then
       echo "$candidate"
       return 0
@@ -61,189 +79,125 @@ sys.exit(1)
   return 1
 }
 
-log "kolla-ansible 설치 경로 탐지 중..."
-KOLLA_DIR=$(detect_kolla_dir) || die "kolla-ansible 설치 경로를 찾을 수 없습니다. KOLLA_ANSIBLE_DIR 환경변수를 설정하거나 kolla-ansible을 먼저 설치하세요."
+log "kolla-ansible 탐지 중..."
+KOLLA_ANSIBLE_BIN=$(detect_kolla_bin) || warn "kolla-ansible 실행 파일을 자동으로 찾지 못했습니다. KOLLA_ANSIBLE_BIN을 직접 지정할 수 있습니다."
+if [[ -n "${KOLLA_ANSIBLE_BIN:-}" && -x "$KOLLA_ANSIBLE_BIN" ]]; then
+  log "kolla-ansible 실행 파일: $KOLLA_ANSIBLE_BIN"
+fi
+
+KOLLA_DIR=$(detect_kolla_dir) || die "kolla-ansible 설치 경로를 찾을 수 없습니다. KOLLA_ANSIBLE_DIR 환경변수를 설정하세요."
 log "kolla-ansible 경로: $KOLLA_DIR"
 
-# ── 2. 버전 검증 ──────────────────────────────────────────────────────────────
-log "kolla-ansible 버전 검증 중..."
-KOLLA_VERSION=$(kolla-ansible --version 2>&1 | grep -oP '\d+\.\d+' | head -1) || die "kolla-ansible 버전을 확인할 수 없습니다."
-log "검출된 버전: $KOLLA_VERSION"
-
-# 2025.2 이상 요구 (year * 100 + minor 형식으로 비교)
-required_major=2025
-required_minor=2
-
-version_major=$(echo "$KOLLA_VERSION" | cut -d. -f1)
-version_minor=$(echo "$KOLLA_VERSION" | cut -d. -f2)
-
-if [[ "$version_major" -lt "$required_major" ]] || \
-   { [[ "$version_major" -eq "$required_major" ]] && [[ "$version_minor" -lt "$required_minor" ]]; }; then
-  die "kolla-ansible 버전이 2025.2 미만입니다 (현재: $KOLLA_VERSION). 최신 버전으로 업그레이드하세요."
-fi
-log "버전 검증 통과: $KOLLA_VERSION >= 2025.2"
-
-# ── 3. role symlink 생성 ──────────────────────────────────────────────────────
 ROLES_DIR="$KOLLA_DIR/ansible/roles"
 if [[ ! -d "$ROLES_DIR" ]]; then
   die "kolla-ansible roles 디렉토리를 찾을 수 없습니다: $ROLES_DIR"
 fi
 
-ROLE_SRC="$REPO_DIR/deploy/kolla/ansible/roles/afterglow"
-ROLE_LINK="$ROLES_DIR/afterglow"
+# ── 2. 심볼릭 링크 생성 (5개 Role + 1개 Aggregate Playbook) ─────────────────
+#
+# 규칙: 대상 경로가 이미 존재하는 경우,
+#   - 심볼릭 링크이고 정산 대상($expected_target)을 가리키면 유지 (skip)
+#   - 심볼릭 링크가 아니거나 타겟이 다르면 교체 없이 실패 (die)
 
-log "afterglow role symlink 생성 중..."
-if [[ -L "$ROLE_LINK" ]] && [[ "$(readlink "$ROLE_LINK")" == "$ROLE_SRC" ]]; then
-  log "role symlink 이미 존재 (skip): $ROLE_LINK"
-else
-  ln -sfn "$ROLE_SRC" "$ROLE_LINK"
-  log "role symlink 생성 완료: $ROLE_LINK -> $ROLE_SRC"
-fi
+create_symlink_safe() {
+  local target="$1"
+  local link_path="$2"
+  local desc="$3"
 
-# ── 4. play symlink 생성 ──────────────────────────────────────────────────────
-PLAY_SRC="$REPO_DIR/deploy/kolla/playbooks/afterglow.yml"
-PLAY_LINK="$KOLLA_DIR/ansible/afterglow.yml"
+  log "$desc 심볼릭 링크 확인 중: $link_path -> $target"
 
-log "afterglow playbook symlink 생성 중..."
-if [[ -L "$PLAY_LINK" ]] && [[ "$(readlink "$PLAY_LINK")" == "$PLAY_SRC" ]]; then
-  log "play symlink 이미 존재 (skip): $PLAY_LINK"
-else
-  ln -sfn "$PLAY_SRC" "$PLAY_LINK"
-  log "play symlink 생성 완료: $PLAY_LINK -> $PLAY_SRC"
-fi
+  if [[ -e "$link_path" || -L "$link_path" ]]; then
+    if [[ -L "$link_path" ]]; then
+      local current_target
+      current_target=$(readlink "$link_path" || true)
+      local current_real expected_real
+      current_real=$(realpath "$link_path" 2>/dev/null || true)
+      expected_real=$(realpath "$target" 2>/dev/null || true)
 
-# ── 5. site.yml 패치 ──────────────────────────────────────────────────────────
-SITE_YML="$KOLLA_DIR/ansible/site.yml"
-if [[ ! -f "$SITE_YML" ]]; then
-  die "site.yml 파일을 찾을 수 없습니다: $SITE_YML"
-fi
-
-log "site.yml 패치 중: $SITE_YML"
-python3 - "$SITE_YML" <<'PYEOF'
-import sys, re
-
-site_yml = sys.argv[1]
-with open(site_yml) as f:
-    content = f.read()
-
-if '# BEGIN afterglow integration' in content:
-    print('[afterglow-install] site.yml already patched, skipping')
-    sys.exit(0)
-
-# kolla site.yml은 import_playbook이 아닌 full play 블록 형식.
-# horizon play 블록 직후에 afterglow play 블록을 삽입한다.
-afterglow_play = (
-    '\n# BEGIN afterglow integration\n'
-    '- name: Apply role afterglow\n'
-    '  gather_facts: false\n'
-    '  hosts:\n'
-    '    - afterglow\n'
-    "    - '&enable_afterglow_True'\n"
-    "  serial: '{{ kolla_serial|default(\"0\") }}'\n"
-    '  roles:\n'
-    '    - { role: afterglow, tags: afterglow }\n'
-    '# END afterglow integration\n'
-)
-
-lines = content.split('\n')
-
-# horizon play 블록 시작 인덱스 탐색 (column 0에서 "- name:" 패턴)
-horizon_play_idx = None
-for i, line in enumerate(lines):
-    if re.match(r'^- name:\s+Apply role horizon\b', line):
-        horizon_play_idx = i
-        break
-
-if horizon_play_idx is not None:
-    # 다음 top-level play 시작 위치 = 삽입 지점
-    insert_idx = len(lines)
-    for i in range(horizon_play_idx + 1, len(lines)):
-        if re.match(r'^- (name|hosts):', lines[i]):
-            insert_idx = i
-            break
-    patch_lines = afterglow_play.split('\n')
-    new_lines = lines[:insert_idx] + patch_lines + lines[insert_idx:]
-    open(site_yml, 'w').write('\n'.join(new_lines))
-    print('[afterglow-install] site.yml 패치 완료 (horizon play 블록 이후 삽입)')
-else:
-    # horizon play를 찾지 못한 경우 파일 끝에 추가
-    print('[afterglow-install] WARNING: "Apply role horizon" play를 찾지 못했습니다. 파일 끝에 삽입합니다.')
-    open(site_yml, 'w').write(content.rstrip('\n') + '\n' + afterglow_play)
-    print('[afterglow-install] site.yml 패치 완료 (파일 끝에 삽입)')
-PYEOF
-
-# ── 6. passwords.yml merge (--apply-passwords 옵션) ───────────────────────────
-if [[ "$APPLY_PASSWORDS" == true ]]; then
-  PASSWORDS_YML="${KOLLA_PASSWORDS_FILE:-/etc/kolla/passwords.yml}"
-  ADDITIONS_YML="$REPO_DIR/deploy/kolla/passwords.afterglow.additions.yml"
-
-  if [[ ! -f "$PASSWORDS_YML" ]]; then
-    die "passwords.yml 파일을 찾을 수 없습니다: $PASSWORDS_YML. KOLLA_PASSWORDS_FILE 환경변수로 경로를 지정하세요."
+      if [[ "$current_target" == "$target" ]] || [[ -n "$expected_real" && "$current_real" == "$expected_real" ]]; then
+        log "기존 심볼릭 링크가 정상 가리킴: $link_path"
+        return 0
+      fi
+    fi
+    die "충돌 발생: $link_path 가 이미 존재하며 예상 대상($target)을 가리키는 심볼릭 링크가 아닙니다."
   fi
 
-  log "passwords.yml merge 중: $PASSWORDS_YML"
-  python3 - "$PASSWORDS_YML" "$ADDITIONS_YML" <<'PYEOF'
-import sys
-try:
-    import yaml
-except ImportError:
-    print('[afterglow-install] ERROR: PyYAML이 설치되지 않았습니다. pip install pyyaml')
-    sys.exit(1)
+  ln -s "$target" "$link_path" || die "$link_path 심볼릭 링크 생성 실패"
+  log "심볼릭 링크 생성 완료: $link_path -> $target"
+}
 
-passwords_file = sys.argv[1]
-additions_file = sys.argv[2]
 
-with open(passwords_file) as f:
-    passwords = yaml.safe_load(f) or {}
+# Standard Kolla invocation wiring. Kolla resolves its default inventory as
+# /etc/kolla/ansible/inventory/all-in-one and always loads globals.d after the
+# stock globals/passwords files. Keep the plugin-owned files authoritative.
+KOLLA_CONFIG_DIR="${KOLLA_CONFIG_PATH:-/etc/kolla}"
+MULTINODE_INVENTORY="$KOLLA_CONFIG_DIR/multinode"
+DEFAULT_INVENTORY="$KOLLA_CONFIG_DIR/ansible/inventory/all-in-one"
+PLUGIN_CONFIG_ROOT="$KOLLA_CONFIG_DIR/config/afterglow"
+PLUGIN_GLOBALS="$PLUGIN_CONFIG_ROOT/globals.yml"
+PLUGIN_SECRETS="$PLUGIN_CONFIG_ROOT/secrets.yml"
+GLOBALS_D="$KOLLA_CONFIG_DIR/globals.d"
+STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
 
-with open(additions_file) as f:
-    additions = yaml.safe_load(f) or {}
+[[ -r "$MULTINODE_INVENTORY" ]] || die "Kolla multinode inventory를 읽을 수 없습니다: $MULTINODE_INVENTORY"
+[[ -r "$PLUGIN_GLOBALS" ]] || die "Afterglow globals를 읽을 수 없습니다: $PLUGIN_GLOBALS"
+[[ -r "$PLUGIN_SECRETS" ]] || die "Afterglow secrets를 읽을 수 없습니다: $PLUGIN_SECRETS"
+[[ -r "$KOLLA_CONFIG_DIR/globals.yml" ]] || die "Kolla globals.yml을 읽을 수 없습니다: $KOLLA_CONFIG_DIR/globals.yml"
+[[ -f "$STOCK_SITE" ]] || die "Kolla stock site.yml을 찾을 수 없습니다: $STOCK_SITE"
+# Role symlinks
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
+create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
-added_keys = []
-for key, value in additions.items():
-    if key not in passwords:
-        passwords[key] = value
-        added_keys.append(key)
-    else:
-        print(f'[afterglow-install] 키 이미 존재, skip: {key}')
+# Aggregate playbook symlink (afterglow-site.yml)
+create_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
 
-if added_keys:
-    with open(passwords_file, 'w') as f:
-        yaml.dump(passwords, f, default_flow_style=False, allow_unicode=True)
-    print(f'[afterglow-install] passwords.yml에 추가된 키: {", ".join(added_keys)}')
-else:
-    print('[afterglow-install] passwords.yml: 추가할 새 키 없음')
-PYEOF
+# A prior manual installation appended the complete plugin globals as a second
+# YAML document. Kolla accepts only one document for -e @globals.yml. Remove
+# that exact duplicate only after proving it matches the plugin-owned source.
+KOLLA_PYTHON=$(command -v python3) || die "python3 실행 파일을 찾을 수 없습니다"
+if [[ "$KOLLA_ANSIBLE_BIN" == /* ]]; then
+  candidate_kolla_python="$(dirname "$KOLLA_ANSIBLE_BIN")/python"
+  [[ -x "$candidate_kolla_python" ]] && KOLLA_PYTHON="$candidate_kolla_python"
 fi
+"$KOLLA_PYTHON" "$REPO_DIR/deploy/kolla/normalize_stock_globals.py" \
+  "$KOLLA_CONFIG_DIR/globals.yml" \
+  "$PLUGIN_GLOBALS" \
+  "$KOLLA_CONFIG_DIR/globals.yml.before-afterglow-dedup" ||
+  die "Kolla globals.yml 중복 Afterglow 문서 정리 실패"
+mkdir -p "$KOLLA_CONFIG_DIR/ansible/inventory"
 
-# ── 7. globals.yml enable_afterglow 확인 ──────────────────────────────────────
-GLOBALS_YML="${KOLLA_GLOBALS_FILE:-/etc/kolla/globals.yml}"
-if [[ -f "$GLOBALS_YML" ]]; then
-  if ! grep -q "enable_afterglow" "$GLOBALS_YML"; then
-    warn "globals.yml에 enable_afterglow 설정이 없습니다."
-    warn "아래 내용을 $GLOBALS_YML 에 추가하세요:"
-    warn "  enable_afterglow: \"yes\""
-    warn "또는 $REPO_DIR/deploy/kolla/globals.afterglow.sample.yml 을 참조하세요."
-  else
-    log "globals.yml에 enable_afterglow 설정 확인됨"
+# Preserve Kolla's normal inventory-relative host_vars/group_vars discovery
+# when its default all-in-one path is redirected to the multinode file.
+for inventory_vars_dir in group_vars host_vars; do
+  source_vars_dir="$KOLLA_CONFIG_DIR/$inventory_vars_dir"
+  target_vars_dir="$KOLLA_CONFIG_DIR/ansible/inventory/$inventory_vars_dir"
+  if [[ -d "$source_vars_dir" ]]; then
+    create_symlink_safe "$source_vars_dir" "$target_vars_dir" "Kolla default $inventory_vars_dir"
+  elif [[ -e "$target_vars_dir" || -L "$target_vars_dir" ]]; then
+    die "Kolla default $inventory_vars_dir exists but $source_vars_dir is absent"
   fi
-else
-  warn "globals.yml 파일을 찾을 수 없습니다: $GLOBALS_YML"
-  warn "KOLLA_GLOBALS_FILE 환경변수로 경로를 지정하거나, 수동으로 설정하세요."
-fi
+done
+mkdir -p "$(dirname "$DEFAULT_INVENTORY")" "$GLOBALS_D"
+create_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
+create_symlink_safe "$PLUGIN_GLOBALS" "$GLOBALS_D/90-openstack-afterglow-globals.yml" "Afterglow globals.d override"
+create_symlink_safe "$PLUGIN_SECRETS" "$GLOBALS_D/91-openstack-afterglow-secrets.yml" "Afterglow secrets globals.d override"
+python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" ||
+  die "Afterglow stock site.yml import 설치 실패"
 
-# ── 8. syntax-check ───────────────────────────────────────────────────────────
-log "Ansible syntax-check 실행 중..."
-if command -v ansible-playbook &>/dev/null; then
-  ansible-playbook --syntax-check "$KOLLA_DIR/ansible/site.yml" && log "syntax-check 통과"
-else
-  warn "ansible-playbook 명령을 찾을 수 없습니다. syntax-check를 건너뜁니다."
-fi
-
-# ── 완료 ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " afterglow integration installed."
-echo " Set enable_afterglow: \"yes\" in globals.yml and run:"
-echo " kolla-ansible deploy -i <inventory>"
+echo " Afterglow, Waygate, Drover, Lumen, and Palimpsest integration wiring installed."
+echo " The installer owns only its marked stock site.yml import, default"
+echo " inventory link, globals.d links, role links, and aggregate playbook link."
+echo ""
+echo " From /etc/kolla, reconfigure Afterglow with:"
+echo " kolla-ansible reconfigure --tags afterglow"
+echo ""
+echo " For explicit inventory diagnostics, use:"
+echo " kolla-ansible reconfigure \\"
+echo "   -i $MULTINODE_INVENTORY \\"
+echo "   --tags afterglow"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

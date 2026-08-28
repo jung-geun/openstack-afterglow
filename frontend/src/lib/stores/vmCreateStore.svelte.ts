@@ -8,6 +8,7 @@ import { auth } from '$lib/stores/auth';
 import { betaFeatures } from '$lib/stores/betaFeatures';
 import type { BetaFeatures } from '$lib/stores/betaFeatures';
 import { toast } from '$lib/stores/toast';
+import { siteConfig } from '$lib/config/site';
 import type { NetworkInfo } from '$lib/types/networks';
 import type { SecurityGroup as SecurityGroupInfo } from '$lib/types/securityGroup';
 import type { Volume } from '$lib/types/volume';
@@ -719,7 +720,10 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	}
 
 	function loadFileStorages() {
-		if (opts.adminMode()) return Promise.resolve();
+		if (opts.adminMode() || !get(siteConfig).services.manila) {
+			fileStorages = [];
+			return Promise.resolve();
+		}
 		const { token, projectId } = authScope();
 		return loadOption(
 			'fileStorages',

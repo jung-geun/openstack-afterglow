@@ -1,0 +1,180 @@
+---
+# Kolla-Ansible site playbook integration for Afterglow services
+
+- name: Gather facts for all hosts
+  hosts: all
+  serial: "{{ kolla_serial | default('0') }}"
+  gather_facts: false
+  tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
+        filter: "{{ kolla_ansible_setup_filter }}"
+        gather_subset: "{{ kolla_ansible_setup_gather_subset }}"
+      when:
+        - not ansible_facts
+  tags: always
+- name: Custom service inventory preflight check
+  hosts: all
+  gather_facts: false
+  run_once: true
+  tags: [always, afterglow, waygate, drover, lumen, palimpsest]
+  tasks:
+    - name: Assert inventory group for enabled afterglow
+      ansible.builtin.assert:
+        that:
+          - groups.get('afterglow', []) | length > 0
+        fail_msg: "Enabled custom service 'afterglow' requires a non-empty '[afterglow]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_afterglow | default(false) | bool
+
+    - name: Assert inventory group for enabled waygate
+      ansible.builtin.assert:
+        that:
+          - groups.get('waygate', []) | length > 0
+        fail_msg: "Enabled custom service 'waygate' requires a non-empty '[waygate]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_waygate | default(false) | bool
+
+    - name: Assert inventory group for enabled drover
+      ansible.builtin.assert:
+        that:
+          - groups.get('drover', []) | length > 0
+        fail_msg: "Enabled custom service 'drover' requires a non-empty '[drover]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_drover | default(false) | bool
+
+    - name: Assert inventory group for enabled lumen
+      ansible.builtin.assert:
+        that:
+          - groups.get('lumen', []) | length > 0
+        fail_msg: "Enabled custom service 'lumen' requires a non-empty '[lumen]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_lumen | default(false) | bool
+
+    - name: Assert inventory group for enabled palimpsest
+      ansible.builtin.assert:
+        that:
+          - groups.get('palimpsest', []) | length > 0
+        fail_msg: "Enabled custom service 'palimpsest' requires a non-empty '[palimpsest]' inventory group. Add it to /etc/kolla/multinode; standard lifecycle commands require the additive plugin installer to have completed."
+      when: enable_palimpsest | default(false) | bool
+
+- name: Apply role afterglow
+  gather_facts: false
+  hosts: afterglow
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: afterglow, tags: afterglow, when: enable_afterglow | default(false) | bool }
+
+- name: Apply role waygate
+  gather_facts: false
+  hosts: waygate
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: waygate, tags: waygate, when: enable_waygate | default(false) | bool }
+
+- name: Apply role drover
+  gather_facts: false
+  hosts: drover
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: drover, tags: drover, when: enable_drover | default(false) | bool }
+
+- name: Apply role lumen
+  gather_facts: false
+  hosts: lumen
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }
+
+- name: Apply role palimpsest
+  gather_facts: false
+  hosts: palimpsest
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: palimpsest, tags: palimpsest, when: enable_palimpsest | default(false) | bool }
+
+- name: Configure plugin HAProxy routes
+  gather_facts: false
+  hosts: loadbalancer
+  serial: "{{ kolla_serial | default('0') }}"
+  tags: haproxy
+  tasks:
+    # Use Kolla's native config/check path. The check task recreates HAProxy only
+    # when the resulting configuration hash changes.
+    - name: Render Kolla HAProxy base configuration
+      ansible.builtin.include_role:
+        name: loadbalancer
+        tasks_from: config
+        apply:
+          tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+
+    - name: Render Afterglow HAProxy routes
+      ansible.builtin.include_role:
+        name: afterglow
+        tasks_from: loadbalancer
+        apply:
+          tags: [afterglow, haproxy]
+      tags: [afterglow, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_afterglow | default(false) | bool
+
+    - name: Render Waygate HAProxy routes
+      ansible.builtin.include_role:
+        name: waygate
+        tasks_from: loadbalancer
+        apply:
+          tags: [waygate, haproxy]
+      tags: [waygate, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_waygate | default(false) | bool
+
+    - name: Render Drover HAProxy routes
+      ansible.builtin.include_role:
+        name: drover
+        tasks_from: loadbalancer
+        apply:
+          tags: [drover, haproxy]
+      tags: [drover, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_drover | default(false) | bool
+
+    - name: Render Lumen HAProxy routes
+      ansible.builtin.include_role:
+        name: lumen
+        tasks_from: loadbalancer
+        apply:
+          tags: [lumen, haproxy]
+      tags: [lumen, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_lumen | default(false) | bool
+
+    - name: Render Palimpsest HAProxy routes
+      ansible.builtin.include_role:
+        name: palimpsest
+        tasks_from: loadbalancer
+        apply:
+          tags: [palimpsest, haproxy]
+      tags: [palimpsest, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade', 'config']
+        - enable_haproxy | default(true) | bool
+        - enable_palimpsest | default(false) | bool
+
+    - name: Reconcile Kolla HAProxy after plugin route changes
+      ansible.builtin.include_role:
+        name: loadbalancer
+        tasks_from: check-containers
+        apply:
+          tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      tags: [afterglow, waygate, drover, lumen, palimpsest, haproxy]
+      when:
+        - kolla_action | default('deploy') in ['deploy', 'reconfigure', 'upgrade']
+        - enable_haproxy | default(true) | bool

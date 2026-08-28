@@ -1,81 +1,200 @@
 ---
-# Afterglow globals override
-# /etc/kolla/globals.yml 끝에 붙여넣거나 별도 파일로 -e @globals.afterglow.yml 로 전달
+# Additive Plugin Override Sample for DMSLab Kolla-Ansible Deployment
+# Place as `/etc/kolla/config/afterglow/globals.yml` (mode 0640). After the
+# plugin installer has added the standard Kolla wiring, run from `/etc/kolla`:
+#   kolla-ansible deploy --tags valkey,afterglow,waygate,drover,lumen,palimpsest
+# The plugin globals and secrets load from globals.d; do not add `-i`, `-p`,
+# or `-e @...` arguments for normal operations.
 
-# ── 마스터 토글 ────────────────────────────────────────────────────────────────
+# ── 1. Service Toggles (DMSLab Topology) ──────────────────────────────────────
+# Stock Kolla service dependency (Kolla owns Valkey lifecycle)
+enable_valkey: "yes"
+
 enable_afterglow: "yes"
 enable_afterglow_backend: "yes"
 enable_afterglow_frontend: "yes"
-enable_afterglow_worker: "yes"
+enable_afterglow_notion_worker: "no"
+enable_palimpsest: "yes"
+enable_palimpsest_hub_api: "yes"
+enable_palimpsest_hub_worker: "yes"
 
-# ── 이미지 ────────────────────────────────────────────────────────────────────
-afterglow_image_namespace: "ghcr.io/openstack-afterglow"
-afterglow_image_tag: "latest"
-# GHCR private 이미지 접근 시 base64 인코딩된 Docker config JSON
-# echo '{"auths":{"ghcr.io":{"auth":"<base64(user:token)>"}}}' | base64
-afterglow_image_pull_secret_b64: ""
+enable_waygate: "yes"
+enable_waygate_api: "yes"
+enable_waygate_worker: "yes"
 
-# ── 노출 URL ──────────────────────────────────────────────────────────────────
-# kolla_external_fqdn 변수를 재사용 권장
-afterglow_external_url: "https://{{ kolla_external_fqdn }}"
+enable_drover: "yes"
+enable_drover_api: "yes"
+enable_drover_worker: "yes"
 
-# ── DB / Cache (kolla mariadb + valkey 공유) ──────────────────────────────────
-afterglow_database_name: "afterglow"
-afterglow_database_user: "afterglow"
-# Redis DB index (다른 kolla 서비스와 충돌 방지)
-afterglow_redis_db_index: 5
+enable_lumen: "yes"
+enable_lumen_api: "yes"
+enable_lumen_worker: "yes"
 
-# ── Keystone ──────────────────────────────────────────────────────────────────
+# ── 2. Immutable GHCR Image References ───────────────────────────────────────
+# Resolve and pin the linux/amd64 manifest digest before deployment. Never
+# deploy mutable tags such as latest or dev. Source builds remain available for
+# development, but this DMSLab topology pulls the published GHCR images.
+enable_afterglow_source_build: false
+enable_drover_source_build: false
+enable_lumen_source_build: false
+enable_waygate_source_build: false
+enable_palimpsest_source_build: false
+
+afterglow_backend_image_ref: "ghcr.io/openstack-afterglow/afterglow-api@sha256:<AFTERGLOW_API_AMD64_DIGEST>"
+afterglow_frontend_image_ref: "ghcr.io/openstack-afterglow/afterglow@sha256:<AFTERGLOW_FRONTEND_AMD64_DIGEST>"
+drover_api_image_ref: "ghcr.io/openstack-afterglow/drover-api@sha256:<DROVER_API_AMD64_DIGEST>"
+drover_worker_image_ref: "ghcr.io/openstack-afterglow/drover-worker@sha256:<DROVER_WORKER_AMD64_DIGEST>"
+waygate_api_image_ref: "ghcr.io/openstack-afterglow/waygate-api@sha256:<WAYGATE_API_AMD64_DIGEST>"
+waygate_worker_image_ref: "ghcr.io/openstack-afterglow/waygate-worker@sha256:<WAYGATE_WORKER_AMD64_DIGEST>"
+lumen_api_image_ref: "ghcr.io/openstack-afterglow/lumen-api@sha256:<LUMEN_API_AMD64_DIGEST>"
+lumen_worker_image_ref: "ghcr.io/openstack-afterglow/lumen-worker@sha256:<LUMEN_WORKER_AMD64_DIGEST>"
+palimpsest_api_image_ref: "ghcr.io/openstack-afterglow/palimpsest-hub-api@sha256:<PALIMPSEST_HUB_API_AMD64_DIGEST>"
+palimpsest_worker_image_ref: "ghcr.io/openstack-afterglow/palimpsest-hub-worker@sha256:<PALIMPSEST_HUB_WORKER_AMD64_DIGEST>"
+
+# ── 3. HAProxy VIP Listeners and Controller Upstreams ────────────────────────
+# Kolla HAProxy owns the VIP ports. App containers bind only the controller API
+# addresses on private upstream ports; Heat retains VIP port 8000.
+# Browser-facing frontend origin. Configure the operator-managed public DNS/TLS
+# endpoint here. DMSLab's public ingress routes the same origin's `/api/v1`
+# path to the backend, so browser API traffic remains HTTPS and same-origin.
+#
+# Standard Kolla globals (`internal_protocol`, `kolla_internal_fqdn`,
+# `openstack_interface`, `openstack_insecure`, `openstack_cacert`) govern
+# internal transport protocol, internal domain/VIP, OpenStack interface selection,
+# and SSL verification across plugin services automatically. Leave internal/admin
+# endpoints and interface settings unpinned here unless custom per-service overrides
+# are required. Plugin-owned settings below define public ingress URLs, HAProxy
+# routing, container listening ports, and service-specific parameters.
+afterglow_public_endpoint_url: "https://cloud.dmslab.re.kr"
+# Route this hostname through Kolla's existing external VIP/TLS frontend.
+# The plugin forwards /api/ to the API backend and other paths to the frontend.
+afterglow_public_haproxy_enabled: true
+afterglow_public_haproxy_fqdn: "cloud.dmslab.re.kr"
+afterglow_public_haproxy_router_port: 18082
+afterglow_backend_port: 8000
+afterglow_frontend_port: 3080
+afterglow_backend_listen_port: 18000
+afterglow_frontend_listen_port: 18081
+afterglow_public_api_base: "https://cloud.dmslab.re.kr"
+afterglow_ceph_monitors: "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
+
+# Optional deploy-host TOML files default to
+# /etc/kolla/config/afterglow/backend/afterglow.conf and
+# /etc/kolla/config/afterglow/frontend/afterglow.conf. Keep the backend source
+# mode 0600. Override afterglow_operator_config_source or
+# afterglow_operator_frontend_config_source only when the source lives
+# elsewhere. Kolla sanitizes backend input, projects frontend input through a
+# closed public allowlist, and reapplies deployment-owned values last.
+
+waygate_api_port: 8010
+waygate_api_listen_port: 18010
+drover_api_port: 8011
+drover_api_listen_port: 18011
+lumen_api_port: 8012
+lumen_api_listen_port: 18012
+palimpsest_api_port: 8020
+palimpsest_api_listen_port: 18020
+
+# Preserve the existing catalog public URLs. drover-api/waygate-api/lumen-api
+# stay internal-VIP-only; a separate `<service>-public` HAProxy entry is added
+# only when the matching `*_public_haproxy_enabled` toggle below is true.
+waygate_external_url: "https://waygate.dmslab.re.kr"
+waygate_public_endpoint_url: "https://waygate.dmslab.re.kr"
+waygate_public_haproxy_enabled: true
+waygate_public_haproxy_fqdn: "waygate.dmslab.re.kr"
+
+drover_external_url: "https://drover.dmslab.re.kr"
+drover_public_endpoint_url: "https://drover.dmslab.re.kr"
+drover_public_haproxy_enabled: true
+drover_public_haproxy_fqdn: "drover.dmslab.re.kr"
+
+lumen_external_url: "https://lumen.dmslab.re.kr"
+lumen_public_endpoint_url: "https://lumen.dmslab.re.kr"
+lumen_public_haproxy_enabled: true
+lumen_public_haproxy_fqdn: "lumen.dmslab.re.kr"
+
+palimpsest_external_url: "https://palimpsest.dmslab.re.kr"
+palimpsest_public_endpoint_url: "https://palimpsest.dmslab.re.kr"
+palimpsest_public_haproxy_enabled: true
+palimpsest_public_haproxy_fqdn: "palimpsest.dmslab.re.kr"
+
+# ── 4. MariaDB _kolla Schemas & Keystone Contracts ───────────────────────────
+# Use dedicated plugin schemas to leave stock afterglow schema untouched
+afterglow_database_name: "afterglow_kolla"
+afterglow_database_user: "afterglow_kolla"
 afterglow_admin_keystone_user: "afterglow_admin"
 afterglow_service_project_name: "afterglow-service"
 
-# ── Manila CephFS share 설정 ──────────────────────────────────────────────────
-afterglow_manila_microversion: "2.65"
-afterglow_manila_share_type: "cephfs"
-afterglow_manila_shares:
-  layer_store_rw:
-    name: layer-store-rw
-    size_gb: 100
-    protocol: CEPHFS
-    access_level: rw
-  layer_store_ro:
-    name: layer-store-ro
-    size_gb: 100
-    protocol: CEPHFS
-    access_level: ro
-  manifest_store:
-    name: manifest-store
-    size_gb: 10
-    protocol: CEPHFS
-    access_level: rw
-  metadata_store:
-    name: metadata-store
-    size_gb: 10
-    protocol: CEPHFS
-    access_level: rw
+drover_database_name: "drover_kolla"
+drover_database_user: "drover_kolla"
+drover_keystone_user: "drover"
+drover_service_project_name: "drover-service"
 
-# CephFS 모니터 주소 (콤마 구분, cloud-init 마운트용)
-# 예: "10.0.0.1:6789,10.0.0.2:6789,10.0.0.3:6789"
-afterglow_ceph_monitors: ""
+lumen_database_name: "lumen_kolla"
+lumen_database_user: "lumen_kolla"
+lumen_keystone_user: "lumen"
+lumen_service_project_name: "lumen-service"
 
-# Manila CephX 접근 ID (share access create 시 access_to 값)
-afterglow_cephx_user: "client.afterglow"
+waygate_database_name: "waygate_kolla"
+waygate_database_user: "waygate_kolla"
+waygate_keystone_user: "waygate"
+waygate_service_project_name: "waygate-service"
 
-# ── k3s ──────────────────────────────────────────────────────────────────────
-afterglow_k3s_callback_base_url: "{{ afterglow_external_url }}"
+palimpsest_database_name: "palimpsest_kolla"
+palimpsest_database_user: "palimpsest_kolla"
+palimpsest_keystone_user: "palimpsest"
+palimpsest_service_project_name: "palimpsest-service"
 
-# ── 선택적 OpenStack 서비스 (afterglow.conf [services] 반영) ─────────────────
-afterglow_service_manila_enabled: true
-afterglow_service_swift_enabled: true
+# Reuse Kolla's Valkey endpoint: controller API address, `valkey_server_port`, and
+# `valkey_master_password` from the normal Kolla password file. Only these
+# plugin database indexes are configured here.
+afterglow_redis_db_index: 5
+waygate_redis_db_index: 6
+drover_redis_db_index: 7
+lumen_redis_db_index: 8
+palimpsest_redis_db_index: 9
+
+palimpsest_hub_volume: "palimpsest_hub"
+palimpsest_hub_path: "/var/lib/palimpsest/hub"
+
+# ── 6. Lumen PostgreSQL Datastore ─────────────────────────────────────────────
+# Select exactly one checkpointer datastore mode:
+# - bundled: create the plugin-owned PostgreSQL container on dms-controller1.
+# - external: connect to an operator-managed PostgreSQL endpoint and create no
+#   lumen_postgres container.
+lumen_postgres_mode: "bundled"
+
+# Bundled mode
+lumen_postgres_image_ref: "pgvector/pgvector:0.8.6-pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b"
+lumen_postgres_database: "lumen"
+lumen_postgres_user: "lumen"
+lumen_postgres_bind_address: "172.30.0.11"
+lumen_postgres_port: 5432
+
+# External mode receives one secret `postgresql://` (or `postgres://`) URL from
+# `/etc/kolla/config/afterglow/secrets.yml`. It is never placed in globals.yml and
+# must not point to Kolla MariaDB.
+
+lumen_enable_checkpointer: true
+
+# Semantic memory disabled (no embedding provider configured in DMSLab). When
+# enabled, set lumen_memory_pgvector_url to a PostgreSQL URL in the secret file.
+lumen_enable_pgvector: false
+lumen_memory_pgvector_url: ""
+chat_semantic_memory_enabled: false
+
+# ── 7. Feature Integrations & Scope Control ──────────────────────────────────
+# Enable active Afterglow features
 afterglow_service_k3s_enabled: true
+afterglow_service_waygate_enabled: true
+afterglow_service_palimpsest_enabled: true
+afterglow_service_chat_enabled: true
+afterglow_service_mcp_enabled: true
+
+# Disable optional integrations to avoid creating external OpenStack resources
+afterglow_service_manila_enabled: false
+afterglow_service_swift_enabled: false
 afterglow_service_zun_enabled: false
 afterglow_service_trove_enabled: false
 afterglow_service_magnum_enabled: false
 afterglow_service_barbican_enabled: false
-
-# ── 모니터링 — libvirt_exporter (Phase 53i) ───────────────────────────────────
-# compute 노드의 hypervisor 측 libvirt_exporter 활성화.
-# 게스트 OS의 node_exporter 설치 여부와 무관하게 모든 VM을 커버.
-# 활성화 후 `kolla-ansible -i inventory reconfigure -t prometheus` 로 적용.
-enable_prometheus_libvirt_exporter: "yes"
-prometheus_libvirt_exporter_port: 9177

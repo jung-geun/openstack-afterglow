@@ -149,6 +149,23 @@ describe('AdminResourcePoliciesPanel', () => {
 		expect(screen.queryByRole('listbox')).toBeNull();
 	});
 
+	it('renders Drover-owned K3s network and volume policy definitions', async () => {
+		render(AdminResourcePoliciesPanel, { token: 'token', projectId: 'admin-project' });
+
+		expect(screen.getByText('K3s volume availability zone')).toBeTruthy();
+		expect(screen.getByText('K3s default network')).toBeTruthy();
+		await waitFor(() => expect(get).toHaveBeenCalledWith(
+			'/api/v1/admin/resource-policies/catalog/k3s.volume_availability_zone',
+			'token',
+			'admin-project'
+		));
+		await waitFor(() => expect(get).toHaveBeenCalledWith(
+			'/api/v1/admin/resource-policies/catalog/k3s.default_network',
+			'token',
+			'admin-project'
+		));
+	});
+
 	it.each([
 		['null root', 'null'],
 		['null scope', '{"admin-project":null}'],

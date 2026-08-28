@@ -76,13 +76,6 @@
 						</div>
 					{/if}
 				{/if}
-				<div class="col-span-full mt-3 mb-2">
-					<span class="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">설정</span>
-				</div>
-				<div class="flex justify-between py-1 border-b border-gray-800/50">
-					<span class="text-xs text-gray-500">k3s 버전</span>
-					<span class="text-xs text-gray-300 font-mono">{versionInfo.config.k3s_version}</span>
-				</div>
 			</div>
 		</div>
 	{/if}

@@ -4,23 +4,24 @@
     container_engine: "{{ kolla_container_engine }}"
     module_name: mysql_db
     module_args:
-      login_host: "{{ database_address }}"
-      login_port: "{{ database_port }}"
-      login_user: "{{ database_user }}"
-      login_password: "{{ database_password }}"
+      login_host: "{{ afterglow_database_address }}"
+      login_port: "{{ afterglow_database_port }}"
+      login_user: "{{ afterglow_database_admin_user }}"
+      login_password: "{{ afterglow_database_admin_password }}"
       name: "{{ afterglow_database_name }}"
   run_once: true
   delegate_to: "{{ groups['afterglow'][0] }}"
+  no_log: true
 
 - name: DB | Create afterglow database user
   kolla_toolbox:
     container_engine: "{{ kolla_container_engine }}"
     module_name: mysql_user
     module_args:
-      login_host: "{{ database_address }}"
-      login_port: "{{ database_port }}"
-      login_user: "{{ database_user }}"
-      login_password: "{{ database_password }}"
+      login_host: "{{ afterglow_database_address }}"
+      login_port: "{{ afterglow_database_port }}"
+      login_user: "{{ afterglow_database_admin_user }}"
+      login_password: "{{ afterglow_database_admin_password }}"
       name: "{{ afterglow_database_user }}"
       password: "{{ afterglow_database_password }}"
       host: "%"

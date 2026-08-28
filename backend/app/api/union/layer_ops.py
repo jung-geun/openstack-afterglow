@@ -18,7 +18,6 @@ from sqlalchemy import desc, select
 from app.api.deps import get_os_conn, require_admin
 from app.database import get_session_factory
 from app.services.cache import invalidate
-from app.services.k3s_cloudinit import _validate_ssh_public_key
 from app.services.layer_base_images import (
     legacy_snapshot_for_ubuntu_base,
     resolve_base_image_snapshot,
@@ -26,6 +25,7 @@ from app.services.layer_base_images import (
     validate_base_image_id,
 )
 from app.services.layer_ubuntu import normalize_ubuntu_base
+from app.utils.ssh_keys import validate_ssh_public_key
 
 _logger = logging.getLogger(__name__)
 
@@ -332,7 +332,7 @@ class LayerConsumeRequest(BaseModel):
         v = v.strip()
         if v == "":
             return None
-        _validate_ssh_public_key(v)
+        validate_ssh_public_key(v)
         return v
 
     @field_validator("ssh_username")

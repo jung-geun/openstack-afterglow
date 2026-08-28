@@ -14,6 +14,7 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_EMPTY_ENV_TOML_FALLBACK_KEYS = frozenset({"GITLAB_OIDC_CLIENT_SECRET"})
 
 
 def is_development_loopback_http_url(value: str) -> bool:
@@ -69,7 +70,7 @@ def _config_override_paths(base_path: Path) -> list[Path]:
         for p in base_path.parent.glob(pattern):
             if p.name == base_path.name:
                 continue
-            if not p.is_file() or p.stat().st_size == 0:
+            if not p.is_file() or p.stat().st_size == 0 or p.name == "afterglow.frontend.conf":
                 continue
             overrides[p.resolve()] = p
     return [overrides[key] for key in sorted(overrides)]
@@ -149,8 +150,13 @@ def _load_toml() -> dict:
     flat["service_swift_enabled"] = svc.get("swift", False)
     flat["service_barbican_enabled"] = svc.get("barbican", False)
     flat["service_waygate_enabled"] = svc.get("waygate", False)
+    flat["service_palimpsest_enabled"] = svc.get("palimpsest", False)
     flat["service_chat_enabled"] = svc.get("chat", False)
     flat["service_mcp_enabled"] = svc.get("mcp", False)
+    flat["service_waygate_internal_url"] = svc.get("waygate_internal_url", "")
+    flat["service_drover_internal_url"] = svc.get("drover_internal_url", "")
+    flat["service_lumen_internal_url"] = svc.get("lumen_internal_url", "")
+    flat["service_palimpsest_internal_url"] = svc.get("palimpsest_internal_url", "")
     mcp = data.get("mcp", {})
     flat["mcp_public_url"] = mcp.get("public_url", "")
     flat["mcp_oauth_consent_url"] = mcp.get("oauth_consent_url", "")
@@ -168,71 +174,23 @@ def _load_toml() -> dict:
     flat["mcp_concurrent_calls_per_grant"] = mcp.get("concurrent_calls_per_grant", 4)
     flat["mcp_read_rate_per_minute"] = mcp.get("read_rate_per_minute", 120)
     flat["mcp_mutation_rate_per_minute"] = mcp.get("mutation_rate_per_minute", 20)
+    flat["lumen_mcp_service_token"] = mcp.get("lumen_service_token", "")
 
+    instance_health = data.get("instance_health", {})
+    flat["instance_health_callback_base_url"] = instance_health.get("callback_base_url", "")
+
+    # Retained temporarily as the shared master key for existing ciphertext domains.
     k3s = data.get("k3s", {})
-    flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
     flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
-    flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
-    flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
-    flat["k3s_occm_image"] = k3s.get(
-        "occm_image",
-        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1",
-    )
-    # Cinder CSI
-    flat["k3s_cinder_csi_enabled"] = k3s.get("cinder_csi_enabled", False)
-    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1")
-    # Manila CSI
-    flat["k3s_manila_csi_enabled"] = k3s.get("manila_csi_enabled", False)
-    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1")
-    flat["k3s_manila_csi_nfs_image"] = k3s.get("manila_csi_nfs_image", "registry.k8s.io/sig-storage/nfsplugin:v4.9.0")
-    flat["k3s_manila_csi_share_protocol"] = k3s.get("manila_csi_share_protocol", "NFS")
-    # Keystone Auth
-    flat["k3s_keystone_auth_enabled"] = k3s.get("keystone_auth_enabled", False)
-    flat["k3s_keystone_auth_image"] = k3s.get(
-        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
-    )
-    flat["k3s_keystone_auth_policy"] = k3s.get("keystone_auth_policy", "")
-    # Octavia Ingress
-    flat["k3s_octavia_ingress_enabled"] = k3s.get("octavia_ingress_enabled", False)
-    flat["k3s_octavia_ingress_image"] = k3s.get(
-        "octavia_ingress_image",
-        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1",
-    )
-    # Barbican KMS
-    flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
-    flat["k3s_barbican_kms_image"] = k3s.get(
-        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
-    )
-    flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
-    # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
-    # 인증서 회전
-    flat["k3s_cert_rotation_node_timeout_sec"] = k3s.get("cert_rotation_node_timeout_sec", 300)
-    flat["k3s_cert_rotation_job_image"] = k3s.get(
-        "cert_rotation_job_image",
-        "registry.k8s.io/util-linux/util-linux:latest",
-    )
-    # Stampede 오토스케일
-    flat["k3s_stampede_enabled"] = k3s.get("stampede_enabled", False)
-    flat["k3s_stampede_interval"] = k3s.get("stampede_interval", 60)
-    flat["k3s_stampede_scale_down_threshold"] = k3s.get("stampede_scale_down_threshold", 0.5)
-    flat["k3s_stampede_scale_down_window"] = k3s.get("stampede_scale_down_window", 600)
-    flat["k3s_stampede_scale_up_cooldown"] = k3s.get("stampede_scale_up_cooldown", 120)
-    flat["k3s_stampede_scale_down_cooldown"] = k3s.get("stampede_scale_down_cooldown", 300)
-    flat["k3s_stampede_resource_headroom_factor"] = k3s.get("stampede_resource_headroom_factor", 0.3)
 
     wr = data.get("worker_runtime", {})
     wr_workers = wr.get("workers", {})
-    wr_drover = wr_workers.get("drover", {})
     wr_notion = wr_workers.get("notion_worker", {})
     wr_docker = wr.get("docker", {})
     wr_k8s = wr.get("kubernetes", {})
     flat["worker_runtime_mode"] = wr.get("mode", "static")
     flat["worker_runtime_reconcile_interval"] = wr.get("reconcile_interval", 30)
     flat["worker_runtime_fail_closed"] = wr.get("fail_closed", True)
-    flat["worker_runtime_drover_enabled"] = wr_drover.get("enabled", True)
-    flat["worker_runtime_drover_desired_replicas"] = wr_drover.get("desired_replicas", 1)
-    flat["worker_runtime_drover_max_replicas"] = wr_drover.get("max_replicas", 1)
-    flat["worker_runtime_drover_module"] = wr_drover.get("module", "app.worker")
     flat["worker_runtime_notion_worker_enabled"] = wr_notion.get("enabled", True)
     flat["worker_runtime_notion_worker_desired_replicas"] = wr_notion.get("desired_replicas", 1)
     flat["worker_runtime_notion_worker_max_replicas"] = wr_notion.get("max_replicas", 1)
@@ -283,18 +241,9 @@ def _load_toml() -> dict:
     flat["builder_layer_share_size_gb"] = builder.get("layer_share_size_gb", 20)
 
     palimpsest = data.get("palimpsest", {})
-    flat["palimpsest_hub_local_path"] = palimpsest.get("hub_local_path", "")
-    flat["palimpsest_hub_max_blob_bytes"] = palimpsest.get("hub_max_blob_bytes", 34359738368)
-    flat["palimpsest_hub_upload_ttl_seconds"] = palimpsest.get("hub_upload_ttl_seconds", 86400)
     flat["palimpsest_kvm_uri"] = palimpsest.get("kvm_uri", "")
     flat["palimpsest_kvm_layer_root"] = palimpsest.get("kvm_layer_root", "/var/lib/palimpsest/layers")
     flat["palimpsest_kvm_state_dir"] = palimpsest.get("kvm_state_dir", "/var/lib/palimpsest/domains")
-
-    waygate = data.get("waygate", {})
-    flat["waygate_callback_base_url"] = waygate.get("callback_base_url", "")
-    flat["waygate_key_name"] = waygate.get("key_name", "")
-    flat["waygate_default_tunnel_cidr"] = waygate.get("default_tunnel_cidr", "10.8.0.0/24")
-    flat["waygate_default_listen_port"] = waygate.get("default_listen_port", 51820)
 
     mon = data.get("monitoring", {})
     flat["prometheus_base_url"] = mon.get("prometheus_base_url", "http://prometheus:9090")
@@ -322,47 +271,6 @@ def _load_toml() -> dict:
     flat["grafana_dashboard_ceph_uid"] = dashboards.get("ceph_uid", "afterglow-ceph")
     flat["grafana_dashboard_instance_cpu_uid"] = dashboards.get("instance_cpu_uid", "afterglow-instance-cpu")
     flat["grafana_dashboard_instance_gpu_uid"] = dashboards.get("instance_gpu_uid", "afterglow-instance-gpu")
-
-    chat = data.get("chat", {})
-    # 빌트인 AI 채팅 (litellm 라우팅 + 크레딧/쿼터)
-    flat["chat_default_model"] = chat.get("default_model", "")
-    flat["chat_execution_protocol_version"] = chat.get("execution_protocol_version", 1)
-    flat["chat_credit_per_usd"] = chat.get("credit_per_usd", 1000.0)
-    flat["chat_default_monthly_quota"] = chat.get("default_monthly_quota", 100000.0)
-    flat["chat_stream_enabled"] = chat.get("stream_enabled", True)
-    # 외부 OpenAI/Anthropic 호환 API(/v1)를 허용할 Host 화이트리스트(콤마 구분).
-    # 비면 모든 Host 허용(개발). 프로덕션은 api.cloud.dmslab.re.kr 등 전용 서브도메인만 지정 권장.
-    flat["chat_api_hosts"] = chat.get("api_hosts", "")
-    # "auto"는 provider/model 기본값(요청 파라미터 미주입), "none"은 명시적 비활성화다.
-    # named effort는 모델 capability의 reasoning_options로 endpoint에서 검증한다.
-    flat["chat_reasoning_effort"] = chat.get("reasoning_effort", "auto")
-    flat["chat_mcp_oauth_callback_url"] = chat.get("mcp_oauth_callback_url", "")
-    # Phase 2: LangGraph 전용 Postgres 체크포인터(비밀 — secret.yaml 주입). 미설정 시 MemorySaver fallback.
-    flat["chat_checkpointer_postgres_url"] = chat.get("checkpointer_postgres_url", "")
-    flat["chat_run_event_retention_hours"] = chat.get("run_event_retention_hours", 24)
-    flat["chat_checkpoint_retention_days"] = chat.get("checkpoint_retention_days", 7)
-    flat["chat_semantic_memory_enabled"] = chat.get("semantic_memory_enabled", False)
-    flat["chat_memory_pgvector_url"] = chat.get("memory_pgvector_url", "")
-    flat["chat_memory_embedding_model"] = chat.get("memory_embedding_model", "")
-    flat["chat_memory_embedding_dimensions"] = chat.get("memory_embedding_dimensions", 0)
-    flat["chat_memory_candidate_limit"] = chat.get("memory_candidate_limit", 20)
-    flat["chat_memory_retrieval_token_budget"] = chat.get("memory_retrieval_token_budget", 1200)
-    flat["chat_memory_retention_days"] = chat.get("memory_retention_days", 365)
-    flat["chat_asset_s3_endpoint"] = chat.get("asset_s3_endpoint", "")
-    flat["chat_asset_s3_bucket"] = chat.get("asset_s3_bucket", "")
-    flat["chat_asset_s3_access_key"] = chat.get("asset_s3_access_key", "")
-    flat["chat_asset_s3_secret_key"] = chat.get("asset_s3_secret_key", "")
-    flat["chat_asset_s3_server_side_encryption"] = chat.get("asset_s3_server_side_encryption", "AES256")
-    flat["chat_asset_s3_kms_key_id"] = chat.get("asset_s3_kms_key_id", "")
-    flat["chat_asset_signed_url_ttl_seconds"] = chat.get("asset_signed_url_ttl_seconds", 300)
-    flat["chat_clamav_host"] = chat.get("clamav_host", "")
-    flat["chat_clamav_port"] = chat.get("clamav_port", 3310)
-    flat["chat_sandbox_url"] = chat.get("sandbox_url", "")
-    flat["chat_sandbox_workspace_url"] = chat.get("sandbox_workspace_url", "")
-    flat["chat_sandbox_api_key"] = chat.get("sandbox_api_key", "")
-    flat["chat_sandbox_image_digest"] = chat.get("sandbox_image_digest", "")
-    flat["chat_sandbox_policy_version"] = chat.get("sandbox_policy_version", "")
-    flat["chat_sandbox_egress_allowlist"] = chat.get("sandbox_egress_allowlist", [])
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -517,6 +425,9 @@ class Settings(BaseSettings):
     mcp_concurrent_calls_per_grant: int = 4
     mcp_read_rate_per_minute: int = 120
     mcp_mutation_rate_per_minute: int = 20
+    # Shared only with Lumen's workload identity; it authorizes opaque delegated
+    # MCP snapshots, never browser credentials or personal MCP tokens.
+    lumen_mcp_service_token: str = ""
     cache_ttl_operational_live: int = 30  # instances/volumes/FIP/컨테이너 상태
     cache_ttl_admin_overview: int = 60  # admin 토폴로지, 하이퍼바이저
     cache_ttl_auth_token: int = 60  # Keystone 토큰 검증 결과
@@ -532,56 +443,26 @@ class Settings(BaseSettings):
     service_trove_enabled: bool = False
     service_swift_enabled: bool = False
     service_barbican_enabled: bool = False
-    service_waygate_enabled: bool = False  # Waygate (활성화 시 [waygate] 섹션 설정도 필요)
+    service_waygate_enabled: bool = False  # Waygate service proxy mount
+    service_palimpsest_enabled: bool = False  # Palimpsest Hub service proxy mount
     service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
     service_mcp_enabled: bool = False  # inbound consumer MCP control plane (Stage 2 rollout gate)
+    # Trusted deployment overrides for extracted-service discovery. Empty values
+    # retain the caller-scoped Keystone catalog as the canonical default.
+    service_waygate_internal_url: str = ""
+    service_drover_internal_url: str = ""
+    service_lumen_internal_url: str = ""
+    service_palimpsest_internal_url: str = ""
+    # Generic instance health-report callback.
+    instance_health_callback_base_url: str = ""
 
-    # k3s 설정
-    k3s_version: str = "v1.34.6+k3s1"
-    k3s_callback_base_url: str = ""
+    # Shared legacy master key. Existing ciphertext domains still depend on it.
     k3s_kubeconfig_encryption_key: str = ""
-    k3s_boot_volume_size_gb: int = 30
-    k3s_occm_enabled: bool = False
-    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
-    # Cinder CSI
-    k3s_cinder_csi_enabled: bool = False
-    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
-    # Manila CSI
-    k3s_manila_csi_enabled: bool = False
-    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
-    k3s_manila_csi_nfs_image: str = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
-    k3s_manila_csi_share_protocol: str = "NFS"
-    # Keystone Auth
-    k3s_keystone_auth_enabled: bool = False
-    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
-    k3s_keystone_auth_policy: str = ""
-    # Barbican KMS
-    k3s_barbican_kms_enabled: bool = False
-    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
-    k3s_barbican_kms_kek_id: str = ""
-    # Octavia Ingress
-    k3s_octavia_ingress_enabled: bool = False
-    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
-    # 인증서 회전
-    k3s_cert_rotation_node_timeout_sec: int = 300
-    k3s_cert_rotation_job_image: str = "registry.k8s.io/util-linux/util-linux:latest"
-    # Stampede 오토스케일
-    k3s_stampede_enabled: bool = False
-    k3s_stampede_interval: int = 60
-    k3s_stampede_scale_down_threshold: float = 0.5
-    k3s_stampede_scale_down_window: int = 600
-    k3s_stampede_scale_up_cooldown: int = 120
-    k3s_stampede_scale_down_cooldown: int = 300
-    k3s_stampede_resource_headroom_factor: float = 0.3
 
     # Background worker runtime manager
     worker_runtime_mode: Literal["static", "docker", "kubernetes"] = "static"
     worker_runtime_reconcile_interval: int = 30
     worker_runtime_fail_closed: bool = True
-    worker_runtime_drover_enabled: bool = True
-    worker_runtime_drover_desired_replicas: int = 1
-    worker_runtime_drover_max_replicas: int = 1
-    worker_runtime_drover_module: str = "app.worker"
     worker_runtime_notion_worker_enabled: bool = True
     worker_runtime_notion_worker_desired_replicas: int = 1
     worker_runtime_notion_worker_max_replicas: int = 1
@@ -607,8 +488,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "worker_runtime_reconcile_interval",
-        "worker_runtime_drover_desired_replicas",
-        "worker_runtime_drover_max_replicas",
         "worker_runtime_notion_worker_desired_replicas",
         "worker_runtime_notion_worker_max_replicas",
     )
@@ -617,15 +496,6 @@ class Settings(BaseSettings):
         if v < 0:
             raise ValueError("worker runtime replica counts and intervals must be non-negative")
         return v
-
-    # --- Palimpsest 허브 (레이어 레지스트리) — docs/palimpsest.md ---
-    # 허브는 백엔드가 blob 을 직접 스트리밍 read/write 해야 성립하므로 Manila share 가 아니라
-    # 별도 blob store 를 쓴다. 비어 있으면 허브 기능이 비활성(503)이다.
-    # K8s 는 PVC, compose 는 볼륨을 이 경로에 마운트한다. 배치는 OCI image-layout 그대로:
-    #   <hub_local_path>/blobs/sha256/<hex>
-    palimpsest_hub_local_path: str = ""
-    palimpsest_hub_max_blob_bytes: int = 34359738368  # 32 GiB — torch 급 레이어를 수용
-    palimpsest_hub_upload_ttl_seconds: int = 86400  # 방치된 업로드 세션 정리 기준(초)
 
     # --- Palimpsest 로컬 KVM 런타임 (선택) ---
     # 비어 있으면 기능 비활성(503). `qemu:///system` 또는 `qemu+ssh://user@host/system`.
@@ -639,12 +509,6 @@ class Settings(BaseSettings):
     union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
-
-    # Waygate (WireGuard 게이트웨이)
-    waygate_default_tunnel_cidr: str = "10.8.0.0/24"  # WireGuard 터널 서브넷 기본값
-    waygate_default_listen_port: int = 51820  # WireGuard UDP 리슨 포트 기본값
-    waygate_callback_base_url: str = ""
-    waygate_key_name: str = ""
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
@@ -673,46 +537,6 @@ class Settings(BaseSettings):
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
 
-    chat_execution_protocol_version: int = 1
-    # 빌트인 AI 채팅 (litellm 라우팅 + 모델별 가중 크레딧 + 월 쿼터)
-    chat_default_model: str = ""  # 기본 모델명 (활성 llm_models 카탈로그의 model_name과 일치해야 함)
-    chat_credit_per_usd: float = 1000.0  # 크레딧 환산율: 1 USD = N 크레딧 (예: $0.001 = 1 크레딧)
-    chat_default_monthly_quota: float = 100000.0  # 신규 지갑 기본 월 쿼터(크레딧). 0 = 무제한
-    chat_stream_enabled: bool = True  # SSE 스트리밍 응답 사용
-    # 외부 /v1 호환 API를 허용할 Host 화이트리스트(콤마 구분). 비면 전체 허용(개발).
-    chat_api_hosts: str = ""
-    chat_reasoning_effort: str = (
-        "auto"  # auto=provider 기본, none=명시적 비활성화, named values는 모델별 capability 검증
-    )
-    # Remote MCP OAuth callback URL. Empty derives the public API callback endpoint.
-    chat_mcp_oauth_callback_url: str = ""
-    # Phase 2: LangGraph 전용 Postgres 체크포인터 접속 URL(secret.yaml 주입). 비면 MemorySaver 사용.
-    chat_checkpointer_postgres_url: str = ""
-    chat_run_event_retention_hours: int = 24
-    chat_checkpoint_retention_days: int = 7
-    chat_semantic_memory_enabled: bool = False
-    chat_memory_pgvector_url: str = ""
-    chat_memory_embedding_model: str = ""
-    chat_memory_embedding_dimensions: int = 0
-    chat_memory_candidate_limit: int = 20
-    chat_memory_retrieval_token_budget: int = 1200
-    chat_memory_retention_days: int = 365
-    chat_asset_s3_endpoint: str = ""
-    chat_asset_s3_bucket: str = ""
-    chat_asset_s3_access_key: str = ""
-    chat_asset_s3_secret_key: str = ""
-    chat_asset_s3_server_side_encryption: str = "AES256"
-    chat_asset_s3_kms_key_id: str = ""
-    chat_asset_signed_url_ttl_seconds: int = 300
-    chat_clamav_host: str = ""
-    chat_clamav_port: int = 3310
-    chat_sandbox_workspace_url: str = ""
-    chat_sandbox_url: str = ""
-    chat_sandbox_api_key: str = ""
-    chat_sandbox_image_digest: str = ""
-    chat_sandbox_policy_version: str = ""
-    chat_sandbox_egress_allowlist: list[str] = []
-
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
@@ -725,13 +549,6 @@ class Settings(BaseSettings):
     jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
     token_ip_binding_mode: str = "subnet"  # off | log | subnet | strict
 
-    @field_validator("chat_execution_protocol_version")
-    @classmethod
-    def validate_chat_execution_protocol_version(cls, value: int) -> int:
-        if value not in {1, 2}:
-            raise ValueError("chat_execution_protocol_version must be 1 or 2")
-        return value
-
     @field_validator("token_ip_binding_mode")
     @classmethod
     def validate_binding_mode(cls, v: str) -> str:
@@ -739,43 +556,6 @@ class Settings(BaseSettings):
         if v not in _VALID_MODES:
             raise ValueError(f"token_ip_binding_mode={v!r} 은 유효하지 않습니다. 허용값: {sorted(_VALID_MODES)}")
         return v
-
-    @field_validator("chat_mcp_oauth_callback_url")
-    @classmethod
-    def validate_chat_mcp_oauth_callback_url(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            return ""
-        try:
-            parsed = urlsplit(value)
-            _ = parsed.port
-        except ValueError:
-            parsed = None
-        if (
-            parsed is None
-            or (parsed.scheme.lower() != "https" and not is_development_loopback_http_url(value))
-            or not parsed.netloc
-            or parsed.username
-            or parsed.password
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError(
-                "chat.mcp_oauth_callback_url must be an absolute HTTPS URL without credentials, query, or fragment; "
-                "development additionally permits an HTTP loopback URL"
-            )
-        return value
-
-    @model_validator(mode="after")
-    def validate_semantic_memory_settings(self) -> "Settings":
-        if self.chat_semantic_memory_enabled:
-            if not self.chat_memory_pgvector_url:
-                raise ValueError("semantic_memory_enabled requires memory_pgvector_url")
-            if not self.chat_memory_embedding_model:
-                raise ValueError("semantic_memory_enabled requires memory_embedding_model")
-            if self.chat_memory_embedding_dimensions <= 0:
-                raise ValueError("semantic_memory_enabled requires memory_embedding_dimensions > 0")
-        return self
 
     # 보안 정책
     # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)
@@ -848,7 +628,14 @@ class Settings(BaseSettings):
 
         return normalize_keystone_url(v)
 
-    @field_validator("os_manila_endpoint", "os_swift_endpoint", mode="after")
+    @field_validator(
+        "os_manila_endpoint",
+        "os_swift_endpoint",
+        "service_waygate_internal_url",
+        "service_drover_internal_url",
+        "service_lumen_internal_url",
+        "service_palimpsest_internal_url",
+    )
     @classmethod
     def _norm_service_endpoint(cls, v: str) -> str:
         from app.services._endpoint import normalize_endpoint
@@ -871,11 +658,6 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-
-    @property
-    def chat_api_host_list(self) -> list[str]:
-        """외부 /v1 API 허용 Host(소문자). 비면 [] = 전체 허용(개발)."""
-        return [h.strip().lower() for h in self.chat_api_hosts.split(",") if h.strip()]
 
     @model_validator(mode="after")
     def warn_insecure_defaults(self) -> "Settings":
@@ -903,6 +685,34 @@ class Settings(BaseSettings):
                 "(root-equivalent) and must NOT be used when AFTERGLOW_ENV=production. "
                 "Use mode='kubernetes' for production worker management."
             )
+
+        for field_name, endpoint in (
+            ("services.waygate_internal_url", self.service_waygate_internal_url),
+            ("services.drover_internal_url", self.service_drover_internal_url),
+            ("services.lumen_internal_url", self.service_lumen_internal_url),
+            ("services.palimpsest_internal_url", self.service_palimpsest_internal_url),
+        ):
+            if not endpoint:
+                continue
+            try:
+                parsed = urlsplit(endpoint)
+                _ = parsed.port
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must use a valid absolute URL") from exc
+            if (
+                parsed.scheme not in {"http", "https"}
+                or (is_production and parsed.scheme != "https")
+                or not parsed.netloc
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
+                scheme_requirement = "HTTPS" if is_production else "HTTP or HTTPS"
+                raise ValueError(
+                    f"{field_name} requires an absolute {scheme_requirement} URL "
+                    "without credentials, query, or fragment"
+                )
 
         if self.service_mcp_enabled:
 
@@ -1031,11 +841,14 @@ def get_settings() -> Settings:
         if val.startswith("tcp://") or val.startswith("udp://"):
             del os.environ[key]
 
-    # TOML 값으로 환경변수를 채워 Settings가 이를 읽도록 함
-    # (환경변수 > .env 이므로, TOML 값을 환경변수로 주입하되 이미 설정된 값은 덮어쓰지 않음)
+    # TOML values seed missing environment settings. Secret mounts commonly
+    # materialize optional values as an empty string; that must not erase a
+    # configured GitLab client secret from a protected TOML layer.
     toml_data = _load_toml()
     for key, value in toml_data.items():
         env_key = key.upper()
-        if env_key not in os.environ:
+        if env_key not in os.environ or (
+            env_key in _EMPTY_ENV_TOML_FALLBACK_KEYS and os.environ[env_key] == "" and value != ""
+        ):
             os.environ[env_key] = str(value)
     return Settings()

@@ -3,23 +3,40 @@
   become: true
   community.docker.docker_container:
     name: afterglow_bootstrap
-    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
-    command: ["python", "-m", "app.bootstrap"]
+    image: "{{ afterglow_backend_image_ref }}"
+    command:
+      - python
+      - -c
+      - |
+        import asyncio
+        import os
+        from app.database import close_db, create_tables, init_db
+
+        async def main():
+            try:
+                init_db(os.environ["DATABASE_URL"])
+                await create_tables()
+            finally:
+                await close_db()
+
+        asyncio.run(main())
     state: started
     detach: false
-    auto_remove: true
+    network_mode: host
+    groups: ["0"]
+    cleanup: true
     volumes:
-      - "{{ afterglow_config_dir }}/afterglow.conf:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}:/app/afterglow.conf:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}:/app/{{ afterglow_operator_config_name }}:ro"
+      - "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}:/app/{{ afterglow_kolla_config_name }}:ro"
     env:
-      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
-      REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
-  register: bootstrap_result
+      DATABASE_URL: "{{ afterglow_database_url }}"
+      REDIS_URL: "{{ afterglow_redis_url }}"
+  no_log: true
   run_once: true
   delegate_to: "{{ groups['afterglow'] | first }}"
-  failed_when: false
 
 - name: Bootstrap | Show bootstrap output
   ansible.builtin.debug:
-    msg: "{{ bootstrap_result }}"
+    msg: "Afterglow database bootstrap completed successfully"
   run_once: true
-  when: bootstrap_result is defined

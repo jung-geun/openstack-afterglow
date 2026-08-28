@@ -57,7 +57,7 @@ Docker Compose 로컬 개발에서는 `.env`도 함께 읽습니다. `.env.examp
 ### 1-b. 설정 오버라이드 (선택)
 
 긴 옵션 섹션(GPU 디바이스 맵 등)은 별도 오버라이드 파일로 분리할 수 있습니다.  
-`afterglow.conf`와 같은 디렉토리에 `afterglow.<name>.conf`, `afterglow.<name>.toml` 또는 레거시 `config.<name>.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다.
+`afterglow.conf`와 같은 디렉토리에 `afterglow.<name>.conf` 또는 `config.gpu.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다. 브라우저 공개 projection인 `afterglow.frontend.conf`은 백엔드 오버라이드에서 제외됩니다.
 
 **머지 규칙**: `dict`는 재귀 병합, `list`와 스칼라는 오버라이드 파일이 덮어씁니다.
 
@@ -145,8 +145,12 @@ enable_afterglow: "yes"
 enable_afterglow_frontend: "yes"
 enable_afterglow_worker: "yes"
 
-# 접근 URL (외부에서 접근 가능한 주소)
-afterglow_external_url: "https://afterglow.example.com"
+# 브라우저 frontend origin
+afterglow_public_endpoint_url: "https://afterglow.example.com"
+
+# Kolla external VIP/TLS frontend으로 같은 도메인을 배포할 때
+afterglow_public_haproxy_enabled: true
+afterglow_public_haproxy_fqdn: "afterglow.example.com"
 
 # 이미지 설정
 afterglow_backend_image: "ghcr.io/openstack-afterglow/afterglow-api"
@@ -172,11 +176,13 @@ afterglow_redis_password: ""  # Redis 인증 미사용 시 빈 문자열
 ### 4. 배포 실행
 
 ```bash
-# 배포
-kolla-ansible deploy -i /etc/kolla/inventory --tags afterglow
+cd /etc/kolla
 
-# 설정만 반영 (재시작 없이)
-kolla-ansible reconfigure -i /etc/kolla/inventory --tags afterglow
+# 배포
+kolla-ansible deploy --tags afterglow
+
+# 설정 반영
+kolla-ansible reconfigure --tags afterglow
 ```
 
 ### 5. 서비스 확인
@@ -190,6 +196,8 @@ docker logs afterglow_backend
 docker logs afterglow_frontend
 docker logs afterglow_worker
 ```
+
+Drover, Lumen, Waygate를 OpenStack SDK service catalog로 사용하는 환경에서는 [서비스 카탈로그 등록 튜토리얼](openstack-service-catalog.md)에서 service type, endpoint, 리전 검증 절차를 완료하세요.
 
 ---
 
@@ -295,6 +303,13 @@ spec:
     - host: afterglow.example.com
       http:
         paths:
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:
@@ -308,7 +323,7 @@ spec:
               service:
                 name: frontend
                 port:
-                  number: 3000
+                  number: 3080
 ```
 
 > **주의**: 프론트엔드 `PUBLIC_API_BASE` 환경변수는 브라우저에서 직접 접근 가능한 외부 URL로 설정해야 합니다. 클러스터 내부 주소(`http://backend:8000`)로 설정하면 브라우저에서 접근할 수 없습니다.

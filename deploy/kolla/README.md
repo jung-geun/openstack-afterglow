@@ -1,226 +1,324 @@
-# afterglow × kolla-ansible 통합 가이드
+# Afterglow Kolla-Ansible Service Deployment Guide
 
-afterglow를 기존 kolla-ansible 배포에 통합하여 `kolla-ansible deploy` 한 줄로 함께 배포합니다.
+This guide deploys **Afterglow**, **Drover**, **Lumen**, **Waygate**, and **Palimpsest** through
+the ordinary Kolla command line from `/etc/kolla`.
+---
+
+## Architecture & Integration Principles
+
+1. **Standard Kolla Invocation**:
+   - The installer appends one marker-delimited `afterglow-site.yml` import to
+     Kolla's installed `site.yml`. It refuses malformed or unexpected markers.
+   - It links Kolla's default `all-in-one` inventory path to `/etc/kolla/multinode`
+     and also links `group_vars` and `host_vars`, preserving normal Kolla
+     inventory variable discovery.
+2. **Plugin-owned Variables**:
+   - Settings and secrets remain in `/etc/kolla/config/afterglow/globals.yml`
+     (mode `0640`) and `/etc/kolla/config/afterglow/secrets.yml` (mode `0600`).
+   - The installer links both files into Kolla's native `globals.d` loader;
+     no `-e @...` arguments are required. It does not copy secret values.
+   - Both files must be readable by the user that runs `kolla-ansible`; run
+     the installer as that same deployment user.
+3. **Kolla HAProxy Internal-VIP Listeners**:
+   - HAProxy owns the internal-VIP frontend ports:
+     - **Afterglow UI**: `3080`
+     - **Afterglow API**: `8000`
+     - **Waygate**: `8010`
+     - **Drover**: `8011`
+     - **Lumen**: `8012`
+     - **Palimpsest**: `8020`
+   - App containers bind the controller API addresses only, using private upstream ports `18081`, `18000`, `18010`, `18011`, `18012`, and `18020`. HAProxy balances each frontend across its matching controller group.
+   - A tag-selected plugin run reconciles the matching Kolla HAProxy fragments.
+     Kolla recreates HAProxy only if their resulting configuration hash changes.
+   - The plugin does not create external-VIP routes, DNS records, or TLS certificates. Existing Drover and Waygate public catalog URLs remain operator-owned ingress contracts.
+4. **Pinned GHCR Images**:
+   - DMSLab pulls published `ghcr.io/openstack-afterglow/*` images by exact linux/amd64 manifest digest. Do not use mutable `latest` or `dev` tags.
+   - Source-build mode remains an optional development path; it is not used for the DMSLab deployment.
+5. **Datastores & Credential Reuse**:
+   - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`, `palimpsest_kolla`).
+   - **Valkey (Redis)**: Current Kolla deploys Valkey server+Sentinel, while this plugin consumes the direct primary on its controller API address for broad Redis-protocol client compatibility. The plugin creates no Redis container; full or Valkey-tagged Kolla deployment (`enable_valkey: "yes"`) must establish Valkey before executing plugin-only tagged operations. Because the direct primary connection does not auto-fail over, promotion requires running `kolla-ansible reconfigure` to update the plugin cache host. Explicit service indexes remain (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen, 9: Palimpsest).
+   - **Palimpsest Hub**: Standalone layer repository service (API & worker) separate from Afterglow-owned layer build/consume APIs. Bootstrap executes `palimpsest-hub-bootstrap`; data migration (`palimpsest-hub-migrate-data`) is not run automatically and requires an empty-destination precondition.
+   - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode does not create a persistent PostgreSQL server container; it starts a disposable verification client container, runs an authenticated `SELECT 1`, then removes it.
 
 ---
 
-## 개요
+## Installation & Symlink Creation
 
-`install.sh`는 사용자의 kolla-ansible 설치에 멱등하게 패치를 적용합니다:
+> **Prerequisite:** Complete [Configuration Setup](#configuration-setup)
+> first. `install.sh` validates both plugin variable files before changing
+> Kolla's installation tree.
 
-- afterglow Ansible role symlink를 kolla-ansible roles 디렉토리에 연결
-- afterglow playbook symlink를 kolla-ansible ansible 디렉토리에 연결
-- `site.yml`에 `import_playbook: afterglow.yml` 라인을 삽입
-
-이후에는 표준 `kolla-ansible deploy` 명령만 사용하면 afterglow도 함께 배포됩니다.
-
----
-
-## 사전 요구 사항
-
-| 항목 | 요구 버전 / 조건 |
-|------|-----------------|
-| kolla-ansible | 2025.2 이상 |
-| OpenStack 서비스 | MariaDB, Valkey(Redis), Keystone, Manila, HAProxy 포함 |
-| Python | 3.10 이상 (PyYAML 포함) |
-| Ansible | kolla-ansible과 함께 설치된 버전 |
-| GHCR 접근 | private 이미지 사용 시 Personal Access Token 필요 |
-
----
-
-## 설치 (3단계)
-
-### 1단계: install.sh 실행
+Run `install.sh` to add the standard-command wiring:
 
 ```bash
-# afterglow 저장소 루트에서 실행
+# Auto-detect Kolla binary/directory or pass explicit paths
+KOLLA_ANSIBLE_BIN=/etc/kolla/.venv/bin/kolla-ansible \
+KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 ./deploy/kolla/install.sh
-
-# passwords.yml에 afterglow 항목을 자동으로 추가하려면
-./deploy/kolla/install.sh --apply-passwords
-
-# kolla-ansible 경로를 직접 지정하려면
-KOLLA_ANSIBLE_DIR=/path/to/kolla-ansible ./deploy/kolla/install.sh
 ```
 
-스크립트는 다음 작업을 수행합니다:
-- kolla-ansible 설치 경로 자동 탐지
-- 버전 검증 (2025.2 이상 요구)
-- role 및 playbook symlink 생성 (멱등)
-- `site.yml` 패치 (이미 패치된 경우 skip)
-- Ansible syntax-check 실행
+### Installer-managed artifacts
+- Role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`, `drover`,
+  `lumen`, `waygate`, and `palimpsest`.
+- Aggregate playbook: `$KOLLA_DIR/ansible/afterglow-site.yml` ->
+  `deploy/kolla/site.yml`.
+- One marker-delimited `afterglow-site.yml` import in
+  `$KOLLA_DIR/ansible/site.yml`.
+- Default inventory link:
+  `/etc/kolla/ansible/inventory/all-in-one` -> `/etc/kolla/multinode`.
+- Inventory-variable directory links:
+  `/etc/kolla/ansible/inventory/{group_vars,host_vars}` when their
+  `/etc/kolla/{group_vars,host_vars}` sources exist.
+- `globals.d` links:
+  `90-openstack-afterglow-globals.yml` and
+  `91-openstack-afterglow-secrets.yml`.
+- An exact legacy duplicate of plugin globals is removed from stock
+  `globals.yml` only after a parsed-mapping equality check; the original is
+  retained as `globals.yml.before-afterglow-dedup`.
 
-### 2단계: 설정 파일 준비
-
-**globals.yml 설정:**
-
-```bash
-# 샘플 파일을 참조하여 /etc/kolla/globals.yml에 추가
-cat deploy/kolla/globals.afterglow.sample.yml >> /etc/kolla/globals.yml
-
-# 최소 필수 설정:
-# enable_afterglow: "yes"
-# afterglow_image_tag: "latest"
-# afterglow_ceph_monitors: "10.0.0.1:6789,..."  (Manila CephFS 사용 시)
-```
-
-**passwords.yml 설정:**
-
-```bash
-# 샘플 파일을 참조하여 /etc/kolla/passwords.yml에 추가 후 값 채우기
-cat deploy/kolla/passwords.afterglow.additions.yml >> /etc/kolla/passwords.yml
-
-# 또는 install.sh --apply-passwords 로 자동 merge
-
-# 각 패스워드 항목 생성:
-# afterglow_database_password: $(python3 -c "import secrets; print(secrets.token_hex(16))")
-# afterglow_secret_key: $(python3 -c "import secrets; print(secrets.token_hex(32))")
-# afterglow_kubeconfig_encryption_key: $(openssl rand -hex 32)
-```
-
-### 3단계: 배포
-
-```bash
-# multinode 배포 (평소와 동일)
-kolla-ansible deploy -i deploy/kolla/inventory/multinode.sample
-
-# all-in-one 배포
-kolla-ansible deploy -i deploy/kolla/inventory/all-in-one.sample
-
-# bootstrap 및 사전 점검 포함 전체 배포
-kolla-ansible bootstrap-servers -i <inventory>
-kolla-ansible prechecks -i <inventory>
-kolla-ansible deploy -i <inventory>
-```
+*Safety Check*: If any managed target conflicts or a `site.yml` marker is
+unexpected, `install.sh` aborts rather than replacing it.
 
 ---
 
-## 제거
+## Configuration Setup
+
+1. **Create Plugin Configuration Root**:
+   ```bash
+   sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" \
+     /etc/kolla/config/afterglow
+   ```
+2. **Create Globals (`/etc/kolla/config/afterglow/globals.yml`, mode `0640`)**:
+   ```bash
+   sudo install -m 0640 -o "$(id -un)" -g "$(id -gn)" \
+     deploy/kolla/globals.afterglow.sample.yml \
+     /etc/kolla/config/afterglow/globals.yml
+   ```
+   Customize the installed file for the deployment.
+3. **Create Secrets (`/etc/kolla/config/afterglow/secrets.yml`, mode `0600`)**:
+   ```bash
+   sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" \
+     deploy/kolla/passwords.afterglow.additions.yml \
+     /etc/kolla/config/afterglow/secrets.yml
+   ```
+   Populate generated 64-hex keys and database/Keystone passwords without
+   printing or committing them.
+
+These two files are sufficient for a normal deployment. The role derives the
+service topology and required runtime values from Kolla plus the plugin
+globals/secrets, then generates and mounts the configuration needed by each
+Afterglow process. A separate operator TOML is optional.
+On the Kolla deployment host, `/etc/kolla/config/afterglow` is the single
+plugin input root: `globals.yml` and `secrets.yml` sit at its top level, while
+`backend/` and `frontend/` hold the optional operator TOML inputs described
+below. On each Afterglow target host, the role separately renders runtime
+layers under `/etc/kolla/config/afterglow/generated/`; do not copy the
+deployment-host variable files to target hosts.
+
+
+### Optional Detailed Afterglow Configuration
+
+For settings not modeled as Kolla variables, place a partial or complete
+backend TOML at `/etc/kolla/config/afterglow/backend/afterglow.conf` on the
+Kolla deployment host. The role uses this path by default. The file may contain
+only the detailed keys being overridden; it does not need to repeat generated
+OpenStack, database, Redis, port, URL, or service-toggle values. Keep it outside
+the repository and Kolla globals files, mode `0600`:
+
+```bash
+# The Kolla deployment user must be able to read this 0600 source file.
+sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" \
+  /etc/kolla/config/afterglow/backend /etc/kolla/config/afterglow/frontend
+sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" ./afterglow.conf \
+  /etc/kolla/config/afterglow/backend/afterglow.conf
+```
+
+An optional `/etc/kolla/config/afterglow/frontend/afterglow.conf` supplies
+additional browser-safe values. Both default source files are discovered by
+existence; no globals override is required. Override
+`afterglow_operator_config_source` or
+`afterglow_operator_frontend_config_source` only when an input lives elsewhere.
+Missing inputs produce empty generated layers.
+
+The role reads the backend source only to produce a protected short-lived
+staging artifact. It removes `[builder].ssh_private_key` before TOML validation.
+The GitLab OIDC client secret remains in this protected TOML flow and is not
+shadowed by an empty container environment variable. The frontend source is
+projected through the same closed browser-safe allowlist as the final frontend
+configuration. Raw operator files are never mounted into containers.
+
+Set `afterglow_ceph_monitors` in `globals.yml` from the `mon_host` value in
+the deployed `/etc/kolla/config/ceph/ceph.conf`; this value is required by the
+Afterglow precheck and final Kolla configuration layer.
+
+The role writes process-specific runtime artifacts under
+`/etc/kolla/config/afterglow/generated`:
+
+1. generated `afterglow.generated.conf` base from Kolla and plugin globals/secrets;
+2. sanitized `afterglow.operator.generated.conf` application override;
+3. projected `afterglow.frontend.operator.generated.conf` public override;
+4. generated `afterglow.zz-kolla.generated.conf` final override;
+5. generated `afterglow.frontend.generated.conf`, a closed public projection of
+   the merged base → backend operator → frontend operator → final result.
+
+The backend and workers mount the generated base, sanitized backend operator,
+and final override in that order. The final layer intentionally reasserts
+deployment-owned OpenStack credentials/project/region/interface, database and
+Redis connections, service toggles, public API/origin and CORS values,
+encryption keys, Manila storage bindings, and application ports.
+
+The frontend mounts only `afterglow.frontend.generated.conf`. Its allowlist
+includes branding, refresh interval, public API/UI origins, service flags,
+public S3/Grafana/chat/GitLab/MCP origins, and no credentials. Kolla-owned final
+values win over both operator inputs.
+
+### Kolla Shared Connection Inputs
+
+Do not duplicate Kolla control-plane topology or administrative credentials in
+the plugin files. Each service derives its MariaDB host, port, administrative
+user, and administrative password from Kolla's `database_address`,
+`database_port`, `database_user`, and `database_password`. The plugin secrets
+file contains only each service's own schema-user password.
+
+Likewise, each service derives its Valkey (Redis-protocol compatible) endpoint
+from the first Kolla Valkey controller API address, `valkey_server_port`, and
+`valkey_master_password`; `*_redis_db_index` is the only cache connection
+setting in `globals.yml`. This matches the topology used by Kolla's services
+and keeps the password in Kolla's existing password file. Current Kolla deploys
+Valkey server+Sentinel; this plugin connects directly to the primary host on
+`valkey_server_port` for broad Redis-client compatibility without creating a
+separate Redis container. Note that a full or Valkey-tagged Kolla deployment
+(`enable_valkey: "yes"`) must establish Valkey before executing plugin-only
+tagged operations, and promotion requires running `kolla-ansible reconfigure`
+because the direct primary host does not auto-fail over.
+
+Runtime OpenStack settings use Kolla's `keystone_internal_url`, project/user
+domain, region, and internal interface variables. Kolla's `openstack_auth`
+provisions service projects/users; the matching runtime service-user passwords
+remain in `/etc/kolla/config/afterglow/secrets.yml`. This follows the internal
+Keystone configuration pattern used by Nova and Glance.
+Secrets remain in `/etc/kolla/config/afterglow/secrets.yml`; do not put them in
+`globals.yml` or commit the operator file.
+
+`[builder].ssh_private_key` in legacy configuration files is not a supported
+runtime setting and is deliberately not transferred. Provision a builder key
+only through a future declared secret mount that is consumed by the runtime.
+`config.gpu.toml` is also not copied independently; place its supported
+settings in the operator TOML file until that file has an explicit handoff.
+
+Re-run Afterglow with the standard Kolla command after changing globals,
+secrets, or the optional operator file. All generated and imported
+configuration artifacts participate in the container configuration hash, so
+the affected processes are recreated with the updated settings:
+
+```bash
+cd /etc/kolla
+kolla-ansible reconfigure --tags afterglow
+```
+
+### Afterglow Public Frontend Endpoint
+
+Set `afterglow_public_endpoint_url` to the browser-facing HTTP(S) origin without a path. The role renders it into the frontend `ORIGIN`, backend CORS origin, frontend base URL, OAuth callback, and instance-health callback base. The DMSLab configuration uses `https://cloud.dmslab.re.kr`.
+
+`afterglow_public_api_base` is the browser API origin. DMSLab's ingress routes `https://cloud.dmslab.re.kr/api/v1` to the backend, so it uses the same HTTPS origin and avoids mixed-content requests.
+
+### Kolla External HAProxy Route
+
+Set `afterglow_public_haproxy_enabled: true` and
+`afterglow_public_haproxy_fqdn` to publish the configured hostname through
+Kolla's existing external VIP/TLS frontend. The plugin owns the added HAProxy
+fragment and map entry: `/api/` is dispatched to the Afterglow API backend and
+all other paths to the frontend backend. It neither patches stock Kolla
+templates nor changes Kolla's certificate, DNS, external VIP, or global config.
+
+The Kolla external TLS certificate must cover the configured hostname.
+
+### Drover, Waygate, and Lumen Public HAProxy Routes
+
+Each service's `<service>-api` HAProxy entry stays internal (bound to the
+internal VIP), so `<service>_internal_endpoint_url`/`<service>_admin_endpoint_url`
+keep working unchanged. Set `drover_public_haproxy_enabled: true` /
+`waygate_public_haproxy_enabled: true` / `lumen_public_haproxy_enabled: true`
+with the matching `*_public_haproxy_fqdn` to add a second `<service>-public`
+HAProxy entry that publishes the API directly on Kolla's external VIP/TLS
+frontend (no loopback router is needed since each service exposes a single
+API path). Disabling the toggle removes the plugin-owned `.cfg` fragment and
+external-frontend-map entry on the next `reconfigure`. The Kolla external TLS
+certificate must cover each enabled hostname.
+
+### Lumen PostgreSQL Mode
+
+`lumen_postgres_mode` is an explicit mutually exclusive choice for Lumen's LangGraph checkpointer:
+
+- `bundled`: this Kolla plugin role runs its isolated `lumen_postgres`
+  container on the first Lumen controller and verifies an authenticated
+  `SELECT 1`. Kolla 2025.2 has no stock PostgreSQL role.
+- `external`: set `lumen_external_postgres_url` in
+  `/etc/kolla/config/afterglow/secrets.yml` to one `postgresql://` (or `postgres://`)
+  URL. The role creates no PostgreSQL resource, validates the URL, writes a
+  temporary mode-0600 libpq service file, runs an authenticated `SELECT 1`,
+  then deletes that file. The URL never appears in the `psql` command line.
+
+`lumen_memory_pgvector_url` is a separate optional PostgreSQL URL for semantic
+memory. It is required only when `lumen_enable_pgvector: true`; provide it in
+the same secret file rather than splitting it into host, port, and password
+variables.
+
+Never point `lumen_external_postgres_url` or `lumen_memory_pgvector_url` at
+Kolla MariaDB. PostgreSQL is required for these Lumen contracts.
+
+## Standard Inventory and Commands
+
+Add all five plugin groups (`afterglow`, `waygate`, `drover`, `lumen`, `palimpsest`) directly to `/etc/kolla/multinode`; this is the authoritative inventory used by ordinary Kolla commands. Then run the installer once from the plugin checkout:
+
+```bash
+KOLLA_ANSIBLE_BIN=/etc/kolla/.venv/bin/kolla-ansible \
+KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
+./deploy/kolla/install.sh
+```
+
+The installer fails rather than replacing conflicting links or unexpected `site.yml` marker content. If it finds a legacy second YAML document in `/etc/kolla/globals.yml`, it removes it only when its parsed mapping exactly matches `/etc/kolla/config/afterglow/globals.yml`, preserving a backup beside the stock file.
+
+> **Note on Kolla Integration:** Stock Kolla-Ansible site playbooks do not auto-discover custom roles. Custom service roles execute through standard `kolla-ansible` commands only after `install.sh` appends the `afterglow-site.yml` import to Kolla's installed `site.yml`. Uninstalled environments will not execute custom roles automatically.
+
+### Post-Installer Bare Kolla Commands
+
+From `/etc/kolla`, once `install.sh` has integrated the plugin import into `site.yml`, standard bare `kolla-ansible` lifecycle commands run custom service operations against `/etc/kolla/multinode`:
+
+```bash
+# Pull plugin and stock service images
+kolla-ansible pull -i multinode
+
+# Initial deployment (include valkey tag if Valkey is not yet running)
+kolla-ansible deploy -i multinode
+
+# Reconfigure running services after config/globals changes
+kolla-ansible reconfigure -i multinode
+
+# Upgrade services to new images and run policy seeding
+kolla-ansible upgrade -i multinode
+```
+
+Tag-filtered operations also remain supported:
+
+```bash
+# Reconfigure only Afterglow
+kolla-ansible reconfigure -i multinode --tags afterglow
+
+# Reconfigure all five plugin services
+kolla-ansible reconfigure -i multinode --tags afterglow,waygate,drover,lumen,palimpsest
+```
+
+The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis; normal operations should use the standard commands above.
+
+---
+
+## Uninstallation
 
 ```bash
 ./deploy/kolla/uninstall.sh
 ```
 
-- role symlink, play symlink 제거
-- `site.yml`에서 afterglow 블록 제거
-- `globals.yml` 및 `passwords.yml`은 변경하지 않음 (수동 정리 필요)
-
----
-
-## afterglow만 단독 재배포
-
-```bash
-# afterglow 태그만 실행
-kolla-ansible deploy -i <inventory> --tags afterglow
-
-# 컨테이너 삭제
-ansible-playbook -i <inventory> deploy/kolla/playbooks/destroy.yml
-```
-
----
-
-## 설정 변수 설명
-
-### globals.yml 주요 항목
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `enable_afterglow` | `"no"` | afterglow 전체 활성화 마스터 토글 |
-| `enable_afterglow_backend` | `"yes"` | FastAPI 백엔드 컨테이너 |
-| `enable_afterglow_frontend` | `"yes"` | SvelteKit 프론트엔드 컨테이너 |
-| `enable_afterglow_worker` | `"yes"` | 비동기 워커 컨테이너 |
-| `afterglow_image_namespace` | `"ghcr.io/openstack-afterglow"` | 컨테이너 이미지 레지스트리 네임스페이스 |
-| `afterglow_image_tag` | `"latest"` | 컨테이너 이미지 태그 |
-| `afterglow_image_pull_secret_b64` | `""` | GHCR private 이미지 접근용 Docker config base64 |
-| `afterglow_external_url` | `"https://{{ kolla_external_fqdn }}"` | afterglow 외부 접근 URL |
-| `afterglow_database_name` | `"afterglow"` | MariaDB 데이터베이스 이름 |
-| `afterglow_redis_db_index` | `5` | Redis DB 인덱스 (타 서비스 충돌 방지) |
-| `afterglow_manila_microversion` | `"2.65"` | Manila API microversion |
-| `afterglow_manila_share_type` | `"cephfs"` | Manila share type |
-| `afterglow_ceph_monitors` | `""` | CephFS 모니터 주소 (콤마 구분) |
-| `afterglow_cephx_user` | `"client.afterglow"` | Manila CephX 접근 ID |
-| `afterglow_service_manila_enabled` | `true` | Manila 연동 활성화 |
-| `afterglow_service_k3s_enabled` | `true` | k3s 프로비저닝 기능 활성화 |
-
-### passwords.yml 주요 항목
-
-| 변수 | 생성 방법 | 설명 |
-|------|-----------|------|
-| `afterglow_database_password` | `python3 -c "import secrets; print(secrets.token_hex(16))"` | MariaDB afterglow 사용자 비밀번호 |
-| `afterglow_secret_key` | `python3 -c "import secrets; print(secrets.token_hex(32))"` | FastAPI JWT/세션 서명 키 (64 hex char) |
-| `afterglow_kubeconfig_encryption_key` | `openssl rand -hex 32` | kubeconfig AES-256-GCM 암호화 키 |
-| `afterglow_oidc_client_secret` | GitLab/OIDC 제공자에서 발급 | OIDC Client Secret |
-| `afterglow_admin_keystone_password` | 임의 생성 | Keystone afterglow_admin 비밀번호 |
-
----
-
-## 검증 명령어
-
-```bash
-# Ansible syntax-check
-ansible-playbook --syntax-check /usr/local/share/kolla-ansible/ansible/site.yml
-
-# afterglow role symlink 확인
-ls -la /usr/local/share/kolla-ansible/ansible/roles/afterglow
-
-# afterglow playbook symlink 확인
-ls -la /usr/local/share/kolla-ansible/ansible/afterglow.yml
-
-# site.yml 패치 확인
-grep -A3 "afterglow integration" /usr/local/share/kolla-ansible/ansible/site.yml
-
-# 배포 dry-run (check mode)
-kolla-ansible deploy -i <inventory> --tags afterglow --check
-
-# 컨테이너 상태 확인 (배포 후)
-kolla-ansible status -i <inventory>
-```
-
----
-
-## 주의 사항
-
-### GHCR private 이미지
-
-afterglow 이미지가 GHCR private 저장소에 있는 경우, `afterglow_image_pull_secret_b64`를 반드시 설정해야 합니다:
-
-```bash
-# Docker config JSON 생성 및 base64 인코딩
-echo '{"auths":{"ghcr.io":{"auth":"'"$(echo -n 'USER:TOKEN' | base64)"'"}}}' | base64
-```
-
-생성된 값을 `globals.yml`의 `afterglow_image_pull_secret_b64`에 설정하세요.
-
-### Manila microversion
-
-afterglow는 Manila API microversion 2.65 이상을 요구합니다. kolla-ansible의 Manila 버전이 이를 지원하는지 확인하세요. 일부 구버전 OpenStack에서는 microversion을 낮춰야 할 수 있습니다.
-
-### CephFS 모니터 주소
-
-`afterglow_ceph_monitors`는 cloud-init 마운트 및 컨테이너 내 CephFS 마운트에 사용됩니다. 형식은 `IP:PORT` 콤마 구분이며, Ceph Monitor 노드 IP를 정확히 입력해야 합니다:
-
-```yaml
-afterglow_ceph_monitors: "10.0.0.1:6789,10.0.0.2:6789,10.0.0.3:6789"
-```
-
----
-
-## 디렉토리 구조
-
-```
-deploy/kolla/
-├── install.sh                        # kolla-ansible 통합 설치 스크립트
-├── uninstall.sh                      # 통합 제거 스크립트
-├── ansible.cfg                       # Ansible 설정
-├── globals.afterglow.sample.yml      # globals.yml 추가 설정 샘플
-├── passwords.afterglow.additions.yml # passwords.yml 추가 항목 샘플
-├── ansible/
-│   └── roles/
-│       └── afterglow/                # afterglow Ansible role (symlink 대상)
-├── inventory/
-│   ├── multinode.sample              # 멀티노드 인벤토리 샘플
-│   └── all-in-one.sample             # 단일노드 인벤토리 샘플
-└── playbooks/
-    ├── afterglow.yml                 # afterglow 배포 playbook (symlink 대상)
-    └── destroy.yml                   # afterglow 컨테이너 삭제 playbook
-```
+Uninstall removes only the installer-owned `site.yml` marker block and expected
+symlinks. It leaves `/etc/kolla/multinode`, plugin configuration, databases,
+containers, images, and source checkouts untouched.

@@ -1,6 +1,6 @@
 """네트워크 및 Floating IP API 테스트."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -179,3 +179,209 @@ async def test_delete_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.delete("/api/v1/networks/floating-ips/fip-1")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_non_admin_returns_403(non_admin_client):
+    resp = await non_admin_client.get("/api/v1/admin/networks/net-1")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_vlan(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-vlan"
+    mock_net.name = "vlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-vlan")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-vlan"
+    assert data["provider_network_type"] == "vlan"
+    assert data["provider_segmentation_id"] == 100
+    assert data["provider_physical_network"] == "physnet1"
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_vxlan(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-vxlan"
+    mock_net.name = "vxlan-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = "vxlan"
+    mock_net.provider_segmentation_id = 2000
+    mock_net.provider_physical_network = None
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-vxlan")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-vxlan"
+    assert data["provider_network_type"] == "vxlan"
+    assert data["provider_segmentation_id"] == 2000
+    assert data["provider_physical_network"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_get_network_detail_missing_provider_values(admin_client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-flat"
+    mock_net.name = "flat-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = False
+    mock_net.is_shared = False
+    mock_net.provider_network_type = None
+    mock_net.provider_segmentation_id = None
+    mock_net.provider_physical_network = None
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await admin_client.get("/api/v1/admin/networks/net-flat")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-flat"
+    assert data["provider_network_type"] is None
+    assert data["provider_segmentation_id"] is None
+    assert data["provider_physical_network"] is None
+
+
+@pytest.mark.asyncio
+async def test_ordinary_user_get_network_detail_does_not_contain_provider_keys(client, mock_conn):
+    mock_net = MagicMock()
+    mock_net.id = "net-user"
+    mock_net.name = "user-net"
+    mock_net.status = "ACTIVE"
+    mock_net.subnet_ids = []
+    mock_net.is_router_external = True
+    mock_net.is_shared = True
+    mock_net.provider_network_type = "vlan"
+    mock_net.provider_segmentation_id = 100
+    mock_net.provider_physical_network = "physnet1"
+
+    mock_conn.network.get_network.return_value = mock_net
+    mock_conn.network.ports.return_value = []
+
+    resp = await client.get("/api/v1/networks/net-user")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "net-user"
+    assert "provider_network_type" not in data
+    assert "provider_segmentation_id" not in data
+    assert "provider_physical_network" not in data
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_non_admin_returns_403(non_admin_client):
+    resp = await non_admin_client.get("/api/v1/admin/subnets/sub-1")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_success(admin_client):
+    from app.models.storage import (
+        AdminSubnetDetail,
+        AdminSubnetPort,
+        AllocationPool,
+        DhcpBindingInfo,
+        SubnetIpAllocation,
+    )
+
+    fake_detail = AdminSubnetDetail(
+        id="sub-1",
+        name="sub-test",
+        network_id="net-1",
+        network_name="net-test",
+        project_id="proj-1",
+        cidr="10.0.0.0/24",
+        gateway_ip="10.0.0.1",
+        ip_version=4,
+        dhcp_enabled=True,
+        allocation_pools=[AllocationPool(start="10.0.0.10", end="10.0.0.250")],
+        ports=[
+            AdminSubnetPort(
+                id="port-1",
+                name="p1",
+                status="ACTIVE",
+                mac_address="fa:16:3e:00:00:01",
+                device_owner="compute:nova",
+                device_id="inst-1",
+                project_id="proj-1",
+                ip_addresses=["10.0.0.5"],
+                binding_host_id="node-1",
+            )
+        ],
+        allocations=[
+            SubnetIpAllocation(
+                ip_address="10.0.0.5",
+                port_id="port-1",
+                port_name="p1",
+                device_owner="compute:nova",
+                device_id="inst-1",
+                project_id="proj-1",
+                binding_host_id="node-1",
+            )
+        ],
+        dhcp_bindings=[
+            DhcpBindingInfo(
+                agent_id="agent-1",
+                host="node-dhcp",
+                binary="neutron-dhcp-agent",
+                availability_zone="nova",
+                alive=True,
+                admin_state_up=True,
+                source="agent",
+                ip_addresses=["10.0.0.2"],
+                port_ids=["port-dhcp"],
+            )
+        ],
+        dhcp_agent_data_available=True,
+    )
+
+    with patch("app.api.identity.admin.neutron.get_admin_subnet_detail", return_value=fake_detail):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "sub-1"
+    assert data["network_name"] == "net-test"
+    assert data["allocation_pools"] == [{"start": "10.0.0.10", "end": "10.0.0.250"}]
+    assert data["ports"][0]["binding_host_id"] == "node-1"
+    assert data["allocations"][0]["ip_address"] == "10.0.0.5"
+    assert data["dhcp_bindings"][0]["source"] == "agent"
+    assert data["dhcp_agent_data_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_not_found(admin_client):
+    from openstack.exceptions import NotFoundException
+
+    with patch(
+        "app.api.identity.admin.neutron.get_admin_subnet_detail", side_effect=NotFoundException("Subnet not found")
+    ):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-missing")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "서브넷을 찾을 수 없습니다"
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_generic_failure(admin_client):
+    with patch("app.api.identity.admin.neutron.get_admin_subnet_detail", side_effect=RuntimeError("Unexpected error")):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-error")
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "내부 서버 오류"

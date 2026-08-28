@@ -9,10 +9,11 @@ Zun "컨테이너"와 혼동 방지를 위해 변수/응답 키에 object_storag
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import logging
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -135,23 +136,45 @@ def list_containers(
         return []
 
 
-def count_containers(conn) -> int:
+def count_containers(conn, *, timeout: float | int | None = None) -> int:
     """현재 계정의 오브젝트 스토리지 컨테이너 수 반환."""
     _apply_endpoint_override(conn)
     try:
-        return sum(1 for _ in conn.object_store.containers())
+        kwargs: dict[str, Any] = {"connect_retries": 0, "raise_exc": True}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = conn.object_store.head("/", **kwargs)
+        headers = getattr(resp, "headers", {}) or {}
+        val = None
+        if hasattr(headers, "get"):
+            val = headers.get("X-Account-Container-Count")
+            if val is None:
+                val = headers.get("x-account-container-count")
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return 0
+        return 0
     except Exception as exc:
         if not _is_account_not_found(exc):
             _logger.debug("Swift 컨테이너 수 조회 실패", exc_info=True)
         return 0
 
 
-def count_containers_all_projects(admin_token: str) -> int:
+def count_containers_all_projects(
+    admin_token: str,
+    *,
+    per_request_timeout: float = 2.0,
+    total_budget: float = 8.0,
+    max_workers: int = 8,
+) -> int:
     """admin 토큰으로 모든 프로젝트 fan-out 해서 swift 컨테이너 총 수 반환.
 
     admin overview의 cross-project 카운트 용도. swift 계정은 프로젝트별로 분리되므로
     admin 본인 프로젝트의 conn.object_store만 보면 0이 나올 수 있어 fan-out 필요.
     한 프로젝트가 401/404여도 해당 프로젝트만 0으로 처리하고 나머지는 합산한다.
+    타임아웃 발생 시 부분합 대신 0을 반환한다.
     """
     from app.services import keystone
 
@@ -160,23 +183,50 @@ def count_containers_all_projects(admin_token: str) -> int:
     except Exception:
         _logger.warning("admin 프로젝트 목록 조회 실패", exc_info=True)
         return 0
-    total = 0
-    for p in projects:
-        pid = p.get("id")
-        if not pid:
-            continue
+
+    project_ids = [p["id"] for p in projects if isinstance(p, dict) and p.get("id")]
+    if not project_ids:
+        return 0
+
+    def _count_for_project(pid: str) -> int:
+        sub_conn = None
         try:
             sub_conn = keystone.get_admin_connection_for_project(pid)
+            if hasattr(sub_conn, "session") and sub_conn.session is not None:
+                sub_conn.session.timeout = per_request_timeout
+            return count_containers(sub_conn, timeout=per_request_timeout)
         except Exception as exc:
             if not _is_unauthorized(exc):
                 _logger.debug("프로젝트 %s connection 실패", pid, exc_info=True)
-            continue
-        try:
-            total += count_containers(sub_conn)
+            return 0
         finally:
-            with contextlib.suppress(Exception):
-                sub_conn.close()
-    return total
+            if sub_conn is not None:
+                with contextlib.suppress(Exception):
+                    sub_conn.close()
+
+    workers = min(max(1, max_workers), len(project_ids))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = [executor.submit(_count_for_project, pid) for pid in project_ids]
+        done, not_done = concurrent.futures.wait(futures, timeout=total_budget)
+
+        if not_done:
+            _logger.warning(
+                "Swift all-project 카운트 타임아웃 (budget=%s, pending=%d/%d)",
+                total_budget,
+                len(not_done),
+                len(futures),
+            )
+            for f in not_done:
+                f.cancel()
+            return 0
+
+        total = 0
+        for f in futures:
+            total += f.result()
+        return total
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def get_account_metadata(conn, *, strict: bool = False) -> dict:

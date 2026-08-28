@@ -89,18 +89,23 @@ function mcpPublicUrl(value: unknown): string {
 	}
 }
 
+function fallbackPublicSiteConfig(): PublicSiteConfig {
+	return {
+		...DEFAULTS,
+		services: { ...DEFAULTS.services },
+		runtime: { ...DEFAULTS.runtime, api_base: deriveBrowserApiBase({}) },
+	};
+}
+
 let _cached: PublicSiteConfig | null = null;
 
 export function loadPublicSiteConfig(): PublicSiteConfig {
 	if (_cached) return _cached;
-
 	const configPath = findConfigPath();
+
+
 	if (!configPath) {
-		_cached = {
-			...DEFAULTS,
-			services: { ...DEFAULTS.services },
-			runtime: { ...DEFAULTS.runtime },
-		};
+		_cached = fallbackPublicSiteConfig();
 		return _cached;
 	}
 
@@ -150,11 +155,8 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 			},
 		};
 	} catch {
-		_cached = {
-			...DEFAULTS,
-			services: { ...DEFAULTS.services },
-			runtime: { ...DEFAULTS.runtime },
-		};
+		console.warn("Unable to load Afterglow frontend runtime configuration; using public environment fallback.");
+		_cached = fallbackPublicSiteConfig();
 	}
 
 	return _cached;

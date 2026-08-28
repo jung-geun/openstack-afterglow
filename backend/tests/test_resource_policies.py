@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from app.services import resource_policies
@@ -16,26 +14,6 @@ class _NetworkAPI:
 class _NetworkConnection:
     def __init__(self, networks):
         self.network = _NetworkAPI(networks)
-
-
-@pytest.mark.asyncio
-async def test_external_network_policy_discovers_and_validates_exact_external_option(monkeypatch):
-    networks = [
-        SimpleNamespace(id="private", name="private", is_external=False, is_router_external=False, is_shared=False),
-        SimpleNamespace(id="public", name="public", is_external=True, is_router_external=True, is_shared=False),
-    ]
-    conn = _NetworkConnection(networks)
-    monkeypatch.setattr(resource_policies.neutron, "list_networks", lambda _conn: networks)
-
-    options = await resource_policies.discover_options(conn, "k3s.occm_floating_network")
-
-    assert options == [{"id": "public", "name": "public", "is_external": True, "is_shared": False}]
-    assert await resource_policies.validate_selection(conn, "k3s.occm_floating_network", "public") == {
-        "id": "public",
-        "name": "public",
-    }
-    with pytest.raises(resource_policies.ResourcePolicyValidationError):
-        await resource_policies.validate_selection(conn, "k3s.occm_floating_network", "private")
 
 
 @pytest.mark.asyncio
@@ -112,10 +90,10 @@ async def test_legacy_name_selector_rejects_ambiguous_or_disallowed_names(monkey
         )
 
 
-def test_registry_has_no_obsolete_builder_or_ingress_defaults():
+def test_registry_has_no_service_owned_drover_policies():
     keys = {spec.key for spec in resource_policies.list_specs()}
 
-    assert {"builder.image", "builder.ubuntu_24_04_image", "k3s.octavia_ingress_subnet"}.isdisjoint(keys)
+    assert not any(key.startswith("k3s.") for key in keys)
     assert {"openstack.service_project", "cinder.default_volume_availability_zone", "manila.nfs_share_type"} <= keys
 
 

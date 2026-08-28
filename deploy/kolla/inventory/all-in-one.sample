@@ -1,10 +1,14 @@
 # Afterglow × kolla-ansible all-in-one inventory sample
-# 단일 노드에서 모든 서비스를 실행합니다
+# Plugin services and Kolla HAProxy run on the single control node.
 
 [control]
 localhost ansible_connection=local
 
 [network:children]
+control
+
+
+[loadbalancer:children]
 control
 
 [compute:children]
@@ -19,14 +23,25 @@ control
 [deployment]
 localhost ansible_connection=local
 
+# ── Plugin Logical Groups ─────────────────────────────────────────────────────
 [afterglow:children]
 control
 
-[baremetal:children]
+[waygate:children]
 control
 
-[haproxy:children]
-network
+[drover:children]
+control
+
+[lumen:children]
+control
+
+[palimpsest:children]
+control
+
+# ── Kolla Logical Groups ──────────────────────────────────────────────────────
+[baremetal:children]
+control
 
 [mariadb:children]
 control

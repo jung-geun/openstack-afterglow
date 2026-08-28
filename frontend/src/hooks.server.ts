@@ -18,7 +18,8 @@ const PUBLIC_PATHS = ['/', '/login', '/auth/gitlab/callback'];
 const STATIC_EXT = /\.(js|css|svg|png|jpg|jpeg|ico|woff2?|ttf|eot|map|webp|gif)$/;
 
 // 인그레스에서 백엔드로 포워딩되는 접두. 프론트가 받을 일은 없지만 SPA 폴백에서 방어적으로 제외.
-const BACKEND_PREFIXES = ['/api', '/v1'];
+// /.well-known 은 MCP OAuth discovery(백엔드 root_router) 이므로 앱 셸 200 대신 404 를 유지한다.
+const BACKEND_PREFIXES = ['/api', '/v1', '/.well-known'];
 
 // SPA 폴백 대상 판단 — 로그인 상태의 "문서 내비게이션 404" 만.
 // 정적 자산·데이터 요청(__data.json)·SvelteKit 내부·백엔드 경로는 제외해 원래 404를 유지한다.

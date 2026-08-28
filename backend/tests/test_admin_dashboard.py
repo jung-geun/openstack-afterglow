@@ -4,16 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
-def _patch_redis():
-    from app.services import cache as cache_mod
-
-    fake = AsyncMock()
-    fake.get.return_value = None
-    fake.setex.return_value = None
-    fake.delete.return_value = None
-    return patch.object(cache_mod, "_get_client", return_value=fake)
-
+from tests.conftest import patch_redis_cache_miss
 
 # ---------------------------------------------------------------------------
 # GET /api/admin/notifications
@@ -27,14 +18,13 @@ async def test_notifications_non_admin_returns_403(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_notifications_returns_structure(admin_client, mock_conn):
+async def test_notifications_returns_structure(admin_client, mock_conn, monkeypatch):
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.session.get.return_value.json.return_value = {"servers": []}
     mock_conn.compute.hypervisors.return_value = []
     mock_conn.network.ips.return_value = []
     mock_conn.network.networks.return_value = []
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/notifications")
-
+    resp = await admin_client.get("/api/v1/admin/notifications")
     assert resp.status_code == 200
     data = resp.json()
     assert "notifications" in data
@@ -43,19 +33,69 @@ async def test_notifications_returns_structure(admin_client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_notifications_error_instances_trigger_alert(admin_client, mock_conn):
+async def test_notifications_error_instances_trigger_alert(admin_client, mock_conn, monkeypatch):
     """ERROR 인스턴스가 있으면 알림 목록에 포함."""
+    patch_redis_cache_miss(monkeypatch)
     error_server = {"id": "s1", "status": "ERROR", "name": "bad-vm"}
     mock_conn.session.get.return_value.json.return_value = {"servers": [error_server]}
     mock_conn.compute.hypervisors.return_value = []
     mock_conn.network.ips.return_value = []
     mock_conn.network.networks.return_value = []
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/notifications")
-
+    resp = await admin_client.get("/api/v1/admin/notifications")
     assert resp.status_code == 200
     notifs = resp.json()["notifications"]
     assert any(n["type"] == "error" for n in notifs)
+
+
+@pytest.mark.asyncio
+async def test_notifications_k3s_pending_success_has_available_true(admin_client, mock_conn, monkeypatch):
+    """K3s pending 클러스터가 있으면 available: True 알림 포함."""
+    patch_redis_cache_miss(monkeypatch)
+    mock_conn.session.get.return_value.json.return_value = {"servers": []}
+    mock_conn.compute.hypervisors.return_value = []
+    mock_conn.network.ips.return_value = []
+    mock_conn.network.networks.return_value = []
+    pending_cluster = {"id": "c1", "status": "CREATE_IN_PROGRESS"}
+    drover = MagicMock()
+    drover.admin_clusters.return_value = [pending_cluster]
+    with (
+        patch("app.config.get_settings", return_value=MagicMock(service_k3s_enabled=True)),
+        patch("app.api.identity.admin_dashboard.register_drover", return_value=drover),
+    ):
+        resp = await admin_client.get("/api/v1/admin/notifications")
+    assert resp.status_code == 200
+    notifs = resp.json()["notifications"]
+    k3s_notif = next((n for n in notifs if n.get("type") == "k3s"), None)
+    assert k3s_notif is not None
+    assert k3s_notif["severity"] == "info"
+    assert k3s_notif["count"] == 1
+    assert k3s_notif["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_notifications_k3s_failure_emits_warning_available_false(admin_client, mock_conn, monkeypatch):
+    """K3s 조회 실패 시 warning 및 available: False 알림 생성."""
+    patch_redis_cache_miss(monkeypatch)
+    mock_conn.session.get.return_value.json.return_value = {"servers": []}
+    mock_conn.compute.hypervisors.return_value = []
+    mock_conn.network.ips.return_value = []
+    mock_conn.network.networks.return_value = []
+    with (
+        patch("app.config.get_settings", return_value=MagicMock(service_k3s_enabled=True)),
+        patch(
+            "app.api.identity.admin_dashboard.register_drover",
+            side_effect=RuntimeError("drover offline"),
+        ),
+    ):
+        resp = await admin_client.get("/api/v1/admin/notifications")
+    assert resp.status_code == 200
+    notifs = resp.json()["notifications"]
+    k3s_notif = next((n for n in notifs if n.get("type") == "k3s"), None)
+    assert k3s_notif is not None
+    assert k3s_notif["severity"] == "warning"
+    assert k3s_notif["message"] == "Drover 클러스터를 불러오지 못했습니다"
+    assert k3s_notif["count"] == 0
+    assert k3s_notif["available"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +110,8 @@ async def test_instances_health_non_admin_returns_403(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_instances_health_returns_list(admin_client, mock_conn):
+async def test_instances_health_returns_list(admin_client, mock_conn, monkeypatch):
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.session.get.return_value.json.return_value = {
         "servers": [
             {
@@ -91,9 +132,7 @@ async def test_instances_health_returns_list(admin_client, mock_conn):
             },
         ]
     }
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/instances/health")
-
+    resp = await admin_client.get("/api/v1/admin/instances/health")
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data
@@ -102,8 +141,9 @@ async def test_instances_health_returns_list(admin_client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_instances_health_kpi_fields(admin_client, mock_conn):
+async def test_instances_health_kpi_fields(admin_client, mock_conn, monkeypatch):
     """Phase 53b: total/active/error/with_alerts/gpu_count KPI 5필드 모두 존재."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.session.get.return_value.json.return_value = {
         "servers": [
             {
@@ -140,9 +180,7 @@ async def test_instances_health_kpi_fields(admin_client, mock_conn):
             },
         ]
     }
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/instances/health")
-
+    resp = await admin_client.get("/api/v1/admin/instances/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 4
@@ -154,12 +192,11 @@ async def test_instances_health_kpi_fields(admin_client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_instances_health_empty(admin_client, mock_conn):
+async def test_instances_health_empty(admin_client, mock_conn, monkeypatch):
     """서버 없을 때 KPI 0 반환."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.session.get.return_value.json.return_value = {"servers": []}
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/instances/health")
-
+    resp = await admin_client.get("/api/v1/admin/instances/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 0
@@ -270,7 +307,8 @@ async def test_fip_pool_stats_non_admin_returns_403(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_fip_pool_stats_returns_structure(admin_client, mock_conn):
+async def test_fip_pool_stats_returns_structure(admin_client, mock_conn, monkeypatch):
+    patch_redis_cache_miss(monkeypatch)
     net = MagicMock()
     net.id = "net1"
     net.name = "external"
@@ -284,9 +322,7 @@ async def test_fip_pool_stats_returns_structure(admin_client, mock_conn):
     fip2.port_id = None
     mock_conn.network.ips.return_value = [fip1, fip2]
 
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/floating-ips/pool-stats")
-
+    resp = await admin_client.get("/api/v1/admin/floating-ips/pool-stats")
     assert resp.status_code == 200
     data = resp.json()
     assert "pools" in data
@@ -309,17 +345,15 @@ async def test_identity_summary_non_admin_returns_403(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_identity_summary_returns_counts(admin_client, mock_conn):
+async def test_identity_summary_returns_counts(admin_client, mock_conn, monkeypatch):
+    patch_redis_cache_miss(monkeypatch)
     u1, u2 = MagicMock(is_enabled=True), MagicMock(is_enabled=False)
     mock_conn.identity.users.return_value = [u1, u2]
     mock_conn.identity.projects.return_value = [MagicMock(), MagicMock(), MagicMock()]
     mock_conn.identity.roles.return_value = [MagicMock(id="r1", name="admin")]
     mock_conn.identity.groups.return_value = []
     mock_conn.identity.domains.return_value = [MagicMock()]
-
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/identity/summary")
-
+    resp = await admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["counts"]["users"] == 2
@@ -337,17 +371,15 @@ async def test_identity_summary_returns_counts(admin_client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn):
+async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn, monkeypatch):
     """users 조회 실패 시 200 응답 + partial=True + users count=0."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.identity.users.side_effect = Exception("403 Forbidden")
     mock_conn.identity.projects.return_value = [MagicMock(), MagicMock()]
     mock_conn.identity.roles.return_value = [MagicMock(id="r1", name="admin")]
     mock_conn.identity.groups.return_value = []
     mock_conn.identity.domains.return_value = []
-
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/identity/summary")
-
+    resp = await admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["partial"] is True
@@ -358,18 +390,16 @@ async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn
 
 
 @pytest.mark.asyncio
-async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn):
+async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn, monkeypatch):
     """roles 조회 실패 시 200 응답 + partial=True + roles count=0 + partial_reasons 포함."""
+    patch_redis_cache_miss(monkeypatch)
     u1 = MagicMock(is_enabled=True)
     mock_conn.identity.users.return_value = [u1]
     mock_conn.identity.projects.return_value = [MagicMock()]
     mock_conn.identity.roles.side_effect = Exception("roles unavailable")
     mock_conn.identity.groups.return_value = []
     mock_conn.identity.domains.return_value = []
-
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/identity/summary")
-
+    resp = await admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["partial"] is True
@@ -381,17 +411,15 @@ async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn
 
 
 @pytest.mark.asyncio
-async def test_identity_summary_partial_reasons_403_classified(admin_client, mock_conn):
+async def test_identity_summary_partial_reasons_403_classified(admin_client, mock_conn, monkeypatch):
     """HTTP 403 예외 시 insufficient_privileges로 분류."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.identity.users.return_value = []
     mock_conn.identity.projects.return_value = []
     mock_conn.identity.roles.side_effect = Exception("HTTP 403 Forbidden: policy")
     mock_conn.identity.groups.return_value = []
     mock_conn.identity.domains.return_value = []
-
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/identity/summary")
-
+    resp = await admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["partial"] is True
@@ -400,17 +428,15 @@ async def test_identity_summary_partial_reasons_403_classified(admin_client, moc
 
 
 @pytest.mark.asyncio
-async def test_identity_summary_no_partial_reasons_when_success(admin_client, mock_conn):
+async def test_identity_summary_no_partial_reasons_when_success(admin_client, mock_conn, monkeypatch):
     """정상 조회 시 partial=False + partial_reasons=[]."""
+    patch_redis_cache_miss(monkeypatch)
     mock_conn.identity.users.return_value = []
     mock_conn.identity.projects.return_value = []
     mock_conn.identity.roles.return_value = []
     mock_conn.identity.groups.return_value = []
     mock_conn.identity.domains.return_value = []
-
-    with _patch_redis():
-        resp = await admin_client.get("/api/v1/admin/identity/summary")
-
+    resp = await admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["partial"] is False

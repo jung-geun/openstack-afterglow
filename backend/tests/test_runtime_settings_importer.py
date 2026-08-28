@@ -6,7 +6,6 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -35,63 +34,10 @@ def test_legacy_bool_honors_explicit_environment(monkeypatch):
     assert importer._legacy_bool(config, "notion", "enabled", "NOTION_ENABLED") is None
 
 
-def test_inflight_snapshots_preserve_only_materialized_k3s_ids():
-    cluster = SimpleNamespace(
-        server_image_id="cluster-image",
-        server_flavor_id="cluster-flavor",
-        agent_flavor_id="cluster-agent-flavor",
-        agent_count=1,
-    )
-    default_agent_group = SimpleNamespace(
-        flavor_id="nodegroup-flavor",
-        image_id="nodegroup-image",
-    )
-    server = SimpleNamespace(
-        provider_network_id="server-network",
-        image_id="server-image",
-        flavor_id="server-flavor",
-        floating_network_id=None,
-    )
-
-    assert importer._backfill_k3s_snapshot(cluster, default_agent_group) == {
-        "k3s.server_image": {"id": "cluster-image", "name": "cluster-image"},
-        "k3s.server_flavor": {"id": "cluster-flavor", "name": "cluster-flavor"},
-        "k3s.default_agent_flavor": {"id": "nodegroup-flavor", "name": "nodegroup-flavor"},
-        "effective_agent_image": {"id": "nodegroup-image", "name": "nodegroup-image"},
-        "_backfill": {
-            "state": "unresolved",
-            "missing": ["cinder.default_volume_availability_zone"],
-        },
-    }
-    assert importer._backfill_waygate_snapshot(server) == {
-        "waygate.provider_network": {"id": "server-network", "name": "server-network"},
-        "waygate.image": {"id": "server-image", "name": "server-image"},
-        "waygate.flavor": {"id": "server-flavor", "name": "server-flavor"},
-        "_backfill": {"state": "complete", "missing": []},
-    }
-
-
-def test_inflight_snapshot_marks_each_missing_k3s_requirement():
-    snapshot = importer._backfill_k3s_snapshot(
-        SimpleNamespace(
-            server_image_id=None,
-            server_flavor_id=None,
-            agent_flavor_id=None,
-            agent_count=1,
-        ),
-        None,
-    )
-
-    assert snapshot["_backfill"] == {
-        "state": "unresolved",
-        "missing": [
-            "cinder.default_volume_availability_zone",
-            "k3s.server_image",
-            "k3s.server_flavor",
-            "k3s.default_agent_flavor",
-            "effective_agent_image",
-        ],
-    }
+def test_default_availability_zone_seeds_compute_and_volume_policies():
+    source = ("nova", "default_availability_zone", "DEFAULT_AVAILABILITY_ZONE")
+    assert importer._POLICY_SOURCES["nova.default_compute_availability_zone"] == source
+    assert importer._POLICY_SOURCES["cinder.default_volume_availability_zone"] == source
 
 
 @pytest.fixture(scope="module")
@@ -191,8 +137,8 @@ def test_apply_seeds_once_and_rolls_back_on_write_failure(importer_database):
         asyncio.run(
             importer._apply(
                 importer_database,
-                {"k3s.server_image": {"id": "image-1", "name": "server-image"}},
-                {"k3s.version": object()},
+                {"nova.default_network": {"id": "network-1", "name": "tenant-network"}},
+                {"notion.sync_enabled_rollback": object()},
                 {},
             )
         )
@@ -207,7 +153,7 @@ def test_apply_seeds_once_and_rolls_back_on_write_failure(importer_database):
         asyncio.run(
             importer._apply(
                 importer_database,
-                {"k3s.server_image": {"id": "image-1", "name": "server-image"}},
+                {"nova.default_network": {"id": "network-1", "name": "tenant-network"}},
                 {},
                 {},
             )

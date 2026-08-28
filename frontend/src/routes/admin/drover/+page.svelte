@@ -10,6 +10,9 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import TableShell from '$lib/components/ui/TableShell.svelte';
+	import ToggleGroup from '$lib/components/ui/ToggleGroup.svelte';
 
 	interface AdminK3sCluster {
 		id: string;
@@ -28,7 +31,7 @@
 	let clusters = $state<AdminK3sCluster[]>([]);
 	let loading = $state(true);
 	let refreshing = $state(false);
-
+	let statusFilter = $state<'all' | 'active' | 'pending' | 'error' | 'deleted'>('all');
 	// 슬라이드 패널
 	let selectedClusterId = $state<string | null>(null);
 
@@ -47,13 +50,28 @@
 		if (clusters.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			clusters = await api.get<AdminK3sCluster[]>('/api/v1/admin/k3s-clusters', token, projectId);
+			let url = '/api/v1/admin/k3s-clusters';
+			const params = new URLSearchParams();
+			if (statusFilter === 'active') params.set('status', 'ACTIVE');
+			else if (statusFilter === 'pending') params.set('status', 'CREATING,PROVISIONING,SCALING,DELETING');
+			else if (statusFilter === 'error') params.set('status', 'ERROR,FAILED');
+			else if (statusFilter === 'deleted') {
+				params.set('include_deleted', 'true');
+				params.set('status', 'DELETED');
+			}
+			if (params.toString()) url += `?${params.toString()}`;
+			clusters = await api.get<AdminK3sCluster[]>(url, token, projectId);
 		} catch {
 			clusters = [];
 		} finally {
 			loading = false;
 			refreshing = false;
 		}
+	}
+
+	function setStatusFilter(filter: typeof statusFilter) {
+		statusFilter = filter;
+		void load();
 	}
 
 	const ar = createAutoRefresh(load, {
@@ -89,55 +107,73 @@
 			/>
 		{/snippet}
 	</PageHeader>
+	<div class="mb-4 flex min-w-0 items-center gap-2">
+		<span class="shrink-0 text-xs text-ink-2">상태 필터:</span>
+		<div class="min-w-0 overflow-x-auto pb-1">
+			<ToggleGroup
+				value={statusFilter}
+				options={[
+					{ value: 'all', label: '전체' },
+					{ value: 'active', label: '정상 (ACTIVE)' },
+					{ value: 'pending', label: '진행 중 (PENDING)' },
+					{ value: 'error', label: '오류 (ERROR/FAILED)' },
+					{ value: 'deleted', label: '삭제됨 (DELETED)' }
+				]}
+				onchange={(value) => setStatusFilter(value as typeof statusFilter)}
+				size="xs"
+				ariaLabel="클러스터 상태 필터"
+			/>
+		</div>
+	</div>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if clusters.length === 0}
-		<div class="text-gray-600 text-sm">Drover 클러스터가 없습니다</div>
+		<EmptyState headline="Drover 클러스터가 없습니다" />
 	{:else}
-		<div class="overflow-x-auto">
-			<table class="w-full text-sm">
+		<TableShell density="compact">
+			<table class="min-w-[58rem] text-sm">
 				<thead>
-					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-2 pr-4">이름</th>
-						<th class="text-left py-2 pr-4">상태</th>
-						<th class="text-left py-2 pr-4">프로젝트</th>
-						<th class="text-left py-2 pr-4">서버 IP</th>
-						<th class="text-left py-2 pr-4">노드</th>
-						<th class="text-left py-2 pr-4">버전</th>
-						<th class="text-left py-2">생성일</th>
+					<tr class="text-xs uppercase tracking-wide">
+						<th>이름</th>
+						<th>상태</th>
+						<th>프로젝트</th>
+						<th>서버 IP</th>
+						<th>노드</th>
+						<th>버전</th>
+						<th>생성일</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each clusters as c (c.id)}
 						<tr
-							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer"
+							class="cursor-pointer text-xs transition-colors focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
 							onclick={() => openClusterPanel(c.id)}
 							onkeydown={(e) => e.key === 'Enter' && openClusterPanel(c.id)}
 							role="button"
 							tabindex="0">
-							<td class="py-2 pr-4">
-								<span class="text-white hover:text-blue-400 transition-colors max-md:block max-md:max-w-[66vw] max-md:truncate" title={c.name}>
+							<td>
+								<span class="max-md:block max-md:max-w-[66vw] max-md:truncate text-ink-0 transition-colors hover:text-accent" title={c.name}>
 									{c.name}
 								</span>
 								{#if c.status_reason}
-									<div class="text-gray-500 text-xs mt-0.5 truncate max-w-40">{c.status_reason}</div>
+									<div class="mt-0.5 max-w-40 truncate text-xs text-ink-3">{c.status_reason}</div>
 								{/if}
 							</td>
-							<td class="py-2 pr-4">
+							<td>
 								<StatusChip status={c.status} />
 							</td>
-							<td class="py-2 pr-4 text-gray-400">
+							<td class="text-ink-2">
 								{c.project_id ? ($projectNames.get(c.project_id) ?? c.project_id.slice(0, 8)) : '-'}
 							</td>
-							<td class="py-2 pr-4 text-gray-400 font-mono">{c.server_ip || '-'}</td>
-							<td class="py-2 pr-4 text-gray-400">1 서버 + {c.agent_vm_ids?.length ?? 0} / {c.agent_count} 에이전트</td>
-							<td class="py-2 pr-4 text-gray-500">{c.k3s_version || '-'}</td>
-							<td class="py-2 text-gray-500">{c.created_at ? c.created_at.slice(0, 10) : '-'}</td>
+							<td class="font-mono text-ink-2">{c.server_ip || '-'}</td>
+							<td class="text-ink-2">1 서버 + {c.agent_vm_ids?.length ?? 0} / {c.agent_count} 에이전트</td>
+							<td class="text-ink-3">{c.k3s_version || '-'}</td>
+							<td class="text-ink-3">{c.created_at ? c.created_at.slice(0, 10) : '-'}</td>
 						</tr>
 					{/each}
 				</tbody>
 			</table>
-		</div>
+		</TableShell>
 	{/if}
 </div>

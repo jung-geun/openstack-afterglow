@@ -246,58 +246,83 @@ async def test_store_session_persists_origin():
 
 @pytest.mark.asyncio
 async def test_blacklist_session_sets_flag():
-    import json
+    import fakeredis.aioredis as fakeredis
 
-    from app.services.session_store import blacklist_session
+    from app.services.session_store import blacklist_session, get_session, store_session
 
-    sess_data = {"keystone_token": "ks", "blacklisted": False, "blacklist_reason": ""}
-    store = {"afterglow:refresh:jti1": json.dumps(sess_data).encode()}
-    with patch("app.services.session_store._get_redis", AsyncMock(return_value=_make_redis_mock(store))):
+    fake = fakeredis.FakeRedis()
+    with patch("app.services.session_store._get_redis", AsyncMock(return_value=fake)):
+        await store_session(
+            jti="jti1",
+            keystone_token="ks",
+            project_id="proj",
+            user_id="user1",
+            exp=9999999999,
+            origin_ip="10.0.0.1",
+            origin_fp="fp_test",
+        )
         await blacklist_session("jti1", "test_reason")
-    updated = json.loads(store["afterglow:refresh:jti1"])
-    assert updated["blacklisted"] is True
-    assert updated["blacklist_reason"] == "test_reason"
+        sess = await get_session("jti1")
+
+    assert sess is not None
+    assert sess["blacklisted"] is True
+    assert sess["blacklist_reason"] == "test_reason"
 
 
 @pytest.mark.asyncio
 async def test_touch_session_seen_updates_last():
-    import json
+    import fakeredis.aioredis as fakeredis
 
-    from app.services.session_store import touch_session_seen
+    from app.services.session_store import get_session, store_session, touch_session_seen
 
-    sess_data = {
-        "keystone_token": "ks",
-        "last_ip": "10.0.0.1",
-        "last_fp": "fp_old",
-        "last_seen": 1000,
-    }
-    store = {"afterglow:refresh:jti1": json.dumps(sess_data).encode()}
-    with patch("app.services.session_store._get_redis", AsyncMock(return_value=_make_redis_mock(store))):
+    fake = fakeredis.FakeRedis()
+    with patch("app.services.session_store._get_redis", AsyncMock(return_value=fake)):
+        await store_session(
+            jti="jti1",
+            keystone_token="ks",
+            project_id="proj",
+            user_id="user1",
+            exp=9999999999,
+            origin_ip="10.0.0.1",
+            origin_fp="fp_old",
+        )
         await touch_session_seen("jti1", "10.0.0.2", "fp_new")
-    updated = json.loads(store["afterglow:refresh:jti1"])
-    assert updated["last_ip"] == "10.0.0.2"
-    assert updated["last_fp"] == "fp_new"
+        sess = await get_session("jti1")
+
+    assert sess is not None
+    assert sess["last_ip"] == "10.0.0.2"
+    assert sess["last_fp"] == "fp_new"
 
 
 @pytest.mark.asyncio
 async def test_touch_session_seen_throttle_skips():
-    import json
-    import time
+    import fakeredis.aioredis as fakeredis
 
-    from app.services.session_store import touch_session_seen
+    from app.services.session_store import get_session, store_session, touch_session_seen
 
-    now = int(time.time())
-    sess_data = {
-        "keystone_token": "ks",
-        "last_ip": "10.0.0.1",
-        "last_fp": "fp_same",
-        "last_seen": now,  # 방금 갱신됨
-    }
-    store = {"afterglow:refresh:jti1": json.dumps(sess_data).encode()}
-    with patch("app.services.session_store._get_redis", AsyncMock(return_value=_make_redis_mock(store))):
-        await touch_session_seen("jti1", "10.0.0.1", "fp_same")  # 동일 IP/FP + 60초 이내 → skip
-    # 내용이 바뀌지 않았거나 last_seen 만 갱신 (여기선 skip이므로 unchanged)
-    assert json.loads(store["afterglow:refresh:jti1"])["last_ip"] == "10.0.0.1"
+    fake = fakeredis.FakeRedis()
+    with patch("app.services.session_store._get_redis", AsyncMock(return_value=fake)):
+        await store_session(
+            jti="jti1",
+            keystone_token="ks",
+            project_id="proj",
+            user_id="user1",
+            exp=9999999999,
+            origin_ip="10.0.0.1",
+            origin_fp="fp_same",
+        )
+        initial_sess = await get_session("jti1")
+        assert initial_sess is not None
+        initial_seen = initial_sess.get("last_seen")
+
+        # Same IP and FP within throttle window (60s) -> touch_session_seen skips
+        await touch_session_seen("jti1", "10.0.0.1", "fp_same")
+        sess = await get_session("jti1")
+
+    assert sess is not None
+    assert sess["last_ip"] == "10.0.0.1"
+    assert sess["last_fp"] == "fp_same"
+    assert sess.get("last_seen") == initial_seen
 
 
 @pytest.mark.asyncio

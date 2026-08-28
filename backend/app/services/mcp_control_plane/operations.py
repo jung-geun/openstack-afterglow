@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.database import get_session_factory
-from app.models.chat_db import McpToolInvocation
+from app.models.mcp_authority import McpToolInvocation
 from app.services.mcp_control_plane.authentication import McpPrincipal
 
 

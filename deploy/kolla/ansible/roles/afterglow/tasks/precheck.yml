@@ -7,6 +7,17 @@
   run_once: true
   tags: precheck
 
+- name: Precheck | Verify stock Kolla Valkey dependency
+  ansible.builtin.assert:
+    that:
+      - enable_valkey | default(false) | bool
+      - groups.get('valkey', []) | length > 0
+      - valkey_master_password is defined and valkey_master_password | length > 0
+    fail_msg: "Deploy stock Kolla Valkey before enabling afterglow; no plugin Redis fallback exists"
+  run_once: true
+  tags: precheck
+  when: enable_afterglow | default(false) | bool
+
 - name: Precheck | Check required password variables
   ansible.builtin.assert:
     that:
@@ -18,6 +29,28 @@
   run_once: true
   tags: precheck
   when: enable_afterglow | bool
+
+- name: Precheck | Validate Afterglow public frontend origin
+  ansible.builtin.assert:
+    that:
+      - afterglow_public_endpoint_url is match('^https?://[^/?#\s]+/?$')
+    fail_msg: "afterglow_public_endpoint_url must be an absolute HTTP(S) origin without a path, query, or fragment"
+  run_once: true
+  tags: precheck
+  when: enable_afterglow | bool
+
+- name: Precheck | Validate Kolla public route hostname
+  ansible.builtin.assert:
+    that:
+      - afterglow_public_haproxy_fqdn is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+      - afterglow_public_haproxy_router_port | int > 0
+      - afterglow_public_haproxy_router_port | int < 65536
+    fail_msg: "afterglow_public_haproxy_fqdn must be a hostname and afterglow_public_haproxy_router_port must be a valid TCP port"
+  run_once: true
+  tags: precheck
+  when:
+    - enable_afterglow | bool
+    - afterglow_public_haproxy_enabled | bool
 
 - name: Precheck | Verify Manila microversion support
   become: true
@@ -63,13 +96,16 @@
   run_once: true
   delegate_to: "{{ groups['afterglow'] | first }}"
   tags: precheck
-  when: enable_afterglow | bool
+  when:
+    - enable_afterglow | bool
+    - not (afterglow_source_mode | default(false) | bool)
 
 - name: Precheck | Warn if backend image not accessible
   ansible.builtin.debug:
     msg: "WARNING: Cannot access {{ afterglow_backend_image }}:{{ afterglow_image_tag }}. Ensure GHCR credentials are configured."
   when:
     - enable_afterglow | bool
+    - not (afterglow_source_mode | default(false) | bool)
     - image_check is defined
     - image_check.rc != 0
   run_once: true

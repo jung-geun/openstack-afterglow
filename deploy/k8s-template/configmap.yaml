@@ -339,19 +339,11 @@ data:
     zun = true
     k3s = true
 
-    [k3s]
-    occm_enabled = true
-    occm_image = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
-    occm_floating_network_id = ""
-    occm_public_network_name = ""
-
-    version = "v1.31.4+k3s1"
-    server_flavor_id = ""
-    default_agent_flavor_id = ""
-    server_image_id = ""
+    [instance_health]
     callback_base_url = "https://example.com/"
-    # kubeconfig_encryption_key는 secret.yaml에서 주입됩니다
-    boot_volume_size_gb = 30
+
+    [k3s]
+    # Shared legacy AES-256-GCM key is injected from secret.yaml.
 
     [cors]
     origins = "https://example.com,http://localhost:3080,http://127.0.0.1:3080"

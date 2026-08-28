@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { auth } from '../auth';
 import { DEFAULT_BETA_FEATURES, betaFeatures } from '../betaFeatures';
 import { resetWizard } from '../wizard';
+import { siteConfig } from '$lib/config/site';
 
 const { api } = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn() } }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
@@ -31,6 +32,10 @@ describe('VM create option loading boundaries', () => {
 		resetWizard();
 		betaFeatures.set(DEFAULT_BETA_FEATURES);
 		auth.set({ token: 'token', refreshToken: null, accessExpiresAt: null, userId: 'user', username: 'user', projectId: 'project', projectName: 'project', availableProjects: [], roles: [], isSystemAdmin: false, federated: false });
+		siteConfig.update(config => ({
+			...config,
+			services: { ...config.services, manila: true },
+		}));
 	});
 
 	it('prefetches configuration after boot options settle without delaying step 1', async () => {
@@ -84,5 +89,23 @@ describe('VM create option loading boundaries', () => {
 		expect(paths).toEqual(expect.arrayContaining([
 			'/api/v1/networks', '/api/v1/keypairs', '/api/v1/security-groups', '/api/v1/networks/default', '/api/v1/file-storage',
 		]));
+	});
+
+	it('skips the file-storage catalog when Manila is disabled', async () => {
+		siteConfig.update(config => ({
+			...config,
+			services: { ...config.services, manila: false },
+		}));
+		api.get.mockImplementation((path: string) => {
+			if (path === '/api/v1/images') return Promise.resolve([image]);
+			if (path === '/api/v1/volumes') return Promise.resolve([]);
+			if (path === '/api/v1/flavors') return Promise.resolve([flavor]);
+			if (path === '/api/v1/dashboard/quotas') return Promise.resolve({});
+			return Promise.resolve([]);
+		});
+		render(VmCreateStoreLoadWrapper);
+		await fireEvent.click(screen.getByTestId('init'));
+		await vi.waitFor(() => expect(api.get.mock.calls.map(([path]) => path)).toContain('/api/v1/networks'));
+		expect(api.get.mock.calls.map(([path]) => path)).not.toContain('/api/v1/file-storage');
 	});
 });

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from app.services.chat.ssrf import SafeAsyncTransport
+from app.services.mcp_control_plane.ssrf import SafeAsyncTransport
 
 OAUTH_VALUE_BYTES = 32
 ACCESS_TOKEN_LIFETIME = timedelta(minutes=15)

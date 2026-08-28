@@ -11,7 +11,7 @@ from keystoneauth1.identity import v3
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models.chat_db import McpLumenSelection
+from app.models.mcp_authority import McpLumenSelection
 from app.services.mcp_control_plane.authentication import McpPrincipal
 from app.services.mcp_control_plane.authority import McpGrantStateError, _lock_grant, decrypt_grant_secret, lock_owner
 

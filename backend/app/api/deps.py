@@ -79,10 +79,9 @@ async def _check_session_timeout(token_hash: str, project_id: str) -> None:
     except HTTPException:
         raise
     except Exception:
-        # fail-closed: Redis 장애 시 세션 검증 불가 → 요청 거부
-        # 401을 반환: 세션 유효성을 확인할 수 없으면 인증되지 않은 것으로 처리
+        # fail-closed: Redis 장애 시 세션 검증 불가 → 503 반환
         _logger.error("Redis 장애로 세션 타임아웃 검증 불가 — 요청 거부 (fail-closed)", exc_info=True)
-        raise HTTPException(status_code=401, detail="세션 유효성을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
+        raise HTTPException(status_code=503, detail="세션 유효성을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.")
 
 
 async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str | None) -> dict:
@@ -102,7 +101,14 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
     if not refresh_jti:
         raise HTTPException(status_code=401, detail="액세스 토큰 형식 오류")
 
-    sess = await get_session(refresh_jti)
+    try:
+        sess = await get_session(refresh_jti)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Redis session lookup failed in _resolve_jwt_token_info: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="세션 저장소 연결 실패")
+
     if sess is None:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
 
@@ -116,7 +122,7 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
     if sess.get("blacklisted"):
         raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
 
-    # ── IP/기기 지문 바인딩 검사 (fail-open: 오류 시 차단 안 함) ───────────
+    # ── IP/기기 지문 바인딩 검사 (fail-closed: 오류 시 503 차단) ───────────
     _username = payload.get("username", "")
     try:
         from app.services.token_binding import check_binding, get_origin
@@ -168,20 +174,75 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
     except HTTPException:
         raise
     except Exception:
-        # fail-closed: 바인딩 검사 실패(Redis 장애·설정 오류) 시 요청 거부.
-        # 운영: Redis 가용성 모니터링 필수 — Redis 장애 시 전체 인증 차단됨.
+        # fail-closed: 바인딩 검사 실패(Redis 장애·설정 오류) 시 503 반환
         _logger.error("토큰 바인딩 검사 실패 — 요청 거부 (fail-closed)", exc_info=True)
         raise HTTPException(
-            status_code=401, detail="토큰 바인딩 검사를 완료할 수 없습니다. 잠시 후 다시 시도해 주세요."
+            status_code=503, detail="토큰 바인딩 검사를 완료할 수 없습니다. 잠시 후 다시 시도해 주세요."
         )
 
     jwt_project_id = payload.get("project_id", "")
-    target_project_id = x_project_id or jwt_project_id
+    home_project_id = jwt_project_id or sess.get("project_id", "")
 
-    # 권한 정보는 항상 Keystone live 검증(60s 캐시). JWT payload에서 꺼내지 않는다.
-    # 프로젝트 전환 여부와 무관하게 동일 경로로 통합 — stale window 제거.
-    effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
-    info = await _cached_validate(sess["keystone_token"], effective_project_id)
+    from keystoneauth1.exceptions.http import Unauthorized
+
+    is_foreign_target = bool(x_project_id and x_project_id != jwt_project_id)
+
+    if is_foreign_target:
+        # 1. foreign X-Project-Id 요청 시 JWT/session home project 검증 우선 진행
+        try:
+            home_info = await _cached_validate(sess["keystone_token"], home_project_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if isinstance(exc, Unauthorized):
+                raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+            _logger.error("Keystone validation transient error on home project: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+        if home_info.get("is_system_admin", False):
+            # 2. System admin override: target rescope 생략하고 home token 및 권한 재사용, logical project_id만 target 설정
+            info = home_info
+            logical_project_id = x_project_id
+            connection_project_id = info.get("project_id", home_project_id)
+            project_name = ""
+        else:
+            # 3. Non-admin: target rescope 시도 (Unauthorized 시 403 반환)
+            try:
+                target_info = await _cached_validate(sess["keystone_token"], x_project_id)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                if isinstance(exc, Unauthorized):
+                    raise HTTPException(status_code=403, detail="해당 프로젝트에 대한 접근 권한이 없습니다.")
+                _logger.error("Keystone validation transient error on target rescope: %s", exc, exc_info=True)
+                raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+            info = target_info
+            logical_project_id = info.get("project_id", x_project_id)
+            connection_project_id = logical_project_id
+            project_name = info.get("project_name", "")
+
+            # X-Project-Id로 실제 rescope가 발생한 비관리자 접근 기록 (fire-and-forget)
+            user_id_for_record = info.get("user_id", payload.get("sub", ""))
+            if user_id_for_record:
+                from app.services.recent_projects import record_project_access
+
+                asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
+    else:
+        effective_project_id = x_project_id or home_project_id
+        try:
+            info = await _cached_validate(sess["keystone_token"], effective_project_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if isinstance(exc, Unauthorized):
+                raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+            _logger.error("Keystone validation transient error: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+        logical_project_id = info.get("project_id", effective_project_id)
+        connection_project_id = logical_project_id
+        project_name = info.get("project_name", payload.get("project_name", ""))
 
     # validate_token은 POST /v3/auth/tokens으로 새 Keystone 토큰을 발급한다.
     # 새 토큰이 원본과 다르면 Redis 세션에 역기록해 Keystone TTL 만료 문제를 방지.
@@ -191,19 +252,13 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
 
         asyncio.create_task(update_session_token(refresh_jti, new_ks_token))
 
-    # X-Project-Id로 실제 rescope가 발생한 경우에만 접근 기록 (fire-and-forget)
-    user_id_for_record = info.get("user_id", payload.get("sub", ""))
-    if x_project_id and x_project_id != jwt_project_id and user_id_for_record:
-        from app.services.recent_projects import record_project_access
-
-        asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
-
     return {
         "token": info["token"],
         "user_id": info.get("user_id", payload.get("sub", "")),
         "username": info.get("username", payload.get("username", "")),
-        "project_id": info.get("project_id", effective_project_id),
-        "project_name": info.get("project_name", payload.get("project_name", "")),
+        "project_id": logical_project_id,
+        "connection_project_id": connection_project_id,
+        "project_name": project_name,
         "roles": info.get("roles", []),
         "is_system_admin": info.get("is_system_admin", False),
         "refresh_jti": refresh_jti,
@@ -237,60 +292,10 @@ async def get_token_info(
             return info
         except HTTPException:
             raise
-        except Exception:
-            raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+        except Exception as exc:
+            _logger.error("Unexpected error in get_token_info: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="인증 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.")
     raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
-
-
-async def get_api_key_info(
-    request: Request,
-    authorization: str | None = Header(None),
-    x_api_key: str | None = Header(None),
-) -> dict:
-    """외부 OpenAI/Anthropic 호환 /v1 엔드포인트 전용 인증 — API 키(sk-afgl-…) 기반.
-
-    `Authorization: Bearer sk-...`(OpenAI SDK) 또는 `x-api-key: sk-...`(Anthropic SDK) 수용.
-    fail-closed: 키 누락/무효/폐기는 모두 401(CLAUDE.md §3). JWT 세션과 별개 경로다.
-    """
-    from app.services.chat import api_key_store as aks
-
-    raw = None
-    if authorization and authorization.startswith("Bearer "):
-        raw = authorization[7:].strip()
-    elif x_api_key:
-        raw = x_api_key.strip()
-    if not raw:
-        raise HTTPException(status_code=401, detail="API 키가 필요합니다 (Authorization: Bearer 또는 x-api-key)")
-
-    info = await aks.verify_key(raw)
-    if info is None:
-        raise HTTPException(status_code=401, detail="유효하지 않은 API 키입니다")
-
-    token_info = {
-        "user_id": info["user_id"],
-        "project_id": info["project_id"],
-        "api_key_id": info["api_key_id"],
-        "source": "api",
-        "username": f"api-key:{info['api_key_id']}",
-        "roles": [],
-        "is_system_admin": False,
-    }
-    request.state.token_info = token_info  # activity_audit_middleware 로깅용
-    return token_info
-
-
-def require_chat_api_host(request: Request) -> None:
-    """외부 /v1 호환 API를 허용 Host(전용 서브도메인)에서만 노출.
-
-    settings.chat_api_hosts 가 설정되면 그 Host 로 들어온 요청만 통과, 그 외는 404(존재 자체를 숨김
-    — 기본 URL과의 충돌·오용 방지). 미설정(빈 목록)이면 전체 허용(개발 편의).
-    """
-    allowed = get_settings().chat_api_host_list
-    if not allowed:
-        return
-    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
-    if host not in allowed:
-        raise HTTPException(status_code=404, detail="Not Found")
 
 
 def require_admin(token_info: dict = Depends(get_token_info)):
@@ -344,13 +349,18 @@ async def get_os_conn(
     )
     scoped_token = token_info["token"]
     project_id = token_info["project_id"]
+    connection_project_id = token_info.get("connection_project_id", project_id)
+    is_system_admin = token_info.get("is_system_admin", False)
     try:
-        conn = keystone.get_openstack_connection(scoped_token, project_id)
+        conn = keystone.get_openstack_connection(scoped_token, connection_project_id)
         conn._afterglow_token = scoped_token
         conn._afterglow_project_id = project_id
+        conn._afterglow_authenticated_project_id = connection_project_id
+        conn._afterglow_is_system_admin = is_system_admin
         conn._afterglow_user_id = token_info.get("user_id", "")
-    except Exception:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+    except Exception as exc:
+        _logger.error("OpenStack connection creation failed in get_os_conn: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail="OpenStack 연결 생성 실패. 잠시 후 다시 시도해 주세요.")
 
     try:
         yield conn

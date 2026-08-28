@@ -50,14 +50,16 @@ function setMatchMedia(reducedMotion: boolean) {
 
 function mockSectionTops(tops: Record<string, number>) {
 	return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-		const top = tops[(this as HTMLElement).id] ?? 999;
+		const isTopStrip = this.classList.contains('top-strip');
+		const top = isTopStrip ? 0 : (tops[this.id] ?? 999);
+		const height = isTopStrip ? 72 : 100;
 		return {
 			top,
-			bottom: top + 100,
+			bottom: top + height,
 			left: 0,
 			right: 0,
 			width: 0,
-			height: 100,
+			height,
 			x: 0,
 			y: top,
 			toJSON: () => ({}),
@@ -156,8 +158,9 @@ describe('LandingPage', () => {
 		expect(content?.tagName).toBe('DIV');
 		expect(container.querySelector('main')).toBeNull();
 		expect(container.querySelector('header')).toBeTruthy();
-		expect(container.querySelector('footer')).toBeTruthy();
-		expect(content?.contains(container.querySelector('footer'))).toBe(true);
+		const pageFooter = container.querySelector<HTMLElement>('.landing-page > footer');
+		expect(pageFooter).toBeTruthy();
+		expect(content?.contains(pageFooter)).toBe(false);
 		await fireEvent.click(skipLink);
 		expect(document.activeElement).toBe(content);
 
@@ -166,7 +169,7 @@ describe('LandingPage', () => {
 		expect(brand?.querySelector('img')?.getAttribute('alt')).toBe('');
 		expect(brand?.querySelector('img')?.getAttribute('src')).toBe('/brand.svg');
 		expect(brand?.textContent).toContain('Test Cloud');
-		expect(container.querySelector('.mega')?.textContent?.trim()).toBe('Test Cloud');
+		expect(container.querySelector('.footer-brand')?.textContent).toContain('Test Cloud');
 
 		const nav = screen.getByRole('navigation', { name: '주요 내비게이션' });
 		const navLinks = Array.from(nav.querySelectorAll<HTMLAnchorElement>('.nav-links a'));
@@ -177,32 +180,36 @@ describe('LandingPage', () => {
 			['화면', '#work'],
 			['문의', '#contact'],
 		]);
-		expect(screen.getAllByRole('link', { name: '콘솔 접속' })).toHaveLength(2);
+		expect(screen.getAllByRole('link', { name: '콘솔 접속' })).toHaveLength(3);
 		expect(screen.getAllByRole('link', { name: '콘솔 접속' }).every((link) => link.getAttribute('href') === '/login')).toBe(true);
 		expect(screen.getByRole('link', { name: '기능 보기' }).getAttribute('href')).toBe('#capabilities');
 
-		const sectionOrder = Array.from(container.querySelectorAll('section')).map(
+		const sectionOrder = Array.from(container.querySelectorAll('#landing-content > section')).map(
 			(section) => section.id || (section.classList.contains('hero') ? 'hero' : 'section'),
 		);
 		expect(sectionOrder).toEqual(['hero', 'overview', 'capabilities', 'workflow', 'section', 'work', 'section', 'contact']);
-		expect(Array.from(container.querySelectorAll('.section-kicker .roman')).map((node) => node.textContent?.trim())).toEqual([
-			'II',
-			'III',
-			'IV',
-			'V',
-			'VI',
-		]);
-		expect(container.querySelector('.quote-panel .roman')?.textContent?.trim()).toBe('VII');
-		expect(container.querySelector('#contact .eyebrow')?.textContent?.trim()).toBe('VIII / Console ready');
-		expect(Array.from(container.querySelectorAll('h1, h2')).map((heading) => heading.textContent?.trim())).toEqual([
-			'연구실 클라우드를 더 쉽게 제공하는 운영 콘솔',
-			'클라우드를 제공하는 일은 자원 생성보다 넓습니다',
-			'연구 클라우드 제공에 필요한 표면을 한데 모읍니다',
-			'연구실마다 다른 사용 흐름을 필터처럼 꺼내 봅니다',
-			'제공 방식은 네 단계로 정리됩니다',
-			'실제 콘솔은 운영자가 빠르게 읽을 수 있어야 합니다',
-			'연구실 클라우드 제공 방식을 정리할 준비가 되셨나요?',
-		]);
+		expect(container.querySelectorAll('.roman, .collage')).toHaveLength(0);
+		expect(container.querySelector('#contact .eyebrow')?.textContent?.trim()).toBe('Console ready');
+		expect(container.querySelector('h1')?.textContent).toContain('연구실 클라우드를');
+		expect(container.querySelector('h1')?.textContent).toContain('더 쉽게 제공하는 운영 콘솔');
+		expect(Array.from(container.querySelectorAll('.section-label > span')).map((label) => label.textContent?.trim())).toEqual([
+				'운영의 범위',
+				'제공 기능',
+				'워크플로우',
+				'제공 방식',
+				'제품 화면',
+				'사용자',
+			]);
+		for (const heading of [
+				'클라우드를 제공하는 일은',
+				'연구 클라우드 제공에 필요한',
+				'연구실마다 다른 사용 흐름을',
+				'제공 방식은 네 단계로 정리됩니다',
+				'실제 콘솔은 운영자가',
+				'연구실 클라우드 제공 방식을',
+			]) {
+				expect(container.textContent).toContain(heading);
+			}
 		expect(container.textContent).toContain('Afterglow는 교수, 연구원, 실습팀이 필요한 컴퓨팅 자원과 공유 스토리지, Kubernetes 환경, AI/ML 라이브러리 레이어를 한 곳에서 신청하고 운영하도록 설계된 클라우드 포털입니다.');
 		expect(container.textContent).toContain('데모, PoC, 학내 연구실 배포 논의를 위해 연락 주세요.');
 	});
@@ -212,12 +219,13 @@ describe('LandingPage', () => {
 		expect(screen.getAllByRole('link', { name: '콘솔 접속' }).every((link) => link.getAttribute('href') === '/dashboard')).toBe(true);
 	});
 
-	it('keeps all workflow cards mounted while filtering and updates progress and pressed state', async () => {
+	it('keeps all workflow rows mounted in one list while filtering and updates pressed state', async () => {
 		const { container } = renderLanding();
 		const cards = workflowCards(container);
 		expect(cards).toHaveLength(5);
 		expect(mutedWorkflowCount(container)).toBe(0);
-		expect(container.querySelector('#workflow-progress')?.getAttribute('style')).toContain('width: 25%');
+		expect(container.querySelectorAll('.workflow-list')).toHaveLength(1);
+		expect(container.querySelector('#workflow-progress')).toBeNull();
 		expect(Array.from(container.querySelectorAll('.lab-card h3')).map((heading) => heading.textContent?.trim())).toEqual([
 			'컴퓨팅 자원 신청',
 			'공유 데이터 공간',
@@ -227,18 +235,17 @@ describe('LandingPage', () => {
 		]);
 
 		const filterGroup = screen.getByRole('group', { name: '워크플로우 필터' });
-		const chooseFilter = async (label: string, width: string, muted: number) => {
+		const chooseFilter = async (label: string, muted: number) => {
 			await fireEvent.click(screen.getByRole('button', { name: label }));
 			expect(workflowCards(container)).toHaveLength(5);
 			expect(mutedWorkflowCount(container)).toBe(muted);
-			expect(container.querySelector('#workflow-progress')?.getAttribute('style')).toContain(`width: ${width}`);
 			expect(filterGroup.querySelector(`[aria-pressed="true"]`)?.textContent?.trim()).toBe(label);
 		};
 
-		await chooseFilter('컴퓨팅', '50%', 3);
-		await chooseFilter('데이터', '75%', 4);
-		await chooseFilter('운영', '100%', 3);
-		await chooseFilter('전체', '25%', 0);
+		await chooseFilter('컴퓨팅', 3);
+		await chooseFilter('데이터', 4);
+		await chooseFilter('운영', 3);
+		await chooseFilter('전체', 0);
 	});
 
 	it('updates the scrollspy from overview through contact with one active location', async () => {
@@ -305,7 +312,7 @@ describe('LandingPage', () => {
 
 		const inquiry = screen.getByRole('link', { name: '이메일 문의 보내기' });
 		expect(inquiry.getAttribute('href')).toBe(`mailto:${email}`);
-		expect(inquiry.textContent?.trim()).toBe('문의');
+			expect(inquiry.textContent?.trim()).toBe(email);
 	});
 
 	it('keeps refined compute, Kubernetes, method-visual, and footer contracts', () => {
@@ -338,28 +345,22 @@ describe('LandingPage', () => {
 		expect(dataImage?.getAttribute('aria-label')).toBe('공유 데이터 공간과 스냅샷 흐름 콜라주');
 		expect(dataImage?.getAttribute('role')).toBe('img');
 
-		const quoteImages = Array.from(container.querySelectorAll<SVGElement>('.quote-visual .plate svg.plate-graphic'));
-		expect(quoteImages.map((image) => image.getAttribute('data-plate'))).toEqual([
-			'kubernetes',
-			'network-topology',
-		]);
-		expect(quoteImages[1]?.getAttribute('aria-label')).toBe('프로젝트와 워크로드를 잇는 라우터 토폴로지 콜라주');
-		quoteImages.forEach((image) => {
-			expect(image.getAttribute('role')).toBe('img');
-		});
+			const quoteImages = Array.from(container.querySelectorAll<SVGElement>('.quote-visual svg.plate-graphic'));
+			expect(quoteImages.map((image) => image.getAttribute('data-plate'))).toEqual(['professor']);
+			expect(quoteImages[0]?.getAttribute('aria-label')).toBe('교수자와 연구원이 프로젝트 환경을 함께 운영하는 화면');
+			quoteImages.forEach((image) => {
+				expect(image.getAttribute('role')).toBe('img');
+			});
 
-		const methodVisuals = Array.from(container.querySelectorAll<SVGElement>('.method-icon'));
-		expect(methodVisuals).toHaveLength(2);
-		expect(methodVisuals.map((visual) => visual.getAttribute('aria-label'))).toEqual([
-			'실험 실행, 지표, 로그 관측 아이콘',
-			'레이어와 스냅샷 재사용 아이콘',
-		]);
-		methodVisuals.forEach((visual) => {
-			expect(visual.getAttribute('role')).toBe('img');
-			expect(visual.textContent?.trim()).toBe('');
-			expect(visual.getAttribute('viewBox')).toBe('0 0 320 240');
-			expect(visual.querySelector('text')).toBeNull();
-		});
+			const methodSteps = Array.from(container.querySelectorAll<HTMLElement>('.method-step'));
+			expect(methodSteps).toHaveLength(4);
+			expect(methodSteps.map((step) => step.querySelector('.method-meta b')?.textContent?.trim())).toEqual(['01', '02', '03', '04']);
+			expect(methodSteps.map((step) => step.querySelector('h3')?.textContent?.trim())).toEqual([
+				'연구 목적에 맞는 프로젝트를 만든다',
+				'컴퓨팅과 데이터 자원을 배정한다',
+				'실험 환경을 실행하고 관측한다',
+				'레이어와 스냅샷으로 다시 쓴다',
+			]);
 
 		const audienceGroup = screen.getByRole('list', { name: '대상 사용자와 조직' });
 		const audienceGlyphs = Array.from(audienceGroup.querySelectorAll<HTMLElement>('.glyph'));
@@ -373,7 +374,7 @@ describe('LandingPage', () => {
 		expect(audienceGlyphs.map((glyph) => glyph.textContent?.trim())).not.toContain('GPU');
 		expect(audienceGlyphs.map((glyph) => glyph.textContent?.trim())).not.toContain('API');
 
-		const footer = container.querySelector<HTMLElement>('footer');
+			const footer = container.querySelector<HTMLElement>('.landing-page > footer');
 		expect(footer?.textContent).toContain('© 2026 Test Cloud. 연구 클라우드 운영 콘솔.');
 		const footerColumns = Array.from(footer?.querySelectorAll<HTMLElement>('.footer-grid > div') ?? []);
 		expect(footerColumns).toHaveLength(2);
@@ -395,9 +396,7 @@ describe('LandingPage', () => {
 
 	it('uses only theme-aware inline artwork for the product-proof image slots', () => {
 		const { container } = renderLanding();
-		const proofImages = Array.from(
-			container.querySelectorAll<SVGElement>('.hero-wide svg.plate-graphic, #work svg.plate-graphic'),
-		);
+			const proofImages = Array.from(container.querySelectorAll<SVGElement>('.overview-screen svg.plate-graphic, #work svg.plate-graphic'));
 		expect(proofImages.map((image) => image.getAttribute('data-plate'))).toEqual([
 			'console',
 			'kubernetes',
@@ -494,18 +493,13 @@ describe('LandingPage', () => {
 
 	it('renders all artwork slots as theme-aware inline plate graphics', () => {
 		const { container } = renderLanding();
-		const heroGraphics = Array.from(
-			container.querySelectorAll<SVGElement>('.collage figure svg.plate-graphic'),
-		);
-		expect(heroGraphics).toHaveLength(3);
-		heroGraphics.forEach((graphic) => {
-			expect(graphic.getAttribute('role')).toBe('img');
-			expect(graphic.getAttribute('data-plate')).toBeTruthy();
-		});
+			expect(container.querySelector('.hero-board .ops-board')).toBeTruthy();
+			expect(container.querySelector('.hero-board svg.plate-graphic')).toBeNull();
 
-		const overviewGraphic = container.querySelector<SVGElement>('#overview figure svg.plate-graphic');
-		expect(overviewGraphic?.getAttribute('role')).toBe('img');
-		const workflowGraphic = container.querySelector<SVGElement>('.lab-card-surface svg.plate-graphic');
+			const overviewGraphic = container.querySelector<SVGElement>('#overview figure svg.plate-graphic');
+			expect(overviewGraphic?.getAttribute('role')).toBe('img');
+			expect(overviewGraphic?.getAttribute('data-plate')).toBe('console');
+		const workflowGraphic = container.querySelector<SVGElement>('.lab-card svg.plate-graphic');
 		expect(workflowGraphic?.getAttribute('data-plate')).toBeTruthy();
 	});
 });

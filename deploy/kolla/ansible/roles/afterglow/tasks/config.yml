@@ -1,40 +1,245 @@
 ---
-- name: Config | Ensure afterglow config directory exists
+- name: Config | Resolve Afterglow service project ID
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: openstack.cloud.project_info
+    module_args:
+      auth: "{{ openstack_auth }}"
+      name: "{{ afterglow_service_project_name }}"
+  register: afterglow_service_project_lookup
+  changed_when: false
+  no_log: true
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_service_project_id | default('') | length == 0
+
+- name: Config | Set resolved Afterglow service project ID
+  ansible.builtin.set_fact:
+    afterglow_service_project_id: "{{ afterglow_service_project_lookup.projects[0].id }}"
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_service_project_id | default('') | length == 0
+    - afterglow_service_project_lookup.projects | default([]) | length == 1
+
+- name: Config | Require exactly one Afterglow service project
+  ansible.builtin.assert:
+    that:
+      - afterglow_service_project_id | default('') | length > 0
+    fail_msg: "Afterglow service project '{{ afterglow_service_project_name }}' must exist before configuration rendering"
+  when: inventory_hostname in groups['afterglow']
+
+- name: Config | Ensure Afterglow runtime config directory exists
   become: true
   ansible.builtin.file:
-    path: "{{ afterglow_config_dir }}"
+    path: "{{ afterglow_runtime_config_dir }}"
     state: directory
     mode: "0750"
     owner: root
     group: root
   when: inventory_hostname in groups['afterglow']
 
-- name: Config | Render afterglow.conf
+- name: Config | Protect operator-owned source files
+  ansible.builtin.assert:
+    that:
+      - afterglow_operator_config_source != afterglow_operator_frontend_config_source
+      - afterglow_operator_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_generated_config_name
+      - afterglow_operator_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_operator_config_name
+      - afterglow_operator_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_kolla_config_name
+      - afterglow_operator_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_operator_frontend_config_name
+      - afterglow_operator_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_frontend_config_name
+      - afterglow_operator_frontend_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_generated_config_name
+      - afterglow_operator_frontend_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_operator_config_name
+      - afterglow_operator_frontend_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_kolla_config_name
+      - afterglow_operator_frontend_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_operator_frontend_config_name
+      - afterglow_operator_frontend_config_source != afterglow_runtime_config_dir ~ '/' ~ afterglow_frontend_config_name
+    fail_msg: "Afterglow operator source paths must not overlap generated runtime artifacts"
+  run_once: true
+
+- name: Config | Check operator configuration source
+  ansible.builtin.stat:
+    path: "{{ afterglow_operator_config_source }}"
+  register: afterglow_operator_config_source_stat
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+
+- name: Config | Require readable operator configuration source
+  ansible.builtin.assert:
+    that:
+      - afterglow_operator_config_source_stat.stat.isreg | default(false)
+      - afterglow_operator_config_source_stat.stat.readable | default(false)
+    fail_msg: "afterglow_operator_config_source must be a readable regular file on the Kolla deployment host"
+  no_log: true
+  run_once: true
+  when: afterglow_operator_config_source_stat.stat.exists | default(false)
+
+- name: Config | Clear stale sanitized operator configuration staging file
   become: true
-  ansible.builtin.template:
-    src: afterglow.conf.j2
-    dest: "{{ afterglow_config_dir }}/afterglow.conf"
+  ansible.builtin.file:
+    path: "{{ afterglow_operator_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+
+- name: Config | Stage and validate sanitized operator configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/sanitize_operator_config.py"
+      - "{{ afterglow_operator_config_source }}"
+      - "{{ afterglow_operator_config_staging_path }}"
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_config_source_stat.stat.exists | default(false)
+
+- name: Config | Copy operator configuration override
+  become: true
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', afterglow_operator_config_staging_path) }}"
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}"
     mode: "0640"
     owner: root
     group: root
-  when: inventory_hostname in groups['afterglow']
-  notify:
-    - Restart afterglow-backend container
-    - Restart afterglow-worker container
+  no_log: true
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_operator_config_source_stat.stat.exists | default(false)
 
-- name: Config | Ensure haproxy services.d directory exists
+- name: Config | Create empty operator configuration layer
+  become: true
+  ansible.builtin.copy:
+    content: "# No operator configuration override is configured.\n"
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}"
+    mode: "0640"
+    owner: root
+    group: root
+  when:
+    - inventory_hostname in groups['afterglow']
+    - not (afterglow_operator_config_source_stat.stat.exists | default(false))
+
+- name: Config | Remove sanitized operator configuration staging file
   become: true
   ansible.builtin.file:
-    path: "{{ afterglow_haproxy_services_d }}"
-    state: directory
-    mode: "0755"
-  when: inventory_hostname in groups['haproxy']
+    path: "{{ afterglow_operator_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
 
-- name: Config | Render haproxy afterglow.cfg
+- name: Config | Check frontend public configuration source
+  ansible.builtin.stat:
+    path: "{{ afterglow_operator_frontend_config_source }}"
+  register: afterglow_operator_frontend_config_source_stat
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+
+- name: Config | Require readable frontend public configuration source
+  ansible.builtin.assert:
+    that:
+      - afterglow_operator_frontend_config_source_stat.stat.isreg | default(false)
+      - afterglow_operator_frontend_config_source_stat.stat.readable | default(false)
+    fail_msg: "afterglow_operator_frontend_config_source must be a readable regular file on the Kolla deployment host"
+  no_log: true
+  run_once: true
+  when: afterglow_operator_frontend_config_source_stat.stat.exists | default(false)
+
+- name: Config | Clear stale frontend public staging file
+  become: true
+  ansible.builtin.file:
+    path: "{{ afterglow_operator_frontend_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+
+- name: Config | Project frontend source onto the public allowlist
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/render_frontend_config.py"
+      - "{{ afterglow_operator_frontend_config_source }}"
+      - "{{ afterglow_operator_frontend_config_staging_path }}"
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+  when: afterglow_operator_frontend_config_source_stat.stat.exists | default(false)
+
+- name: Config | Copy frontend public operator layer
+  become: true
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', afterglow_operator_frontend_config_staging_path) }}"
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_frontend_config_name }}"
+    mode: "0644"
+    owner: root
+    group: root
+  no_log: true
+  when:
+    - inventory_hostname in groups['afterglow']
+    - afterglow_operator_frontend_config_source_stat.stat.exists | default(false)
+
+- name: Config | Create empty frontend public operator layer
+  become: true
+  ansible.builtin.copy:
+    content: "# No frontend public configuration override is configured.\n"
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_operator_frontend_config_name }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when:
+    - inventory_hostname in groups['afterglow']
+    - not (afterglow_operator_frontend_config_source_stat.stat.exists | default(false))
+
+- name: Config | Remove frontend public staging file
+  become: true
+  ansible.builtin.file:
+    path: "{{ afterglow_operator_frontend_config_staging_path }}"
+    state: absent
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['deployment'][0] }}"
+
+- name: Config | Render generated Afterglow base layer
   become: true
   ansible.builtin.template:
-    src: haproxy-afterglow.cfg.j2
-    dest: "{{ afterglow_haproxy_services_d }}/afterglow.cfg"
-    mode: "0644"
-  when: inventory_hostname in groups['haproxy']
-  notify: Restart haproxy container
+    src: afterglow.conf.j2
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}"
+    mode: "0640"
+    owner: root
+    group: root
+  no_log: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Config | Render final Kolla configuration override
+  become: true
+  ansible.builtin.template:
+    src: afterglow.kolla.conf.j2
+    dest: "{{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}"
+    mode: "0640"
+    owner: root
+    group: root
+  no_log: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Config | Render merged public frontend configuration
+  become: true
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/render_frontend_config.py
+      {{ afterglow_runtime_config_dir }}/{{ afterglow_generated_config_name }}
+      {{ afterglow_runtime_config_dir }}/{{ afterglow_operator_config_name }}
+      {{ afterglow_runtime_config_dir }}/{{ afterglow_operator_frontend_config_name }}
+      {{ afterglow_runtime_config_dir }}/{{ afterglow_kolla_config_name }}
+      {{ afterglow_runtime_config_dir }}/{{ afterglow_frontend_config_name }}
+  register: afterglow_frontend_config_render
+  changed_when: >-
+    afterglow_frontend_config_render.rc == 0 and
+    ((afterglow_frontend_config_render.stdout | trim | default('{}', true) | from_json).changed
+    | default(false) | bool)
+  when: inventory_hostname in groups['afterglow']

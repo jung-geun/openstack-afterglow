@@ -1,11 +1,8 @@
 """Waygate API routers — lazy import to reduce startup time."""
 
 _ROUTERS = {
-    "waygate_servers_router": ".servers",
-    "waygate_clients_router": ".clients",
     "waygate_agent_router": ".agent",
-    "waygate_attachments_router": ".attachments",
-    "waygate_migration_router": ".migration",
+    "waygate_proxy_router": ".proxy",
 }
 
 

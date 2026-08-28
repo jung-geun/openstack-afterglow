@@ -879,7 +879,7 @@ def _make_monitoring_settings(gpu: bool = False, enabled: bool = True, cidr: str
     s.default_network_id = ""
     s.default_network_external_id = ""
     s.default_network_cidr = ""
-    s.k3s_callback_base_url = ""
+    s.instance_health_callback_base_url = ""
     s.instance_volume_type = ""
     s.boot_volume_size_gb = 50
     return s

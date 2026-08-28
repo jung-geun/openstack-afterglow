@@ -18,7 +18,7 @@ os.environ.setdefault("SERVICE_SWIFT_ENABLED", "true")
 os.environ.setdefault("SERVICE_WAYGATE_ENABLED", "true")
 os.environ.setdefault("SERVICE_CHAT_ENABLED", "true")
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -147,11 +147,19 @@ def _reset_rate_limiter():
 
 @pytest.fixture(autouse=True)
 def _fake_redis_global(monkeypatch):
-    """Inject one fakeredis backend for every cache path used by unit tests."""
+    """Use fakeredis by default; functional tests opt into the disposable real Redis."""
+    from app.services import cache as cache_mod
+
+    if os.environ.get("AFTERGLOW_TEST_REAL_REDIS") == "1":
+        cache_mod.set_backend(None)
+        try:
+            yield None
+        finally:
+            cache_mod.set_backend(None)
+        return
+
     import fakeredis.aioredis as _fakeredis
 
-    from app.services import cache as cache_mod
-    from app.services import k3s_cluster
     from app.services.cache.redis_backend import RedisBackend
 
     fake = _fakeredis.FakeRedis(decode_responses=True)
@@ -164,7 +172,6 @@ def _fake_redis_global(monkeypatch):
     monkeypatch.setattr(cache_mod, "_get_redis", _get_fake, raising=False)
     monkeypatch.setattr(cache_mod, "_get_client", lambda: fake, raising=False)
     monkeypatch.setattr("app.services.session_store._get_redis", _get_fake, raising=False)
-    monkeypatch.setattr(k3s_cluster, "_get_client", lambda: fake, raising=False)
     try:
         yield fake
     finally:
@@ -174,6 +181,16 @@ def _fake_redis_global(monkeypatch):
 @pytest.fixture
 def mock_conn():
     return make_mock_conn()
+
+
+def patch_redis_cache_miss(monkeypatch):
+    """Force cache misses: cache._get_client() returns a mock whose get/setex/delete are no-ops."""
+    fake = AsyncMock()
+    fake.get.return_value = None
+    fake.setex.return_value = None
+    fake.delete.return_value = None
+    monkeypatch.setattr("app.services.cache._get_client", lambda: fake)
+    return fake
 
 
 @pytest.fixture

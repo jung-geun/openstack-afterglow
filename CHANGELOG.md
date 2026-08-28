@@ -7,6 +7,27 @@
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-08-28
+
+### Added
+
+- **관리자 서브넷 운영 상세** — allocation pool, 할당 IP·포트, Neutron binding host와 DHCP agent 배치를 확인하는 관리자 API·화면을 추가하고 네트워크 목록에 실제 CIDR을 표시한다.
+
+### Changed
+
+- **시스템 관리자 외부 프로젝트 조회** — 홈 프로젝트에서 검증한 시스템 관리자 토큰을 유지하면서 명시한 대상 프로젝트를 논리적 리소스 범위로 사용해 별도 tenant role 없이 관리자 상세 조회를 수행한다.
+- **Kolla 캐시를 stock Valkey로 통일** — Afterglow, Drover, Lumen, Palimpsest, Waygate가 Kolla Valkey를 공용 Redis 호환 캐시로 사용하고, 누락된 서비스·inventory·비밀번호를 배포 전 검사한다.
+- **관리자 Swift 집계에 시간 예산 적용** — 프로젝트별 account metadata를 제한된 동시성과 deadline으로 집계해 Swift 장애가 관리자 overview 전체를 30초 이상 지연하지 않게 한다.
+- **Kolla 생명주기 및 기본 설정 동기화** — Kolla Ansible 플러그인 생명주기 및 기본 런타임 변수 동기화를 정비하고 인벤토리 프리플라이트, 풀 의미론, 업그레이드 순서를 검증한다.
+- **자동 런타임 배치 정책 동기화** — 배포·재구성·업그레이드 생명주기 과정에서 런타임 배치 정책(`import_runtime_infrastructure_settings.py`)을 동기화하도록 계약을 확장한다.
+
+### Fixed
+
+- **동시 401 세션 소실 방지** — 이미 교체된 access token의 늦은 401은 최신 토큰으로 재시도하고, 동일 토큰 세대의 refresh 실패를 합쳐 401 fan-out이 유효한 세션을 반복 회전·삭제하지 않게 한다.
+- **관리자 버전 API 500 제거** — Drover 분리 뒤 삭제된 전역 `k3s_version` 설정을 응답·타입·화면에서 제거해 관리자 overview가 현재 런타임 계약으로 응답한다.
+- **Dependabot 보안 취약점 패키지 조치** — 프론트엔드/백엔드 의존성 및 잠금 파일의 보안 취약점을 조치하고 호환성을 확보한다.
+- **백엔드 프로덕션 이미지 패키징 수정** — 백엔드 프로덕션 Docker 이미지에 runtime placement policy 스크립트(`scripts/import_runtime_infrastructure_settings.py`)가 포함되도록 `/app/scripts/` 경로 복사 단계를 추가한다.
+
 ## [1.17.0] - 2026-07-31
 
 ### Added

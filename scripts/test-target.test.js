@@ -285,3 +285,151 @@ test("--validate checks the complete target catalog", async () => {
 		cleanupRun(result);
 	}
 });
+
+test("waygate target runs from backend root", async () => {
+	const result = await runCli(["--dry-run", "waygate"])
+	try {
+		assert.equal(result.signal, null)
+		assert.equal(result.code, 0, result.stderr || result.stdout)
+		assert.match(result.stdout, /waygate \[backend\]/)
+		assert.match(result.stdout, /cwd: backend/)
+		assert.match(result.stdout, /cmd: uv run python -m pytest tests\/contracts\/test_waygate_proxy\.py tests\/contracts\/test_waygate_agent\.py -v/)
+		assert.deepEqual(result.events, [])
+	} finally {
+		cleanupRun(result)
+	}
+})
+
+test("service source dirs and root Docker stages cannot return and SDK dependencies use immutable subdirectories", () => {
+	for (const service of ["drover", "lumen", "waygate"]) {
+		const serviceDir = path.join(rootDir, "services", service);
+		assert.equal(
+			fs.existsSync(serviceDir),
+			false,
+			`services/${service} directory must be removed`
+		);
+	}
+
+	const dockerfileContent = fs.readFileSync(path.join(rootDir, "Dockerfile"), "utf-8");
+	for (const stage of ["waygate-builder", "drover-builder", "lumen-builder"]) {
+		assert.equal(
+			dockerfileContent.includes(`AS ${stage}`),
+			false,
+			`Dockerfile must not contain stage AS ${stage}`
+		);
+	}
+
+	const pyprojectContent = fs.readFileSync(path.join(rootDir, "backend", "pyproject.toml"), "utf-8");
+	for (const sdk of ["waygate-sdk", "drover-sdk", "lumen-sdk"]) {
+		const pattern = new RegExp(`${sdk} @ git\\+https://github\\.com/openstack-afterglow/[a-z-]+\\.git@[0-9a-f]{40}#subdirectory=sdk`);
+		assert.ok(
+			pattern.test(pyprojectContent),
+			`pyproject.toml must declare ${sdk} with immutable SHA and #subdirectory=sdk`
+		);
+	}
+})
+test("package.json contains exact command contract scripts and no obsolete scripts", () => {
+	const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf-8"));
+	const scripts = pkg.scripts;
+
+	assert.equal(scripts["test:unit:backend"], "cd backend && AFTERGLOW_ALLOW_INSECURE=1 uv run python -m pytest tests/ -v --ignore=tests/integration --ignore=tests/contracts -m \"not db and not contract\"");
+	assert.equal(scripts["test:unit:frontend"], "cd frontend && npm test");
+	assert.equal(scripts["test:unit"], "npm run test:target:js && npm run test:unit:backend && npm run test:unit:frontend");
+	assert.equal(scripts["test:contract"], "node scripts/test-target.js contracts");
+	assert.equal(scripts["test:functional"], "node scripts/test-db.js");
+	assert.equal(scripts["test:orchestration"], "node --test scripts/test-target.test.js scripts/test-db.test.js && node scripts/test-target.js --validate");
+	assert.equal(scripts["test:kolla:contract"], "node --test scripts/kolla-contract.test.js");
+	assert.equal(scripts["test:target:js"], "npm run test:orchestration && npm run test:kolla:contract");
+	assert.equal(scripts["test:live"], "cd backend && AFTERGLOW_ALLOW_INSECURE=1 uv run python -m pytest tests/integration -v");
+	assert.equal(scripts["test:all"], "npm run test:unit && npm run test:contract && npm run test:functional");
+	assert.equal(scripts["test:gate"], "npm run test:all && npm run lint:backend");
+
+	assert.equal(scripts["test:backend:app"], undefined);
+	assert.equal(scripts["test:backend:integration"], undefined);
+	assert.equal(scripts["test:contracts"], undefined);
+	for (const key of Object.keys(scripts)) {
+		assert.ok(!key.startsWith("test:integration:"), `obsolete script ${key} must be removed`);
+	}
+});
+
+test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
+	const workflow = fs.readFileSync(path.join(rootDir, ".github", "workflows", "test.yml"), "utf-8");
+	const hasRootLockfile = ["package-lock.json", "npm-shrinkwrap.json"].some((name) =>
+		fs.existsSync(path.join(rootDir, name))
+	);
+
+	assert.match(workflow, /name: Test target orchestration\s+run: npm run test:orchestration/);
+	assert.match(workflow, /name: Kolla contract tests\s+run: npm run test:kolla:contract/);
+	assert.match(workflow, /if ! STATUS=\$\(curl/);
+	assert.match(workflow, /Keystone probe transport failed or timed out/);
+	if (!hasRootLockfile) {
+		assert.doesNotMatch(workflow, /cache:\s*npm/);
+		assert.doesNotMatch(workflow, /run:\s*npm ci/);
+	}
+
+	const osInterfaceFallbacks = Array.from(
+		workflow.matchAll(/vars\.AFTERGLOW_OS_INTERFACE\s*\|\|\s*'([^']+)'/g),
+		(m) => m[1]
+	);
+	assert.deepEqual(osInterfaceFallbacks, ["public", "public"]);
+});
+
+test("pull requests cannot schedule the self-hosted image build matrix", () => {
+	const workflow = fs.readFileSync(path.join(rootDir, ".github", "workflows", "docker-build.yml"), "utf-8");
+	const buildStart = workflow.indexOf("\n  build:");
+	const manifestStart = workflow.indexOf("\n  manifest:");
+	const buildJob = workflow.slice(buildStart, manifestStart);
+
+	assert.ok(buildStart >= 0 && manifestStart > buildStart, "docker workflow build job must exist");
+	assert.match(buildJob, /runs-on: \$\{\{ matrix\.runner \}\}/);
+	assert.match(
+		buildJob,
+		/if: needs\.changes\.outputs\.is_pr != 'true' && needs\.changes\.outputs\.targets != '\[\]'/
+	);
+});
+
+test("contract tests live in tests/contracts/ and do not overlap with unit collection", () => {
+	const contractDir = path.join(rootDir, "backend", "tests", "contracts");
+	assert.ok(fs.existsSync(contractDir), "backend/tests/contracts directory must exist");
+	assert.ok(fs.existsSync(path.join(contractDir, "conftest.py")), "backend/tests/contracts/conftest.py must exist");
+
+	const expectedContractFiles = [
+		"test_service_proxy.py",
+		"test_drover_proxy.py",
+		"test_waygate_proxy.py",
+		"test_waygate_agent.py",
+		"test_lumen_proxy.py",
+		"test_palimpsest_hub_proxy.py",
+		"test_service_sdk_dependency_sources.py",
+		"test_mcp_stage2_adapters.py",
+		"test_ingress_root_path_coverage.py",
+		"test_k3s_shell_proxy.py",
+		"test_mcp_lumen_bridge.py"
+	];
+
+	for (const file of expectedContractFiles) {
+		assert.ok(
+			fs.existsSync(path.join(contractDir, file)),
+			`contract test file ${file} must exist in backend/tests/contracts/`
+		);
+		assert.equal(
+			fs.existsSync(path.join(rootDir, "backend", "tests", file)),
+			false,
+			`contract test file ${file} must no longer exist directly in backend/tests/`
+		);
+	}
+});
+
+test("live targets replace legacy integration target names", async () => {
+	const targetsJs = require("./test-target.js");
+
+	const liveTargets = ["live:auth", "live:admin", "live:compute", "live:network", "live:storage", "live:layers"];
+	for (const name of liveTargets) {
+		assert.ok(name in targetsJs.targets, `target ${name} must exist`);
+		const legacyName = "integration:" + name.split(":")[1];
+		assert.ok(!(legacyName in targetsJs.targets), `legacy target ${legacyName} must be removed`);
+	}
+
+	const result = await runCli(["integration:auth"]);
+	assert.notEqual(result.code, 0, "running legacy integration:auth target must fail");
+});

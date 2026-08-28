@@ -32,8 +32,9 @@ async def test_get_network_detail(client):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_get_topology(client):
     resp = await client.get("/api/v1/networks/topology")
-    # 토폴로지 조회가 실패할 수 있음 (캐시 누락 등)
-    assert resp.status_code in (200, 500)
+    # Keystone availability is external to topology correctness. Authentication
+    # fails closed with 503 on transient validation outages; 500 remains a defect.
+    assert resp.status_code in (200, 503)
 
 
 # ─────────────────────────────────────────────────────────────────

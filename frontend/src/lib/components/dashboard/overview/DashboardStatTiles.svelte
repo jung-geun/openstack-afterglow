@@ -101,8 +101,8 @@
 	{:else}
 		<StatTile
 			label="Drover 클러스터"
-			value={k3sStats?.active ?? '—'}
-			unit={k3sStats ? '활성' : undefined}
+			value={k3sStats?.available === false ? '사용할 수 없음' : (k3sStats?.active ?? '—')}
+			unit={k3sStats && k3sStats.available !== false ? '활성' : undefined}
 			accent="blue"
 		>
 			{#snippet icon()}

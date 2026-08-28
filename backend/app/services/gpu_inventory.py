@@ -1,7 +1,4 @@
-"""GPU 인벤토리 수집 유틸리티 — FastAPI 의존 없음.
-
-app.worker, app.notion_worker에서 안전하게 import 가능.
-"""
+"""GPU inventory helpers without FastAPI dependencies."""
 
 from __future__ import annotations
 
@@ -495,3 +492,83 @@ def build_alias_to_device_name_map() -> dict[str, str]:
                     # 정규화 키도 등록 (소문자, 구분자 제거) — exact match 우선 보장을 위해 setdefault
                     alias_map.setdefault(_normalize_alias_value(alias), name)
     return alias_map
+
+
+def normalize_gpu_alias(alias: str) -> str:
+    """GPU alias를 대표(canonical) 이름으로 정규화."""
+    if not alias:
+        return ""
+    if "audio" in alias.lower():
+        return ""
+    import re
+
+    return re.sub(r"[^a-zA-Z0-9]", "", alias).upper()
+
+
+async def get_all_gpu_aliases() -> list[str]:
+    """클러스터의 모든 GPU PCI alias 반환 (flavor extra_specs + Placement API 통합)."""
+    import asyncio
+
+    from app.database import is_db_available
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning("GPU 카탈로그 DB overlay 갱신 실패 — 기존 alias map으로 계속 진행", exc_info=True)
+
+    from app.config import get_settings
+    from app.services import nova
+
+    def _collect():
+        import openstack
+
+        s = get_settings()
+        admin_conn = openstack.connect(
+            load_envvars=False,
+            load_yaml_config=False,
+            auth_url=s.os_auth_url,
+            auth_type="password",
+            username=s.os_username,
+            password=s.os_password,
+            project_name=s.os_project_name,
+            user_domain_name=s.os_user_domain_name,
+            project_domain_name=s.os_project_domain_name,
+            region_name=s.os_region_name,
+            api_timeout=30,
+            verify=s.ssl_verify,
+        )
+        try:
+            from app.api.identity.admin_gpu import build_device_name_to_alias_map
+
+            aliases: set[str] = set()
+
+            all_flavors = nova.list_flavors(admin_conn)
+            for f in all_flavors:
+                alias_str = (f.extra_specs or {}).get("pci_passthrough:alias", "")
+                if alias_str:
+                    for entry in alias_str.split(","):
+                        entry = entry.strip()
+                        if ":" in entry:
+                            alias = entry.rpartition(":")[0].strip()
+                            norm = normalize_gpu_alias(alias)
+                            if norm:
+                                aliases.add(norm)
+
+            device_to_alias = build_device_name_to_alias_map()
+            gpu_data = _collect_gpu_hosts(admin_conn)
+            for gpu_type in gpu_data.get("gpu_types", []):
+                device_name = gpu_type["device_name"]
+                alias = device_to_alias.get(device_name)
+                if alias:
+                    norm = normalize_gpu_alias(alias)
+                    if norm:
+                        aliases.add(norm)
+
+            return sorted(aliases)
+        finally:
+            admin_conn.close()
+
+    return await asyncio.to_thread(_collect)

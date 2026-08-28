@@ -7,6 +7,7 @@ const readSource = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 const landingRouteSource = readSource('src/routes/+page.svelte');
 const landingComponentSource = readSource('src/lib/components/landing/LandingPage.svelte');
+const landingOpsBoardSource = readSource('src/lib/components/landing/LandingOpsBoard.svelte');
 const landingSource = `${landingRouteSource}\n${landingComponentSource}`;
 const loginRouteSource = readSource('src/routes/login/+page.svelte');
 const loginComponentSource = readSource('src/lib/components/auth/LoginPage.svelte');
@@ -58,7 +59,8 @@ describe('public landing and login route source contracts', () => {
 			'문의',
 			'콘솔 접속',
 			'기능 보기',
-			'연구실 클라우드를 더 쉽게 제공하는',
+				'연구실 클라우드를',
+				'더 쉽게 제공하는',
 			'GPU 가속 VM에 필요한 GPU, vCPU, 메모리, 스토리지를 프로젝트 쿼터 안에서 배정해 개별 실험 환경을 바로 준비합니다.',
 			'K8s 클러스터 노드를 구성한 뒤 수업·연구 프로젝트의 Pod와 워크로드를 배포하고 상태를 콘솔에서 추적합니다.',
 			'AI/ML 라이브러리 레이어',
@@ -68,7 +70,8 @@ describe('public landing and login route source contracts', () => {
 			'클러스터 실습',
 			'관측 가능한 운영',
 			'보안과 감사',
-			'연구실 클라우드 제공 방식을 정리할 준비가 되셨나요?',
+				'연구실 클라우드 제공 방식을',
+				'정리할 준비가 되셨나요?',
 			'© 2026 {siteName}. 연구 클라우드 운영 콘솔.',
 		]) {
 			expect(landingSource).toContain(copy);
@@ -83,7 +86,6 @@ describe('public landing and login route source contracts', () => {
 			'onclick={focusLandingContent}',
 			"document.getElementById('landing-content')?.focus();",
 			'<div id="landing-content" tabindex="-1">',
-			'id="workflow-progress"',
 			'ariaLabel="워크플로우 필터"',
 			'onchange={selectFilter}',
 			'href={`mailto:${email}`}',
@@ -93,7 +95,26 @@ describe('public landing and login route source contracts', () => {
 		]) {
 			expect(landingComponentSource).toContain(hook);
 		}
-		expect(landingComponentSource).toMatch(/\.landing-page \.top-strip\s*\{\s*position:\s*fixed;/);
+		expect(landingComponentSource).toMatch(/\.top-strip\s*\{\s*position:\s*fixed;/);
+		expect(landingComponentSource).not.toContain('<main id="landing-content"');
+		expect(layoutSource).toContain('<main class="min-h-screen bg-gray-950 text-white">');
+	});
+
+	it('keeps the operations-board signature and global responsive tiers explicit', () => {
+		expect(landingComponentSource).toContain("import LandingOpsBoard from './LandingOpsBoard.svelte';");
+		expect(landingComponentSource).toContain('<div class="hero-board" data-reveal><LandingOpsBoard /></div>');
+		expect(landingOpsBoardSource).toContain('ariaLabel="연구 운영 시나리오"');
+		expect(landingOpsBoardSource).toContain('aria-live="polite"');
+
+		for (const source of [landingComponentSource, landingOpsBoardSource]) {
+			expect(source).toContain('@media (min-width: 768px)');
+			expect(source).toContain('@media (min-width: 1024px)');
+			expect(source).not.toMatch(/@media\s*\([^)]*(?:880|1080|560)px/);
+		}
+		expect(landingComponentSource).not.toMatch(/\.nav-cta[^}]*display:\s*none/);
+		expect(landingComponentSource).toContain("grid-template-areas: 'brand cta' 'links links'");
+		expect(landingComponentSource).toContain('.landing-workflow-filter .toggle-option) { min-height: 2.75rem; }');
+		expect(landingOpsBoardSource).toContain('.scenario-switcher .toggle-option) { min-height: 2.75rem; }');
 	});
 
 	it('keeps login-only APIs out of the root landing route', () => {
@@ -123,9 +144,11 @@ describe('public landing and login route source contracts', () => {
 		expect(clientSource).toContain("await goto('/login', { replaceState: true })");
 		expect(hooksSource).toContain("const PUBLIC_PATHS = ['/', '/login', '/auth/gitlab/callback'];");
 		expect(callbackSource).toContain('href="/login"');
-		expect(layoutCssSource).toContain('font-family: "MaruBuri";');
-		expect(layoutCssSource).toContain("url('/fonts/maruburi/MaruBuri-Regular.ttf')");
-		expect(layoutCssSource).toContain('--font-sans: "MaruBuri", "Geist", Inter, system-ui, sans-serif;');
+		expect(layoutCssSource).toContain('font-family: "Pretendard Variable";');
+		expect(layoutCssSource).toContain("url('/fonts/pretendard/PretendardVariable.woff2')");
+		expect(layoutCssSource).toContain('--font-sans: "Pretendard Variable"');
+		expect(layoutCssSource).toContain('--font-display: "IBM Plex Sans KR"');
+		expect(layoutCssSource).toContain('--font-mono: "IBM Plex Mono", "Pretendard Variable"');
 		expect(layoutCssSource).toContain('font-family: var(--font-sans);');
 	});
 

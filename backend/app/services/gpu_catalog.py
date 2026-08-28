@@ -286,10 +286,8 @@ def build_export_xlsx(devices: list[dict]) -> bytes:
 
 
 async def refresh_device_map_from_db() -> None:
-    """DB 카탈로그를 읽어 PCI_DEVICE_MAP에 overlay하고 관련 lazy 캐시를 무효화."""
+    """DB 카탈로그를 읽어 PCI_DEVICE_MAP에 overlay."""
     from app.services.gpu_inventory import apply_db_overlay
-    from app.services.gpu_quota import invalidate_norm_map
 
     entries = await list_db_devices()
     apply_db_overlay(entries)
-    invalidate_norm_map()

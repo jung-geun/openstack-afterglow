@@ -21,9 +21,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    git \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY services/afterglow-crypto/ /services/afterglow-crypto/
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
@@ -39,6 +41,7 @@ COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app/ ./app/
 COPY backend/tofu/ ./tofu/
+COPY backend/scripts/ ./scripts/
 
 # .pyc 직접 사용으로 cold start 가속
 RUN python -m compileall -q app/
@@ -54,9 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ffmp
 
 RUN rm -rf /tmp/* /root/.cache
 
-RUN mkdir -p /var/lib/afterglow/palimpsest \
-    && adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app /var/lib/afterglow/palimpsest
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
 
 # uv 없이 직접 venv 바이너리 사용 → 시작 시간 ~300ms 단축
 ENV PATH="/app/.venv/bin:$PATH"
@@ -79,12 +81,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 CMD ["sh", "-c", "uv sync --frozen --no-install-project && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Worker 스테이지 (afterglow-drover 이미지)
-# ─────────────────────────────────────────────────────────────────────────────
-# drover (app.worker) 와 notion-worker (app.notion_worker) 공용.
-# OpenTofu/curl/unzip 제외, fastapi/uvicorn/boto3 등 API 전용 패키지 제외.
-# 사용법:
-#   docker build --target worker -t afterglow-drover .
+# Notion integration worker stage
+# OpenTofu/curl/unzip and API-only dependencies are omitted.
+# Usage:
+#   docker build --target worker -t afterglow-worker .
 
 # ── Worker 빌더 (worker 의존성 그룹만 설치) ──────────────────────────────────
 FROM python:3.12-slim AS worker-builder
@@ -95,9 +95,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    git \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY services/afterglow-crypto/ /services/afterglow-crypto/
 COPY backend/pyproject.toml backend/uv.lock ./
 # worker 의존성 그룹만 설치 (fastapi/uvicorn/boto3 등 API 전용 패키지 제외)
 RUN uv sync --frozen --no-dev --no-install-project --only-group worker
@@ -127,8 +129,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
 
-# 기본 CMD: drover. notion-worker는 compose/k8s command로 override.
-CMD ["python", "-m", "app.worker"]
+# Default command for the sole remaining Afterglow integration worker.
+CMD ["python", "-m", "app.notion_worker"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Frontend 스테이지

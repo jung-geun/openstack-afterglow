@@ -41,6 +41,7 @@
 			zun_count: number;
 			k3s_count: number;
 			k3s_active?: number;
+			k3s_available?: boolean;
 		};
 		data_services?: {
 			database_instance_count: number;
@@ -198,9 +199,13 @@
 
 			<div class="grid grid-cols-2 gap-3">
 				<SummaryStatCard value={summary.containers.zun_count} label="Zun 컨테이너" size="lg" />
-				<SummaryStatCard value={summary.containers.k3s_count} label="Drover 클러스터" size="lg">
+				<SummaryStatCard
+					value={summary.containers.k3s_available === false ? '사용할 수 없음' : summary.containers.k3s_count}
+					label="Drover 클러스터"
+					size="lg"
+				>
 					{#snippet labelExtra()}
-						{#if (summary.containers.k3s_count ?? 0) > 0}
+						{#if summary.containers.k3s_available !== false && (summary.containers.k3s_count ?? 0) > 0}
 							<span class="text-green-400">({summary.containers.k3s_active ?? 0} active)</span>
 						{/if}
 					{/snippet}

@@ -58,6 +58,8 @@ from app.services.cache import (
     ttl_static,
 )
 from app.services.cache import invalidation as cache_invalidation
+from app.services.resource_policies import ResourcePolicyValidationError
+from app.services.resource_policy_store import ResourcePolicyStorageUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,29 @@ async def _record_cloud_init_history_best_effort(token_info: dict, userdata: str
 
 
 router = APIRouter()
+
+
+async def _resolve_create_placement(
+    req: CreateInstanceRequest,
+    conn: openstack.connection.Connection,
+    settings,
+) -> tuple[CreateInstanceRequest, str, str]:
+    """Resolve pre-create placement and surface expected policy failures safely."""
+    try:
+        if not req.network_id:
+            resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
+            if resolved_net_id:
+                req = req.model_copy(update={"network_id": resolved_net_id})
+        compute_zone, volume_zone = await instance_orch.resolve_availability_zones(conn, req.availability_zone)
+    except (ResourcePolicyStorageUnavailable, ResourcePolicyValidationError, RuntimeError) as exc:
+        logger.warning("인스턴스 생성 배치 사전검증 실패: %s", exc)
+        error = HTTPException(
+            status_code=503,
+            detail="인스턴스 배치 정책을 사용할 수 없습니다. 관리자에게 문의하세요.",
+        )
+        error._afterglow_safe_public_detail = True
+        raise error from exc
+    return req, compute_zone, volume_zone
 
 
 class BulkActionRequest(BaseModel):
@@ -235,14 +260,10 @@ async def create_instance(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
-    # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
-    if not req.network_id:
-        resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
-        if resolved_net_id:
-            req = req.model_copy(update={"network_id": resolved_net_id})
-
-    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
-        conn, req.availability_zone
+    req, compute_availability_zone, volume_availability_zone = await _resolve_create_placement(
+        req,
+        conn,
+        settings,
     )
 
     # 수집된 리소스 (rollback 용)
@@ -346,12 +367,13 @@ async def create_instance(
         gpu_available = flavor.is_gpu if flavor else False
 
         if gpu_available and is_db_available():
-            from app.services.gpu_quota import check_gpu_quota
+            from drover_sdk import register as register_drover
 
-            ok, msg = await check_gpu_quota(conn, conn._afterglow_project_id, flavor.extra_specs or {})
-            if not ok:
-                raise HTTPException(status_code=409, detail=msg)
-
+            _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, flavor.extra_specs or {})
+            if not _res.get("ok"):
+                raise HTTPException(
+                    status_code=409, detail=_res.get("detail") or _res.get("message") or "GPU quota 초과"
+                )
         # 헬스 리포트 토큰 발급 + userdata (libraries·GPU·data_mounts 있을 때만)
         project_id = conn._afterglow_project_id
         _health_id = ""
@@ -526,14 +548,10 @@ async def create_instance_async(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
-    # Default 네트워크 결정 (SSE 시작 전에 미리 처리)
-    if not req.network_id:
-        resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
-        if resolved_net_id:
-            req = req.model_copy(update={"network_id": resolved_net_id})
-
-    compute_availability_zone, volume_availability_zone = await instance_orch.resolve_availability_zones(
-        conn, req.availability_zone
+    req, compute_availability_zone, volume_availability_zone = await _resolve_create_placement(
+        req,
+        conn,
+        settings,
     )
 
     async def progress_generator():
@@ -596,10 +614,11 @@ async def create_instance_async(
 
             # GPU quota 사전 체크
             if is_db_available() and _sse_flavor and _sse_flavor.is_gpu:
-                from app.services.gpu_quota import check_gpu_quota
+                from drover_sdk import register as register_drover
 
-                _ok, _msg = await check_gpu_quota(conn, conn._afterglow_project_id, _sse_flavor.extra_specs or {})
-                if not _ok:
+                _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, _sse_flavor.extra_specs or {})
+                if not _res.get("ok"):
+                    _msg = _res.get("detail") or _res.get("message") or "GPU quota 초과"
                     yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
                     raise HTTPException(status_code=409, detail=_msg)
 

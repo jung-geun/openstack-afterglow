@@ -80,7 +80,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # Deployment의 /scale 을 PATCH 한다(일시정지=replicas 0, 재개=1). 이 값은 Helm이 선언한
 # replicaCount 와 달라지므로, selfHeal 이 켜진 ArgoCD가 즉시 되돌리지 않도록 무시한다.
 # 이름은 backend/app/services/worker_runtime.py 의 _deployment_name 과 일치해야 한다.
-_WORKER_DEPLOYMENT_NAMES = ("drover", "notion-worker")
+_WORKER_DEPLOYMENT_NAMES = ("notion-worker",)
 # These resources are intentionally operator-managed.  Helm still renders them
 # so they exist on a fresh install, but ArgoCD must not overwrite values that
 # an administrator applies directly to the target namespace.

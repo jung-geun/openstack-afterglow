@@ -1,4 +1,4 @@
-name: Unit Tests
+name: Layered Tests
 
 on:
   # docker-build.yml 이 needs: 체인으로 호출 — push/PR 트리거는 거기서 관장
@@ -6,10 +6,15 @@ on:
 
 jobs:
   version-check:
-    name: Version sync check
+    name: Version + orchestration checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test target orchestration
+        run: npm run test:orchestration
       - name: Install uv (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: astral-sh/setup-uv@v6
@@ -55,28 +60,55 @@ jobs:
         working-directory: backend
         run: uv run ruff format --check .
 
-      - name: Unit tests (integration 제외)
-        working-directory: backend
+      - name: Unit tests
         env:
           AFTERGLOW_ALLOW_INSECURE: "1"
-        run: uv run python -m pytest tests/ -v --ignore=tests/integration
+        run: npm run test:unit:backend
 
-  # ─── MariaDB 통합 테스트 — dev 브랜치 push 시에만 실행 ──────────────────────
-  test-backend-db:
-    name: Backend (MariaDB integration)
-    needs: test-backend
-    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+  test-contract:
+    name: Service contract tests
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Apply tag version (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: npm run version:apply-tag
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: Contract tests
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+        run: npm run test:contract
+      - name: Kolla contract tests
+        run: npm run test:kolla:contract
+
+  # ─── 국소 기능 테스트 — 무조건 항상 실행 ──────────────────────────────────
+  test-functional:
+    name: Disposable local functional tests
+    needs: version-check
     runs-on: ubuntu-latest
     services:
       mariadb:
         image: mariadb:11.4
         env:
           MARIADB_ROOT_PASSWORD: dev
-          MARIADB_DATABASE: afterglow_test
+          MARIADB_DATABASE: afterglow_functional
           MARIADB_USER: afterglow
           MARIADB_PASSWORD: dev
         ports:
-          - 3306:3306
+          - 3307:3306
         options: >-
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=10s
@@ -89,7 +121,7 @@ jobs:
           POSTGRES_USER: afterglow
           POSTGRES_PASSWORD: dev
         ports:
-          - 5432:5432
+          - 5434:5432
         options: >-
           --health-cmd="pg_isready -U afterglow -d afterglow_checkpoints"
           --health-interval=10s
@@ -98,7 +130,7 @@ jobs:
       redis:
         image: redis:7-alpine
         ports:
-          - 6379:6379
+          - 6380:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -122,24 +154,37 @@ jobs:
         working-directory: backend
         run: uv sync --frozen --extra dev
 
-      - name: MariaDB integration tests
+      - name: Functional tests
         env:
           AFTERGLOW_ALLOW_INSECURE: "1"
-          AFTERGLOW_REDIS_URL: redis://localhost:6379/0
-          AFTERGLOW_TEST_DATABASE_URL: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test
-          AFTERGLOW_ALLOW_SHARED_TEST_DATABASE: "1"
-          AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL: postgresql://afterglow:dev@127.0.0.1:5432/afterglow_checkpoints
-        run: npm run test:target -- db
+          REDIS_URL: redis://127.0.0.1:6380/0
+          AFTERGLOW_REDIS_URL: redis://127.0.0.1:6380/0
+          AFTERGLOW_TEST_REAL_REDIS: "1"
+          AFTERGLOW_TEST_DATABASE_URL: mysql+aiomysql://afterglow:dev@127.0.0.1:3307/afterglow_functional
+          AFTERGLOW_TEST_CHECKPOINTER_POSTGRES_URL: postgresql://afterglow:dev@127.0.0.1:5434/afterglow_checkpoints
+        run: npm run test:functional -- --no-start
+
+  test-frontend:
+    name: Frontend (unit tests)
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: npm run test:unit:frontend
 
   # ─── secret 존재 여부 + Keystone 인증 probe를 job output으로 노출 ──────────
-  # secrets 컨텍스트는 if: 표현식에서 직접 사용 불가 (GitHub Actions 제약).
-  # 별도 job에서 env로 secret을 받아 비어 있는지 검사하고,
-  # 존재하면 실제 Keystone token POST를 시도해 자격증명 유효성까지 확인한다.
-  # 만료된 시크릿이 "set"으로 오판되어 integration tests가 전량 401로 폭발하는 문제 방지.
-  # 보안: 모든 비밀값은 env: 블록으로만 주입하고 run에서 $VAR 형태로만 참조.
-  #        jq로 JSON body를 구성하므로 특수문자 이스케이프 문제 없음.
-  detect-integration:
-    name: Detect integration secrets
+  detect-live:
+    name: Detect live OpenStack credentials
     needs: version-check
     runs-on: ubuntu-latest
     outputs:
@@ -156,7 +201,7 @@ jobs:
         run: |
           if [ -z "$OS_AUTH_URL" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "AFTERGLOW_OS_AUTH_URL secret is not set — skipping integration tests."
+            echo "AFTERGLOW_OS_AUTH_URL secret is not set — skipping live OpenStack tests."
             exit 0
           fi
 
@@ -177,15 +222,19 @@ jobs:
           fi
 
           # Keystone v3 token probe (timeout 5s) — 응답 body 저장
-          STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
+          if ! STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
             --max-time 5 \
             -X POST "${_AUTH_URL}/auth/tokens" \
             -H "Content-Type: application/json" \
-            --data "@/tmp/ks_body.json")
+            --data "@/tmp/ks_body.json"); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Live OpenStack tests skipped::Keystone probe transport failed or timed out. Check the OpenStack endpoint."
+            exit 0
+          fi
 
           if [ "$STATUS" != "201" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Integration tests skipped::Keystone probe returned HTTP $STATUS. Update AFTERGLOW_OS_* secrets or check the OpenStack endpoint."
+            echo "::warning title=Live OpenStack tests skipped::Keystone probe returned HTTP $STATUS. Update AFTERGLOW_OS_* secrets or check the OpenStack endpoint."
             exit 0
           fi
 
@@ -198,7 +247,7 @@ jobs:
 
           if [ -z "$NET_URL" ] || [ "$NET_URL" = "null" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Integration tests skipped::network endpoint (interface=$OS_INTERFACE) not found in Keystone catalog."
+            echo "::warning title=Live OpenStack tests skipped::network endpoint (interface=$OS_INTERFACE) not found in Keystone catalog."
             exit 0
           fi
 
@@ -207,36 +256,18 @@ jobs:
           # 도달성 검사 — HTTP 응답 코드 무관, curl exit code만 검사
           if curl -sk --max-time 5 -o /dev/null "$NET_URL"; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Keystone + network endpoint reachable — integration tests will run."
+            echo "Keystone + network endpoint reachable — live OpenStack tests will run."
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Integration tests skipped::network endpoint $NET_URL unreachable from runner (interface=$OS_INTERFACE)."
+            echo "::warning title=Live OpenStack tests skipped::network endpoint $NET_URL unreachable from runner (interface=$OS_INTERFACE)."
           fi
 
-  # ─── 통합 테스트: detect-integration.outputs.enabled == 'true' 시만 실행 ───
-  # GitHub Secrets 등록 방법:
-  #   Settings > Secrets and variables > Actions > New repository secret
-  #
-  # 필수 Secrets:
-  #   AFTERGLOW_OS_AUTH_URL       — Keystone v3 endpoint
-  #   AFTERGLOW_OS_USERNAME       — admin 사용자 이름
-  #   AFTERGLOW_OS_PASSWORD       — admin 비밀번호
-  #   AFTERGLOW_OS_PROJECT_NAME   — admin 프로젝트 이름 (기본: admin)
-  #
-  # 선택 Secrets (다중 계정 통합 테스트):
-  #   AFTERGLOW_TEST_ADMIN_USER_USERNAME / PASSWORD / PROJECT
-  #   AFTERGLOW_TEST_USER_USERNAME / PASSWORD / PROJECT
-  #
-  # 선택 Variables (Settings > Variables, 기본값 있음):
-  #   AFTERGLOW_OS_PROJECT_DOMAIN_NAME — 기본: Default
-  #   AFTERGLOW_OS_USER_DOMAIN_NAME    — 기본: Default
-  #   AFTERGLOW_OS_REGION_NAME         — 기본: RegionOne
-  #   AFTERGLOW_OS_INTERFACE           — 기본: internal
-  test-backend-integration:
-    name: Backend (integration tests)
-    needs: [test-backend, detect-integration]
+  # ─── 실제 OpenStack 테스트: detect-live.outputs.enabled == 'true' 시만 실행 ───
+  test-live:
+    name: Backend (live OpenStack tests)
+    needs: [test-backend, test-contract, test-functional, test-frontend, detect-live]
     runs-on: ubuntu-latest
-    if: ${{ needs.detect-integration.outputs.enabled == 'true' }}
+    if: ${{ needs.detect-live.outputs.enabled == 'true' }}
     services:
       redis:
         image: redis:7-alpine
@@ -265,8 +296,7 @@ jobs:
         working-directory: backend
         run: uv sync --frozen --extra dev
 
-      - name: Integration tests
-        working-directory: backend
+      - name: Live OpenStack tests
         env:
           AFTERGLOW_ALLOW_INSECURE: "1"
           AFTERGLOW_REDIS_URL: redis://localhost:6379/0
@@ -277,7 +307,7 @@ jobs:
           OS_PROJECT_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_PROJECT_DOMAIN_NAME || 'Default' }}
           OS_USER_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_USER_DOMAIN_NAME || 'Default' }}
           OS_REGION_NAME: ${{ vars.AFTERGLOW_OS_REGION_NAME || 'RegionOne' }}
-          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'internal' }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'public' }}
           AFTERGLOW_TEST_ADMIN_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
           AFTERGLOW_TEST_ADMIN_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
           AFTERGLOW_TEST_ADMIN_PROJECT: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
@@ -296,23 +326,4 @@ jobs:
           AFTERGLOW_TEST_LIBRARY_IDS: ${{ vars.AFTERGLOW_TEST_LIBRARY_IDS }}
           AFTERGLOW_TEST_SSH_KEY: ${{ secrets.AFTERGLOW_TEST_SSH_KEY }}
           AFTERGLOW_TEST_SSH_USER: ${{ vars.AFTERGLOW_TEST_SSH_USER }}
-        run: uv run python -m pytest tests/integration -v -m slow
-
-  test-frontend:
-    name: Frontend (vitest)
-    needs: version-check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1"
-
-      - name: Install
-        working-directory: frontend
-        run: bun install --frozen-lockfile
-
-      - name: Test
-        working-directory: frontend
-        run: bun run test
+        run: npm run test:live

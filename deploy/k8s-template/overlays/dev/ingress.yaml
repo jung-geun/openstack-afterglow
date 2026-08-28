@@ -18,6 +18,17 @@ spec:
     - host: dev.your-domain.example.com # 실제 도메인으로 변경 후 kubectl apply
       http:
         paths:
+          # MCP OAuth discovery (RFC 9728 / RFC 8414) lives at the origin root, not under /api —
+          # backend/app/api/mcp.py root_router. cert-manager 의 HTTP-01 solver Ingress 는 더 긴
+          # /.well-known/acme-challenge/<token> 규칙을 쓰므로 Traefik 우선순위에서 앞서고,
+          # 인증서 발급은 이 규칙의 영향을 받지 않는다.
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:

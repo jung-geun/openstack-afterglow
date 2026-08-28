@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import ipaddress
 import logging as _logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import openstack
 
 from app.models.storage import (
+    AdminNetworkDetail,
+    AdminSubnetDetail,
+    AdminSubnetPort,
+    AllocationPool,
+    DhcpBindingInfo,
     FloatingIpInfo,
     NetworkDetail,
     NetworkInfo,
@@ -14,6 +20,7 @@ from app.models.storage import (
     RouterInfo,
     RouterInterface,
     SubnetDetail,
+    SubnetIpAllocation,
     TopologyData,
     TopologyNetwork,
     TopologyRouter,
@@ -37,13 +44,33 @@ def _iter_router_interface_ports(conn, **kwargs):
 
 
 def list_networks(conn: openstack.connection.Connection, project_id: str | None = None) -> list[NetworkInfo]:
-    result = []
-    for n in conn.network.networks():
+    all_networks = list(conn.network.networks())
+    visible_networks = []
+    for n in all_networks:
         if project_id and not (
-            bool(n.is_router_external) or bool(n.is_shared) or getattr(n, "project_id", None) == project_id
+            bool(getattr(n, "is_router_external", False))
+            or bool(getattr(n, "is_shared", False))
+            or getattr(n, "project_id", None) == project_id
         ):
             continue
-        result.append(_net_to_info(n))
+        visible_networks.append(n)
+
+    all_subnets = list(conn.network.subnets())
+
+    visible_net_ids = {n.id for n in visible_networks}
+    net_cidrs_map: dict[str, set[str]] = {}
+    for s in all_subnets:
+        net_id = getattr(s, "network_id", None)
+        cidr = getattr(s, "cidr", None)
+        if net_id and net_id in visible_net_ids and cidr:
+            if net_id not in net_cidrs_map:
+                net_cidrs_map[net_id] = set()
+            net_cidrs_map[net_id].add(cidr)
+
+    result = []
+    for n in visible_networks:
+        cidrs = _sort_cidrs(net_cidrs_map.get(n.id, set()))
+        result.append(_net_to_info(n, cidrs))
     return result
 
 
@@ -52,11 +79,9 @@ def get_network(conn: openstack.connection.Connection, network_id: str) -> Netwo
     return _net_to_info(n)
 
 
-def get_network_detail(conn: openstack.connection.Connection, network_id: str) -> NetworkDetail:
-    n = conn.network.get_network(network_id)
-
+def _serialize_network_detail(conn: openstack.connection.Connection, n: Any) -> NetworkDetail:
     subnet_details = []
-    for subnet_id in n.subnet_ids or []:
+    for subnet_id in getattr(n, "subnet_ids", None) or []:
         try:
             s = conn.network.get_subnet(subnet_id)
             subnet_details.append(
@@ -74,7 +99,7 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
     # 이 네트워크에 연결된 라우터 찾기 (router_interface 포트 기준)
     router_map: dict[str, RouterInfo] = {}
     try:
-        ports = list(_iter_router_interface_ports(conn, network_id=network_id))
+        ports = list(_iter_router_interface_ports(conn, network_id=n.id))
         for port in ports:
             router_id = port.device_id
             if not router_id:
@@ -105,11 +130,277 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
         id=n.id,
         name=n.name or "",
         status=n.status,
-        subnets=list(n.subnet_ids or []),
-        is_external=bool(n.is_router_external),
-        is_shared=bool(n.is_shared),
+        subnets=list(getattr(n, "subnet_ids", None) or []),
+        is_external=bool(getattr(n, "is_router_external", False)),
+        is_shared=bool(getattr(n, "is_shared", False)),
         subnet_details=subnet_details,
         routers=list(router_map.values()),
+    )
+
+
+def get_network_detail(conn: openstack.connection.Connection, network_id: str) -> NetworkDetail:
+    n = conn.network.get_network(network_id)
+    return _serialize_network_detail(conn, n)
+
+
+def get_admin_network_detail(conn: openstack.connection.Connection, network_id: str) -> AdminNetworkDetail:
+    n = conn.network.get_network(network_id)
+    base_detail = _serialize_network_detail(conn, n)
+    seg_id = getattr(n, "provider_segmentation_id", None)
+    if seg_id is not None:
+        try:
+            seg_id = int(seg_id)
+        except (ValueError, TypeError):
+            seg_id = None
+
+    return AdminNetworkDetail(
+        **base_detail.model_dump(),
+        provider_network_type=getattr(n, "provider_network_type", None),
+        provider_segmentation_id=seg_id,
+        provider_physical_network=getattr(n, "provider_physical_network", None),
+    )
+
+
+def _ip_address_key(ip_str: str) -> tuple[int, int, str]:
+    try:
+        address = ipaddress.ip_address(ip_str)
+        return (address.version, int(address), "")
+    except (ValueError, TypeError):
+        return (99, 0, str(ip_str))
+
+
+def get_admin_subnet_detail(conn: openstack.connection.Connection, subnet_id: str) -> AdminSubnetDetail:
+    subnet = conn.network.get_subnet(subnet_id)
+    network = conn.network.get_network(subnet.network_id)
+
+    raw_pools = getattr(subnet, "allocation_pools", []) or []
+    allocation_pools: list[AllocationPool] = []
+    for p in raw_pools:
+        if isinstance(p, dict):
+            s_ip = p.get("start")
+            e_ip = p.get("end")
+        else:
+            s_ip = getattr(p, "start", None)
+            e_ip = getattr(p, "end", None)
+        if s_ip and e_ip:
+            allocation_pools.append(AllocationPool(start=str(s_ip), end=str(e_ip)))
+    allocation_pools.sort(key=lambda ap: _ip_address_key(ap.start))
+
+    raw_ports = list(conn.network.ports(network_id=subnet.network_id))
+    subnet_ports: list[AdminSubnetPort] = []
+    allocations: list[SubnetIpAllocation] = []
+    dhcp_ports: list[tuple[Any, list[str]]] = []
+
+    for port in raw_ports:
+        port_id = getattr(port, "id", "") or (port.get("id") if isinstance(port, dict) else "")
+        port_name = getattr(port, "name", "") or (port.get("name") if isinstance(port, dict) else "") or ""
+        port_status = getattr(port, "status", "") or (port.get("status") if isinstance(port, dict) else "") or ""
+        mac_address = (
+            getattr(port, "mac_address", "") or (port.get("mac_address") if isinstance(port, dict) else "") or ""
+        )
+        device_owner = (
+            getattr(port, "device_owner", "") or (port.get("device_owner") if isinstance(port, dict) else "") or ""
+        )
+        device_id = getattr(port, "device_id", "") or (port.get("device_id") if isinstance(port, dict) else "") or ""
+        project_id = (
+            getattr(port, "project_id", None)
+            or getattr(port, "tenant_id", None)
+            or (port.get("project_id") or port.get("tenant_id") if isinstance(port, dict) else None)
+        )
+        binding_host_id = (
+            getattr(port, "binding_host_id", None)
+            or getattr(port, "binding:host_id", None)
+            or (port.get("binding:host_id") or port.get("binding_host_id") if isinstance(port, dict) else None)
+        )
+
+        fixed_ips = getattr(port, "fixed_ips", []) or (port.get("fixed_ips") if isinstance(port, dict) else []) or []
+        subnet_ips: list[str] = []
+        for f in fixed_ips:
+            if isinstance(f, dict):
+                f_sub = f.get("subnet_id")
+                f_ip = f.get("ip_address")
+            else:
+                f_sub = getattr(f, "subnet_id", None)
+                f_ip = getattr(f, "ip_address", None)
+            if f_sub == subnet_id and f_ip:
+                subnet_ips.append(str(f_ip))
+
+        if not subnet_ips:
+            continue
+
+        subnet_ips.sort(key=_ip_address_key)
+
+        subnet_ports.append(
+            AdminSubnetPort(
+                id=port_id,
+                name=port_name,
+                status=port_status,
+                mac_address=mac_address,
+                device_owner=device_owner,
+                device_id=device_id,
+                project_id=project_id,
+                ip_addresses=subnet_ips,
+                binding_host_id=binding_host_id,
+            )
+        )
+
+        for ip in subnet_ips:
+            allocations.append(
+                SubnetIpAllocation(
+                    ip_address=ip,
+                    port_id=port_id,
+                    port_name=port_name,
+                    device_owner=device_owner,
+                    device_id=device_id,
+                    project_id=project_id,
+                    binding_host_id=binding_host_id,
+                )
+            )
+
+        if device_owner.startswith("network:dhcp"):
+            dhcp_ports.append((port, subnet_ips))
+
+    subnet_ports.sort(key=lambda p: p.id)
+    allocations.sort(key=lambda a: (_ip_address_key(a.ip_address), a.port_id))
+
+    dhcp_agent_data_available = True
+    agents = []
+    try:
+        agents = list(conn.network.network_hosting_dhcp_agents(network.id))
+    except Exception:
+        dhcp_agent_data_available = False
+
+    dhcp_bindings: list[DhcpBindingInfo] = []
+    matched_dhcp_port_ids: set[str] = set()
+
+    if dhcp_agent_data_available and agents:
+        for agent in agents:
+            ag_id = getattr(agent, "id", None) or (agent.get("id") if isinstance(agent, dict) else None)
+            ag_host = getattr(agent, "host", None) or (agent.get("host") if isinstance(agent, dict) else None)
+            ag_binary = getattr(agent, "binary", None) or (agent.get("binary") if isinstance(agent, dict) else None)
+            ag_az = getattr(agent, "availability_zone", None) or (
+                agent.get("availability_zone") if isinstance(agent, dict) else None
+            )
+            ag_alive = getattr(agent, "is_alive", None)
+            if ag_alive is None:
+                ag_alive = getattr(agent, "alive", None)
+            if ag_alive is None and isinstance(agent, dict):
+                ag_alive = agent.get("is_alive") if "is_alive" in agent else agent.get("alive")
+
+            ag_admin_up = getattr(agent, "is_admin_state_up", None)
+            if ag_admin_up is None:
+                ag_admin_up = getattr(agent, "admin_state_up", None)
+            if ag_admin_up is None and isinstance(agent, dict):
+                ag_admin_up = (
+                    agent.get("is_admin_state_up") if "is_admin_state_up" in agent else agent.get("admin_state_up")
+                )
+
+            ag_ips: list[str] = []
+            ag_port_ids: list[str] = []
+            for d_port, d_ips in dhcp_ports:
+                dp_id = getattr(d_port, "id", "") or (d_port.get("id") if isinstance(d_port, dict) else "")
+                dp_host = (
+                    getattr(d_port, "binding_host_id", None)
+                    or getattr(d_port, "binding:host_id", None)
+                    or (
+                        d_port.get("binding:host_id") or d_port.get("binding_host_id")
+                        if isinstance(d_port, dict)
+                        else None
+                    )
+                )
+                dp_dev_id = getattr(d_port, "device_id", "") or (
+                    d_port.get("device_id") if isinstance(d_port, dict) else ""
+                )
+
+                is_match = bool(
+                    (ag_host and dp_host and ag_host == dp_host)
+                    or (ag_id and dp_dev_id and (ag_id in dp_dev_id or dp_dev_id in ag_id))
+                    or (ag_host and dp_dev_id and ag_host in dp_dev_id)
+                )
+
+                if is_match:
+                    matched_dhcp_port_ids.add(dp_id)
+                    ag_port_ids.append(dp_id)
+                    ag_ips.extend(d_ips)
+
+            ag_ips = sorted(list(set(ag_ips)), key=_ip_address_key)
+            ag_port_ids = sorted(list(set(ag_port_ids)))
+
+            dhcp_bindings.append(
+                DhcpBindingInfo(
+                    agent_id=ag_id,
+                    host=ag_host,
+                    binary=ag_binary,
+                    availability_zone=ag_az,
+                    alive=ag_alive,
+                    admin_state_up=ag_admin_up,
+                    source="agent",
+                    ip_addresses=ag_ips,
+                    port_ids=ag_port_ids,
+                )
+            )
+
+    for d_port, d_ips in dhcp_ports:
+        dp_id = getattr(d_port, "id", "") or (d_port.get("id") if isinstance(d_port, dict) else "")
+        if dp_id not in matched_dhcp_port_ids:
+            dp_host = (
+                getattr(d_port, "binding_host_id", None)
+                or getattr(d_port, "binding:host_id", None)
+                or (
+                    d_port.get("binding:host_id") or d_port.get("binding_host_id") if isinstance(d_port, dict) else None
+                )
+            )
+            dhcp_bindings.append(
+                DhcpBindingInfo(
+                    agent_id=None,
+                    host=dp_host,
+                    binary=None,
+                    availability_zone=None,
+                    alive=None,
+                    admin_state_up=None,
+                    source="port",
+                    ip_addresses=sorted(d_ips, key=_ip_address_key),
+                    port_ids=[dp_id],
+                )
+            )
+
+    dhcp_bindings.sort(
+        key=lambda b: (
+            0 if b.source == "agent" else 1,
+            b.host or "",
+            b.agent_id or "",
+            b.port_ids[0] if b.port_ids else "",
+        )
+    )
+
+    proj_id = (
+        getattr(subnet, "project_id", None)
+        or getattr(subnet, "tenant_id", None)
+        or (subnet.get("project_id") or subnet.get("tenant_id") if isinstance(subnet, dict) else None)
+    )
+    gw_ip = getattr(subnet, "gateway_ip", None) or (subnet.get("gateway_ip") if isinstance(subnet, dict) else None)
+    ip_ver = getattr(subnet, "ip_version", 4) or (subnet.get("ip_version") if isinstance(subnet, dict) else 4) or 4
+    dhcp_en = getattr(subnet, "is_dhcp_enabled", None)
+    if dhcp_en is None:
+        dhcp_en = getattr(subnet, "enable_dhcp", True)
+    if dhcp_en is None and isinstance(subnet, dict):
+        dhcp_en = subnet.get("is_dhcp_enabled") if "is_dhcp_enabled" in subnet else subnet.get("enable_dhcp", True)
+
+    return AdminSubnetDetail(
+        id=subnet.id if hasattr(subnet, "id") else subnet["id"],
+        name=getattr(subnet, "name", "") or (subnet.get("name") if isinstance(subnet, dict) else "") or "",
+        network_id=network.id if hasattr(network, "id") else network["id"],
+        network_name=getattr(network, "name", "") or (network.get("name") if isinstance(network, dict) else "") or "",
+        project_id=proj_id,
+        cidr=getattr(subnet, "cidr", "") or (subnet.get("cidr") if isinstance(subnet, dict) else "") or "",
+        gateway_ip=str(gw_ip) if gw_ip else None,
+        ip_version=int(ip_ver),
+        dhcp_enabled=bool(dhcp_en),
+        allocation_pools=allocation_pools,
+        ports=subnet_ports,
+        allocations=allocations,
+        dhcp_bindings=dhcp_bindings,
+        dhcp_agent_data_available=dhcp_agent_data_available,
     )
 
 
@@ -1032,14 +1323,27 @@ def _fip_to_info(f) -> FloatingIpInfo:
     )
 
 
-def _net_to_info(n) -> NetworkInfo:
+def _sort_cidrs(cidrs: Any) -> list[str]:
+    def cidr_key(cidr: str):
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+            return (net.version, net.network_address, net.prefixlen, cidr)
+        except (ValueError, TypeError):
+            return (99, cidr, 0, cidr)
+
+    unique_cidrs = set(c for c in cidrs if c)
+    return sorted(unique_cidrs, key=cidr_key)
+
+
+def _net_to_info(n, cidrs: list[str] | None = None) -> NetworkInfo:
     return NetworkInfo(
         id=n.id,
         name=n.name or "",
         status=n.status,
-        subnets=list(n.subnet_ids or []),
-        is_external=bool(n.is_router_external),
-        is_shared=bool(n.is_shared),
+        subnets=list(getattr(n, "subnet_ids", None) or []),
+        cidrs=list(cidrs or []),
+        is_external=bool(getattr(n, "is_router_external", False)),
+        is_shared=bool(getattr(n, "is_shared", False)),
     )
 
 

@@ -8,15 +8,16 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import httpx
+from drover_sdk import register as register_drover
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from starlette.requests import Request
+from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.models.storage import (
+    AdminNetworkDetail,
+    AdminSubnetDetail,
     FileStorageDeleteDiagnostic,
     FileStorageForceDeleteResult,
     FileStorageInfo,
@@ -26,7 +27,6 @@ from app.models.storage import (
     VolumeDeleteRecoveryResult,
 )
 from app.services import instance_recovery, keystone, library_builder, manila, neutron, nova, volume_delete_recovery
-from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 from app.services.cache import invalidation as cache_invalidation
@@ -543,11 +543,13 @@ async def get_monitoring_summary(
             asyncio.to_thread(_count_identity_users_projects),
         )
 
-        # 2차: k3s 클러스터 (async)
+        # Drover owns the authoritative cross-project cluster inventory.
+        k3s_available = True
         try:
-            clusters = await k3s_cluster.list_all_clusters()
+            clusters = await asyncio.to_thread(register_drover(conn).admin_clusters)
         except Exception:
             clusters = []
+            k3s_available = False
         k3s_total = len(clusters)
         k3s_active = sum(1 for c in clusters if (c.get("status") or "") == "ACTIVE")
 
@@ -583,6 +585,7 @@ async def get_monitoring_summary(
                 "zun_count": zun_count,
                 "k3s_count": k3s_total,
                 "k3s_active": k3s_active,
+                "k3s_available": k3s_available,
             },
             "data_services": {
                 "database_instance_count": db_instance_count,
@@ -2048,13 +2051,35 @@ class UpdatePortRequest(BaseModel):
     name: str | None = None
 
 
-@router.get("/networks/{network_id}", dependencies=[Depends(require_admin)])
+@router.get("/networks/{network_id}", dependencies=[Depends(require_admin)], response_model=AdminNetworkDetail)
 async def get_admin_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """네트워크 상세 조회 (관리자)."""
     try:
-        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
+        return await asyncio.to_thread(neutron.get_admin_network_detail, conn, network_id)
     except Exception:
         raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+
+
+@router.get("/subnets/{subnet_id}", dependencies=[Depends(require_admin)], response_model=AdminSubnetDetail)
+async def get_admin_subnet(subnet_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """서브넷 상세 조회 (관리자)."""
+    from openstack.exceptions import HttpException, NotFoundException, ResourceNotFound
+
+    try:
+        return await asyncio.to_thread(neutron.get_admin_subnet_detail, conn, subnet_id)
+    except (NotFoundException, ResourceNotFound):
+        raise HTTPException(status_code=404, detail="서브넷을 찾을 수 없습니다")
+    except HttpException as exc:
+        status_code = getattr(exc, "status_code", None) or 500
+        if status_code >= 500:
+            _logger.error("OpenStack upstream error fetching subnet detail for %s: %s", subnet_id, exc, exc_info=True)
+            raise HTTPException(status_code=status_code, detail="OpenStack service error")
+        raise HTTPException(status_code=status_code, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Unexpected error fetching admin subnet detail for %s: %s", subnet_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="서브넷 상세 조회 실패")
 
 
 @router.post("/networks", dependencies=[Depends(require_admin)], status_code=201)
@@ -2354,396 +2379,98 @@ class GpuQuotaRequest(BaseModel):
 @router.get("/gpu-aliases", dependencies=[Depends(require_admin)])
 async def get_gpu_aliases():
     """클러스터의 모든 GPU PCI alias 목록 반환 (flavor + Placement API 통합, admin connection 사용)."""
-    from app.services.gpu_quota import get_all_gpu_aliases
+    from app.services.gpu_inventory import get_all_gpu_aliases
 
     aliases = await get_all_gpu_aliases()
     return {"aliases": aliases}
 
 
 @router.get("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
-async def get_default_gpu_quotas():
+async def get_default_gpu_quotas(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 조회."""
     from app.database import is_db_available
-    from app.services.gpu_quota import DEFAULT_PROJECT_ID, get_project_gpu_quotas
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
 
-    quotas = await get_project_gpu_quotas(DEFAULT_PROJECT_ID)
-    return [{"gpu_type": q["gpu_type"], "limit": q["limit"]} for q in quotas]
+    try:
+        return await asyncio.to_thread(register_drover(conn).default_gpu_quotas)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 @router.put("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
-async def set_default_gpu_quota(req: GpuQuotaRequest):
+async def set_default_gpu_quota(req: GpuQuotaRequest, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 설정 (upsert)."""
     from app.database import is_db_available
-    from app.services.gpu_quota import DEFAULT_PROJECT_ID, set_project_gpu_quota
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
 
-    return await set_project_gpu_quota(DEFAULT_PROJECT_ID, req.gpu_type, req.limit)
+    try:
+        return await asyncio.to_thread(register_drover(conn).set_default_gpu_quota, req.gpu_type, req.limit)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 @router.delete("/gpu-quotas/defaults/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
-async def delete_default_gpu_quota(gpu_type: str):
+async def delete_default_gpu_quota(gpu_type: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 삭제 (기본값 0으로 복귀)."""
     from app.database import is_db_available
-    from app.services.gpu_quota import DEFAULT_PROJECT_ID, delete_project_gpu_quota
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
 
-    await delete_project_gpu_quota(DEFAULT_PROJECT_ID, gpu_type)
+    try:
+        await asyncio.to_thread(register_drover(conn).delete_default_gpu_quota, gpu_type)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 @router.get("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
 async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """프로젝트의 GPU quota 목록 + 현재 사용량 조회.
-
-    클러스터의 모든 GPU alias에 대해 유효 quota (프로젝트별 > 기본값 > 0)를 반환.
-    """
+    """프로젝트의 GPU quota 목록 + 현재 사용량 조회."""
     from app.database import is_db_available
-    from app.services.gpu_quota import (
-        get_all_gpu_aliases,
-        get_effective_gpu_quotas,
-        get_project_gpu_usage,
-    )
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
 
-    aliases, effective, usage = await asyncio.gather(
-        get_all_gpu_aliases(),
-        get_effective_gpu_quotas(project_id),
-        get_project_gpu_usage(conn, project_id),
-    )
-
-    # aliases + effective quota + usage 의 모든 키를 합침
-    all_types = sorted(set(aliases) | set(effective.keys()) | set(usage.keys()))
-    result = []
-    for alias in all_types:
-        limit = effective.get(alias, 0)
-        in_use = usage.get(alias, 0)
-        result.append(
-            {
-                "gpu_type": alias,
-                "limit": limit,
-                "in_use": in_use,
-                "available": (limit - in_use) if limit >= 0 else -1,
-            }
-        )
-    return result
+    try:
+        return await asyncio.to_thread(register_drover(conn).project_gpu_quotas, project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 @router.put("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
-async def set_gpu_quota(project_id: str, req: GpuQuotaRequest):
+async def set_gpu_quota(
+    project_id: str, req: GpuQuotaRequest, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     """프로젝트의 GPU quota 설정 (upsert)."""
     from app.database import is_db_available
-    from app.services.gpu_quota import set_project_gpu_quota
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
 
-    return await set_project_gpu_quota(project_id, req.gpu_type, req.limit)
+    try:
+        return await asyncio.to_thread(register_drover(conn).set_project_gpu_quota, project_id, req.gpu_type, req.limit)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 @router.delete("/gpu-quotas/{project_id}/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
-async def delete_gpu_quota(project_id: str, gpu_type: str):
+async def delete_gpu_quota(
+    project_id: str, gpu_type: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     """프로젝트의 특정 GPU quota 삭제 (기본값으로 폴백)."""
     from app.database import is_db_available
-    from app.services.gpu_quota import delete_project_gpu_quota
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
 
-    await delete_project_gpu_quota(project_id, gpu_type)
-
-
-# ===========================================================================
-# k3s 클러스터 관리 (관리자)
-# ===========================================================================
-
-
-@router.get("/k3s-clusters", dependencies=[Depends(require_admin)])
-async def list_admin_k3s_clusters():
-    """전체 프로젝트의 k3s 클러스터 목록 (관리자용)."""
     try:
-        clusters = await k3s_cluster.list_all_clusters()
-        return clusters
-    except Exception:
-        _logger.warning("k3s 클러스터 목록 조회 실패", exc_info=True)
-        raise HTTPException(status_code=500, detail="k3s 클러스터 목록 조회 실패")
-
-
-@router.get("/k3s-clusters/{cluster_id}", dependencies=[Depends(require_admin)])
-async def get_admin_k3s_cluster(cluster_id: str):
-    """관리자용 단일 k3s 클러스터 조회 (프로젝트 필터 없음)."""
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-    return cluster
-
-
-@router.get("/k3s-clusters/{cluster_id}/kubeconfig", dependencies=[Depends(require_admin)])
-async def download_admin_k3s_kubeconfig(cluster_id: str):
-    """관리자용 kubeconfig 다운로드."""
-    from fastapi.responses import Response
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-
-    try:
-        kubeconfig = await k3s_cluster.get_kubeconfig_admin(cluster_id)
-    except Exception as e:
-        _logger.error("admin kubeconfig 복호화 실패: %s", e)
-        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
-    if not kubeconfig:
-        raise HTTPException(status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다.")
-
-    cluster_name = cluster.get("name", cluster_id)
-    return Response(
-        content=kubeconfig,
-        media_type="application/yaml",
-        headers={"Content-Disposition": f'attachment; filename="kubeconfig-{cluster_name}.yaml"'},
-    )
-
-
-class AdminScaleK3sRequest(BaseModel):
-    agent_count: int = Field(ge=0, le=50)
-
-
-@router.patch("/k3s-clusters/{cluster_id}/scale", dependencies=[Depends(require_admin)])
-async def scale_admin_k3s_cluster(cluster_id: str, req: AdminScaleK3sRequest):
-    """관리자용 k3s 클러스터 에이전트 스케일링."""
-    import asyncio
-
-    from app.api.k3s.clusters import _scale_agents
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-    if cluster.get("status") != "ACTIVE":
-        raise HTTPException(status_code=409, detail="ACTIVE 상태의 클러스터만 스케일링할 수 있습니다")
-
-    desired = req.agent_count
-
-    project_id = cluster.get("project_id", "")
-    current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []
-    if isinstance(current_agent_ids, str):
-        import json as _json
-
-        try:
-            current_agent_ids = _json.loads(current_agent_ids)
-        except Exception:
-            current_agent_ids = []
-
-    if desired == len(current_agent_ids):
-        return {"message": "변경 없음", "agent_count": desired}
-
-    await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
-    asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
-    return {"message": f"스케일링 시작: {len(current_agent_ids)} → {desired}", "agent_count": desired}
-
-
-@router.delete("/k3s-clusters/{cluster_id}", status_code=204, dependencies=[Depends(require_admin)])
-async def delete_admin_k3s_cluster(
-    cluster_id: str,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
-):
-    """관리자용 k3s 클러스터 삭제."""
-    from app.api.k3s.clusters import _delete_cluster_progress
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-
-    if cluster.get("deleted_at"):
-        return
-
-    project_id = cluster.get("project_id", "")
-    async for _msg in _delete_cluster_progress(conn, project_id, cluster, token_info=None):
-        pass
-
-
-@router.post("/k3s-clusters/{cluster_id}/delete-async", dependencies=[Depends(require_admin)])
-async def delete_admin_k3s_cluster_async(
-    request: Request,
-    cluster_id: str,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
-):
-    """관리자용 k3s 클러스터 삭제 — SSE 스트리밍 진행률 반환."""
-    import time
-    from collections.abc import AsyncGenerator
-
-    from app.api.k3s.clusters import _SSE_HEADERS, _delete_cluster_progress
-    from app.models.k3s import K3sProgressMessage, K3sProgressStep
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-
-    project_id = cluster.get("project_id", "")
-
-    async def gen() -> AsyncGenerator[str, None]:
-        yield ": " + " " * 2048 + "\n\n"
-        start = time.monotonic()
-        if cluster.get("deleted_at"):
-            msg = K3sProgressMessage(
-                step=K3sProgressStep.COMPLETED,
-                progress=100,
-                message="이미 삭제된 클러스터입니다",
-                elapsed_seconds=0.0,
-            )
-            yield f"data: {msg.model_dump_json()}\n\n"
-            return
-        try:
-            async for msg in _delete_cluster_progress(conn, project_id, cluster, token_info=None):
-                msg.elapsed_seconds = round(time.monotonic() - start, 1)
-                yield f"data: {msg.model_dump_json()}\n\n"
-        except Exception as e:
-            _logger.error("k3s cluster %s admin async delete failed: %s", cluster_id, e, exc_info=True)
-            fail = K3sProgressMessage(
-                step=K3sProgressStep.FAILED,
-                progress=0,
-                message=f"삭제 실패: {e}",
-                error=str(e),
-                elapsed_seconds=round(time.monotonic() - start, 1),
-            )
-            yield f"data: {fail.model_dump_json()}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
-
-
-@router.get("/k3s-clusters/{cluster_id}/ca-certificate", dependencies=[Depends(require_admin)])
-async def download_admin_k3s_ca_certificate(cluster_id: str):
-    """관리자용 k3s CA 인증서 PEM 다운로드."""
-    from fastapi.responses import Response
-
-    from app.services.k3s_certs import extract_ca_pem
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-
-    project_id = cluster.get("project_id", "")
-    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
-    if not kc:
-        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
-
-    try:
-        pem = extract_ca_pem(kc)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"CA 인증서 추출 실패: {e}")
-
-    cluster_name = cluster.get("name", cluster_id)
-    _logger.info("k3s CA 다운로드 (admin): cluster=%s project=%s", cluster_id, project_id)
-    return Response(
-        content=pem.encode(),
-        media_type="application/x-pem-file",
-        headers={"Content-Disposition": f'attachment; filename="ca-{cluster_name}.pem"'},
-    )
-
-
-@router.get("/k3s-clusters/{cluster_id}/certificate-expiry", dependencies=[Depends(require_admin)])
-async def get_admin_k3s_certificate_expiry(cluster_id: str):
-    """관리자용 k3s 인증서 만료 조회."""
-    from app.models.k3s import CertificateExpiryResponse, CertificateInfo
-    from app.services.cache import cached_call
-    from app.services.cache import keys as cache_keys
-    from app.services.k3s_certs import parse_kubeconfig_certs, probe_tls_server_cert
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-
-    project_id = cluster.get("project_id", "")
-    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
-    if not kc:
-        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
-
-    cache_key = cache_keys.project_key("k3s", project_id, cluster_id, sub="cert_expiry")
-
-    async def _compute() -> dict:
-        import yaml
-
-        certs = parse_kubeconfig_certs(kc)
-        server_via_tls: list[dict] = []
-        try:
-            parsed = yaml.safe_load(kc)
-            server_url = parsed["clusters"][0]["cluster"]["server"]
-            host = server_url.split("//")[-1].split(":")[0]
-            port_str = server_url.split(":")[-1].split("/")[0]
-            port = int(port_str) if port_str.isdigit() else 6443
-            server_via_tls = await probe_tls_server_cert(host, port)
-        except Exception as e:
-            _logger.debug("TLS 프로브 실패: %s", e)
-        return {"ca": certs.get("ca"), "client": certs.get("client"), "server_via_tls": server_via_tls}
-
-    data = await cached_call(cache_key, 3600, _compute)
-
-    def _to_info(d: dict | None) -> CertificateInfo | None:
-        return CertificateInfo(**d) if d else None
-
-    return CertificateExpiryResponse(
-        ca=_to_info(data.get("ca")),
-        client=_to_info(data.get("client")),
-        server_via_tls=[CertificateInfo(**s) for s in (data.get("server_via_tls") or [])],
-    )
-
-
-@router.post("/k3s-clusters/{cluster_id}/rotate-certs", dependencies=[Depends(require_admin)])
-async def rotate_admin_k3s_certs(cluster_id: str):
-    """관리자용 k3s 인증서 회전 (SSE 스트림)."""
-    from app.api.k3s.clusters import _SSE_HEADERS
-    from app.config import get_settings
-    from app.services.k3s_cert_rotation import acquire_rotation_lock, release_rotation_lock, rotate_certificates
-
-    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-    if cluster.get("status") not in ("ACTIVE", "ERROR"):
-        raise HTTPException(status_code=409, detail="클러스터가 ACTIVE 상태가 아닙니다.")
-
-    master_count = cluster.get("master_count", 1)
-    if master_count < 3:
-        raise HTTPException(
-            status_code=422,
-            detail="단일 마스터 클러스터는 인증서 회전 중 다운타임이 발생합니다. HA 클러스터에서만 지원합니다.",
-        )
-
-    if not await acquire_rotation_lock(cluster_id):
-        raise HTTPException(status_code=409, detail="이미 진행 중인 인증서 회전 작업이 있습니다.")
-
-    settings = get_settings()
-    project_id = cluster.get("project_id", "")
-
-    async def _gen():
-        try:
-            async for msg in rotate_certificates(
-                cluster_id,
-                project_id,
-                "admin",
-                node_timeout=float(settings.k3s_cert_rotation_node_timeout_sec),
-                job_image=settings.k3s_cert_rotation_job_image,
-            ):
-                yield f"data: {msg.model_dump_json()}\n\n"
-        finally:
-            await release_rotation_lock(cluster_id)
-
-    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
-
-
-# k3s 클러스터 템플릿 관리 (관리자)
-
-
-@router.get("/k3s-cluster-templates", dependencies=[Depends(require_admin)])
-async def list_admin_k3s_cluster_templates():
-    """관리자용 템플릿 전체 목록 (public=False 포함)."""
-    from app.services import k3s_template as _tmpl_svc
-
-    return await _tmpl_svc.list_templates(admin=True)
+        await asyncio.to_thread(register_drover(conn).delete_project_gpu_quota, project_id, gpu_type)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
 
 
 # ===========================================================================
@@ -2763,8 +2490,6 @@ async def admin_version():
     import platform
     import subprocess
     import time
-
-    s = get_settings()
 
     # 의존성 버전
     deps: dict = {}
@@ -2805,8 +2530,5 @@ async def admin_version():
             "commit": git_commit,
             "tag": git_tag,
             "branch": git_branch,
-        },
-        "config": {
-            "k3s_version": s.k3s_version,
         },
     }
