@@ -285,3 +285,103 @@ async def test_ordinary_user_get_network_detail_does_not_contain_provider_keys(c
     assert "provider_network_type" not in data
     assert "provider_segmentation_id" not in data
     assert "provider_physical_network" not in data
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_non_admin_returns_403(non_admin_client):
+    resp = await non_admin_client.get("/api/v1/admin/subnets/sub-1")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_success(admin_client):
+    from app.models.storage import (
+        AdminSubnetDetail,
+        AdminSubnetPort,
+        AllocationPool,
+        DhcpBindingInfo,
+        SubnetIpAllocation,
+    )
+
+    fake_detail = AdminSubnetDetail(
+        id="sub-1",
+        name="sub-test",
+        network_id="net-1",
+        network_name="net-test",
+        project_id="proj-1",
+        cidr="10.0.0.0/24",
+        gateway_ip="10.0.0.1",
+        ip_version=4,
+        dhcp_enabled=True,
+        allocation_pools=[AllocationPool(start="10.0.0.10", end="10.0.0.250")],
+        ports=[
+            AdminSubnetPort(
+                id="port-1",
+                name="p1",
+                status="ACTIVE",
+                mac_address="fa:16:3e:00:00:01",
+                device_owner="compute:nova",
+                device_id="inst-1",
+                project_id="proj-1",
+                ip_addresses=["10.0.0.5"],
+                binding_host_id="node-1",
+            )
+        ],
+        allocations=[
+            SubnetIpAllocation(
+                ip_address="10.0.0.5",
+                port_id="port-1",
+                port_name="p1",
+                device_owner="compute:nova",
+                device_id="inst-1",
+                project_id="proj-1",
+                binding_host_id="node-1",
+            )
+        ],
+        dhcp_bindings=[
+            DhcpBindingInfo(
+                agent_id="agent-1",
+                host="node-dhcp",
+                binary="neutron-dhcp-agent",
+                availability_zone="nova",
+                alive=True,
+                admin_state_up=True,
+                source="agent",
+                ip_addresses=["10.0.0.2"],
+                port_ids=["port-dhcp"],
+            )
+        ],
+        dhcp_agent_data_available=True,
+    )
+
+    with patch("app.api.identity.admin.neutron.get_admin_subnet_detail", return_value=fake_detail):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "sub-1"
+    assert data["network_name"] == "net-test"
+    assert data["allocation_pools"] == [{"start": "10.0.0.10", "end": "10.0.0.250"}]
+    assert data["ports"][0]["binding_host_id"] == "node-1"
+    assert data["allocations"][0]["ip_address"] == "10.0.0.5"
+    assert data["dhcp_bindings"][0]["source"] == "agent"
+    assert data["dhcp_agent_data_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_not_found(admin_client):
+    from openstack.exceptions import NotFoundException
+
+    with patch(
+        "app.api.identity.admin.neutron.get_admin_subnet_detail", side_effect=NotFoundException("Subnet not found")
+    ):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-missing")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "서브넷을 찾을 수 없습니다"
+
+
+@pytest.mark.asyncio
+async def test_admin_get_subnet_detail_generic_failure(admin_client):
+    with patch("app.api.identity.admin.neutron.get_admin_subnet_detail", side_effect=RuntimeError("Unexpected error")):
+        resp = await admin_client.get("/api/v1/admin/subnets/sub-error")
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "내부 서버 오류"

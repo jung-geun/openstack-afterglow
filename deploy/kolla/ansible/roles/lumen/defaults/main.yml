@@ -28,7 +28,7 @@ lumen_database_admin_user: "{{ database_user }}"
 lumen_database_admin_password: "{{ database_password }}"
 lumen_database_url: "mysql+aiomysql://{{ lumen_database_user }}:{{ lumen_database_password }}@{{ lumen_database_address }}:{{ lumen_database_port }}/{{ lumen_database_name }}"
 lumen_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
-lumen_valkey_port: "{{ redis_port | default(6379) }}"
+lumen_valkey_port: "{{ valkey_server_port }}"
 lumen_valkey_password: "{{ valkey_master_password }}"
 lumen_redis_db_index: 8
 lumen_redis_url: "redis://default:{{ lumen_valkey_password }}@{{ lumen_valkey_host }}:{{ lumen_valkey_port }}/{{ lumen_redis_db_index }}"

@@ -3,6 +3,7 @@ export interface Network {
   name: string;
   status?: string;
   subnets: string[];
+  cidrs?: string[];
   is_external: boolean;
   is_shared: boolean;
 }
@@ -24,6 +25,62 @@ export interface SubnetDetail {
   gateway_ip: string | null;
   dhcp_enabled: boolean;
 }
+export interface SubnetAllocationPool {
+  start: string;
+  end: string;
+}
+
+export interface SubnetPort {
+  id: string;
+  name: string;
+  status: string;
+  mac_address: string;
+  device_owner: string;
+  device_id: string;
+  project_id: string | null;
+  ip_addresses: string[];
+  binding_host_id: string | null;
+}
+
+export interface SubnetAllocation {
+  ip_address: string;
+  port_id: string;
+  port_name: string;
+  device_owner: string;
+  device_id: string;
+  project_id: string | null;
+  binding_host_id: string | null;
+}
+
+export interface SubnetDhcpBinding {
+  agent_id: string | null;
+  host: string | null;
+  binary: string | null;
+  availability_zone: string | null;
+  alive: boolean | null;
+  admin_state_up: boolean | null;
+  source: 'agent' | 'port';
+  ip_addresses: string[];
+  port_ids: string[];
+}
+
+export interface AdminSubnetDetail {
+  id: string;
+  name: string;
+  network_id: string;
+  network_name: string;
+  project_id: string | null;
+  cidr: string;
+  gateway_ip: string | null;
+  ip_version: number;
+  dhcp_enabled: boolean;
+  allocation_pools: SubnetAllocationPool[];
+  ports: SubnetPort[];
+  allocations: SubnetAllocation[];
+  dhcp_bindings: SubnetDhcpBinding[];
+  dhcp_agent_data_available: boolean;
+}
+
 
 export interface RouterInfo {
   id: string;

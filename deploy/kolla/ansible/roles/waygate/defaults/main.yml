@@ -28,7 +28,7 @@ waygate_database_admin_user: "{{ database_user }}"
 waygate_database_admin_password: "{{ database_password }}"
 waygate_database_url: "mysql+aiomysql://{{ waygate_database_user }}:{{ waygate_database_password }}@{{ waygate_database_address }}:{{ waygate_database_port }}/{{ waygate_database_name }}"
 waygate_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
-waygate_valkey_port: "{{ redis_port | default(6379) }}"
+waygate_valkey_port: "{{ valkey_server_port }}"
 waygate_valkey_password: "{{ valkey_master_password }}"
 waygate_redis_db_index: 6
 waygate_redis_url: "redis://default:{{ waygate_valkey_password }}@{{ waygate_valkey_host }}:{{ waygate_valkey_port }}/{{ waygate_redis_db_index }}"

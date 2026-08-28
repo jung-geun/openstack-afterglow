@@ -746,3 +746,35 @@ async def test_sync_monitoring_sg_returns_both_sg_names(admin_client, mock_conn)
     assert data["project_id"] == "proj-abc"
     assert data["sg_names"]["node_exporter"] == "node_exporter"
     assert data["sg_names"]["dcgm_exporter"] == "dcgm_exporter"
+
+
+@pytest.mark.asyncio
+async def test_admin_version_returns_current_runtime_shape(admin_client):
+    """GET /api/v1/admin/version 엔드포인트가 현재 런타임 구조를 반환한다."""
+    resp = await admin_client.get("/api/v1/admin/version")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "platform" in data
+    assert isinstance(data["platform"].get("backend_version"), str)
+
+    assert "runtime" in data
+    assert isinstance(data["runtime"].get("python_version"), str)
+    assert isinstance(data["runtime"].get("uptime_seconds"), int)
+
+    assert "dependencies" in data
+    assert isinstance(data["dependencies"], dict)
+    for pkg in ("fastapi", "openstacksdk", "python-keystoneclient", "pydantic", "uvicorn"):
+        assert pkg in data["dependencies"]
+        assert data["dependencies"][pkg] is None or isinstance(data["dependencies"][pkg], str)
+
+    assert "git" in data
+    assert isinstance(data["git"], dict)
+    assert "commit" in data["git"]
+    assert "tag" in data["git"]
+    assert "branch" in data["git"]
+    assert data["git"]["commit"] is None or isinstance(data["git"]["commit"], str)
+    assert data["git"]["tag"] is None or isinstance(data["git"]["tag"], str)
+    assert data["git"]["branch"] is None or isinstance(data["git"]["branch"], str)
+
+    assert "config" not in data

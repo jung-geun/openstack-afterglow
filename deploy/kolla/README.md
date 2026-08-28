@@ -36,7 +36,7 @@ the ordinary Kolla command line from `/etc/kolla`.
    - Source-build mode remains an optional development path; it is not used for the DMSLab deployment.
 5. **Datastores & Credential Reuse**:
    - **MariaDB**: Creates plugin-owned `_kolla` schemas (`afterglow_kolla`, `drover_kolla`, `lumen_kolla`, `waygate_kolla`, `palimpsest_kolla`).
-   - **Valkey (Redis)**: Connects directly to Kolla's current primary on its controller API address with explicit indexes (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen, 9: Palimpsest). This direct connection does not fail over automatically; update the plugin cache host after a Kolla Valkey promotion.
+   - **Valkey (Redis)**: Current Kolla deploys Valkey server+Sentinel, while this plugin consumes the direct primary on its controller API address for broad Redis-protocol client compatibility. The plugin creates no Redis container; full or Valkey-tagged Kolla deployment (`enable_valkey: "yes"`) must establish Valkey before executing plugin-only tagged operations. Because the direct primary connection does not auto-fail over, promotion requires running `kolla-ansible reconfigure` to update the plugin cache host. Explicit service indexes remain (5: Afterglow, 6: Waygate, 7: Drover, 8: Lumen, 9: Palimpsest).
    - **Palimpsest Hub**: Standalone layer repository service (API & worker) separate from Afterglow-owned layer build/consume APIs. Bootstrap executes `palimpsest-hub-bootstrap`; data migration (`palimpsest-hub-migrate-data`) is not run automatically and requires an empty-destination precondition.
    - **Lumen PostgreSQL**: Set `lumen_postgres_mode: bundled` to create the plugin-owned `lumen_postgres` container (`pgvector/pgvector:0.8.6-pg16@sha256:a3625087...`) on the first Lumen controller, or `external` to connect to an explicitly configured operator-managed PostgreSQL endpoint. External mode does not create a persistent PostgreSQL server container; it starts a disposable verification client container, runs an authenticated `SELECT 1`, then removes it.
 
@@ -180,11 +180,17 @@ user, and administrative password from Kolla's `database_address`,
 `database_port`, `database_user`, and `database_password`. The plugin secrets
 file contains only each service's own schema-user password.
 
-Likewise, each service derives its Redis/Valkey endpoint from the first
-Kolla Valkey controller API address, `redis_port`, and
+Likewise, each service derives its Valkey (Redis-protocol compatible) endpoint
+from the first Kolla Valkey controller API address, `valkey_server_port`, and
 `valkey_master_password`; `*_redis_db_index` is the only cache connection
 setting in `globals.yml`. This matches the topology used by Kolla's services
-and keeps the password in Kolla's existing password file.
+and keeps the password in Kolla's existing password file. Current Kolla deploys
+Valkey server+Sentinel; this plugin connects directly to the primary host on
+`valkey_server_port` for broad Redis-client compatibility without creating a
+separate Redis container. Note that a full or Valkey-tagged Kolla deployment
+(`enable_valkey: "yes"`) must establish Valkey before executing plugin-only
+tagged operations, and promotion requires running `kolla-ansible reconfigure`
+because the direct primary host does not auto-fail over.
 
 Runtime OpenStack settings use Kolla's `keystone_internal_url`, project/user
 domain, region, and internal interface variables. Kolla's `openstack_auth`
@@ -281,11 +287,13 @@ stock file.
 
 ### Deploy Services
 
-From `/etc/kolla`:
+From `/etc/kolla`, run initial deployment including the stock Valkey service dependency:
 
 ```bash
-kolla-ansible deploy --tags afterglow,waygate,drover,lumen,palimpsest
+kolla-ansible deploy --tags valkey,afterglow,waygate,drover,lumen,palimpsest
 ```
+
+Plugin-only tags (`--tags afterglow,waygate,drover,lumen,palimpsest`) are valid for deployment or reconfigure operations only after Valkey has been established.
 
 ### Reconfigure Services
 

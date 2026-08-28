@@ -470,6 +470,7 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 
 	assert.match(afterglowDefaults, /afterglow_database_address: "\{\{ database_address \}\}"/)
 	assert.match(afterglowDefaults, /afterglow_database_admin_user: "\{\{ database_user \}\}"/)
+	assert.match(afterglowDefaults, /afterglow_valkey_port: "\{\{ valkey_server_port \}\}"/)
 	assert.match(afterglowDefaults, /afterglow_valkey_password: "\{\{ valkey_master_password \| default\(''\) \}\}"/)
 	assert.match(afterglowDefaults, /afterglow_keystone_auth_url: "\{\{ keystone_internal_url \}\}"/)
 	assert.match(afterglowDefaults, /afterglow_keystone_project_domain_name: "\{\{ default_project_domain_name \}\}"/)
@@ -488,7 +489,7 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 		assert.match(defaults, new RegExp(`${service}_database_port: "\\{\\{ database_port \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_database_admin_user: "\\{\\{ database_user \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_valkey_host: "\\{\\{ 'api' \\| kolla_address\\(groups\\['valkey'\\]\\[0\\]\\) \\}\\}"`))
-		assert.match(defaults, new RegExp(`${service}_valkey_port: "\\{\\{ redis_port \\| default\\(6379\\) \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_port: "\\{\\{ valkey_server_port \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_valkey_password: "\\{\\{ valkey_master_password`))
 		assert.match(defaults, new RegExp(`${service}_keystone_auth_url: "\\{\\{ keystone_internal_url \\}\\}"`))
 		assert.match(defaults, new RegExp(`${service}_keystone_project_domain_name: "\\{\\{ default_project_domain_name \\}\\}"`))
@@ -734,4 +735,85 @@ test("Palimpsest Hub standalone Kolla role structure and contracts", () => {
 
 	// 8. Image reference validator
 	assert.match(validator, /afterglow-local\/palimpsest-hub-/)
+})
+
+test("Kolla plugin requires stock Kolla Valkey dependency and rejects standalone Redis", () => {
+	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+	assert.match(sample, /enable_valkey:\s*"yes"/)
+
+	const expectedRoles = [
+		{ name: "afterglow", dbIndex: 5 },
+		{ name: "waygate", dbIndex: 6 },
+		{ name: "drover", dbIndex: 7 },
+		{ name: "lumen", dbIndex: 8 },
+		{ name: "palimpsest", dbIndex: 9 },
+	]
+
+	for (const { name: service, dbIndex } of expectedRoles) {
+		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
+		assert.match(defaults, new RegExp(`${service}_valkey_host: "\\{\\{ 'api' \\| kolla_address\\(groups\\['valkey'\\]\\[0\\]\\) \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_port: "\\{\\{ valkey_server_port \\}\\}"`))
+		assert.match(defaults, new RegExp(`${service}_valkey_password:`))
+		assert.match(defaults, new RegExp(`${service}_valkey_password:.*valkey_master_password`))
+		assert.match(defaults, new RegExp(`${service}_redis_db_index: ${dbIndex}`))
+		assert.match(
+			defaults,
+			new RegExp(
+				`${service}_redis_url: "redis://default:\\{\\{ ${service}_valkey_password \\}\\}@\\{\\{ ${service}_valkey_host \\}\\}:\\{\\{ ${service}_valkey_port \\}\\}/\\{\\{ ${service}_redis_db_index \\}\\}"`
+			)
+		)
+
+		const precheck = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/precheck.yml`)
+		assert.match(precheck, /name: Precheck \| Verify stock Kolla Valkey dependency/)
+		assert.match(precheck, /enable_valkey \| default\(false\) \| bool/)
+		assert.match(precheck, /groups\.get\('valkey', \[\]\) \| length > 0/)
+		assert.match(precheck, /valkey_master_password is defined and valkey_master_password \| length > 0/)
+		assert.match(precheck, new RegExp(`when: enable_${service} \\| default\\(false\\) \\| bool`))
+		assert.match(precheck, /run_once: true/)
+		assert.match(precheck, /tags: precheck/)
+		assert.match(precheck, new RegExp(`Deploy stock Kolla Valkey before enabling ${service}; no plugin Redis fallback exists`))
+	}
+
+	const filesToScan = [
+		"deploy/kolla/globals.afterglow.sample.yml",
+	]
+
+	function collectFiles(dir) {
+		const entries = fs.readdirSync(dir, { withFileTypes: true })
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name)
+			if (entry.isDirectory()) {
+				collectFiles(fullPath)
+			} else if (entry.isFile()) {
+				const relPath = path.relative(rootDir, fullPath)
+				filesToScan.push(relPath)
+			}
+		}
+	}
+	collectFiles(path.join(rootDir, "deploy/kolla/ansible/roles"))
+
+	assert.strictEqual(fs.existsSync(path.join(rootDir, "deploy/kolla/ansible/roles/redis")), false)
+
+	const forbiddenPatterns = [
+		/\benable_redis\b/,
+		/\broles\/redis\b/,
+		/\bredis_services\b/,
+		/\bredis_port\b/,
+		/\benable_redis_[a-z_]+\b/,
+		/\bcontainer_name:\s*"?redis\b/,
+		/\bimage:\s*"?[^"\n]*\bredis:[^"\n]*/,
+		/\bredis_data\b/,
+		/\bredis_volume\b/,
+	]
+
+	for (const relPath of filesToScan) {
+		const content = readRepoFile(relPath)
+		for (const pattern of forbiddenPatterns) {
+			assert.equal(
+				pattern.test(content),
+				false,
+				`File ${relPath} matched forbidden Redis pattern ${pattern}`
+			)
+		}
+	}
 })

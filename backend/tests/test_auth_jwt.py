@@ -515,3 +515,137 @@ async def test_get_os_conn_constructor_failure_yields_503(
 
         assert resp.status_code == 503
         assert "detail" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_system_admin_foreign_target_succeeds_and_never_validates_target(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """system_admin이 foreign X-Project-Id 요청 시 target rescope를 검증하지 않고 home 권한으로 성공해야 한다."""
+    from unittest.mock import AsyncMock
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+    admin_home_data = dict(_KS_DATA, is_system_admin=True, project_id="home-proj-id", roles=["admin"])
+    cached_validate_mock = AsyncMock(return_value=admin_home_data)
+
+    with patch("app.api.deps._cached_validate", new=cached_validate_mock):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {access}", "X-Project-Id": "foreign-target-proj-id"},
+            )
+
+    assert resp.status_code == 200
+    assert resp.json()["project_id"] == "foreign-target-proj-id"
+    assert cached_validate_mock.call_count == 1
+    assert cached_validate_mock.call_args[0][1] == "proj-1"
+
+
+@pytest.mark.asyncio
+async def test_valid_non_admin_target_unauthorized_yields_403(_ks_authenticate, _ks_get_user, _rate_limiter_off):
+    """유효한 세션의 비관리자가 접근 불가 target X-Project-Id로 요청 시 403을 반환해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+    from keystoneauth1.exceptions.http import Unauthorized
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+    non_admin_home_data = dict(_KS_DATA, is_system_admin=False, project_id="home-proj-id")
+
+    async def side_effect(token, project_id):
+        if project_id == "foreign-target-proj-id":
+            raise Unauthorized("Target project unauthorized")
+        return non_admin_home_data
+
+    with patch("app.api.deps._cached_validate", side_effect=side_effect):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {access}", "X-Project-Id": "foreign-target-proj-id"},
+            )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_foreign_target_invalid_home_yields_401(_ks_authenticate, _ks_get_user, _rate_limiter_off):
+    """foreign X-Project-Id 요청 시 home project 검증 실패(Unauthorized)는 401을 반환해야 한다."""
+    from httpx import ASGITransport, AsyncClient
+    from keystoneauth1.exceptions.http import Unauthorized
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+    with patch("app.api.deps._cached_validate", side_effect=Unauthorized("Home session unauthorized")):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {access}", "X-Project-Id": "foreign-target-proj-id"},
+            )
+
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_os_conn_system_admin_foreign_target_scope_and_close(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """get_os_conn이 system_admin foreign target 시 SDK에는 authenticated home scope를 전달하고 conn에는 target logical scope 및 메타데이터를 설정하며 종료 시 connection을 닫아야 한다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/v1/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+        assert login.status_code == 200
+        access = login.json()["token"]
+
+    admin_home_data = dict(_KS_DATA, is_system_admin=True, project_id="home-proj-id")
+    fake_conn = MagicMock()
+    fake_conn.close = MagicMock()
+
+    with (
+        patch("app.api.deps._cached_validate", new=AsyncMock(return_value=admin_home_data)),
+        patch("app.api.deps.keystone.get_openstack_connection", return_value=fake_conn) as mock_get_conn,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/v1/flavors",
+                headers={"Authorization": f"Bearer {access}", "X-Project-Id": "foreign-target-proj-id"},
+            )
+
+    assert resp.status_code == 200
+    mock_get_conn.assert_called_once()
+    assert mock_get_conn.call_args[0][1] == "home-proj-id"
+    assert fake_conn._afterglow_project_id == "foreign-target-proj-id"
+    assert fake_conn._afterglow_authenticated_project_id == "home-proj-id"
+    assert fake_conn._afterglow_is_system_admin is True
+    fake_conn.close.assert_called_once()

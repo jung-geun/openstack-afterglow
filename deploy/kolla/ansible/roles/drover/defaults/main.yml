@@ -28,7 +28,7 @@ drover_database_admin_user: "{{ database_user }}"
 drover_database_admin_password: "{{ database_password }}"
 drover_database_url: "mysql+aiomysql://{{ drover_database_user }}:{{ drover_database_password }}@{{ drover_database_address }}:{{ drover_database_port }}/{{ drover_database_name }}"
 drover_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
-drover_valkey_port: "{{ redis_port | default(6379) }}"
+drover_valkey_port: "{{ valkey_server_port }}"
 drover_valkey_password: "{{ valkey_master_password }}"
 drover_redis_db_index: 7
 drover_redis_url: "redis://default:{{ drover_valkey_password }}@{{ drover_valkey_host }}:{{ drover_valkey_port }}/{{ drover_redis_db_index }}"

@@ -28,7 +28,7 @@ palimpsest_database_admin_user: "{{ database_user }}"
 palimpsest_database_admin_password: "{{ database_password }}"
 palimpsest_database_url: "mysql+asyncmy://{{ palimpsest_database_user }}:{{ palimpsest_database_password }}@{{ palimpsest_database_address }}:{{ palimpsest_database_port }}/{{ palimpsest_database_name }}"
 palimpsest_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
-palimpsest_valkey_port: "{{ redis_port | default(6379) }}"
+palimpsest_valkey_port: "{{ valkey_server_port }}"
 palimpsest_valkey_password: "{{ valkey_master_password }}"
 palimpsest_redis_db_index: 9
 palimpsest_redis_url: "redis://default:{{ palimpsest_valkey_password }}@{{ palimpsest_valkey_host }}:{{ palimpsest_valkey_port }}/{{ palimpsest_redis_db_index }}"

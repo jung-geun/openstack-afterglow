@@ -77,7 +77,7 @@ afterglow_database_user: "afterglow"
 afterglow_database_url: "mysql+aiomysql://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ afterglow_database_address }}:{{ afterglow_database_port }}/{{ afterglow_database_name }}"
 
 afterglow_valkey_host: "{{ 'api' | kolla_address(groups['valkey'][0]) }}"
-afterglow_valkey_port: "{{ redis_port | default(6379) }}"
+afterglow_valkey_port: "{{ valkey_server_port }}"
 afterglow_valkey_password: "{{ valkey_master_password | default('') }}"
 afterglow_redis_db_index: 5
 afterglow_redis_url: "redis://default:{{ afterglow_valkey_password }}@{{ afterglow_valkey_host }}:{{ afterglow_valkey_port }}/{{ afterglow_redis_db_index }}"

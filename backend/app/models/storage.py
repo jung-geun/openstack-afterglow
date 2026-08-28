@@ -174,6 +174,7 @@ class NetworkInfo(BaseModel):
     name: str
     status: str
     subnets: list[str] = []
+    cidrs: list[str] = []
     is_external: bool = False
     is_shared: bool = False
 
@@ -242,6 +243,62 @@ class AdminNetworkDetail(NetworkDetail):
     provider_network_type: str | None = None
     provider_segmentation_id: int | None = None
     provider_physical_network: str | None = None
+
+
+class AllocationPool(BaseModel):
+    start: str
+    end: str
+
+
+class AdminSubnetPort(BaseModel):
+    id: str
+    name: str
+    status: str
+    mac_address: str
+    device_owner: str
+    device_id: str
+    project_id: str | None = None
+    ip_addresses: list[str] = []
+    binding_host_id: str | None = None
+
+
+class SubnetIpAllocation(BaseModel):
+    ip_address: str
+    port_id: str
+    port_name: str
+    device_owner: str
+    device_id: str
+    project_id: str | None = None
+    binding_host_id: str | None = None
+
+
+class DhcpBindingInfo(BaseModel):
+    agent_id: str | None = None
+    host: str | None = None
+    binary: str | None = None
+    availability_zone: str | None = None
+    alive: bool | None = None
+    admin_state_up: bool | None = None
+    source: Literal["agent", "port"]
+    ip_addresses: list[str] = []
+    port_ids: list[str] = []
+
+
+class AdminSubnetDetail(BaseModel):
+    id: str
+    name: str
+    network_id: str
+    network_name: str
+    project_id: str | None = None
+    cidr: str
+    gateway_ip: str | None = None
+    ip_version: int
+    dhcp_enabled: bool
+    allocation_pools: list[AllocationPool] = []
+    ports: list[AdminSubnetPort] = []
+    allocations: list[SubnetIpAllocation] = []
+    dhcp_bindings: list[DhcpBindingInfo] = []
+    dhcp_agent_data_available: bool = True
 
 
 class CreateVolumeRequest(BaseModel):

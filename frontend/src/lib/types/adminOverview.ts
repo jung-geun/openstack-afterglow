@@ -17,7 +17,6 @@ export interface VersionInfo {
 	runtime: { python_version: string; uptime_seconds: number };
 	dependencies: Record<string, string | null>;
 	git: { commit: string | null; tag: string | null; branch: string | null };
-	config: { k3s_version: string };
 }
 
 export interface ProjectUsage {

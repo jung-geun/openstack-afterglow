@@ -280,7 +280,7 @@ function seedState(): MockupState {
 				{ project_id: 'mock-project-3', project_name: 'sample-ci-runner', cpu: { used: 24, quota: 80 }, ram_mb: { used: 49152, quota: 131072 }, instances: { used: 11, quota: 25 }, disk_gb: { used: 900, quota: 4000 }, gpu_instances: 0 },
 				{ project_id: 'mock-project-4', project_name: 'sample-visual-research', cpu: { used: 96, quota: 192 }, ram_mb: { used: 262144, quota: 524288 }, instances: { used: 16, quota: 50 }, disk_gb: { used: 4200, quota: 16000 }, gpu_instances: 3 },
 			],
-			version: { platform: { backend_version: '0.0.0-mock' }, runtime: { python_version: '3.12.8', uptime_seconds: 864000 }, dependencies: { fastapi: '0.125.0', openstacksdk: '3.3.0' }, git: { commit: 'mockup', tag: 'v0.0.0-mock', branch: 'mockup' }, config: { k3s_version: 'v1.30.4+k3s1' } },
+			version: { platform: { backend_version: '0.0.0-mock' }, runtime: { python_version: '3.12.8', uptime_seconds: 864000 }, dependencies: { fastapi: '0.125.0', openstacksdk: '3.3.0' }, git: { commit: 'mockup', tag: 'v0.0.0-mock', branch: 'mockup' } },
 			notifications: [
 				{ severity: 'critical', message: 'sample-compute-node-a GPU 온도가 임계치에 접근했습니다.', target: 'sample-compute-node-a', href: '/admin/monitoring' },
 				{ severity: 'warning', message: 'sample-project-beta RAM quota 사용률 80% 초과', target: 'mock-project-2', href: '/admin/projects' },

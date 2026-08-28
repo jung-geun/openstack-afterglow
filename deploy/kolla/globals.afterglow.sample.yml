@@ -2,11 +2,14 @@
 # Additive Plugin Override Sample for DMSLab Kolla-Ansible Deployment
 # Place as `/etc/kolla/config/afterglow/globals.yml` (mode 0640). After the
 # plugin installer has added the standard Kolla wiring, run from `/etc/kolla`:
-#   kolla-ansible deploy --tags afterglow,waygate,drover,lumen,palimpsest
+#   kolla-ansible deploy --tags valkey,afterglow,waygate,drover,lumen,palimpsest
 # The plugin globals and secrets load from globals.d; do not add `-i`, `-p`,
 # or `-e @...` arguments for normal operations.
 
 # ── 1. Service Toggles (DMSLab Topology) ──────────────────────────────────────
+# Stock Kolla service dependency (Kolla owns Valkey lifecycle)
+enable_valkey: "yes"
+
 enable_afterglow: "yes"
 enable_afterglow_backend: "yes"
 enable_afterglow_frontend: "yes"
@@ -143,7 +146,7 @@ palimpsest_database_user: "palimpsest_kolla"
 palimpsest_keystone_user: "palimpsest"
 palimpsest_service_project_name: "palimpsest-service"
 
-# Reuse Kolla's Valkey endpoint: controller API address, `redis_port`, and
+# Reuse Kolla's Valkey endpoint: controller API address, `valkey_server_port`, and
 # `valkey_master_password` from the normal Kolla password file. Only these
 # plugin database indexes are configured here.
 afterglow_redis_db_index: 5

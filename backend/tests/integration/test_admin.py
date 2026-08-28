@@ -483,3 +483,46 @@ async def test_admin_user_can_access_admin_projects(admin_user_client):
     assert resp.status_code == 200, (
         f"admin_user 가 /api/admin/projects 에 접근 실패 ({resp.status_code}): {resp.text[:200]}"
     )
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_admin_user_foreign_project_instance_detail_endpoints(admin_user_client, admin_user_auth_data):
+    """admin_user가 자신에게 권한 할당이 없는 타 테넌트 인스턴스의 상세/인터페이스/볼륨/보안그룹/소유자 API에 X-Project-Id 헤더로 접근 가능해야 한다."""
+    admin_scoped_project = admin_user_auth_data.get("project_id", "")
+
+    # 1. 관리자 권한으로 모든 인스턴스 목록 조회
+    resp = await admin_user_client.get("/api/v1/admin/all-instances")
+    assert resp.status_code == 200
+    all_instances = resp.json()
+    items = all_instances.get("items", all_instances) if isinstance(all_instances, dict) else all_instances
+
+    # 2. admin_user의 scoped project와 다른 프로젝트 소유 인스턴스 선택
+    target_inst = None
+    target_project_id = None
+    for inst in items:
+        p_id = inst.get("project_id") or inst.get("tenant_id")
+        if p_id and p_id != admin_scoped_project:
+            target_inst = inst
+            target_project_id = p_id
+            break
+
+    if not target_inst or not target_project_id:
+        pytest.skip("admin_user의 scoped project와 다른 프로젝트 소유 인스턴스가 없어 테스트를 스킵합니다.")
+
+    instance_id = target_inst["id"]
+    headers = {"X-Project-Id": target_project_id}
+
+    # 3. detail, interfaces, volumes, security-groups, owner 5개 엔드포인트 요청 및 200 확인
+    endpoints = [
+        f"/api/v1/instances/{instance_id}",
+        f"/api/v1/instances/{instance_id}/interfaces",
+        f"/api/v1/instances/{instance_id}/volumes",
+        f"/api/v1/instances/{instance_id}/security-groups",
+        f"/api/v1/instances/{instance_id}/owner",
+    ]
+
+    for ep in endpoints:
+        r = await admin_user_client.get(ep, headers=headers)
+        assert r.status_code == 200, (
+            f"Failed on {ep} with X-Project-Id={target_project_id}: status {r.status_code}, body: {r.text[:200]}"
+        )

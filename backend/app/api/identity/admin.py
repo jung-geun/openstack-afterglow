@@ -17,6 +17,7 @@ from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, req
 from app.config import get_settings
 from app.models.storage import (
     AdminNetworkDetail,
+    AdminSubnetDetail,
     FileStorageDeleteDiagnostic,
     FileStorageForceDeleteResult,
     FileStorageInfo,
@@ -2059,6 +2060,28 @@ async def get_admin_network(network_id: str, conn: openstack.connection.Connecti
         raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
 
 
+@router.get("/subnets/{subnet_id}", dependencies=[Depends(require_admin)], response_model=AdminSubnetDetail)
+async def get_admin_subnet(subnet_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """서브넷 상세 조회 (관리자)."""
+    from openstack.exceptions import HttpException, NotFoundException, ResourceNotFound
+
+    try:
+        return await asyncio.to_thread(neutron.get_admin_subnet_detail, conn, subnet_id)
+    except (NotFoundException, ResourceNotFound):
+        raise HTTPException(status_code=404, detail="서브넷을 찾을 수 없습니다")
+    except HttpException as exc:
+        status_code = getattr(exc, "status_code", None) or 500
+        if status_code >= 500:
+            _logger.error("OpenStack upstream error fetching subnet detail for %s: %s", subnet_id, exc, exc_info=True)
+            raise HTTPException(status_code=status_code, detail="OpenStack service error")
+        raise HTTPException(status_code=status_code, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Unexpected error fetching admin subnet detail for %s: %s", subnet_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="서브넷 상세 조회 실패")
+
+
 @router.post("/networks", dependencies=[Depends(require_admin)], status_code=201)
 async def create_network(
     req: CreateNetworkRequest,
@@ -2468,8 +2491,6 @@ async def admin_version():
     import subprocess
     import time
 
-    s = get_settings()
-
     # 의존성 버전
     deps: dict = {}
     for pkg in ("fastapi", "openstacksdk", "python-keystoneclient", "pydantic", "uvicorn"):
@@ -2509,8 +2530,5 @@ async def admin_version():
             "commit": git_commit,
             "tag": git_tag,
             "branch": git_branch,
-        },
-        "config": {
-            "k3s_version": s.k3s_version,
         },
     }

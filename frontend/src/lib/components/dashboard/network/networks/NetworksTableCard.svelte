@@ -107,7 +107,12 @@
           </button>
         </div>
         <!-- CIDR -->
-        <div class="hidden sm:block text-gray-400 font-mono text-[12px]">—</div>
+        <div
+          class="hidden sm:block text-gray-400 font-mono text-[12px] truncate"
+          title={net.cidrs && net.cidrs.length > 0 ? net.cidrs.join(', ') : undefined}
+        >
+          {net.cidrs && net.cidrs.length > 0 ? net.cidrs.join(', ') : '—'}
+        </div>
         <!-- 유형 badge -->
         <div>
           {#if net.is_external}

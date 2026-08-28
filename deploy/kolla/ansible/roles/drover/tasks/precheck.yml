@@ -7,6 +7,17 @@
   run_once: true
   tags: precheck
 
+- name: Precheck | Verify stock Kolla Valkey dependency
+  ansible.builtin.assert:
+    that:
+      - enable_valkey | default(false) | bool
+      - groups.get('valkey', []) | length > 0
+      - valkey_master_password is defined and valkey_master_password | length > 0
+    fail_msg: "Deploy stock Kolla Valkey before enabling drover; no plugin Redis fallback exists"
+  run_once: true
+  tags: precheck
+  when: enable_drover | default(false) | bool
+
 - name: Precheck | Check required Drover secrets
   ansible.builtin.assert:
     that:

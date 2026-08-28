@@ -181,22 +181,68 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
         )
 
     jwt_project_id = payload.get("project_id", "")
-    target_project_id = x_project_id or jwt_project_id
+    home_project_id = jwt_project_id or sess.get("project_id", "")
 
-    # 권한 정보는 항상 Keystone live 검증(60s 캐시). JWT payload에서 꺼내지 않는다.
-    # 프로젝트 전환 여부와 무관하게 동일 경로로 통합 — stale window 제거.
-    effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
-    try:
-        info = await _cached_validate(sess["keystone_token"], effective_project_id)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        from keystoneauth1.exceptions.http import Unauthorized
+    from keystoneauth1.exceptions.http import Unauthorized
 
-        if isinstance(exc, Unauthorized):
-            raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
-        _logger.error("Keystone validation transient error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+    is_foreign_target = bool(x_project_id and x_project_id != jwt_project_id)
+
+    if is_foreign_target:
+        # 1. foreign X-Project-Id 요청 시 JWT/session home project 검증 우선 진행
+        try:
+            home_info = await _cached_validate(sess["keystone_token"], home_project_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if isinstance(exc, Unauthorized):
+                raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+            _logger.error("Keystone validation transient error on home project: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+        if home_info.get("is_system_admin", False):
+            # 2. System admin override: target rescope 생략하고 home token 및 권한 재사용, logical project_id만 target 설정
+            info = home_info
+            logical_project_id = x_project_id
+            connection_project_id = info.get("project_id", home_project_id)
+            project_name = ""
+        else:
+            # 3. Non-admin: target rescope 시도 (Unauthorized 시 403 반환)
+            try:
+                target_info = await _cached_validate(sess["keystone_token"], x_project_id)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                if isinstance(exc, Unauthorized):
+                    raise HTTPException(status_code=403, detail="해당 프로젝트에 대한 접근 권한이 없습니다.")
+                _logger.error("Keystone validation transient error on target rescope: %s", exc, exc_info=True)
+                raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+            info = target_info
+            logical_project_id = info.get("project_id", x_project_id)
+            connection_project_id = logical_project_id
+            project_name = info.get("project_name", "")
+
+            # X-Project-Id로 실제 rescope가 발생한 비관리자 접근 기록 (fire-and-forget)
+            user_id_for_record = info.get("user_id", payload.get("sub", ""))
+            if user_id_for_record:
+                from app.services.recent_projects import record_project_access
+
+                asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
+    else:
+        effective_project_id = x_project_id or home_project_id
+        try:
+            info = await _cached_validate(sess["keystone_token"], effective_project_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if isinstance(exc, Unauthorized):
+                raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+            _logger.error("Keystone validation transient error: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="인증 검증 서비스 일시적 오류. 잠시 후 다시 시도해 주세요.")
+
+        logical_project_id = info.get("project_id", effective_project_id)
+        connection_project_id = logical_project_id
+        project_name = info.get("project_name", payload.get("project_name", ""))
 
     # validate_token은 POST /v3/auth/tokens으로 새 Keystone 토큰을 발급한다.
     # 새 토큰이 원본과 다르면 Redis 세션에 역기록해 Keystone TTL 만료 문제를 방지.
@@ -206,19 +252,13 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
 
         asyncio.create_task(update_session_token(refresh_jti, new_ks_token))
 
-    # X-Project-Id로 실제 rescope가 발생한 경우에만 접근 기록 (fire-and-forget)
-    user_id_for_record = info.get("user_id", payload.get("sub", ""))
-    if x_project_id and x_project_id != jwt_project_id and user_id_for_record:
-        from app.services.recent_projects import record_project_access
-
-        asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
-
     return {
         "token": info["token"],
         "user_id": info.get("user_id", payload.get("sub", "")),
         "username": info.get("username", payload.get("username", "")),
-        "project_id": info.get("project_id", effective_project_id),
-        "project_name": info.get("project_name", payload.get("project_name", "")),
+        "project_id": logical_project_id,
+        "connection_project_id": connection_project_id,
+        "project_name": project_name,
         "roles": info.get("roles", []),
         "is_system_admin": info.get("is_system_admin", False),
         "refresh_jti": refresh_jti,
@@ -309,10 +349,14 @@ async def get_os_conn(
     )
     scoped_token = token_info["token"]
     project_id = token_info["project_id"]
+    connection_project_id = token_info.get("connection_project_id", project_id)
+    is_system_admin = token_info.get("is_system_admin", False)
     try:
-        conn = keystone.get_openstack_connection(scoped_token, project_id)
+        conn = keystone.get_openstack_connection(scoped_token, connection_project_id)
         conn._afterglow_token = scoped_token
         conn._afterglow_project_id = project_id
+        conn._afterglow_authenticated_project_id = connection_project_id
+        conn._afterglow_is_system_admin = is_system_admin
         conn._afterglow_user_id = token_info.get("user_id", "")
     except Exception as exc:
         _logger.error("OpenStack connection creation failed in get_os_conn: %s", exc, exc_info=True)
