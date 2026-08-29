@@ -15,7 +15,6 @@ from fastapi.responses import StreamingResponse
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_token_info, require_admin
 from app.config import get_settings
-from app.database import is_db_available
 from app.models import compute as compute_models
 from app.models.compute import CreateInstanceRequest
 from app.models.progress import ProgressMessage, ProgressStep
@@ -160,6 +159,25 @@ async def admin_create_instance_async(
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
+            from app.services.gpu_inventory import (
+                GpuQuotaDenied,
+                GpuQuotaUnavailable,
+                require_gpu_quota,
+            )
+
+            _sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+            _sse_flavor = next((f for f in _sse_flavors if f.id == req.flavor_id), None)
+            try:
+                gpu_available = await require_gpu_quota(conn, _sse_flavor) if _sse_flavor else False
+            except GpuQuotaDenied as exc:
+                message = str(exc)
+                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {message}")
+                raise HTTPException(status_code=409, detail=message) from exc
+            except GpuQuotaUnavailable as exc:
+                message = str(exc)
+                yield send_progress(ProgressStep.MANILA_PREPARING, 0, f"GPU quota 조회 실패: {message}")
+                raise HTTPException(status_code=503, detail=message) from exc
+
             file_storages_info = []
             _sse_health_id = ""
             _sse_health_token = ""
@@ -186,19 +204,6 @@ async def admin_create_instance_async(
                     )
                     file_storages_info = [file_storage_info]
                 yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
-
-            _sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
-            _sse_flavor = next((f for f in _sse_flavors if f.id == req.flavor_id), None)
-            gpu_available = _sse_flavor.is_gpu if _sse_flavor else False
-
-            if is_db_available() and _sse_flavor and _sse_flavor.is_gpu:
-                from drover_sdk import register as register_drover
-
-                _res = await asyncio.to_thread(register_drover(conn).check_gpu_quota, _sse_flavor.extra_specs or {})
-                if not _res.get("ok"):
-                    _msg = _res.get("detail") or _res.get("message") or "GPU quota 초과"
-                    yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
-                    raise HTTPException(status_code=409, detail=_msg)
 
             if req.boot_volume_id:
                 yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "기존 부팅 볼륨 검증 중...")

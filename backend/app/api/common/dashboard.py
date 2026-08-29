@@ -531,15 +531,17 @@ async def get_project_quotas(
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
-    # GPU quota (DB 있는 경우)
+    # Drover owns GPU quota state independently of Afterglow's local database.
     gpu_quota: list[dict] = []
-    if is_db_available():
-        try:
-            status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
-            if isinstance(status_list, list):
-                gpu_quota = status_list
-        except Exception:
-            _logger.warning("GPU quota 조회 실패", exc_info=True)
+    gpu_quota_available = True
+    try:
+        status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+        if not isinstance(status_list, list):
+            raise ValueError("gpu_quota_status response is not a list")
+        gpu_quota = status_list
+    except Exception:
+        gpu_quota_available = False
+        _logger.warning("GPU quota 조회 실패", exc_info=True)
 
     return {
         "compute": compute_q,
@@ -547,6 +549,7 @@ async def get_project_quotas(
         "network": network_q,
         "file_storage": file_storage_q,
         "gpu": gpu_quota,
+        "gpu_available": gpu_quota_available,
         "database": {"instances_count": trove_count},
         "object_storage": swift_meta,
     }
@@ -611,39 +614,52 @@ async def get_gpu_available(
         raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
 
     # 프로젝트 GPU 쿼터 기반 필터링 + 가용량을 쿼터 상한 기준으로 표시
-    if is_db_available():
-        try:
-            from app.api.identity.admin_gpu import build_device_name_to_alias_map
+    try:
+        from app.api.identity.admin_gpu import build_device_name_to_alias_map
 
-            status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
-            quotas = {item["gpu_type"]: item["limit"] for item in status_list}
-            usage = {item["gpu_type"]: item["in_use"] for item in status_list}
-            name_to_alias = build_device_name_to_alias_map()
+        status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+        if not isinstance(status_list, list):
+            raise ValueError("gpu_quota_status response is not a list")
+        quotas = {
+            item["gpu_type"]: item["limit"]
+            for item in status_list
+            if isinstance(item, dict) and isinstance(item.get("gpu_type"), str) and type(item.get("limit")) is int
+        }
+        usage = {
+            item["gpu_type"]: item["in_use"]
+            for item in status_list
+            if isinstance(item, dict) and isinstance(item.get("gpu_type"), str) and type(item.get("in_use")) is int
+        }
+        name_to_alias = build_device_name_to_alias_map()
 
-            filtered = []
-            for t in data["gpu_types"]:
-                alias = name_to_alias.get(t["device_name"], "")
-                limit = quotas.get(alias, 0)
-                if limit == 0:
-                    continue
-                in_use = usage.get(alias, 0)
-                if limit == -1:
-                    # 무제한: 클러스터 전체 수치 그대로 사용
-                    filtered.append(t)
-                else:
-                    # 상한 있음: total=쿼터 상한, available=min(쿼터 잔여, 클러스터 잔여)
-                    quota_remaining = max(limit - in_use, 0)
-                    filtered.append(
-                        {
-                            **t,
-                            "total": limit,
-                            "used": in_use,
-                            "available": min(quota_remaining, t["available"]),
-                        }
-                    )
-            data = {**data, "gpu_types": filtered}
-        except Exception:
-            _logger.warning("GPU 쿼터 필터링 실패 — 전체 목록 반환", exc_info=True)
+        filtered = []
+        for t in data["gpu_types"]:
+            alias = name_to_alias.get(t["device_name"], "")
+            limit = quotas.get(alias, 0)
+            if limit == 0:
+                continue
+            in_use = usage.get(alias, 0)
+            if limit == -1:
+                filtered.append(t)
+            else:
+                quota_remaining = max(limit - in_use, 0)
+                filtered.append(
+                    {
+                        **t,
+                        "total": limit,
+                        "used": in_use,
+                        "available": min(quota_remaining, t["available"]),
+                    }
+                )
+        data = {**data, "gpu_types": filtered, "available": True}
+    except Exception:
+        _logger.warning("GPU 쿼터 필터링 실패 — 비어있는 GPU 목록 반환", exc_info=True)
+        data = {
+            **data,
+            "gpu_types": [],
+            "summary": {"total": 0, "used": 0, "available": 0},
+            "available": False,
+        }
 
     return data
 

@@ -304,3 +304,47 @@ async def test_proxy_upstream_connection_failure_503():
             resp = await proxy("drover", req, "/v1/clusters")
             assert resp.status_code == 503
             assert json.loads(resp.body.decode()) == {"detail": "drover 서비스를 사용할 수 없습니다"}
+
+
+def test_join_version_aware_url_variants():
+    from app.services.service_proxy import _append_query, join_version_aware_url
+
+    assert (
+        join_version_aware_url("https://drover.local/v1", "/v1/admin/clusters")
+        == "https://drover.local/v1/admin/clusters"
+    )
+    assert (
+        join_version_aware_url("https://drover.local/v1/", "/v1/admin/clusters")
+        == "https://drover.local/v1/admin/clusters"
+    )
+    assert (
+        join_version_aware_url("https://drover.local/api/v2.1/project", "/v1/admin/clusters")
+        == "https://drover.local/api/v2.1/project/admin/clusters"
+    )
+    assert (
+        join_version_aware_url("https://drover.local", "/v1/admin/clusters") == "https://drover.local/v1/admin/clusters"
+    )
+    assert join_version_aware_url("http://10.0.0.1:9517", "/v1/containers") == "http://10.0.0.1:9517/v1/containers"
+    assert (
+        join_version_aware_url(
+            "https://zun.local:9517/v1",
+            "/v1/containers/c1/logs?stdout=true&stderr=true#top",
+        )
+        == "https://zun.local:9517/v1/containers/c1/logs?stdout=true&stderr=true#top"
+    )
+    assert (
+        _append_query(
+            "https://drover.local/v1/clusters?source=cache#section",
+            "refresh=true",
+        )
+        == "https://drover.local/v1/clusters?source=cache&refresh=true#section"
+    )
+
+    with pytest.raises(ValueError, match="must be relative"):
+        join_version_aware_url("http://zun.local", "https://evil.example/v1/containers")
+    with pytest.raises(ValueError, match="must be relative"):
+        join_version_aware_url("http://zun.local", "//evil.example/v1/containers")
+    with pytest.raises(ValueError, match="cannot contain"):
+        join_version_aware_url("http://zun.local/v1?foo=bar", "/v1/containers")
+    with pytest.raises(ValueError, match="cannot contain"):
+        join_version_aware_url("http://zun.local/v1#section", "/v1/containers")

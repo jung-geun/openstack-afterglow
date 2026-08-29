@@ -768,7 +768,6 @@ async def test_create_instance_with_libraries_attaches_union_sg(client, mock_con
         patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
         patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
     ):
         resp = await client.post(
             "/api/v1/instances",
@@ -819,7 +818,6 @@ async def test_create_instance_sg_skipped_when_disabled(client, mock_conn):
         ),
         patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
         patch("app.api.compute.instances.get_settings") as mock_settings,
     ):
         s = MM()
@@ -932,7 +930,6 @@ async def test_create_instance_non_gpu_attaches_node_exporter_only(client, mock_
         ),
         patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
         patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=False)),
     ):
         resp = await client.post(
@@ -969,9 +966,12 @@ async def test_create_instance_gpu_attaches_both_sgs(client, mock_conn):
     fake_upper = MM()
     fake_upper.id = "vol-upper"
     mock_conn.compute.create_volume_attachment.return_value = MM()
+    quota_proxy = MM()
+    quota_proxy.check_gpu_quota.return_value = {"ok": True}
 
     with (
         patch("app.api.compute.instances.nova.list_flavors", return_value=[_make_flavor(is_gpu=True)]),
+        patch("drover_sdk.register", return_value=quota_proxy),
         patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
         patch("app.api.compute.instances.cinder.rename_volume"),
         patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
@@ -986,7 +986,6 @@ async def test_create_instance_gpu_attaches_both_sgs(client, mock_conn):
         patch("app.api.compute.instances.neutron.ensure_dcgm_exporter_sg", return_value="dcgm_exporter"),
         patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
         patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=True)),
     ):
         resp = await client.post(
@@ -1002,6 +1001,7 @@ async def test_create_instance_gpu_attaches_both_sgs(client, mock_conn):
         )
 
     assert resp.status_code in (200, 201, 202)
+    quota_proxy.check_gpu_quota.assert_called_once()
     assert "node_exporter" in attached_sgs
     assert "dcgm_exporter" in attached_sgs
     assert "default" in attached_sgs
@@ -1043,7 +1043,6 @@ async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_
         ),
         patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
         patch(
             "app.api.compute.instances.get_settings",
             return_value=_make_monitoring_settings(enabled=False),
@@ -1096,7 +1095,6 @@ async def test_create_instance_monitoring_sg_skipped_when_no_cidr(client, mock_c
         ),
         patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
-        patch("app.api.compute.instances.is_db_available", return_value=False),
         patch(
             "app.api.compute.instances.get_settings",
             return_value=_make_monitoring_settings(cidr=""),

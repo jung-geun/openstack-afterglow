@@ -45,7 +45,7 @@ dependencies = [
     "langchain-mcp-adapters==0.3.1",
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@0e8bc4407a06ff7aad82be2dba785c353320781a#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@04345d976e9ba0a44924c33ec45ef84e25d999a7#subdirectory=sdk",
     "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 
@@ -127,7 +127,7 @@ worker = [
     "langchain-mcp-adapters==0.3.1",
     "apscheduler>=3.10",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
-    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@0e8bc4407a06ff7aad82be2dba785c353320781a#subdirectory=sdk",
+    "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@04345d976e9ba0a44924c33ec45ef84e25d999a7#subdirectory=sdk",
     "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 

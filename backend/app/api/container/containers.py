@@ -29,6 +29,7 @@ from app.models.containers import (
 from app.rate_limit import limiter
 from app.services import cache, zun
 from app.services.cache import invalidation, keys
+from app.services.service_proxy import join_version_aware_url
 from app.services.zun import ZunServiceUnavailable
 
 logger = logging.getLogger(__name__)
@@ -261,9 +262,8 @@ async def container_exec_ws(
                 continue
             try:
                 body = {"command": ["/bin/sh", "-c", cmd]}
-                resp = await asyncio.to_thread(
-                    lambda _body=body: conn.session.post(f"{endpoint}/v1/containers/{container_id}/execute", json=_body)
-                )
+                exec_url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}/execute")
+                resp = await asyncio.to_thread(lambda _url=exec_url, _body=body: conn.session.post(_url, json=_body))
                 result = resp.json() if hasattr(resp, "json") else {}
                 output = result.get("output", "")
                 exit_code = result.get("exit_code", 0)

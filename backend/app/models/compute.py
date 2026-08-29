@@ -51,7 +51,9 @@ class FlavorInfo(BaseModel):
 
     @property
     def is_gpu(self) -> bool:
-        return self.name.startswith("gpu.")
+        from app.services.gpu_inventory import is_gpu_flavor
+
+        return is_gpu_flavor(self)
 
     @property
     def gpu_count(self) -> int:
