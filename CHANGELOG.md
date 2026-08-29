@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-08-29
+
+### Changed
+
+- **분리 서비스 API 버전 상속 일반화** — Keystone catalog endpoint가 `/v1`, `/v2`, `/v2.1` 중 하나를 포함할 때 SDK와 Afterglow 프록시가 중복 버전 경로를 만들지 않고 endpoint의 실제 버전을 권위 있게 사용한다.
+- **GPU 쿼터 판정 Drover 통합** — PCI alias와 flavor extra spec을 Drover의 쿼터 응답으로 일관되게 판정하고, CPU flavor는 우회하면서 GPU 생성은 모든 인프라 변경 전에 쿼터를 확인한다.
+
+### Fixed
+
+- **선택 조회 장애 격리와 필수 GPU 검증 fail-closed** — 선택적인 Drover 읽기 실패는 명시적인 unavailable/필터링 응답으로 제한하고, GPU 생성의 거부·전송 오류·비정상 응답은 각각 409/503으로 중단해 무관한 화면과 실제 생성 안전성을 함께 보존한다.
+- **Drover GPU alias 수량 계산 복구** — `alias`, `alias:count`, 여러 PCI alias가 섞인 flavor를 모두 계산하고 잘못된 0·음수 수량은 최소 1로 보정하며 오디오 등 비GPU PCI alias를 제외한다.
+- **Kolla 서비스 이미지 갱신 안전성 강화** — digest 기반 서비스 이미지 갱신 시 보안 런타임 설정과 자격 증명을 노출하지 않고 유지하도록 upgrade/reconfigure 계약을 보강한다.
+
 ## [1.17.1] - 2026-08-28
 
 ### Added
