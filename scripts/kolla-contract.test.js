@@ -850,12 +850,12 @@ test("Afterglow Kolla placement-policy seeding lifecycle and container contract"
 
 	assert.match(upgrade, /seed_runtime_policies\.yml/)
 	assert.ok(
-		upgrade.indexOf("docker_image") < upgrade.indexOf("seed_runtime_policies.yml"),
+		upgrade.indexOf("pull.yml") < upgrade.indexOf("seed_runtime_policies.yml"),
 		"upgrade.yml must include seed_runtime_policies.yml after image pull"
 	)
 	assert.ok(
-		upgrade.indexOf("seed_runtime_policies.yml") < upgrade.indexOf("docker_container"),
-		"upgrade.yml must include seed_runtime_policies.yml before container restart"
+		upgrade.indexOf("seed_runtime_policies.yml") < upgrade.indexOf("start.yml"),
+		"upgrade.yml must include seed_runtime_policies.yml before the shared start specification"
 	)
 
 	assert.match(seedTask, /image:\s*"\{\{ afterglow_backend_image_ref \}\}"/)
@@ -891,20 +891,74 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 		assert.match(site, new RegExp(`when: enable_${service} \\| default\\(false\\) \\| bool`))
 	}
 
+	const afterglowDeploy = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/deploy.yml")
+	const afterglowReconfigure = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/reconfigure.yml")
 	const afterglowUpgrade = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/upgrade.yml")
+	const afterglowPrecheck = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/precheck.yml")
+
+	assert.match(afterglowDeploy, /include_tasks:\s*pull\.yml/)
+	const deploySourceIndex = afterglowDeploy.indexOf("source_build.yml")
+	const deployPullIndex = afterglowDeploy.indexOf("pull.yml")
+	const deployPrecondIndex = afterglowDeploy.indexOf("preconditions.yml")
+	const deployStartIndex = afterglowDeploy.indexOf("start.yml")
+	assert.ok(deploySourceIndex < deployPullIndex, "deploy.yml must include pull.yml after source_build.yml")
+	assert.ok(deployPullIndex < deployPrecondIndex, "deploy.yml must include pull.yml before preconditions.yml")
+	assert.ok(deployPullIndex < deployStartIndex, "deploy.yml must include pull.yml before start.yml")
+
+	assert.match(afterglowReconfigure, /include_tasks:\s*pull\.yml/)
+	const reconfigPrecheckIndex = afterglowReconfigure.indexOf("precheck.yml")
+	const reconfigPullIndex = afterglowReconfigure.indexOf("pull.yml")
+	const reconfigConfigIndex = afterglowReconfigure.indexOf("config.yml")
+	const reconfigStartIndex = afterglowReconfigure.indexOf("start.yml")
+	assert.ok(reconfigPrecheckIndex < reconfigPullIndex, "reconfigure.yml must include pull.yml after precheck.yml")
+	assert.ok(reconfigPullIndex < reconfigConfigIndex, "reconfigure.yml must include pull.yml before config.yml")
+	assert.ok(reconfigPullIndex < reconfigStartIndex, "reconfigure.yml must include pull.yml before start.yml")
+
 	assert.match(afterglowUpgrade, /include_tasks:\s*pull\.yml/)
 	assert.match(afterglowUpgrade, /include_tasks:\s*seed_runtime_policies\.yml/)
+	assert.match(afterglowUpgrade, /include_tasks:\s*start\.yml/)
+	assert.match(afterglowUpgrade, /afterglow_start_restart:\s*true/)
 	const pullIndex = afterglowUpgrade.indexOf("pull.yml")
 	const seedIndex = afterglowUpgrade.indexOf("seed_runtime_policies.yml")
-	const restartIndex = afterglowUpgrade.indexOf("docker_container")
+	const restartIndex = afterglowUpgrade.indexOf("start.yml")
 	assert.ok(pullIndex < seedIndex, "upgrade.yml must include pull.yml before seed_runtime_policies.yml")
-	assert.ok(seedIndex < restartIndex, "upgrade.yml must seed runtime policies before container restart")
+	assert.ok(seedIndex < restartIndex, "upgrade.yml must seed runtime policies before the shared start task")
+
+	assert.match(afterglowPrecheck, /Inspect enabled remote Afterglow image manifests/)
+	assert.match(afterglowPrecheck, /loop:\s*"\{\{\s*afterglow_services\s*\|\s*dict2items\s*\}\}"/)
+	assert.match(afterglowPrecheck, /argv:\s*\n\s*-\s*docker\s*\n\s*-\s*manifest\s*\n\s*-\s*inspect\s*\n\s*-\s*"\{\{\s*item\.value\.image\s*\}\}"/)
+	assert.match(afterglowPrecheck, /register:\s*image_checks/)
+	assert.match(afterglowPrecheck, /item\.rc\s*==\s*0/)
+	assert.doesNotMatch(afterglowPrecheck, /afterglow_backend_image\s*\}\}:\s*\{\{\s*afterglow_image_tag/)
+	assert.doesNotMatch(afterglowPrecheck, /WARN|WARNING/)
+
+	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const afterglowStart = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/start.yml")
+	const serviceMapStart = afterglowDefaults.indexOf("afterglow_services:")
+	const environmentMapStart = afterglowDefaults.indexOf("afterglow_service_environments:")
+	const serviceMap = afterglowDefaults.slice(serviceMapStart, environmentMapStart)
+	assert.ok(serviceMapStart >= 0 && environmentMapStart > serviceMapStart)
+	assert.doesNotMatch(serviceMap, /^\s+environment:/m)
+	assert.match(afterglowStart, /env:\s*"\{\{ afterglow_service_environments\.get\(item\.key, \{\}\) \}\}"/)
+	assert.match(afterglowStart, /groups:\s*"\{\{ item\.value\.groups \| default\(omit\) \}\}"/)
+	assert.match(afterglowStart, /network_mode:\s*"\{\{ item\.value\.network_mode \| default\(omit\) \}\}"/)
+	assert.match(afterglowPrecheck, /Fail if any configured Afterglow image is inaccessible[\s\S]*?no_log:\s*true/)
+
+	const droverDefaults = readRepoFile("deploy/kolla/ansible/roles/drover/defaults/main.yml")
+	const droverStart = readRepoFile("deploy/kolla/ansible/roles/drover/tasks/start.yml")
+	const droverServiceMapStart = droverDefaults.indexOf("drover_services:")
+	const droverEnvironmentMapStart = droverDefaults.indexOf("drover_service_environments:")
+	const droverServiceMap = droverDefaults.slice(droverServiceMapStart, droverEnvironmentMapStart)
+	assert.ok(droverServiceMapStart >= 0 && droverEnvironmentMapStart > droverServiceMapStart)
+	assert.doesNotMatch(droverServiceMap, /^\s+environment:/m)
+	assert.match(droverStart, /env:\s*"\{\{ drover_service_environments\.get\(item\.key, \{\}\) \}\}"/)
 
 	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
 		const pull = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/pull.yml`)
 		assert.match(pull, /community\.docker\.docker_image/)
 		assert.match(pull, /source:\s*pull/)
 		assert.match(pull, /force_source:\s*true/)
+		assert.match(pull, /no_log:\s*true/)
 		assert.match(pull, new RegExp(`loop:\\s*"\\{\\{\\s*${service}_services\\s*\\|\\s*dict2items\\s*\\}\\}"`))
 		assert.match(pull, new RegExp(`not\\s*\\(${service}_source_mode\\s*\\|\\s*default\\(false\\)\\s*\\|\\s*bool\\)`))
 	}

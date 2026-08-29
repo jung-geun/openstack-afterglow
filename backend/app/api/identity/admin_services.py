@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.deps import CacheMode, cache_mode, get_os_conn, require_admin
 from app.config import get_settings
 from app.services.cache import cached_call, ttl_normal
+from app.services.service_proxy import join_version_aware_url
 
 _logger = logging.getLogger(__name__)
 
@@ -190,8 +191,8 @@ def _fetch_container(conn, settings) -> list[dict]:
     try:
         zun_ep = _get_ep(conn, "container")
         if zun_ep:
-            zun_ep = _strip_version(zun_ep)
-            resp = conn.session.get(f"{zun_ep}/v1/services", timeout=_SERVICE_TIMEOUT)
+            url = join_version_aware_url(zun_ep, "/v1/services")
+            resp = conn.session.get(url, timeout=_SERVICE_TIMEOUT)
             for svc in resp.json().get("services", []):
                 result.append(
                     {

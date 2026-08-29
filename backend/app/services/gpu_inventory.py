@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from typing import Any
 
 from app.config import load_raw_toml
 
@@ -572,3 +573,85 @@ async def get_all_gpu_aliases() -> list[str]:
             admin_conn.close()
 
     return await asyncio.to_thread(_collect)
+
+
+_NON_GPU_PCI_ALIAS_TOKENS = frozenset(
+    {"audio", "crypto", "fpga", "infiniband", "network", "nic", "nvme", "qat", "rdma", "sriov"}
+)
+
+
+def is_gpu_flavor(flavor: Any = None, extra_specs: dict | None = None) -> bool:
+    """Return whether a flavor requests a GPU-class PCI device."""
+    if flavor is None and not extra_specs:
+        return False
+
+    name = ""
+    specs = extra_specs or {}
+    explicit_gpu: bool | None = None
+    if isinstance(flavor, str):
+        name = flavor
+    elif isinstance(flavor, dict):
+        name = flavor.get("original_name") or flavor.get("name") or flavor.get("id") or ""
+        specs = flavor.get("extra_specs") or specs
+        if isinstance(flavor.get("is_gpu"), bool):
+            explicit_gpu = flavor["is_gpu"]
+    elif flavor is not None:
+        name = getattr(flavor, "name", "") or ""
+        specs = getattr(flavor, "extra_specs", None) or specs
+        stored_is_gpu = getattr(flavor, "__dict__", {}).get("is_gpu")
+        if isinstance(stored_is_gpu, bool):
+            explicit_gpu = stored_is_gpu
+
+    for entry in str(specs.get("pci_passthrough:alias", "")).split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        alias_name = entry.rpartition(":")[0].strip() if ":" in entry else entry
+        alias_lower = alias_name.lower()
+        alias_tokens = {token for token in re.split(r"[^a-z0-9]+", alias_lower) if token}
+        if alias_name and "audio" not in alias_lower and alias_tokens.isdisjoint(_NON_GPU_PCI_ALIAS_TOKENS):
+            return True
+
+    category = specs.get(":category", "")
+    if category and "gpu" in str(category).lower():
+        return True
+    if explicit_gpu is not None:
+        return explicit_gpu
+    return isinstance(name, str) and name.lower().startswith(("gpu.", "gpu_", "g1."))
+
+
+class GpuQuotaUnavailable(RuntimeError):
+    """Drover could not provide a trustworthy GPU quota decision."""
+
+
+class GpuQuotaDenied(RuntimeError):
+    """Drover explicitly denied a GPU quota request."""
+
+
+async def require_gpu_quota(conn: Any, flavor: Any) -> bool:
+    """Require an affirmative Drover decision for GPU flavors before mutation."""
+    if not is_gpu_flavor(flavor):
+        return False
+
+    import asyncio
+
+    from drover_sdk import register as register_drover
+
+    flavor_extra_specs = (
+        flavor.get("extra_specs") if isinstance(flavor, dict) else getattr(flavor, "extra_specs", None)
+    ) or {}
+    try:
+        result = await asyncio.to_thread(
+            register_drover(conn).check_gpu_quota,
+            flavor_extra_specs,
+        )
+    except Exception as exc:
+        _logger.warning("Drover GPU quota check failed", exc_info=True)
+        raise GpuQuotaUnavailable("Drover GPU quota 서비스에 접근할 수 없거나 응답 형식이 잘못되었습니다") from exc
+
+    if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+        raise GpuQuotaUnavailable("Drover GPU quota 서비스에 접근할 수 없거나 응답 형식이 잘못되었습니다")
+    if not result["ok"]:
+        detail = result.get("detail") or result.get("message") or "GPU quota 초과"
+        raise GpuQuotaDenied(str(detail))
+    return True

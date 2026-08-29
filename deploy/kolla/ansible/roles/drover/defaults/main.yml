@@ -100,11 +100,6 @@ drover_services:
     volumes:
       - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"
       - "kolla_logs:/var/log/kolla/"
-    environment:
-      DATABASE_URL: "{{ drover_database_url }}"
-      REDIS_URL: "{{ drover_redis_url }}"
-      OS_PASSWORD: "{{ drover_keystone_password }}"
-      DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; response = urlopen('http://{{ drover_api_listen_address }}:{{ drover_api_listen_port }}/v1/health', timeout=5); assert response.status == 200"]
       interval: 30s
@@ -135,11 +130,18 @@ drover_services:
     volumes:
       - "/etc/kolla/drover/drover.conf:/app/drover.conf:ro"
       - "kolla_logs:/var/log/kolla/"
-    environment:
-      DATABASE_URL: "{{ drover_database_url }}"
-      REDIS_URL: "{{ drover_redis_url }}"
-      OS_PASSWORD: "{{ drover_keystone_password }}"
-      DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
+
+drover_service_environments:
+  drover-api:
+    DATABASE_URL: "{{ drover_database_url }}"
+    REDIS_URL: "{{ drover_redis_url }}"
+    OS_PASSWORD: "{{ drover_keystone_password }}"
+    DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
+  drover-worker:
+    DATABASE_URL: "{{ drover_database_url }}"
+    REDIS_URL: "{{ drover_redis_url }}"
+    OS_PASSWORD: "{{ drover_keystone_password }}"
+    DROVER_KUBECONFIG_ENCRYPTION_KEY: "{{ drover_kubeconfig_encryption_key }}"
 
 drover_public_haproxy_services:
   drover-public:

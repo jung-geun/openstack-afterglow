@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import HTTPException, Request
@@ -51,6 +53,56 @@ _SERVICE_OVERRIDE_FIELDS: dict[str, str] = {
     "lumen": "service_lumen_internal_url",
     "palimpsest": "service_palimpsest_internal_url",
 }
+
+_VERSION_SEGMENT_REGEX = re.compile(r"^v[0-9]+(?:\.[0-9]+)*$")
+
+
+def join_version_aware_url(endpoint: str, request_path: str) -> str:
+    """Append a relative API path while treating the endpoint version as authoritative."""
+    parsed_endpoint = urlsplit(endpoint)
+    if parsed_endpoint.scheme not in {"http", "https", "ws", "wss"} or not parsed_endpoint.netloc:
+        raise ValueError("Endpoint URL must be absolute HTTP(S) or WebSocket URL")
+    if parsed_endpoint.query or parsed_endpoint.fragment:
+        raise ValueError("Endpoint URL cannot contain a query or fragment")
+
+    parsed_request = urlsplit(request_path)
+    if parsed_request.scheme or parsed_request.netloc:
+        raise ValueError("Upstream request path must be relative")
+
+    endpoint_segments = [segment for segment in parsed_endpoint.path.split("/") if segment]
+    endpoint_has_version = any(_VERSION_SEGMENT_REGEX.fullmatch(segment) for segment in endpoint_segments)
+
+    request_segments = [segment for segment in parsed_request.path.split("/") if segment]
+    if endpoint_has_version and request_segments and _VERSION_SEGMENT_REGEX.fullmatch(request_segments[0]):
+        request_segments = request_segments[1:]
+
+    base_path = parsed_endpoint.path.rstrip("/")
+    if request_segments:
+        joined_path = f"{base_path}/{'/'.join(request_segments)}"
+        if parsed_request.path.endswith("/"):
+            joined_path += "/"
+    elif parsed_request.path.endswith("/"):
+        joined_path = f"{base_path}/"
+    else:
+        joined_path = base_path or "/"
+
+    return urlunsplit(
+        (
+            parsed_endpoint.scheme,
+            parsed_endpoint.netloc,
+            joined_path,
+            parsed_request.query,
+            parsed_request.fragment,
+        )
+    )
+
+
+def _append_query(url: str, query: str) -> str:
+    if not query:
+        return url
+    parsed = urlsplit(url)
+    merged_query = f"{parsed.query}&{query}" if parsed.query else query
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, merged_query, parsed.fragment))
 
 
 def _configured_internal_endpoint(service_type: str) -> str | None:
@@ -125,10 +177,15 @@ async def _forward(
             content={"detail": f"{service_type} 서비스를 사용할 수 없습니다"},
         )
 
-    clean_path = upstream_path if upstream_path.startswith("/") else f"/{upstream_path}"
-    upstream_url = f"{endpoint}{clean_path}"
-    if request.url.query:
-        upstream_url = f"{upstream_url}?{request.url.query}"
+    try:
+        upstream_url = join_version_aware_url(endpoint, upstream_path)
+    except ValueError:
+        _logger.error("Invalid %s service endpoint configuration", service_type)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"{service_type} 서비스를 사용할 수 없습니다"},
+        )
+    upstream_url = _append_query(upstream_url, request.url.query)
 
     content = request.stream() if request.method in {"POST", "PUT", "PATCH", "DELETE"} else None
     settings = get_settings()
@@ -198,10 +255,12 @@ async def get_json(service_type: str, request: Request, upstream_path: str) -> A
     if not endpoint:
         raise HTTPException(status_code=503, detail=f"{service_type} 서비스를 사용할 수 없습니다")
 
-    clean_path = upstream_path if upstream_path.startswith("/") else f"/{upstream_path}"
-    upstream_url = f"{endpoint}{clean_path}"
-    if request.url.query:
-        upstream_url = f"{upstream_url}?{request.url.query}"
+    try:
+        upstream_url = join_version_aware_url(endpoint, upstream_path)
+    except ValueError as exc:
+        _logger.error("Invalid %s service endpoint configuration", service_type)
+        raise HTTPException(status_code=503, detail=f"{service_type} 서비스를 사용할 수 없습니다") from exc
+    upstream_url = _append_query(upstream_url, request.url.query)
 
     headers = _forwarded_headers(request)
     headers["x-auth-token"] = token

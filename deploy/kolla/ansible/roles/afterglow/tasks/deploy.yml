@@ -6,6 +6,9 @@
   ansible.builtin.include_tasks: source_build.yml
   when: afterglow_source_mode | default(false) | bool
 
+- name: Include pull tasks
+  ansible.builtin.include_tasks: pull.yml
+
 - name: Include precondition tasks
   ansible.builtin.include_tasks: preconditions.yml
   when: afterglow_run_preconditions | default(true) | bool

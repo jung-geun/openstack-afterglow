@@ -86,27 +86,42 @@
   tags: precheck
   when: enable_afterglow | bool and afterglow_service_manila_enabled | bool
 
-- name: Precheck | Verify Docker image accessibility (dry-run pull)
+- name: Precheck | Inspect enabled remote Afterglow image manifests
   become: true
   ansible.builtin.command:
-    cmd: "docker manifest inspect {{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
-  register: image_check
+    argv:
+      - docker
+      - manifest
+      - inspect
+      - "{{ item.value.image }}"
+  register: image_checks
   failed_when: false
   changed_when: false
+  no_log: true
+  loop: "{{ afterglow_services | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
   run_once: true
   delegate_to: "{{ groups['afterglow'] | first }}"
   tags: precheck
   when:
     - enable_afterglow | bool
+    - item.value.enabled | bool
     - not (afterglow_source_mode | default(false) | bool)
 
-- name: Precheck | Warn if backend image not accessible
-  ansible.builtin.debug:
-    msg: "WARNING: Cannot access {{ afterglow_backend_image }}:{{ afterglow_image_tag }}. Ensure GHCR credentials are configured."
+- name: Precheck | Fail if any configured Afterglow image is inaccessible
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: "Cannot access configured Afterglow image reference. Ensure GHCR credentials are configured."
+  no_log: true
+  loop: "{{ image_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key | default('image') }}"
+  run_once: true
+  tags: precheck
   when:
     - enable_afterglow | bool
     - not (afterglow_source_mode | default(false) | bool)
-    - image_check is defined
-    - image_check.rc != 0
-  run_once: true
-  tags: precheck
+    - image_checks is defined
+    - not (item.skipped | default(false) | bool)

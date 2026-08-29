@@ -12,7 +12,7 @@ import websockets
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from app.services.service_proxy import resolve_service_endpoint
+from app.services.service_proxy import join_version_aware_url, resolve_service_endpoint
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -81,17 +81,17 @@ async def shell_relay(cluster_id: str, websocket: WebSocket) -> None:
         await websocket.close(code=1013, reason="drover unavailable")
         return
 
+    query = websocket.scope.get("query_string", b"").decode("ascii")
+    request_path = f"/v1/clusters/{quote(cluster_id, safe='')}/shell"
+    if query:
+        request_path = f"{request_path}?{query}"
     try:
         base = _websocket_endpoint(endpoint)
+        upstream_url = join_version_aware_url(base, request_path)
     except ValueError:
-        _logger.error("Drover catalog endpoint has an unsupported scheme")
+        _logger.error("Drover catalog endpoint is invalid")
         await websocket.close(code=1013, reason="drover unavailable")
         return
-
-    query = websocket.scope.get("query_string", b"").decode("ascii")
-    upstream_url = f"{base}/v1/clusters/{quote(cluster_id, safe='')}/shell"
-    if query:
-        upstream_url = f"{upstream_url}?{query}"
 
     close_code, close_reason = 1000, ""
     try:

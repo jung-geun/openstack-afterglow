@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     import openstack
 
 from app.models.containers import ZunContainerInfo
+from app.services.service_proxy import join_version_aware_url
 
 
 class ZunServiceUnavailable(Exception):
@@ -21,12 +22,7 @@ def _get_zun_endpoint(conn: openstack.connection.Connection) -> str:
             service_type="container",
             interface="public",
         )
-        base = endpoint.rstrip("/")
-        # 서비스 카탈로그 endpoint에 이미 /v1 경로가 포함된 경우 제거
-        # (예: https://zun.dmslab.re.kr/v1/ → /v1/containers 이중 경로 방지)
-        if base.endswith("/v1"):
-            base = base[:-3]
-        return base
+        return endpoint.rstrip("/")
     except Exception:
         pass
     # fallback: identity endpoint에서 추론
@@ -54,8 +50,9 @@ def _container_to_info(data: dict) -> ZunContainerInfo:
 def list_containers_admin(conn: openstack.connection.Connection) -> list[ZunContainerInfo]:
     """관리자 전용: 전체 프로젝트의 컨테이너 목록 조회."""
     endpoint = _get_zun_endpoint(conn)
+    url = join_version_aware_url(endpoint, "/v1/containers?all_projects=True")
     try:
-        resp = conn.session.get(f"{endpoint}/v1/containers?all_projects=True")
+        resp = conn.session.get(url)
         status_code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
         if status_code == 404:
             raise ZunServiceUnavailable("Zun 서비스 엔드포인트가 404를 반환했습니다")
@@ -75,9 +72,9 @@ def list_containers_admin(conn: openstack.connection.Connection) -> list[ZunCont
 
 def list_containers(conn: openstack.connection.Connection) -> list[ZunContainerInfo]:
     endpoint = _get_zun_endpoint(conn)
+    url = join_version_aware_url(endpoint, "/v1/containers")
     try:
-        resp = conn.session.get(f"{endpoint}/v1/containers")
-        # HTTP 상태 코드 검사 (404는 서비스 미배포를 의미)
+        resp = conn.session.get(url)
         status_code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
         if status_code == 404:
             raise ZunServiceUnavailable("Zun 서비스 엔드포인트가 404를 반환했습니다")
@@ -97,7 +94,8 @@ def list_containers(conn: openstack.connection.Connection) -> list[ZunContainerI
 
 def get_container(conn: openstack.connection.Connection, container_id: str) -> ZunContainerInfo:
     endpoint = _get_zun_endpoint(conn)
-    resp = conn.session.get(f"{endpoint}/v1/containers/{container_id}")
+    url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}")
+    resp = conn.session.get(url)
     return _container_to_info(resp.json())
 
 
@@ -126,7 +124,8 @@ def create_container(
         body["auto_remove"] = auto_remove
     if ports:
         body["ports"] = ports
-    resp = conn.session.post(f"{endpoint}/v1/containers", json=body)
+    url = join_version_aware_url(endpoint, "/v1/containers")
+    resp = conn.session.post(url, json=body)
     return _container_to_info(resp.json())
 
 
@@ -150,22 +149,26 @@ def delete_container(conn: openstack.connection.Connection, container_id: str) -
                     break
     except Exception:
         pass  # 상태 조회 실패해도 삭제 시도
-    conn.session.delete(f"{endpoint}/v1/containers/{container_id}")
+    url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}")
+    conn.session.delete(url)
 
 
 def start_container(conn: openstack.connection.Connection, container_id: str) -> None:
     endpoint = _get_zun_endpoint(conn)
-    conn.session.post(f"{endpoint}/v1/containers/{container_id}/start")
+    url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}/start")
+    conn.session.post(url)
 
 
 def stop_container(conn: openstack.connection.Connection, container_id: str) -> None:
     endpoint = _get_zun_endpoint(conn)
-    conn.session.post(f"{endpoint}/v1/containers/{container_id}/stop")
+    url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}/stop")
+    conn.session.post(url)
 
 
 def get_container_logs(conn: openstack.connection.Connection, container_id: str) -> str:
     endpoint = _get_zun_endpoint(conn)
-    resp = conn.session.get(f"{endpoint}/v1/containers/{container_id}/logs?stdout=true&stderr=true")
+    url = join_version_aware_url(endpoint, f"/v1/containers/{container_id}/logs?stdout=true&stderr=true")
+    resp = conn.session.get(url)
     return resp.text if hasattr(resp, "text") else str(resp.content)
 
 
@@ -176,6 +179,6 @@ def get_exec_websocket_url(conn: openstack.connection.Connection, container_id: 
     raw_endpoint = _get_zun_endpoint(conn)
     # http(s)://host:port → ws(s)://host:port
     ws_endpoint = raw_endpoint.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url = f"{ws_endpoint}/v1/containers/{container_id}/execute_resize"
+    ws_url = join_version_aware_url(ws_endpoint, f"/v1/containers/{container_id}/execute_resize")
     token = getattr(conn, "_afterglow_token", None) or conn.auth_token
     return ws_url, token
