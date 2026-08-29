@@ -654,9 +654,13 @@ async def test_gpu_available_fallback_when_drover_unavailable():
         "summary": {"total": 4, "used": 1, "available": 3},
     }
 
-    with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=fake_placement_data)):
-        with patch("app.api.common.dashboard.register_drover", side_effect=Exception("Drover unreachable")):
-            result = await get_gpu_available(conn=conn, cm=cache_mode)
-            assert result["gpu_types"] == []
-            assert result["summary"] == {"total": 0, "used": 0, "available": 0}
-            assert result["available"] is False
+    settings = MagicMock(gpu_available_visible=True)
+    with (
+        patch("app.api.common.dashboard.get_settings", return_value=settings),
+        patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=fake_placement_data)),
+        patch("app.api.common.dashboard.register_drover", side_effect=Exception("Drover unreachable")),
+    ):
+        result = await get_gpu_available(conn=conn, cm=cache_mode)
+        assert result["gpu_types"] == []
+        assert result["summary"] == {"total": 0, "used": 0, "available": 0}
+        assert result["available"] is False
