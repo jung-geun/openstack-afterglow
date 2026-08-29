@@ -7,5 +7,5 @@
 - [x] Detect GPU entitlement from PCI passthrough aliases, remove the local database gate, validate quota response shape, and perform quota checks before any Cinder, Manila, Neutron, or Nova mutation.
 - [x] Cover synchronous, tenant SSE, and admin SSE GPU creation for allow, denial, unavailable Drover, malformed Drover response, nonstandard GPU flavor names, and zero leaked resources.
 - [x] Commit and push the Drover fix, pin both Afterglow Drover SDK dependency groups and the lockfile to that immutable commit, and verify focused tests.
-- [ ] Run `npm run test:all` followed by `npm run lint:backend`, obtain independent code/security review, archive this change, commit, and push `dev`.
-- [ ] Verify successful Drover and Afterglow GitHub Actions image-build workflows and record immutable image evidence.
+- [x] Run `npm run test:all` followed by `npm run lint:backend`, obtain independent code/security review, archive this change, commit, and push `dev`.
+- [x] Verify successful Drover and Afterglow GitHub Actions image-build workflows and record immutable image evidence.
