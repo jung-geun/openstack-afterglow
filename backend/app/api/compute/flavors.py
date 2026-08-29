@@ -47,11 +47,9 @@ async def list_flavors(
                     return quotas.get("gpu", 0) > 0 or quotas.get("default", 0) > 0
                 for entry in alias_str.split(","):
                     entry = entry.strip()
-                    if ":" not in entry:
+                    if not entry or not is_gpu_flavor(extra_specs={"pci_passthrough:alias": entry}):
                         continue
-                    alias = entry.rpartition(":")[0].strip()
-                    if "audio" in alias.lower():
-                        continue
+                    alias = entry.rpartition(":")[0].strip() if ":" in entry else entry
                     canonical = normalize_gpu_alias(alias)
                     if quotas.get(canonical, 0) == 0:
                         return False

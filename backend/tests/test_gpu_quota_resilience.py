@@ -122,6 +122,42 @@ def test_is_gpu_flavor_classification():
 
 
 @pytest.mark.asyncio
+async def test_flavor_filter_enforces_no_count_gpu_alias_and_ignores_non_gpu_pci(client, mock_conn):
+    cpu_flavor = FlavorInfo(id="fl-cpu", name="m1.medium", vcpus=2, ram=4096, disk=20, extra_specs={})
+    denied_gpu = FlavorInfo(
+        id="fl-denied",
+        name="accelerated-denied",
+        vcpus=8,
+        ram=16384,
+        disk=100,
+        extra_specs={"pci_passthrough:alias": "RTX3090"},
+    )
+    allowed_gpu = FlavorInfo(
+        id="fl-allowed",
+        name="accelerated-allowed",
+        vcpus=8,
+        ram=16384,
+        disk=100,
+        extra_specs={"pci_passthrough:alias": "sriov_nic:1,H100"},
+    )
+    quota_proxy = MagicMock()
+    quota_proxy.effective_gpu_quotas.return_value = {"RTX3090": 0, "H100": 1}
+
+    with (
+        patch(
+            "app.api.compute.flavors.nova.list_flavors",
+            return_value=[cpu_flavor, denied_gpu, allowed_gpu],
+        ),
+        patch("app.api.compute.flavors.cache.cached_call", new=_load_without_cache),
+        patch("drover_sdk.register", return_value=quota_proxy),
+    ):
+        response = await client.get("/api/v1/flavors")
+
+    assert response.status_code == 200
+    assert [flavor["id"] for flavor in response.json()] == ["fl-cpu", "fl-allowed"]
+
+
+@pytest.mark.asyncio
 async def test_require_gpu_quota_forwards_dict_extra_specs():
     conn = MagicMock()
     quota_proxy = MagicMock()
