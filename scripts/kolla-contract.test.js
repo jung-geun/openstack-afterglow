@@ -502,6 +502,19 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 	}
 })
 
+test("Drover resolves and renders its concrete service project ID", () => {
+	const defaults = readRepoFile("deploy/kolla/ansible/roles/drover/defaults/main.yml")
+	const configTasks = readRepoFile("deploy/kolla/ansible/roles/drover/tasks/config.yml")
+	const template = readRepoFile("deploy/kolla/ansible/roles/drover/templates/drover.conf.j2")
+
+	assert.match(defaults, /^drover_service_project_id: ""/m)
+	assert.match(configTasks, /module_name: openstack\.cloud\.project_info/)
+	assert.match(configTasks, /name: "\{\{ drover_service_project_name \}\}"/)
+	assert.match(configTasks, /drover_service_project_lookup\.projects\[0\]\.id/)
+	assert.match(configTasks, /drover_service_project_id \| default\(''\) \| length > 0/)
+	assert.match(template, /service_project_id = "\{\{ drover_service_project_id \}\}"/)
+})
+
 test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external HAProxy frontend without disturbing internal endpoints", () => {
 	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
 	for (const service of ["drover", "waygate", "lumen"]) {

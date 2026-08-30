@@ -1,4 +1,33 @@
 ---
+- name: Config | Resolve Drover service project ID
+  kolla_toolbox:
+    container_engine: "{{ kolla_container_engine }}"
+    module_name: openstack.cloud.project_info
+    module_args:
+      auth: "{{ openstack_auth }}"
+      name: "{{ drover_service_project_name }}"
+  register: drover_service_project_lookup
+  changed_when: false
+  no_log: true
+  when:
+    - inventory_hostname in groups['drover']
+    - drover_service_project_id | default('') | length == 0
+
+- name: Config | Set resolved Drover service project ID
+  ansible.builtin.set_fact:
+    drover_service_project_id: "{{ drover_service_project_lookup.projects[0].id }}"
+  when:
+    - inventory_hostname in groups['drover']
+    - drover_service_project_id | default('') | length == 0
+    - drover_service_project_lookup.projects | default([]) | length == 1
+
+- name: Config | Require exactly one Drover service project
+  ansible.builtin.assert:
+    that:
+      - drover_service_project_id | default('') | length > 0
+    fail_msg: "Drover service project '{{ drover_service_project_name }}' must exist before configuration rendering"
+  when: inventory_hostname in groups['drover']
+
 - name: Config | Ensure Drover config directory exists
   become: true
   ansible.builtin.file:
