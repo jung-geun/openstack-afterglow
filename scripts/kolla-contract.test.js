@@ -946,6 +946,10 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 	assert.doesNotMatch(afterglowPrecheck, /WARN|WARNING/)
 
 	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
+	const sampleGlobals = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+	assert.match(sampleGlobals, /afterglow_image_tag:\s*"v1\.18\.0"/)
+	assert.doesNotMatch(sampleGlobals, /^afterglow_(backend|frontend|worker)_image_ref:/m)
+	assert.match(sampleGlobals, /^drover_api_image_ref:.*@sha256:/m)
 	const afterglowStart = readRepoFile("deploy/kolla/ansible/roles/afterglow/tasks/start.yml")
 	const serviceMapStart = afterglowDefaults.indexOf("afterglow_services:")
 	const environmentMapStart = afterglowDefaults.indexOf("afterglow_service_environments:")
@@ -968,12 +972,19 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 
 	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
 		const pull = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/pull.yml`)
+		const start = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/start.yml`)
 		assert.match(pull, /community\.docker\.docker_image/)
 		assert.match(pull, /source:\s*pull/)
 		assert.match(pull, /force_source:\s*true/)
 		assert.match(pull, /no_log:\s*true/)
 		assert.match(pull, new RegExp(`loop:\\s*"\\{\\{\\s*${service}_services\\s*\\|\\s*dict2items\\s*\\}\\}"`))
 		assert.match(pull, new RegExp(`not\\s*\\(${service}_source_mode\\s*\\|\\s*default\\(false\\)\\s*\\|\\s*bool\\)`))
+		assert.match(
+			start,
+			new RegExp(
+				`pull:\\s*"\\{\\{\\s*'never'\\s+if\\s+\\(${service}_source_mode\\s*\\|\\s*default\\(false\\)\\s*\\|\\s*bool\\)\\s+else\\s+'always'\\s*\\}\\}"`,
+			),
+		)
 	}
 })
 

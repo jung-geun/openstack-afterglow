@@ -30,18 +30,21 @@ enable_lumen: "yes"
 enable_lumen_api: "yes"
 enable_lumen_worker: "yes"
 
-# ── 2. Immutable GHCR Image References ───────────────────────────────────────
-# Resolve and pin the linux/amd64 manifest digest before deployment. Never
-# deploy mutable tags such as latest or dev. Source builds remain available for
-# development, but this DMSLab topology pulls the published GHCR images.
+# ── 2. Published Image Selection ─────────────────────────────────────────────
+# Afterglow follows the requested release tag. Use a version tag for a
+# deterministic release or `latest` to resolve the registry digest on every
+# pull/deploy/reconfigure. Explicit *_image_ref values override these tags.
 enable_afterglow_source_build: false
 enable_drover_source_build: false
 enable_lumen_source_build: false
 enable_waygate_source_build: false
 enable_palimpsest_source_build: false
 
-afterglow_backend_image_ref: "ghcr.io/openstack-afterglow/afterglow-api@sha256:<AFTERGLOW_API_AMD64_DIGEST>"
-afterglow_frontend_image_ref: "ghcr.io/openstack-afterglow/afterglow@sha256:<AFTERGLOW_FRONTEND_AMD64_DIGEST>"
+afterglow_image_tag: "v1.18.0"
+
+# Independently released extracted services remain pinned to immutable linux/amd64
+# manifest digests. Update a digest deliberately when upgrading that service.
+
 drover_api_image_ref: "ghcr.io/openstack-afterglow/drover-api@sha256:<DROVER_API_AMD64_DIGEST>"
 drover_worker_image_ref: "ghcr.io/openstack-afterglow/drover-worker@sha256:<DROVER_WORKER_AMD64_DIGEST>"
 waygate_api_image_ref: "ghcr.io/openstack-afterglow/waygate-api@sha256:<WAYGATE_API_AMD64_DIGEST>"
@@ -198,3 +201,7 @@ afterglow_service_zun_enabled: false
 afterglow_service_trove_enabled: false
 afterglow_service_magnum_enabled: false
 afterglow_service_barbican_enabled: false
+# ── 8. Log Directory Ownership ────────────────────────────────────────────────
+# Optional log directory ownership override for custom images (default: 1000)
+# afterglow_log_owner_uid: 1000
+# afterglow_log_owner_gid: 1000

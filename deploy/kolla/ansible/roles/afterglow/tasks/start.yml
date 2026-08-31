@@ -17,6 +17,7 @@
   community.docker.docker_container:
     name: "{{ item.value.container_name }}"
     image: "{{ item.value.image }}"
+    pull: "{{ 'never' if (afterglow_source_mode | default(false) | bool) else 'always' }}"
     state: started
     restart: "{{ afterglow_start_restart | default(false) | bool }}"
     restart_policy: "{{ item.value.restart_policy | default('unless-stopped') }}"
