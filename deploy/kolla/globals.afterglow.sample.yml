@@ -33,7 +33,8 @@ enable_lumen_worker: "yes"
 # ── 2. Published Image Selection ─────────────────────────────────────────────
 # Afterglow follows the requested release tag. Use a version tag for a
 # deterministic release or `latest` to resolve the registry digest on every
-# pull/deploy/reconfigure. Explicit *_image_ref values override these tags.
+# pull/deploy/reconfigure. The computed refs also override legacy bare image
+# refs in stock globals without duplicating the selected tag.
 enable_afterglow_source_build: false
 enable_drover_source_build: false
 enable_lumen_source_build: false
@@ -41,6 +42,9 @@ enable_waygate_source_build: false
 enable_palimpsest_source_build: false
 
 afterglow_image_tag: "v1.18.0"
+afterglow_backend_image_ref: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+afterglow_frontend_image_ref: "{{ afterglow_frontend_image }}:{{ afterglow_image_tag }}"
+afterglow_worker_image_ref: "{{ afterglow_worker_image }}:{{ afterglow_image_tag }}"
 
 # Independently released extracted services remain pinned to immutable linux/amd64
 # manifest digests. Update a digest deliberately when upgrading that service.
