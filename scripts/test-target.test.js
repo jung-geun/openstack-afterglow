@@ -362,6 +362,26 @@ test("CI separates pure orchestration from uv-backed Kolla contracts", () => {
 	assert.match(workflow, /name: Kolla contract tests\s+run: npm run test:kolla:contract/);
 	assert.match(workflow, /if ! STATUS=\$\(curl/);
 	assert.match(workflow, /Keystone probe transport failed or timed out/);
+	const dockerWorkflow = fs.readFileSync(
+		path.join(rootDir, ".github", "workflows", "docker-build.yml"),
+		"utf-8",
+	);
+	assert.match(
+		workflow,
+		/workflow_call:\s+inputs:\s+run_live_openstack:[\s\S]*?type: boolean\s+default: false/,
+	);
+	assert.match(
+		workflow,
+		/detect-live:[\s\S]*?if: \$\{\{ inputs\.run_live_openstack \}\}/,
+	);
+	assert.match(
+		dockerWorkflow,
+		/workflow_dispatch:[\s\S]*?run_live_openstack:[\s\S]*?type: boolean/,
+	);
+	assert.match(
+		dockerWorkflow,
+		/with:\s+run_live_openstack: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_live_openstack \}\}/,
+	);
 	if (!hasRootLockfile) {
 		assert.doesNotMatch(workflow, /cache:\s*npm/);
 		assert.doesNotMatch(workflow, /run:\s*npm ci/);
