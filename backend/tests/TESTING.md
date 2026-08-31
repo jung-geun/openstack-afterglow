@@ -173,5 +173,5 @@ GitHub Actions 워크플로 `.github/workflows/test.yml`:
 - `test-contract`: 추출 서비스 소비자 계약과 uv-backed Kolla helper 계약
 - `test-functional`: 실제 MariaDB/PostgreSQL/Redis를 쓰는 local functional (`test:functional -- --no-start`)
 - `test-frontend`: SvelteKit unit
-- `detect-live`: Keystone 토큰 POST 및 network endpoint 도달성 검사
-- `test-live`: 사전조건 충족 시 실제 OpenStack scenario (`test:live`)
+- `detect-live`: `workflow_dispatch`에서 `run_live_openstack=true`로 명시한 경우에만 Keystone 토큰 POST 및 network endpoint 도달성 검사
+- `test-live`: 수동 opt-in과 사전조건을 모두 충족한 경우에만 실제 OpenStack scenario (`test:live`) 실행; push/PR 기본 CI에서는 제외

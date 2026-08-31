@@ -7,5 +7,5 @@
 - [x] Run Drover and Afterglow release verification gates.
 - [x] Treat no-count GPU PCI aliases as quantity one when filtering project flavors.
 - [x] Commit and push both development branches and open dev-to-main release pull requests.
-- [ ] After the required manual main merges, create annotated Drover `v0.2.0` and Afterglow `v1.18.0` tags from their main merge commits.
-- [ ] Verify versioned and `latest` GHCR images plus the `1.18.0` Helm chart are publicly resolvable.
+- [x] After the required manual main merges, create annotated Drover `v0.2.0` and Afterglow `v1.18.0` tags from their main merge commits.
+- [x] Verify versioned and `latest` GHCR images plus the `1.18.0` Helm chart are publicly resolvable.

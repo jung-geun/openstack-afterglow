@@ -40,6 +40,7 @@ drover_keystone_user_domain_name: "{{ default_user_domain_name }}"
 drover_keystone_region_name: "{{ openstack_region_name }}"
 drover_keystone_interface: "{{ openstack_interface | default('internal') }}"
 drover_service_project_name: "drover-service"
+drover_service_project_id: ""  # config tasks resolve the concrete ID before rendering
 drover_external_url: "{{ public_protocol | default('https') }}://{{ kolla_external_fqdn | default('localhost') }}:{{ drover_api_port }}"
 drover_callback_base_url: "{{ drover_external_url }}"
 drover_public_endpoint_url: "{{ drover_external_url }}"

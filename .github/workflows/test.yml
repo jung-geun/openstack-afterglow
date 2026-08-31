@@ -3,7 +3,12 @@ name: Layered Tests
 on:
   # docker-build.yml 이 needs: 체인으로 호출 — push/PR 트리거는 거기서 관장
   workflow_call:
-
+    inputs:
+      run_live_openstack:
+        description: "Run opt-in live OpenStack scenarios"
+        required: false
+        type: boolean
+        default: false
 jobs:
   version-check:
     name: Version + orchestration checks
@@ -187,6 +192,7 @@ jobs:
     name: Detect live OpenStack credentials
     needs: version-check
     runs-on: ubuntu-latest
+    if: ${{ inputs.run_live_openstack }}
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
     steps:
