@@ -58,36 +58,66 @@
   gather_facts: false
   hosts: afterglow
   serial: "{{ kolla_serial | default('0') }}"
-  roles:
-    - { role: afterglow, tags: afterglow, when: enable_afterglow | default(false) | bool }
+  tasks:
+    - name: Apply role afterglow
+      ansible.builtin.include_role:
+        name: afterglow
+        apply:
+          tags: afterglow
+      tags: afterglow
+      when: enable_afterglow | default(false) | bool
 
 - name: Apply role waygate
   gather_facts: false
   hosts: waygate
   serial: "{{ kolla_serial | default('0') }}"
-  roles:
-    - { role: waygate, tags: waygate, when: enable_waygate | default(false) | bool }
+  tasks:
+    - name: Apply role waygate
+      ansible.builtin.include_role:
+        name: waygate
+        apply:
+          tags: waygate
+      tags: waygate
+      when: enable_waygate | default(false) | bool
 
 - name: Apply role drover
   gather_facts: false
   hosts: drover
   serial: "{{ kolla_serial | default('0') }}"
-  roles:
-    - { role: drover, tags: drover, when: enable_drover | default(false) | bool }
+  tasks:
+    - name: Apply role drover
+      ansible.builtin.include_role:
+        name: drover
+        apply:
+          tags: drover
+      tags: drover
+      when: enable_drover | default(false) | bool
 
 - name: Apply role lumen
   gather_facts: false
   hosts: lumen
   serial: "{{ kolla_serial | default('0') }}"
-  roles:
-    - { role: lumen, tags: lumen, when: enable_lumen | default(false) | bool }
+  tasks:
+    - name: Apply role lumen
+      ansible.builtin.include_role:
+        name: lumen
+        apply:
+          tags: lumen
+      tags: lumen
+      when: enable_lumen | default(false) | bool
 
 - name: Apply role palimpsest
   gather_facts: false
   hosts: palimpsest
   serial: "{{ kolla_serial | default('0') }}"
-  roles:
-    - { role: palimpsest, tags: palimpsest, when: enable_palimpsest | default(false) | bool }
+  tasks:
+    - name: Apply role palimpsest
+      ansible.builtin.include_role:
+        name: palimpsest
+        apply:
+          tags: palimpsest
+      tags: palimpsest
+      when: enable_palimpsest | default(false) | bool
 
 - name: Configure plugin HAProxy routes
   gather_facts: false

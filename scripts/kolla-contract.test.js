@@ -38,7 +38,7 @@ test("Afterglow health checks use probe tools present in published images", () =
 })
 
 test("Extracted service health checks use Python available in published images", () => {
-	for (const service of ["drover", "waygate", "lumen", "palimpsest"]) {
+	for (const service of ["waygate", "lumen", "palimpsest"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		assert.match(
 			defaults,
@@ -353,13 +353,21 @@ test("Kolla installer loads plugin variables from the standard config root", () 
 
 	try {
 		fs.mkdirSync(path.join(kollaAnsiblePath, "ansible", "roles"), { recursive: true })
+		const fixtureDroverRoleDir = path.join(kollaAnsiblePath, "ansible", "roles", "drover")
+		fs.mkdirSync(path.join(fixtureDroverRoleDir, "tasks"), { recursive: true })
+		fs.mkdirSync(path.join(fixtureDroverRoleDir, "defaults"), { recursive: true })
+		fs.mkdirSync(path.join(fixtureDroverRoleDir, "templates"), { recursive: true })
+		fs.writeFileSync(path.join(fixtureDroverRoleDir, "tasks", "main.yml"), "---\n- name: Drover main\n  ansible.builtin.debug:\n    msg: drover\n")
+		fs.writeFileSync(path.join(fixtureDroverRoleDir, "tasks", "deploy.yml"), "---\n- name: Drover deploy\n  ansible.builtin.debug:\n    msg: deploy\n")
+		fs.writeFileSync(path.join(fixtureDroverRoleDir, "defaults", "main.yml"), "drover_services: {}\n")
+		fs.writeFileSync(path.join(fixtureDroverRoleDir, "templates", "drover.conf.j2"), "[drover]\n")
 		fs.mkdirSync(pluginConfigRoot, { recursive: true })
 		fs.mkdirSync(legacyConfigRoot, { recursive: true })
 		fs.mkdirSync(kollaBinDirectory, { recursive: true })
 		fs.writeFileSync(fakeKollaBinary, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 })
 		fs.writeFileSync(
 			fakeKollaPython,
-			'#!/usr/bin/env bash\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
+			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.17"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
 			{ mode: 0o755 }
 		)
 		fs.writeFileSync(
@@ -449,7 +457,7 @@ test("Kolla helper refusals preserve stock files", () => {
 })
 
 test("Plugin lifecycle dispatchers preserve stock actions and tag isolation", () => {
-	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+	for (const service of ["afterglow", "waygate", "lumen", "palimpsest"]) {
 		const dispatcher = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/main.yml`)
 		assert.doesNotMatch(dispatcher, /tags: always/)
 		assert.match(dispatcher, /'config_validate', 'stop', 'deploy-containers', 'check'/)
@@ -480,7 +488,7 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 	assert.match(afterglowConfig, /project_domain_name = "\{\{ afterglow_keystone_project_domain_name \}\}"/)
 	assert.match(afterglowDatabase, /login_host: "\{\{ afterglow_database_address \}\}"/)
 
-	for (const service of ["drover", "waygate", "lumen", "palimpsest"]) {
+	for (const service of ["waygate", "lumen", "palimpsest"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		const template = readRepoFile(`deploy/kolla/ansible/roles/${service}/templates/${service}.conf.j2`)
 		const database = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/preconditions_db.yml`)
@@ -502,22 +510,13 @@ test("Plugin services derive data-plane and OpenStack topology from Kolla variab
 	}
 })
 
-test("Drover resolves and renders its concrete service project ID", () => {
-	const defaults = readRepoFile("deploy/kolla/ansible/roles/drover/defaults/main.yml")
-	const configTasks = readRepoFile("deploy/kolla/ansible/roles/drover/tasks/config.yml")
-	const template = readRepoFile("deploy/kolla/ansible/roles/drover/templates/drover.conf.j2")
-
-	assert.match(defaults, /^drover_service_project_id: ""/m)
-	assert.match(configTasks, /module_name: openstack\.cloud\.project_info/)
-	assert.match(configTasks, /name: "\{\{ drover_service_project_name \}\}"/)
-	assert.match(configTasks, /drover_service_project_lookup\.projects\[0\]\.id/)
-	assert.match(configTasks, /drover_service_project_id \| default\(''\) \| length > 0/)
-	assert.match(template, /service_project_id = "\{\{ drover_service_project_id \}\}"/)
+test("Drover Kolla role source is externalized to service wheel", () => {
+	assert.equal(fs.existsSync(path.join(rootDir, "deploy/kolla/ansible/roles/drover")), false)
 })
 
 test("Drover, Waygate, and Lumen public hostnames are routed by Kolla's external HAProxy frontend without disturbing internal endpoints", () => {
 	const sample = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
-	for (const service of ["drover", "waygate", "lumen"]) {
+	for (const service of ["waygate", "lumen"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		const precheck = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/precheck.yml`)
 		const loadbalancer = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/loadbalancer.yml`)
@@ -757,7 +756,6 @@ test("Kolla plugin requires stock Kolla Valkey dependency and rejects standalone
 	const expectedRoles = [
 		{ name: "afterglow", dbIndex: 5 },
 		{ name: "waygate", dbIndex: 6 },
-		{ name: "drover", dbIndex: 7 },
 		{ name: "lumen", dbIndex: 8 },
 		{ name: "palimpsest", dbIndex: 9 },
 	]
@@ -963,16 +961,7 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 	assert.match(afterglowStart, /network_mode:\s*"\{\{ item\.value\.network_mode \| default\(omit\) \}\}"/)
 	assert.match(afterglowPrecheck, /Fail if any configured Afterglow image is inaccessible[\s\S]*?no_log:\s*true/)
 
-	const droverDefaults = readRepoFile("deploy/kolla/ansible/roles/drover/defaults/main.yml")
-	const droverStart = readRepoFile("deploy/kolla/ansible/roles/drover/tasks/start.yml")
-	const droverServiceMapStart = droverDefaults.indexOf("drover_services:")
-	const droverEnvironmentMapStart = droverDefaults.indexOf("drover_service_environments:")
-	const droverServiceMap = droverDefaults.slice(droverServiceMapStart, droverEnvironmentMapStart)
-	assert.ok(droverServiceMapStart >= 0 && droverEnvironmentMapStart > droverServiceMapStart)
-	assert.doesNotMatch(droverServiceMap, /^\s+environment:/m)
-	assert.match(droverStart, /env:\s*"\{\{ drover_service_environments\.get\(item\.key, \{\}\) \}\}"/)
-
-	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+	for (const service of ["afterglow", "waygate", "lumen", "palimpsest"]) {
 		const pull = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/pull.yml`)
 		const start = readRepoFile(`deploy/kolla/ansible/roles/${service}/tasks/start.yml`)
 		assert.match(pull, /community\.docker\.docker_image/)
@@ -1015,7 +1004,7 @@ test("Kolla global topology fallbacks, Afterglow TLS settings, and Lumen Keyston
 	assert.match(lumenDefaults, /KEYSTONE_REGION_NAME: "\{\{ lumen_keystone_region_name \}\}"/)
 	assert.match(lumenDefaults, /KEYSTONE_INTERFACE: "\{\{ lumen_keystone_interface \}\}"/)
 
-	for (const service of ["drover", "waygate", "palimpsest"]) {
+	for (const service of ["waygate", "palimpsest"]) {
 		const defaults = readRepoFile(`deploy/kolla/ansible/roles/${service}/defaults/main.yml`)
 		assert.match(defaults, new RegExp(`${service}_keystone_interface: "\\{\\{ openstack_interface \\| default\\('internal'\\) \\}\\}"`))
 		assert.match(
@@ -1024,5 +1013,181 @@ test("Kolla global topology fallbacks, Afterglow TLS settings, and Lumen Keyston
 				`${service}_internal_endpoint_url: "\\{\\{ internal_protocol \\| default\\('http'\\) \\}\\}:\\/\\/\\{\\{ kolla_internal_fqdn \\| default\\(kolla_internal_vip_address\\) \\}\\}:\\{\\{ ${service}_api_port \\}\\}"`
 			)
 		)
+	}
+})
+test("Kolla site playbook uses dynamic include_role dispatch with inventory preflight for all services", () => {
+	const site = readRepoFile("deploy/kolla/site.yml")
+
+	// Dynamic include_role for all 5 services
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		assert.match(site, new RegExp(`name: Apply role ${service}`))
+		assert.match(site, new RegExp(`ansible\\.builtin\\.include_role:\\s*\\n\\s*name: ${service}`))
+		assert.match(site, new RegExp(`apply:\\s*\\n\\s*tags: ${service}`))
+		assert.match(site, new RegExp(`when: enable_${service} \\| default\\(false\\) \\| bool`))
+	}
+
+	// Ensure no static `roles:` list is used in site.yml
+	assert.doesNotMatch(site, /^\s*roles:\s*\n\s*-\s*\{\s*role:\s*(?:afterglow|waygate|drover|lumen|palimpsest)/m)
+
+	// Custom service inventory preflight task asserts non-empty group when enabled
+	assert.match(site, /Custom service inventory preflight check/)
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		assert.match(site, new RegExp(`Assert inventory group for enabled ${service}`))
+		assert.match(site, new RegExp(`groups\\.get\\('${service}', \\[\\]\\) \\| length > 0`))
+	}
+
+	// HAProxy route rendering uses dynamic include_role tasks_from: loadbalancer
+	for (const service of ["afterglow", "waygate", "drover", "lumen", "palimpsest"]) {
+		assert.match(site, new RegExp(`Render ${service[0].toUpperCase()}${service.slice(1)} HAProxy routes`))
+		assert.match(site, new RegExp(`name: ${service}\\s*\\n\\s*tasks_from: loadbalancer`))
+	}
+})
+
+test("Drover Kolla role packaging, operator specifications, and installer contracts", () => {
+	// 1. Drover source role removed from Afterglow repo
+	assert.equal(fs.existsSync(path.join(rootDir, "deploy/kolla/ansible/roles/drover")), false)
+
+	// 2. Installer & uninstaller symlink contracts
+	const installer = readRepoFile("deploy/kolla/install.sh")
+	const uninstaller = readRepoFile("deploy/kolla/uninstall.sh")
+
+	assert.doesNotMatch(installer, /create_symlink_safe[^"\n]*roles\/drover/)
+	assert.doesNotMatch(uninstaller, /remove_symlink_safe[^"\n]*roles\/drover/)
+
+	// 3. Exact wheel URL, SHA256, and Kolla source commit in operator pyproject.toml
+	const pyproject = readRepoFile("deploy/kolla/operator/pyproject.toml")
+	assert.match(
+		pyproject,
+		/drover-kolla @ https:\/\/github\.com\/openstack-afterglow\/drover\/releases\/download\/v0\.2\.17\/drover_kolla-0\.2\.17-py3-none-any\.whl#sha256=d8d3e93ea00621079ba79e09007b01b2d691a4f6c5d7274ac6baca4def28a39a/
+	)
+	assert.match(
+		pyproject,
+		/kolla-ansible @ git\+https:\/\/opendev\.org\/openstack\/kolla-ansible@34daacfbf2d5987f543787f57535b2bebe7dee19/
+	)
+
+	// 4. Operator globals/secrets preservation
+	const sampleGlobals = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
+	assert.match(sampleGlobals, /^enable_drover: "yes"$/m)
+	assert.match(sampleGlobals, /^drover_public_haproxy_enabled: true$/m)
+	assert.match(sampleGlobals, /^drover_public_haproxy_fqdn: "drover\.dmslab\.re\.kr"$/m)
+})
+
+test("Hermetic integration test for drover-kolla wheel installation, Ansible dispatch, and uninstall safety", () => {
+	const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "drover-kolla-hermetic-"))
+	const kollaConfigPath = path.join(temporaryDirectory, "etc", "kolla")
+	const kollaAnsiblePath = path.join(temporaryDirectory, "share", "kolla-ansible")
+	const rolesDir = path.join(kollaAnsiblePath, "ansible", "roles")
+	const droverRoleDir = path.join(rolesDir, "drover")
+	const distInfoDir = path.join(rolesDir, "drover_kolla-0.2.17.dist-info")
+
+	const pluginConfigRoot = path.join(kollaConfigPath, "config", "afterglow")
+	const pluginGlobals = path.join(pluginConfigRoot, "globals.yml")
+	const pluginSecrets = path.join(pluginConfigRoot, "secrets.yml")
+
+	const installer = path.join(rootDir, "deploy", "kolla", "install.sh")
+	const uninstaller = path.join(rootDir, "deploy", "kolla", "uninstall.sh")
+	const kollaBinDirectory = path.join(temporaryDirectory, "bin")
+	const fakeKollaBinary = path.join(kollaBinDirectory, "kolla-ansible")
+
+	const pythonResult = spawnSync(
+		"uv",
+		[
+			"run",
+			"--project",
+			path.join(rootDir, "backend"),
+			"python",
+			"-c",
+			"import sys; print(sys.executable)",
+		],
+		{ encoding: "utf8" }
+	)
+	assert.equal(pythonResult.status, 0, pythonResult.stderr)
+	const commandEnvironment = {
+		...process.env,
+		AFTERGLOW_REPO_DIR: rootDir,
+		KOLLA_ANSIBLE_BIN: fakeKollaBinary,
+		KOLLA_TEST_PYTHON: pythonResult.stdout.trim(),
+		KOLLA_ANSIBLE_DIR: kollaAnsiblePath,
+		KOLLA_CONFIG_PATH: kollaConfigPath,
+	}
+
+	try {
+		// 1. Setup mock installed drover-kolla 0.2.17 wheel files in Python share/roles
+		fs.mkdirSync(path.join(droverRoleDir, "defaults"), { recursive: true })
+		fs.mkdirSync(path.join(droverRoleDir, "tasks"), { recursive: true })
+		fs.mkdirSync(path.join(droverRoleDir, "templates"), { recursive: true })
+		fs.mkdirSync(distInfoDir, { recursive: true })
+
+		fs.writeFileSync(path.join(droverRoleDir, "defaults", "main.yml"), "drover_services: {}\n")
+		fs.writeFileSync(path.join(droverRoleDir, "tasks", "main.yml"), "---\n- name: Drover main task\n  ansible.builtin.debug:\n    msg: drover\n")
+		fs.writeFileSync(path.join(droverRoleDir, "tasks", "deploy.yml"), "---\n- name: Drover deploy task\n  ansible.builtin.debug:\n    msg: deploy\n")
+		fs.writeFileSync(path.join(droverRoleDir, "templates", "drover.conf.j2"), "[DEFAULT]\n")
+		fs.writeFileSync(path.join(distInfoDir, "METADATA"), "Metadata-Version: 2.1\nName: drover-kolla\nVersion: 0.2.17\n")
+
+		// Verify drover role is a real package directory, not a symlink
+		assert.equal(fs.statSync(droverRoleDir).isDirectory(), true)
+		assert.equal(fs.lstatSync(droverRoleDir).isSymbolicLink(), false)
+		assert.match(fs.readFileSync(path.join(distInfoDir, "METADATA"), "utf8"), /Version: 0\.2\.17/)
+
+		// 2. Setup mock Afterglow source role links targets & Kolla environment
+		for (const role of ["afterglow", "waygate", "lumen", "palimpsest"]) {
+			fs.mkdirSync(path.join(rootDir, "deploy", "kolla", "ansible", "roles", role), { recursive: true })
+		}
+		fs.mkdirSync(pluginConfigRoot, { recursive: true })
+		fs.mkdirSync(kollaBinDirectory, { recursive: true })
+
+		const fakeKollaPython = path.join(kollaBinDirectory, "python")
+		fs.writeFileSync(fakeKollaBinary, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 })
+		fs.writeFileSync(
+			fakeKollaPython,
+			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.17"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
+			{ mode: 0o755 }
+		)
+		fs.writeFileSync(path.join(kollaAnsiblePath, "ansible", "site.yml"), "---\n- import_playbook: gather-facts.yml\n")
+		fs.writeFileSync(path.join(kollaConfigPath, "multinode"), "[control]\ncontroller\n[drover]\ncontroller\n")
+		fs.writeFileSync(path.join(kollaConfigPath, "globals.yml"), "kolla_base: true\n")
+		fs.writeFileSync(pluginGlobals, "enable_drover: true\n", { mode: 0o640 })
+		fs.writeFileSync(pluginSecrets, "drover_secret: test\n", { mode: 0o600 })
+
+		// 3. Run installer in environment
+		const installResult = spawnSync("bash", [installer], {
+			encoding: "utf8",
+			env: commandEnvironment,
+		})
+		assert.equal(installResult.status, 0, installResult.stderr)
+
+		// Verify symlinks for repository roles were created
+		for (const role of ["afterglow", "waygate", "lumen", "palimpsest"]) {
+			const roleLink = path.join(rolesDir, role)
+			assert.equal(fs.existsSync(roleLink), true)
+			assert.equal(fs.lstatSync(roleLink).isSymbolicLink(), true)
+		}
+
+		// Verify drover role remains the package-installed real directory (NO symlink created over it)
+		assert.equal(fs.lstatSync(droverRoleDir).isSymbolicLink(), false)
+		assert.equal(fs.statSync(droverRoleDir).isDirectory(), true)
+		assert.equal(fs.existsSync(path.join(droverRoleDir, "tasks", "main.yml")), true)
+
+		// 4. Run uninstaller in environment
+		const uninstallResult = spawnSync("bash", [uninstaller], {
+			encoding: "utf8",
+			env: commandEnvironment,
+		})
+		assert.equal(uninstallResult.status, 0, uninstallResult.stderr)
+
+		// Verify repository role symlinks removed
+		for (const role of ["afterglow", "waygate", "lumen", "palimpsest"]) {
+			const roleLink = path.join(rolesDir, role)
+			assert.throws(() => fs.lstatSync(roleLink), { code: "ENOENT" })
+		}
+
+		// Verify package-installed drover role and operator files remain UNTOUCHED
+		assert.equal(fs.existsSync(droverRoleDir), true)
+		assert.equal(fs.statSync(droverRoleDir).isDirectory(), true)
+		assert.equal(fs.lstatSync(droverRoleDir).isSymbolicLink(), false)
+		assert.equal(fs.existsSync(pluginGlobals), true)
+		assert.equal(fs.existsSync(pluginSecrets), true)
+	} finally {
+		fs.rmSync(temporaryDirectory, { recursive: true, force: true })
 	}
 })

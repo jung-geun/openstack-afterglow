@@ -45,7 +45,7 @@ the ordinary Kolla command line from `/etc/kolla`.
 
 ## Installation & Symlink Creation
 
-> **Prerequisite:** Complete [Configuration Setup](#configuration-setup)
+> **Prerequisite:** Complete [Operator Environment & Package Setup](#operator-environment--package-setup) and [Configuration Setup](#configuration-setup)
 > first. `install.sh` validates both plugin variable files before changing
 > Kolla's installation tree.
 
@@ -59,8 +59,11 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 ```
 
 ### Installer-managed artifacts
-- Role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`, `drover`,
+- Source role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`,
   `lumen`, `waygate`, and `palimpsest`.
+- Verified package-installed role under `$KOLLA_DIR/ansible/roles/`: `drover`
+  (installed via `drover-kolla` wheel; installer validates non-symlink role path
+  and required lifecycle files).
 - Aggregate playbook: `$KOLLA_DIR/ansible/afterglow-site.yml` ->
   `deploy/kolla/site.yml`.
 - One marker-delimited `afterglow-site.yml` import in
@@ -79,6 +82,50 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 
 *Safety Check*: If any managed target conflicts or a `site.yml` marker is
 unexpected, `install.sh` aborts rather than replacing it.
+
+---
+
+## Operator Environment & Package Setup
+
+The `deploy/kolla/operator/` directory contains a canonical `uv` project
+(`pyproject.toml` and committed `uv.lock`) specifying exact dependency pins:
+
+- **`kolla-ansible`**: git commit `33e819508f73a909a94ca931a750c646510d1b2d` (21.2.0).
+- **`drover-kolla`**: PEP 508 URL wheel release `v0.2.17` (`drover_kolla-0.2.17-py3-none-any.whl`).
+
+### 1. Legacy Drover Symlink Migration
+
+If upgrading an environment that previously used Afterglow's central Drover role source:
+
+```bash
+# Remove legacy Afterglow Drover symlink if present
+rm -f /etc/kolla/.venv/share/kolla-ansible/ansible/roles/drover
+```
+
+`install.sh` fail-closes with explicit migration instructions if a legacy symlink remains.
+
+### 2. Operator Virtual Environment Sync
+
+To sync the operator environment into Kolla's virtual environment:
+
+```bash
+cd deploy/kolla/operator
+uv sync --frozen
+```
+
+This installs the `drover-kolla` wheel directly into `$VIRTUAL_ENV/share/kolla-ansible/ansible/roles/drover` as a real, package-owned directory.
+
+> **Security Note:** Keep the operator project free of live secrets or deployment globals. Operator configuration belongs exclusively in `/etc/kolla/config/afterglow/`.
+
+### 3. Installation & Registration Order
+
+Follow this installation sequence:
+
+1. **Sync Operator Packages**: Run `uv sync --frozen` in `deploy/kolla/operator`.
+2. **Configure Operator Variables**: Populate `/etc/kolla/config/afterglow/globals.yml` and `secrets.yml`.
+3. **Run Integration Installer**: Run `./deploy/kolla/install.sh`.
+
+The installer validates that `$ROLES_DIR/drover` is a valid package-installed directory (and not a symlink), wires source role symlinks (`afterglow`, `waygate`, `lumen`, `palimpsest`), and appends the `afterglow-site.yml` import to stock `site.yml`.
 
 ---
 
@@ -298,6 +345,7 @@ kolla-ansible reconfigure -i multinode
 
 # Upgrade services to new images and run policy seeding (force-refreshes mutable tags)
 kolla-ansible upgrade -i multinode
+```
 
 Tag-filtered operations also remain supported:
 
@@ -313,12 +361,16 @@ The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis; no
 
 ---
 
-## Uninstallation
+## Uninstallation & Role Ownership
 
 ```bash
 ./deploy/kolla/uninstall.sh
 ```
 
-Uninstall removes only the installer-owned `site.yml` marker block and expected
-symlinks. It leaves `/etc/kolla/multinode`, plugin configuration, databases,
-containers, images, and source checkouts untouched.
+### Uninstaller Ownership Rules
+
+- **Source Roles**: Removes installer-managed symlinks for `afterglow`, `waygate`, `lumen`, and `palimpsest`.
+- **Stock Playbook**: Removes the `afterglow-site.yml` import block from `site.yml`.
+- **Aggregate Playbook & Globals.d**: Removes aggregate playbook link and `globals.d` links.
+- **Package-owned Roles (Drover)**: `uninstall.sh` **never** deletes package-installed `drover` role files under `$ROLES_DIR/drover`. Package role lifecycle is managed via `uv` / package tooling.
+- **Operator State**: Leaves `/etc/kolla/multinode`, plugin configuration, databases, containers, images, and source checkouts untouched.

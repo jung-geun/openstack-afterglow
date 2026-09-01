@@ -93,7 +93,7 @@ if [[ ! -d "$ROLES_DIR" ]]; then
   die "kolla-ansible roles 디렉토리를 찾을 수 없습니다: $ROLES_DIR"
 fi
 
-# ── 2. 심볼릭 링크 생성 (5개 Role + 1개 Aggregate Playbook) ─────────────────
+# ── 2. 심볼릭 링크 생성 및 Role 검증 ─────────────────────────────────────────
 #
 # 규칙: 대상 경로가 이미 존재하는 경우,
 #   - 심볼릭 링크이고 정산 대상($expected_target)을 가리키면 유지 (skip)
@@ -144,10 +144,40 @@ STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
 [[ -r "$PLUGIN_SECRETS" ]] || die "Afterglow secrets를 읽을 수 없습니다: $PLUGIN_SECRETS"
 [[ -r "$KOLLA_CONFIG_DIR/globals.yml" ]] || die "Kolla globals.yml을 읽을 수 없습니다: $KOLLA_CONFIG_DIR/globals.yml"
 [[ -f "$STOCK_SITE" ]] || die "Kolla stock site.yml을 찾을 수 없습니다: $STOCK_SITE"
-# Role symlinks
+
+# Verify the package-installed Drover role and its distribution metadata.
+KOLLA_PYTHON=$(command -v python3) || die "python3 실행 파일을 찾을 수 없습니다"
+if [[ "$KOLLA_ANSIBLE_BIN" == /* ]]; then
+  candidate_kolla_python="$(dirname "$KOLLA_ANSIBLE_BIN")/python"
+  [[ -x "$candidate_kolla_python" ]] && KOLLA_PYTHON="$candidate_kolla_python"
+fi
+
+DROVER_ROLE_DIR="$ROLES_DIR/drover"
+DROVER_LEGACY_ROLE_TARGET="$REPO_DIR/deploy/kolla/ansible/roles/drover"
+DROVER_KOLLA_VERSION="0.2.17"
+if [[ -L "$DROVER_ROLE_DIR" ]]; then
+  current_drover_target=$(readlink "$DROVER_ROLE_DIR" || true)
+  if [[ "$current_drover_target" == "$DROVER_LEGACY_ROLE_TARGET" ]]; then
+    die "Legacy Afterglow-owned Drover role symlink detected at $DROVER_ROLE_DIR. Verify it points to $DROVER_LEGACY_ROLE_TARGET, remove only that symlink with 'rm -- $DROVER_ROLE_DIR', then run 'uv sync --frozen' in deploy/kolla/operator before rerunning install.sh."
+  fi
+  die "Unexpected Drover role symlink at $DROVER_ROLE_DIR -> $current_drover_target. Refusing to replace or remove it."
+elif [[ ! -d "$DROVER_ROLE_DIR" ||
+        ! -f "$DROVER_ROLE_DIR/tasks/main.yml" ||
+        ! -f "$DROVER_ROLE_DIR/tasks/deploy.yml" ||
+        ! -f "$DROVER_ROLE_DIR/defaults/main.yml" ||
+        ! -f "$DROVER_ROLE_DIR/templates/drover.conf.j2" ]]; then
+  die "Drover role missing or invalid at $DROVER_ROLE_DIR. Install drover-kolla==$DROVER_KOLLA_VERSION into the active Kolla environment with 'uv sync --frozen' in deploy/kolla/operator."
+fi
+installed_drover_kolla_version=$(
+  "$KOLLA_PYTHON" -c 'from importlib.metadata import version; print(version("drover-kolla"))' 2>/dev/null || true
+)
+[[ "$installed_drover_kolla_version" == "$DROVER_KOLLA_VERSION" ]] ||
+  die "Expected drover-kolla==$DROVER_KOLLA_VERSION in the active Kolla environment, found '${installed_drover_kolla_version:-not installed}'."
+log "Drover role verified at $DROVER_ROLE_DIR (drover-kolla==$installed_drover_kolla_version)"
+
+# Role symlinks (Afterglow, Waygate, Lumen, Palimpsest)
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
-create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
@@ -157,15 +187,10 @@ create_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterg
 # A prior manual installation appended the complete plugin globals as a second
 # YAML document. Kolla accepts only one document for -e @globals.yml. Remove
 # that exact duplicate only after proving it matches the plugin-owned source.
-KOLLA_PYTHON=$(command -v python3) || die "python3 실행 파일을 찾을 수 없습니다"
-if [[ "$KOLLA_ANSIBLE_BIN" == /* ]]; then
-  candidate_kolla_python="$(dirname "$KOLLA_ANSIBLE_BIN")/python"
-  [[ -x "$candidate_kolla_python" ]] && KOLLA_PYTHON="$candidate_kolla_python"
-fi
 "$KOLLA_PYTHON" "$REPO_DIR/deploy/kolla/normalize_stock_globals.py" \
   "$KOLLA_CONFIG_DIR/globals.yml" \
   "$PLUGIN_GLOBALS" \
-  "$KOLLA_CONFIG_DIR/globals.yml.before-afterglow-dedup" ||
+  "$KOLLA_CONFIG_DIR/globals.yml.before-afterglow-dedup" || \
   die "Kolla globals.yml 중복 Afterglow 문서 정리 실패"
 mkdir -p "$KOLLA_CONFIG_DIR/ansible/inventory"
 
@@ -184,14 +209,15 @@ mkdir -p "$(dirname "$DEFAULT_INVENTORY")" "$GLOBALS_D"
 create_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
 create_symlink_safe "$PLUGIN_GLOBALS" "$GLOBALS_D/90-openstack-afterglow-globals.yml" "Afterglow globals.d override"
 create_symlink_safe "$PLUGIN_SECRETS" "$GLOBALS_D/91-openstack-afterglow-secrets.yml" "Afterglow secrets globals.d override"
-python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" ||
+python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" || \
   die "Afterglow stock site.yml import 설치 실패"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Afterglow, Waygate, Drover, Lumen, and Palimpsest integration wiring installed."
+echo " Afterglow, Waygate, Drover (package-installed), Lumen, and Palimpsest integration wiring installed."
 echo " The installer owns only its marked stock site.yml import, default"
-echo " inventory link, globals.d links, role links, and aggregate playbook link."
+echo " inventory link, globals.d links, source role links (afterglow, waygate,"
+echo " lumen, palimpsest), and aggregate playbook link. Drover role is package-owned."
 echo ""
 echo " From /etc/kolla, reconfigure Afterglow with:"
 echo " kolla-ansible reconfigure --tags afterglow"
