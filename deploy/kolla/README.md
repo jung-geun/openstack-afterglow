@@ -90,8 +90,8 @@ unexpected, `install.sh` aborts rather than replacing it.
 The `deploy/kolla/operator/` directory contains a canonical `uv` project
 (`pyproject.toml` and committed `uv.lock`) specifying exact dependency pins:
 
-- **`kolla-ansible`**: git commit `33e819508f73a909a94ca931a750c646510d1b2d` (21.2.0).
-- **`drover-kolla`**: PEP 508 URL wheel release `v0.2.17` (`drover_kolla-0.2.17-py3-none-any.whl`).
+- **`kolla-ansible`**: git commit `34daacfbf2d5987f543787f57535b2bebe7dee19` (21.2.0).
+- **`drover-kolla`**: PEP 508 URL wheel release `v0.2.19` (`drover_kolla-0.2.19-py3-none-any.whl`).
 
 ### 1. Legacy Drover Symlink Migration
 

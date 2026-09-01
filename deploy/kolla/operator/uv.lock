@@ -13,7 +13,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "drover-kolla", url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.17/drover_kolla-0.2.17-py3-none-any.whl" },
+    { name = "drover-kolla", url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.19/drover_kolla-0.2.19-py3-none-any.whl" },
     { name = "kolla-ansible", git = "https://opendev.org/openstack/kolla-ansible?rev=34daacfbf2d5987f543787f57535b2bebe7dee19" },
 ]
 
@@ -400,13 +400,13 @@ wheels = [
 
 [[package]]
 name = "drover-kolla"
-version = "0.2.17"
-source = { url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.17/drover_kolla-0.2.17-py3-none-any.whl" }
+version = "0.2.19"
+source = { url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.19/drover_kolla-0.2.19-py3-none-any.whl" }
 dependencies = [
     { name = "kolla-ansible" },
 ]
 wheels = [
-    { url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.17/drover_kolla-0.2.17-py3-none-any.whl", hash = "sha256:d8d3e93ea00621079ba79e09007b01b2d691a4f6c5d7274ac6baca4def28a39a" },
+    { url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.19/drover_kolla-0.2.19-py3-none-any.whl", hash = "sha256:9d11fdc3a07240a3d613ba878102668b0f9b5cf35b5bd3f3ce6e033426a12392" },
 ]
 
 [package.metadata]

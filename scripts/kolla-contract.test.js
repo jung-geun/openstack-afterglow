@@ -367,7 +367,7 @@ test("Kolla installer loads plugin variables from the standard config root", () 
 		fs.writeFileSync(fakeKollaBinary, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 })
 		fs.writeFileSync(
 			fakeKollaPython,
-			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.17"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
+			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.19"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
 			{ mode: 0o755 }
 		)
 		fs.writeFileSync(
@@ -1058,7 +1058,7 @@ test("Drover Kolla role packaging, operator specifications, and installer contra
 	const pyproject = readRepoFile("deploy/kolla/operator/pyproject.toml")
 	assert.match(
 		pyproject,
-		/drover-kolla @ https:\/\/github\.com\/openstack-afterglow\/drover\/releases\/download\/v0\.2\.17\/drover_kolla-0\.2\.17-py3-none-any\.whl#sha256=d8d3e93ea00621079ba79e09007b01b2d691a4f6c5d7274ac6baca4def28a39a/
+		/drover-kolla @ https:\/\/github\.com\/openstack-afterglow\/drover\/releases\/download\/v0\.2\.19\/drover_kolla-0\.2\.19-py3-none-any\.whl#sha256=9d11fdc3a07240a3d613ba878102668b0f9b5cf35b5bd3f3ce6e033426a12392/
 	)
 	assert.match(
 		pyproject,
@@ -1078,7 +1078,7 @@ test("Hermetic integration test for drover-kolla wheel installation, Ansible dis
 	const kollaAnsiblePath = path.join(temporaryDirectory, "share", "kolla-ansible")
 	const rolesDir = path.join(kollaAnsiblePath, "ansible", "roles")
 	const droverRoleDir = path.join(rolesDir, "drover")
-	const distInfoDir = path.join(rolesDir, "drover_kolla-0.2.17.dist-info")
+	const distInfoDir = path.join(rolesDir, "drover_kolla-0.2.19.dist-info")
 
 	const pluginConfigRoot = path.join(kollaConfigPath, "config", "afterglow")
 	const pluginGlobals = path.join(pluginConfigRoot, "globals.yml")
@@ -1112,7 +1112,7 @@ test("Hermetic integration test for drover-kolla wheel installation, Ansible dis
 	}
 
 	try {
-		// 1. Setup mock installed drover-kolla 0.2.17 wheel files in Python share/roles
+		// 1. Setup mock installed drover-kolla 0.2.19 wheel files in Python share/roles
 		fs.mkdirSync(path.join(droverRoleDir, "defaults"), { recursive: true })
 		fs.mkdirSync(path.join(droverRoleDir, "tasks"), { recursive: true })
 		fs.mkdirSync(path.join(droverRoleDir, "templates"), { recursive: true })
@@ -1122,12 +1122,12 @@ test("Hermetic integration test for drover-kolla wheel installation, Ansible dis
 		fs.writeFileSync(path.join(droverRoleDir, "tasks", "main.yml"), "---\n- name: Drover main task\n  ansible.builtin.debug:\n    msg: drover\n")
 		fs.writeFileSync(path.join(droverRoleDir, "tasks", "deploy.yml"), "---\n- name: Drover deploy task\n  ansible.builtin.debug:\n    msg: deploy\n")
 		fs.writeFileSync(path.join(droverRoleDir, "templates", "drover.conf.j2"), "[DEFAULT]\n")
-		fs.writeFileSync(path.join(distInfoDir, "METADATA"), "Metadata-Version: 2.1\nName: drover-kolla\nVersion: 0.2.17\n")
+		fs.writeFileSync(path.join(distInfoDir, "METADATA"), "Metadata-Version: 2.1\nName: drover-kolla\nVersion: 0.2.19\n")
 
 		// Verify drover role is a real package directory, not a symlink
 		assert.equal(fs.statSync(droverRoleDir).isDirectory(), true)
 		assert.equal(fs.lstatSync(droverRoleDir).isSymbolicLink(), false)
-		assert.match(fs.readFileSync(path.join(distInfoDir, "METADATA"), "utf8"), /Version: 0\.2\.17/)
+		assert.match(fs.readFileSync(path.join(distInfoDir, "METADATA"), "utf8"), /Version: 0\.2\.19/)
 
 		// 2. Setup mock Afterglow source role links targets & Kolla environment
 		for (const role of ["afterglow", "waygate", "lumen", "palimpsest"]) {
@@ -1140,7 +1140,7 @@ test("Hermetic integration test for drover-kolla wheel installation, Ansible dis
 		fs.writeFileSync(fakeKollaBinary, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 })
 		fs.writeFileSync(
 			fakeKollaPython,
-			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.17"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
+			'#!/usr/bin/env bash\nif [[ "${1:-}" == "-c" && "${2:-}" == *drover-kolla* ]]; then echo "0.2.19"; exit 0; fi\nexec "${KOLLA_TEST_PYTHON:?}" "$@"\n',
 			{ mode: 0o755 }
 		)
 		fs.writeFileSync(path.join(kollaAnsiblePath, "ansible", "site.yml"), "---\n- import_playbook: gather-facts.yml\n")

@@ -6,8 +6,8 @@ This directory defines the operator virtual environment for Afterglow Kolla-Ansi
 
 The operator environment manages the dependencies required for running `kolla-ansible` and service role wheels (such as `drover-kolla`).
 
-- **Kolla-Ansible**: pinned to git commit `33e819508f73a909a94ca931a750c646510d1b2d` (21.2.0).
-- **Drover Kolla Role**: pinned to wheel release `drover_kolla-0.2.17-py3-none-any.whl` (v0.2.17).
+- **Kolla-Ansible**: pinned to git commit `34daacfbf2d5987f543787f57535b2bebe7dee19` (21.2.0).
+- **Drover Kolla Role**: pinned to wheel release `drover_kolla-0.2.19-py3-none-any.whl` (v0.2.19).
 
 ## Installation
 

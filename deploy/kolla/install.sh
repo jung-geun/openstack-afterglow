@@ -154,7 +154,7 @@ fi
 
 DROVER_ROLE_DIR="$ROLES_DIR/drover"
 DROVER_LEGACY_ROLE_TARGET="$REPO_DIR/deploy/kolla/ansible/roles/drover"
-DROVER_KOLLA_VERSION="0.2.17"
+DROVER_KOLLA_VERSION="0.2.19"
 if [[ -L "$DROVER_ROLE_DIR" ]]; then
   current_drover_target=$(readlink "$DROVER_ROLE_DIR" || true)
   if [[ "$current_drover_target" == "$DROVER_LEGACY_ROLE_TARGET" ]]; then
