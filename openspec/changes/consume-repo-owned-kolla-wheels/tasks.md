@@ -6,5 +6,5 @@
 - [x] Move Drover-specific role contracts out of Afterglow and add installed-wheel composition/lifecycle coverage.
 - [x] Preserve aggregate stock-site registration, operator globals/secrets, inventory links, and shared HAProxy reconciliation.
 - [x] Pin exact GitHub Release wheel URLs and immutable Kolla source in the operator project/lock.
-- [ ] Run exact Kolla contracts, full repository gates, and a live package-only pull/reconfigure verification.
+- [x] Run exact Kolla contracts, full repository gates, and a live package-only pull/reconfigure verification.
 - [ ] Archive the completed change.
