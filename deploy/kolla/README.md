@@ -60,10 +60,10 @@ KOLLA_ANSIBLE_DIR=/etc/kolla/.venv/share/kolla-ansible \
 
 ### Installer-managed artifacts
 - Source role links under `$KOLLA_DIR/ansible/roles/`: `afterglow`,
-  `lumen`, `waygate`, and `palimpsest`.
-- Verified package-installed role under `$KOLLA_DIR/ansible/roles/`: `drover`
-  (installed via `drover-kolla` wheel; installer validates non-symlink role path
-  and required lifecycle files).
+  `waygate`, and `palimpsest`.
+- Verified package-installed roles under `$KOLLA_DIR/ansible/roles/`: `drover`
+  (installed via `drover-kolla` wheel) and `lumen` (installed via `lumen-kolla`
+  wheel; installer validates non-symlink role paths and required lifecycle files).
 - Aggregate playbook: `$KOLLA_DIR/ansible/afterglow-site.yml` ->
   `deploy/kolla/site.yml`.
 - One marker-delimited `afterglow-site.yml` import in
@@ -92,14 +92,16 @@ The `deploy/kolla/operator/` directory contains a canonical `uv` project
 
 - **`kolla-ansible`**: git commit `34daacfbf2d5987f543787f57535b2bebe7dee19` (21.2.0).
 - **`drover-kolla`**: PEP 508 URL wheel release `v0.2.19` (`drover_kolla-0.2.19-py3-none-any.whl`).
+- **`lumen-kolla`**: PEP 508 URL wheel release `v0.1.1` (`lumen_kolla-0.1.1-py3-none-any.whl`).
 
-### 1. Legacy Drover Symlink Migration
+### 1. Legacy Symlink Migration
 
-If upgrading an environment that previously used Afterglow's central Drover role source:
+If upgrading an environment that previously used Afterglow's central Drover or Lumen role sources:
 
 ```bash
-# Remove legacy Afterglow Drover symlink if present
+# Remove legacy Afterglow Drover and Lumen symlinks if present
 rm -f /etc/kolla/.venv/share/kolla-ansible/ansible/roles/drover
+rm -f /etc/kolla/.venv/share/kolla-ansible/ansible/roles/lumen
 ```
 
 `install.sh` fail-closes with explicit migration instructions if a legacy symlink remains.
@@ -113,7 +115,7 @@ cd deploy/kolla/operator
 uv sync --frozen
 ```
 
-This installs the `drover-kolla` wheel directly into `$VIRTUAL_ENV/share/kolla-ansible/ansible/roles/drover` as a real, package-owned directory.
+This installs the `drover-kolla` and `lumen-kolla` wheels directly into `$VIRTUAL_ENV/share/kolla-ansible/ansible/roles/{drover,lumen}` as real, package-owned directories.
 
 > **Security Note:** Keep the operator project free of live secrets or deployment globals. Operator configuration belongs exclusively in `/etc/kolla/config/afterglow/`.
 
@@ -125,7 +127,7 @@ Follow this installation sequence:
 2. **Configure Operator Variables**: Populate `/etc/kolla/config/afterglow/globals.yml` and `secrets.yml`.
 3. **Run Integration Installer**: Run `./deploy/kolla/install.sh`.
 
-The installer validates that `$ROLES_DIR/drover` is a valid package-installed directory (and not a symlink), wires source role symlinks (`afterglow`, `waygate`, `lumen`, `palimpsest`), and appends the `afterglow-site.yml` import to stock `site.yml`.
+The installer validates that `$ROLES_DIR/drover` and `$ROLES_DIR/lumen` are valid package-installed directories (and not symlinks), wires source role symlinks (`afterglow`, `waygate`, `palimpsest`), and appends the `afterglow-site.yml` import to stock `site.yml`.
 
 ---
 
@@ -369,8 +371,8 @@ The explicit `-i`, `-p`, and `-e` form remains an escape hatch for diagnosis; no
 
 ### Uninstaller Ownership Rules
 
-- **Source Roles**: Removes installer-managed symlinks for `afterglow`, `waygate`, `lumen`, and `palimpsest`.
+- **Source Roles**: Removes installer-managed symlinks for `afterglow`, `waygate`, and `palimpsest`.
 - **Stock Playbook**: Removes the `afterglow-site.yml` import block from `site.yml`.
 - **Aggregate Playbook & Globals.d**: Removes aggregate playbook link and `globals.d` links.
-- **Package-owned Roles (Drover)**: `uninstall.sh` **never** deletes package-installed `drover` role files under `$ROLES_DIR/drover`. Package role lifecycle is managed via `uv` / package tooling.
+- **Package-owned Roles**: `uninstall.sh` **never** deletes package-installed `drover` or `lumen` role files under `$ROLES_DIR/{drover,lumen}`. Package role lifecycle is managed via `uv` / package tooling.
 - **Operator State**: Leaves `/etc/kolla/multinode`, plugin configuration, databases, containers, images, and source checkouts untouched.

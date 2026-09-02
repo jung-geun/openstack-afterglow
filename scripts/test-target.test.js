@@ -300,7 +300,7 @@ test("waygate target runs from backend root", async () => {
 	}
 })
 
-test("service source dirs and root Docker stages cannot return and SDK dependencies use immutable subdirectories", () => {
+test("service source dirs and root Docker stages cannot return and imported SDKs use immutable subdirectories", () => {
 	for (const service of ["drover", "lumen", "waygate"]) {
 		const serviceDir = path.join(rootDir, "services", service);
 		assert.equal(
@@ -320,13 +320,14 @@ test("service source dirs and root Docker stages cannot return and SDK dependenc
 	}
 
 	const pyprojectContent = fs.readFileSync(path.join(rootDir, "backend", "pyproject.toml"), "utf-8");
-	for (const sdk of ["waygate-sdk", "drover-sdk", "lumen-sdk"]) {
+	for (const sdk of ["waygate-sdk", "drover-sdk"]) {
 		const pattern = new RegExp(`${sdk} @ git\\+https://github\\.com/openstack-afterglow/[a-z-]+\\.git@[0-9a-f]{40}#subdirectory=sdk`);
 		assert.ok(
 			pattern.test(pyprojectContent),
 			`pyproject.toml must declare ${sdk} with immutable SHA and #subdirectory=sdk`
 		);
 	}
+	assert.equal(pyprojectContent.includes("lumen-sdk"), false, "generic Lumen BFF must not install lumen-sdk");
 })
 test("package.json contains exact command contract scripts and no obsolete scripts", () => {
 	const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf-8"));

@@ -175,10 +175,32 @@ installed_drover_kolla_version=$(
   die "Expected drover-kolla==$DROVER_KOLLA_VERSION in the active Kolla environment, found '${installed_drover_kolla_version:-not installed}'."
 log "Drover role verified at $DROVER_ROLE_DIR (drover-kolla==$installed_drover_kolla_version)"
 
-# Role symlinks (Afterglow, Waygate, Lumen, Palimpsest)
+LUMEN_ROLE_DIR="$ROLES_DIR/lumen"
+LUMEN_LEGACY_ROLE_TARGET="$REPO_DIR/deploy/kolla/ansible/roles/lumen"
+LUMEN_KOLLA_VERSION="0.1.1"
+if [[ -L "$LUMEN_ROLE_DIR" ]]; then
+  current_lumen_target=$(readlink "$LUMEN_ROLE_DIR" || true)
+  if [[ "$current_lumen_target" == "$LUMEN_LEGACY_ROLE_TARGET" ]]; then
+    die "Legacy Afterglow-owned Lumen role symlink detected at $LUMEN_ROLE_DIR. Verify it points to $LUMEN_LEGACY_ROLE_TARGET, remove only that symlink with 'rm -- $LUMEN_ROLE_DIR', then run 'uv sync --frozen' in deploy/kolla/operator before rerunning install.sh."
+  fi
+  die "Unexpected Lumen role symlink at $LUMEN_ROLE_DIR -> $current_lumen_target. Refusing to replace or remove it."
+elif [[ ! -d "$LUMEN_ROLE_DIR" ||
+        ! -f "$LUMEN_ROLE_DIR/tasks/main.yml" ||
+        ! -f "$LUMEN_ROLE_DIR/tasks/deploy.yml" ||
+        ! -f "$LUMEN_ROLE_DIR/defaults/main.yml" ||
+        ! -f "$LUMEN_ROLE_DIR/templates/lumen.conf.j2" ]]; then
+  die "Lumen role missing or invalid at $LUMEN_ROLE_DIR. Install lumen-kolla==$LUMEN_KOLLA_VERSION into the active Kolla environment with 'uv sync --frozen' in deploy/kolla/operator."
+fi
+installed_lumen_kolla_version=$(
+  "$KOLLA_PYTHON" -c 'from importlib.metadata import version; print(version("lumen-kolla"))' 2>/dev/null || true
+)
+[[ "$installed_lumen_kolla_version" == "$LUMEN_KOLLA_VERSION" ]] ||
+  die "Expected lumen-kolla==$LUMEN_KOLLA_VERSION in the active Kolla environment, found '${installed_lumen_kolla_version:-not installed}'."
+log "Lumen role verified at $LUMEN_ROLE_DIR (lumen-kolla==$installed_lumen_kolla_version)"
+
+# Role symlinks (Afterglow, Waygate, Palimpsest)
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
-create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
 create_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
 # Aggregate playbook symlink (afterglow-site.yml)
@@ -214,10 +236,10 @@ python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" install "$STOCK_SITE" || \
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Afterglow, Waygate, Drover (package-installed), Lumen, and Palimpsest integration wiring installed."
+echo " Afterglow, Waygate, Drover (package-installed), Lumen (package-installed), and Palimpsest integration wiring installed."
 echo " The installer owns only its marked stock site.yml import, default"
 echo " inventory link, globals.d links, source role links (afterglow, waygate,"
-echo " lumen, palimpsest), and aggregate playbook link. Drover role is package-owned."
+echo " palimpsest), and aggregate playbook link. Drover and Lumen roles are package-owned."
 echo ""
 echo " From /etc/kolla, reconfigure Afterglow with:"
 echo " kolla-ansible reconfigure --tags afterglow"

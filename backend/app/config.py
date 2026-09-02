@@ -445,7 +445,7 @@ class Settings(BaseSettings):
     service_barbican_enabled: bool = False
     service_waygate_enabled: bool = False  # Waygate service proxy mount
     service_palimpsest_enabled: bool = False  # Palimpsest Hub service proxy mount
-    service_chat_enabled: bool = False  # AI 채팅(LibreChat 임베드) (활성화 시 [chat] 섹션 설정도 필요)
+    service_chat_enabled: bool = False  # AI 채팅 (Lumen AI API 프록시 마운트)
     service_mcp_enabled: bool = False  # inbound consumer MCP control plane (Stage 2 rollout gate)
     # Trusted deployment overrides for extracted-service discovery. Empty values
     # retain the caller-scoped Keystone catalog as the canonical default.

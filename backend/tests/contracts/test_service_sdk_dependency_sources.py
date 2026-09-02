@@ -1,4 +1,4 @@
-"""The retired standalone SDK repositories must never become dependency sources again."""
+"""Imported service SDKs must resolve from their owning repositories."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 import tomllib
 from pathlib import Path
 
-_SERVICE_SDKS = ("drover", "lumen", "waygate")
+_SERVICE_SDKS = ("drover", "waygate")
 _SOURCE_PATTERN = re.compile(
     r"^(?P<package>[a-z-]+) @ "
     r"git\+https://github\.com/openstack-afterglow/(?P<service>[a-z-]+)\.git@"
@@ -42,6 +42,8 @@ def test_service_sdks_only_resolve_from_their_own_service_repositories():
             assert match["package"] == package
             assert match["service"] == service
 
+        assert all(not dependency.startswith("lumen-sdk") for dependency in dependencies)
+
 
 def test_lockfile_preserves_the_service_owned_sdk_sources():
     backend_root = Path(__file__).resolve().parents[2]
@@ -58,3 +60,4 @@ def test_lockfile_preserves_the_service_owned_sdk_sources():
         match = _LOCK_SOURCE_PATTERN.fullmatch(source)
         assert match, f"{service}-sdk must be locked from its service repository"
         assert match["service"] == service
+    assert all(package["name"] != "lumen-sdk" for package in lockfile["package"])
