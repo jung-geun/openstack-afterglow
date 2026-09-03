@@ -92,7 +92,7 @@ The `deploy/kolla/operator/` directory contains a canonical `uv` project
 
 - **`kolla-ansible`**: git commit `34daacfbf2d5987f543787f57535b2bebe7dee19` (21.2.0).
 - **`drover-kolla`**: PEP 508 URL wheel release `v0.2.19` (`drover_kolla-0.2.19-py3-none-any.whl`).
-- **`lumen-kolla`**: PEP 508 URL wheel release `v0.1.3` (`lumen_kolla-0.1.3-py3-none-any.whl`).
+- **`lumen-kolla`**: PEP 508 URL wheel release `v0.1.4` (`lumen_kolla-0.1.4-py3-none-any.whl`).
 
 ### 1. Legacy Symlink Migration
 

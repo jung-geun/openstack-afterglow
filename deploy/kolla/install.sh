@@ -177,7 +177,7 @@ log "Drover role verified at $DROVER_ROLE_DIR (drover-kolla==$installed_drover_k
 
 LUMEN_ROLE_DIR="$ROLES_DIR/lumen"
 LUMEN_LEGACY_ROLE_TARGET="$REPO_DIR/deploy/kolla/ansible/roles/lumen"
-LUMEN_KOLLA_VERSION="0.1.3"
+LUMEN_KOLLA_VERSION="0.1.4"
 if [[ -L "$LUMEN_ROLE_DIR" ]]; then
   current_lumen_target=$(readlink "$LUMEN_ROLE_DIR" || true)
   if [[ "$current_lumen_target" == "$LUMEN_LEGACY_ROLE_TARGET" ]]; then
