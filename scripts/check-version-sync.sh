@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI 및 로컬에서 세 파일의 version 일치를 검증한다.
+# CI 및 로컬에서 release version source 일치를 검증한다.
 # node 없이 bash + grep + sed 만으로 동작하므로 self-hosted linux runner에서도 사용 가능.
 set -euo pipefail
 
@@ -15,13 +15,18 @@ BE_V=$(grep -E '^version[[:space:]]*=' "${ROOT_DIR}/backend/pyproject.toml" \
     | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
 
 CHART_V=$(grep '^version:' "${ROOT_DIR}/helm/afterglow/Chart.yaml" | awk '{print $2}')
+KOLLA_SAMPLE_V=$(sed -nE \
+    's/^afterglow_image_tag:[[:space:]]*"v([^"]+)"[[:space:]]*$/\1/p' \
+    "${ROOT_DIR}/deploy/kolla/globals.afterglow.sample.yml")
 
-if [ "$ROOT_V" != "$FE_V" ] || [ "$ROOT_V" != "$BE_V" ] || [ "$ROOT_V" != "$CHART_V" ]; then
+if [ "$ROOT_V" != "$FE_V" ] || [ "$ROOT_V" != "$BE_V" ] \
+    || [ "$ROOT_V" != "$CHART_V" ] || [ "$ROOT_V" != "$KOLLA_SAMPLE_V" ]; then
     echo "✗ version mismatch:" >&2
-    echo "  root package.json        : $ROOT_V" >&2
-    echo "  frontend/package.json    : $FE_V" >&2
-    echo "  backend/pyproject.toml   : $BE_V" >&2
-    echo "  helm/afterglow/Chart.yaml: $CHART_V" >&2
+    echo "  root package.json                     : $ROOT_V" >&2
+    echo "  frontend/package.json                 : $FE_V" >&2
+    echo "  backend/pyproject.toml                : $BE_V" >&2
+    echo "  helm/afterglow/Chart.yaml             : $CHART_V" >&2
+    echo "  deploy/kolla/globals.afterglow.sample.yml: $KOLLA_SAMPLE_V" >&2
     echo "" >&2
     echo "  fix: npm run version:sync" >&2
     exit 1

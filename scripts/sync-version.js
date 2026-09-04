@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 루트 package.json version → frontend/package.json, backend/pyproject.toml, backend/uv.lock
+// 루트 package.json version → frontend, backend, Helm, Kolla operator sample
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
@@ -45,5 +45,18 @@ if (fs.existsSync(chartPath)) {
 	chart = chart.replace(/^appVersion:\s*.+$/m, `appVersion: "${version}"`);
 	fs.writeFileSync(chartPath, chart);
 }
+
+// 5) deploy/kolla/globals.afterglow.sample.yml — published Afterglow image tag
+const kollaSamplePath = path.join(root, "deploy/kolla/globals.afterglow.sample.yml");
+let kollaSample = fs.readFileSync(kollaSamplePath, "utf-8");
+if (!/^afterglow_image_tag:\s*"v[^"]+"/m.test(kollaSample)) {
+	console.error("deploy/kolla/globals.afterglow.sample.yml: afterglow_image_tag line not found");
+	process.exit(1);
+}
+kollaSample = kollaSample.replace(
+	/^afterglow_image_tag:\s*"v[^"]+"/m,
+	`afterglow_image_tag: "v${version}"`
+);
+fs.writeFileSync(kollaSamplePath, kollaSample);
 
 console.log(`✓ version synced to ${version}`);
