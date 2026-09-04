@@ -901,7 +901,9 @@ test("Kolla plugin lifecycle integrates inventory preflight, pull semantics, and
 
 	const afterglowDefaults = readRepoFile("deploy/kolla/ansible/roles/afterglow/defaults/main.yml")
 	const sampleGlobals = readRepoFile("deploy/kolla/globals.afterglow.sample.yml")
-	assert.match(sampleGlobals, /afterglow_image_tag:\s*"v1\.18\.0"/)
+	const releaseVersion = JSON.parse(readRepoFile("package.json")).version
+	const escapedReleaseVersion = releaseVersion.replaceAll(".", "\\.")
+	assert.match(sampleGlobals, new RegExp(`^afterglow_image_tag:\\s*"v${escapedReleaseVersion}"$`, "m"))
 	assert.match(sampleGlobals, /^afterglow_backend_image_ref: "\{\{ afterglow_backend_image \}\}:\{\{ afterglow_image_tag \}\}"$/m)
 	assert.match(sampleGlobals, /^afterglow_frontend_image_ref: "\{\{ afterglow_frontend_image \}\}:\{\{ afterglow_image_tag \}\}"$/m)
 	assert.match(sampleGlobals, /^afterglow_worker_image_ref: "\{\{ afterglow_worker_image \}\}:\{\{ afterglow_image_tag \}\}"$/m)
