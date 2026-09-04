@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-09-04
+
+### Changed
+
+- **분리 서비스 Kolla 역할 소유권 전환** — Drover와 Lumen 역할을 각 서비스 릴리즈의 SHA256 고정 wheel로 설치하고 Afterglow에 중복된 역할 트리와 내장 AI 런타임 의존성을 제거했다.
+- **실제 OpenStack 테스트 수동 실행 전환** — 안정적인 전용 클라우드가 준비될 때까지 push·PR·main CI의 live lifecycle 시나리오를 명시적 workflow dispatch로만 실행한다.
+
+### Fixed
+
+- **Lumen 채팅 세션 인증 복구** — BFF가 Keystone 토큰의 실제 연결 프로젝트와 시스템 관리자가 선택한 논리 프로젝트를 분리해 전달하고, 브라우저가 대상 프로젝트 헤더를 위조하지 못하게 하며, 로컬 Compose도 실제 Keystone 설정을 Lumen에 주입한다.
+- **분리 서비스 배포 안정성 복구** — Lumen PostgreSQL 네트워크·trusted-origin 수정 릴리즈와 credential 비노출 Kolla 환경을 소비하고 Drover 서비스 프로젝트 범위를 올바르게 해석한다.
+- **Kolla mutable image 갱신 복구** — pull·reconfigure가 mutable image tag의 새 manifest를 확인해 캐시된 컨테이너를 재생성하면서 명시적 digest override는 보존한다.
+
 ## [1.18.0] - 2026-08-29
 
 ### Changed
