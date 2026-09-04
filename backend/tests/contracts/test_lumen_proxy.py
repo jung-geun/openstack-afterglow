@@ -301,3 +301,40 @@ def test_afterglow_chat_boundary_no_ai_runtime_dependencies_or_secrets():
     for service_name in ("lumen-api", "lumen-worker"):
         service = production_compose["services"][service_name]
         assert service["environment"]["LUMEN_ENCRYPTION_KEY"] == "${LUMEN_ENCRYPTION_KEY:-}"
+
+
+def test_lumen_compose_keystone_auth_configuration():
+    repo_root = Path(__file__).resolve().parents[3]
+    compose_path = repo_root / "docker-compose.yml"
+    compose_raw = compose_path.read_text(encoding="utf-8")
+    compose = yaml.safe_load(compose_raw)
+
+    command = "--env-file .env --env-file docker-compose.services.env --profile services"
+    assert command in compose_raw
+
+    expected = {
+        "KEYSTONE_AUTH_URL": "${LUMEN_KEYSTONE_AUTH_URL:-${OS_AUTH_URL:-}}",
+        "KEYSTONE_ADMIN_USERNAME": "${LUMEN_KEYSTONE_ADMIN_USERNAME:-${OS_USERNAME:-}}",
+        "KEYSTONE_ADMIN_PASSWORD": "${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${OS_PASSWORD:-}}",
+        "KEYSTONE_ADMIN_PROJECT": "${LUMEN_KEYSTONE_ADMIN_PROJECT:-${OS_PROJECT_NAME:-}}",
+        "KEYSTONE_DOMAIN": "${LUMEN_KEYSTONE_DOMAIN:-${OS_USER_DOMAIN_NAME:-Default}}",
+        "KEYSTONE_REGION_NAME": "${LUMEN_KEYSTONE_REGION_NAME:-${OS_REGION_NAME:-RegionOne}}",
+        "KEYSTONE_INTERFACE": "${LUMEN_KEYSTONE_INTERFACE:-${OS_INTERFACE:-internal}}",
+    }
+    for service_name in ("lumen-migrate", "lumen-api", "lumen-worker"):
+        service = compose["services"][service_name]
+        assert service["env_file"] == [{"path": ".env", "required": False}]
+        assert {key: service["environment"][key] for key in expected} == expected
+        assert "localhost:5000" not in str(service["environment"])
+
+    example = (repo_root / ".env.example").read_text(encoding="utf-8")
+    for name in (
+        "LUMEN_KEYSTONE_AUTH_URL",
+        "LUMEN_KEYSTONE_ADMIN_USERNAME",
+        "LUMEN_KEYSTONE_ADMIN_PASSWORD",
+        "LUMEN_KEYSTONE_ADMIN_PROJECT",
+        "LUMEN_KEYSTONE_DOMAIN",
+        "LUMEN_KEYSTONE_REGION_NAME",
+        "LUMEN_KEYSTONE_INTERFACE",
+    ):
+        assert f"{name}=" in example
