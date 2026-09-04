@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "kolla-ansible @ git+https://opendev.org/openstack/kolla-ansible@34daacfbf2d5987f543787f57535b2bebe7dee19",
     "drover-kolla @ https://github.com/openstack-afterglow/drover/releases/download/v0.2.19/drover_kolla-0.2.19-py3-none-any.whl#sha256=9d11fdc3a07240a3d613ba878102668b0f9b5cf35b5bd3f3ce6e033426a12392",
-    "lumen-kolla @ https://github.com/openstack-afterglow/lumen/releases/download/v0.1.6/lumen_kolla-0.1.6-py3-none-any.whl#sha256=e426a6698ec39ce7f135da41e4111a45e970eaaaa984055ce4f6627c0017d94b",
+    "lumen-kolla @ https://github.com/openstack-afterglow/lumen/releases/download/v0.1.7/lumen_kolla-0.1.7-py3-none-any.whl#sha256=c6331ee04fa11d123c5b47fe50ed965cf436cdc65fc4e89c2724a4052d1ba269",
 ]
 
 [build-system]

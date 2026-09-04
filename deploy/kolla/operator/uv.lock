@@ -16,7 +16,7 @@ dependencies = [
 requires-dist = [
     { name = "drover-kolla", url = "https://github.com/openstack-afterglow/drover/releases/download/v0.2.19/drover_kolla-0.2.19-py3-none-any.whl" },
     { name = "kolla-ansible", git = "https://opendev.org/openstack/kolla-ansible?rev=34daacfbf2d5987f543787f57535b2bebe7dee19" },
-    { name = "lumen-kolla", url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.6/lumen_kolla-0.1.6-py3-none-any.whl" },
+    { name = "lumen-kolla", url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.7/lumen_kolla-0.1.7-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -523,13 +523,13 @@ dependencies = [
 
 [[package]]
 name = "lumen-kolla"
-version = "0.1.6"
-source = { url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.6/lumen_kolla-0.1.6-py3-none-any.whl" }
+version = "0.1.7"
+source = { url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.7/lumen_kolla-0.1.7-py3-none-any.whl" }
 dependencies = [
     { name = "kolla-ansible" },
 ]
 wheels = [
-    { url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.6/lumen_kolla-0.1.6-py3-none-any.whl", hash = "sha256:e426a6698ec39ce7f135da41e4111a45e970eaaaa984055ce4f6627c0017d94b" },
+    { url = "https://github.com/openstack-afterglow/lumen/releases/download/v0.1.7/lumen_kolla-0.1.7-py3-none-any.whl", hash = "sha256:c6331ee04fa11d123c5b47fe50ed965cf436cdc65fc4e89c2724a4052d1ba269" },
 ]
 
 [package.metadata]
