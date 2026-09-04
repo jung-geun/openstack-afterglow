@@ -120,6 +120,7 @@ async def test_proxy_forwarding():
             "Idempotency-Key": "ik-888",
             "Last-Event-ID": "evt-999",
             "X-Project-Id": "attacker-project",
+            "X-Target-Project-Id": "attacker-target",
         },
         body=b'{"name": "gateway-1"}',
         token_info={"token": "ks-token-secret", "project_id": "proj-uuid-1"},
@@ -146,8 +147,62 @@ async def test_proxy_forwarding():
             assert sent_req.headers.get("x-auth-token") == "ks-token-secret"
             assert sent_req.headers.get("x-project-id") == "proj-uuid-1"
             assert sent_req.headers.get("cookie") is None
+            assert sent_req.headers.get("x-target-project-id") is None
             assert sent_req.headers.get("idempotency-key") == "ik-888"
             assert sent_req.headers.get("last-event-id") == "evt-999"
+
+
+@pytest.mark.asyncio
+async def test_lumen_proxy_separates_connection_and_logical_projects():
+    req = _make_request(
+        path="/api/v1/chat/models",
+        headers={"X-Target-Project-Id": "attacker-target"},
+        token_info={
+            "token": "home-scoped-token",
+            "project_id": "logical-project",
+            "connection_project_id": "home-project",
+        },
+    )
+    upstream_response = httpx.Response(200, json=[])
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint",
+        return_value="http://lumen.internal:8012",
+    ) as mock_endpoint:
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
+            response = await proxy("lumen", req, "/v1/chat/models")
+
+    assert response.status_code == 200
+    mock_endpoint.assert_called_once_with("home-scoped-token", "home-project", "lumen")
+    sent_request = mock_send.call_args.args[0]
+    assert sent_request.headers["x-auth-token"] == "home-scoped-token"
+    assert sent_request.headers["x-project-id"] == "home-project"
+    assert sent_request.headers["x-target-project-id"] == "logical-project"
+
+
+@pytest.mark.asyncio
+async def test_non_lumen_proxy_preserves_logical_project_contract():
+    req = _make_request(
+        token_info={
+            "token": "home-scoped-token",
+            "project_id": "logical-project",
+            "connection_project_id": "home-project",
+        },
+    )
+    upstream_response = httpx.Response(200, json={})
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint",
+        return_value="http://waygate.internal:8010",
+    ) as mock_endpoint:
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
+            response = await proxy("waygate", req, "/v1/servers")
+
+    assert response.status_code == 200
+    mock_endpoint.assert_called_once_with("home-scoped-token", "logical-project", "waygate")
+    sent_request = mock_send.call_args.args[0]
+    assert sent_request.headers["x-project-id"] == "logical-project"
+    assert sent_request.headers.get("x-target-project-id") is None
 
 
 @pytest.mark.asyncio
@@ -186,6 +241,32 @@ async def test_get_json_uses_caller_catalog_and_keystone_headers():
     assert url == "http://waygate.internal:8010/v1/admin/resource-policies"
     assert headers["x-auth-token"] == "ks-token-secret"
     assert headers["x-project-id"] == "proj-uuid-1"
+
+
+@pytest.mark.asyncio
+async def test_lumen_get_json_separates_connection_and_logical_projects():
+    req = _make_request(
+        path="/api/v1/chat/usage",
+        token_info={
+            "token": "home-scoped-token",
+            "project_id": "logical-project",
+            "connection_project_id": "home-project",
+        },
+    )
+    upstream_response = httpx.Response(200, json={"balance": 0})
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint",
+        return_value="http://lumen.internal:8012",
+    ) as mock_endpoint:
+        with patch.object(httpx.AsyncClient, "get", return_value=upstream_response) as mock_get:
+            result = await get_json("lumen", req, "/v1/usage")
+
+    assert result == {"balance": 0}
+    mock_endpoint.assert_called_once_with("home-scoped-token", "home-project", "lumen")
+    headers = mock_get.await_args.kwargs["headers"]
+    assert headers["x-project-id"] == "home-project"
+    assert headers["x-target-project-id"] == "logical-project"
 
 
 @pytest.mark.asyncio

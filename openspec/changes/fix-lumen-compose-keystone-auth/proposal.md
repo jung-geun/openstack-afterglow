@@ -7,6 +7,7 @@ Afterglow browser sessions are valid and refresh successfully, but local extract
 - Document and enforce the local service-stack command with both `.env` and `docker-compose.services.env` interpolation sources.
 - Add explicit `LUMEN_KEYSTONE_*` inputs to `.env.example` and map them to the Lumen API/worker/migration `KEYSTONE_*` settings.
 - Add a Compose contract test that prevents the Lumen Keystone URL/admin settings from disappearing or reverting to container loopback defaults.
+- Forward the token’s connection project as `X-Project-Id` and a differing verified system-admin logical selection as `X-Target-Project-Id`, rather than asking Lumen to rescope a home token to an unrelated project.
 - Populate the developer’s ignored `.env` from the existing `afterglow.conf` OpenStack section without committing credential values, then recreate only Lumen local containers.
 
 ## Capabilities
@@ -19,4 +20,4 @@ Afterglow browser sessions are valid and refresh successfully, but local extract
 
 ## Impact
 
-`docker-compose.yml`, `.env.example`, `docker-compose.services.env`, Lumen proxy Compose contract tests, and local ignored operator state. Production Kolla settings remain unchanged.
+`docker-compose.yml`, `.env.example`, `docker-compose.services.env`, service proxy header transformation/tests, local ignored operator state, and the Lumen Keystone principal contract. Production Kolla’s Keystone endpoint remains unchanged.
