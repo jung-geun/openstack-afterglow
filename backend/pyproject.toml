@@ -28,8 +28,7 @@ dependencies = [
     "idna>=3.15",
     "aiosmtplib>=3.0.0",
     "openpyxl>=3.1.5",
-    "litellm==1.93.0",
-    # Built-in chat dependencies: durable validation, media inspection, MCP, and pgvector.
+    # BFF-side MCP control plane and bounded content inspection; no model/agent runtime.
     "mcp==1.28.1",
     "jsonschema==4.26.0",
     "beautifulsoup4==4.14.3",
@@ -37,16 +36,9 @@ dependencies = [
     "Pillow==12.3.0",
     "pypdf==6.15.0",
     "mutagen==1.47.0",
-    "pgvector==0.4.2",
-    "langgraph==1.2.2",
-    "langchain-core==1.4.9",
-    "langgraph-checkpoint-postgres==3.1.1",
-    "psycopg[binary]==3.3.4",  # AsyncPostgresSaver 용 — [binary]로 libpq 번들(시스템 의존 불요)
-    "langchain-mcp-adapters==0.3.1",
     "afterglow-crypto @ git+https://github.com/openstack-afterglow/afterglow-crypto.git@aee36e8ea173e486f443fa816de4e6397d11cff2",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
     "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@bd4caa490eb3c21fdeb9cc8f008aaf02f72264ef#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 
 [build-system]
@@ -124,11 +116,9 @@ worker = [
     "prometheus-client>=0.20.0",
     "pyyaml>=6.0",
     "idna>=3.15",
-    "langchain-mcp-adapters==0.3.1",
     "apscheduler>=3.10",
     "waygate-sdk @ git+https://github.com/openstack-afterglow/waygate.git@1c59b5e86d3c3c1b9d3397b38301ee9bc401cf03#subdirectory=sdk",
     "drover-sdk @ git+https://github.com/openstack-afterglow/drover.git@bd4caa490eb3c21fdeb9cc8f008aaf02f72264ef#subdirectory=sdk",
-    "lumen-sdk @ git+https://github.com/openstack-afterglow/lumen.git@f4b1d88161dd20ac2900aeb2040a884c21fb5d49#subdirectory=sdk",
 ]
 
 [tool.hatch.build.targets.wheel]

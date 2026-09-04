@@ -164,7 +164,7 @@ KUBECONFIG="$KUBECONFIG" kubectl apply -f "$OUT_DIR/configmap.yaml"
 
 # afterglow.conf는 subPath 마운트이고 Secret 값은 환경변수이므로 Pod 재시작 필요
 KUBECONFIG="$KUBECONFIG" kubectl -n "$NAMESPACE" rollout restart deployment \
-  backend chat-worker frontend drover notion-worker
+  backend frontend drover notion-worker
 KUBECONFIG="$KUBECONFIG" kubectl -n "$NAMESPACE" rollout status deployment/backend
 ```
 `--namespace`는 환경 프로필을 필수로 선택합니다. `afterglow-dev`는

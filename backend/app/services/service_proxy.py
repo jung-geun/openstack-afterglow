@@ -232,14 +232,20 @@ async def proxy(service_type: str, request: Request, upstream_path: str) -> Resp
     """Proxy a browser request using its validated caller-scoped Keystone token."""
     token_info = getattr(request.state, "token_info", None)
     token = token_info.get("token") if token_info else None
-    project_id = token_info.get("project_id") if token_info else None
-    if not token or not project_id:
+    logical_project_id = token_info.get("project_id") if token_info else None
+    if not token or not logical_project_id:
         raise HTTPException(status_code=401, detail="인증이 필요합니다")
 
-    endpoint = await asyncio.to_thread(_get_internal_endpoint, token, project_id, service_type)
+    connection_project_id = logical_project_id
+    if service_type == "lumen":
+        connection_project_id = (token_info.get("connection_project_id") if token_info else None) or logical_project_id
+
+    endpoint = await asyncio.to_thread(_get_internal_endpoint, token, connection_project_id, service_type)
     headers = _forwarded_headers(request)
     headers["x-auth-token"] = token
-    headers["x-project-id"] = project_id
+    headers["x-project-id"] = connection_project_id
+    if service_type == "lumen" and logical_project_id != connection_project_id:
+        headers["x-target-project-id"] = logical_project_id
     return await _forward(service_type, request, upstream_path, endpoint=endpoint, headers=headers)
 
 
@@ -247,11 +253,15 @@ async def get_json(service_type: str, request: Request, upstream_path: str) -> A
     """Fetch a small authenticated JSON document from an extracted service."""
     token_info = getattr(request.state, "token_info", None)
     token = token_info.get("token") if token_info else None
-    project_id = token_info.get("project_id") if token_info else None
-    if not token or not project_id:
+    logical_project_id = token_info.get("project_id") if token_info else None
+    if not token or not logical_project_id:
         raise HTTPException(status_code=401, detail="인증이 필요합니다")
 
-    endpoint = await asyncio.to_thread(_get_internal_endpoint, token, project_id, service_type)
+    connection_project_id = logical_project_id
+    if service_type == "lumen":
+        connection_project_id = (token_info.get("connection_project_id") if token_info else None) or logical_project_id
+
+    endpoint = await asyncio.to_thread(_get_internal_endpoint, token, connection_project_id, service_type)
     if not endpoint:
         raise HTTPException(status_code=503, detail=f"{service_type} 서비스를 사용할 수 없습니다")
 
@@ -264,7 +274,9 @@ async def get_json(service_type: str, request: Request, upstream_path: str) -> A
 
     headers = _forwarded_headers(request)
     headers["x-auth-token"] = token
-    headers["x-project-id"] = project_id
+    headers["x-project-id"] = connection_project_id
+    if service_type == "lumen" and logical_project_id != connection_project_id:
+        headers["x-target-project-id"] = logical_project_id
     settings = get_settings()
     try:
         async with httpx.AsyncClient(

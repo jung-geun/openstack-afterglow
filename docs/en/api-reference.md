@@ -121,7 +121,7 @@ Prometheus SD (`/api/v1/sd/...`) and the baked paths for VM agents use a separat
 |------|-----------|------|
 | [Dashboard](../api/dashboard.md) | `/api/v1/dashboard`, `/api/v1/libraries` | Project resource summary, quotas, library catalog |
 | [System Services](../api/system-services.md) | `/api/v1/announcements`, `/api/v1/tutorials`, `/api/v1/sd`, `/api/v1/grafana`, `/api/v1/site-config`, `/api/v1/user-dashboard` | Announcements, tutorials, Prometheus SD, Grafana embed, site config, personal dashboard |
-| [Chat](../api/chat.md) | `/api/v1/chat` | LLM chat usage/quota — *optional* |
+| [Chat](../api/chat.md) | `/api/v1/chat` | Lumen AI API proxy & SSE streaming (BFF) — *optional* |
 | [Metrics](../api/metrics.md) | `/api/v1/metrics`, `/api/v1/health` | Prometheus metrics, health check (no authentication required) |
 
 ---

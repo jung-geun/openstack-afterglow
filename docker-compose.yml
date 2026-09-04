@@ -16,7 +16,7 @@ services:
         max-file: "3"
 
   # Local databases for all extracted services. Start the service stack with:
-  # docker compose --env-file docker-compose.services.env --profile services up service-mariadb waygate-api waygate-worker drover-api drover-worker lumen-api lumen-worker palimpsest-api palimpsest-worker
+  # docker compose --env-file .env --env-file docker-compose.services.env --profile services up service-mariadb waygate-api waygate-worker drover-api drover-worker lumen-api lumen-worker palimpsest-api palimpsest-worker
   service-mariadb:
     profiles: ["services"]
     image: mariadb:11.4
@@ -302,21 +302,22 @@ services:
   lumen-migrate:
     profiles: ["services", "lumen"]
     image: ${LUMEN_API_IMAGE:-ghcr.io/openstack-afterglow/lumen-api:dev}
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: ${LUMEN_DATABASE_URL:-mysql+aiomysql://lumen:dev@service-mariadb:3306/lumen}
       REDIS_URL: redis://redis:6379/8
-      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${KEYSTONE_AUTH_URL:-}}
-      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${KEYSTONE_ADMIN_USERNAME:-}}
-      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${KEYSTONE_ADMIN_PASSWORD:-}}
-      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${KEYSTONE_ADMIN_PROJECT:-}}
-      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${KEYSTONE_DOMAIN:-}}
-      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${KEYSTONE_REGION_NAME:-}}
-      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${KEYSTONE_INTERFACE:-}}
-      LUMEN_ENCRYPTION_KEY: ${LUMEN_ENCRYPTION_KEY:-${K3S_KUBECONFIG_ENCRYPTION_KEY:-}}
+      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${OS_AUTH_URL:-}}
+      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${OS_USERNAME:-}}
+      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${OS_PASSWORD:-}}
+      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${OS_PROJECT_NAME:-}}
+      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${OS_USER_DOMAIN_NAME:-Default}}
+      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${OS_REGION_NAME:-RegionOne}}
+      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${OS_INTERFACE:-internal}}
+      LUMEN_ENCRYPTION_KEY: ${LUMEN_ENCRYPTION_KEY:-}
       MCP_CONTROL_PLANE_URL: ${MCP_CONTROL_PLANE_URL:-http://backend:8000}
       LUMEN_MCP_SERVICE_TOKEN: ${LUMEN_MCP_SERVICE_TOKEN:-}
-    volumes:
-      - ./afterglow.conf:/etc/afterglow/afterglow.conf:ro
     command: python -m lumen.scripts.migrate --apply
     depends_on:
       redis:
@@ -337,23 +338,16 @@ services:
     environment:
       DATABASE_URL: ${LUMEN_DATABASE_URL:-mysql+aiomysql://lumen:dev@service-mariadb:3306/lumen}
       REDIS_URL: redis://redis:6379/8
-      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${KEYSTONE_AUTH_URL:-}}
-      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${KEYSTONE_ADMIN_USERNAME:-}}
-      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${KEYSTONE_ADMIN_PASSWORD:-}}
-      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${KEYSTONE_ADMIN_PROJECT:-}}
-      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${KEYSTONE_DOMAIN:-}}
-      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${KEYSTONE_REGION_NAME:-}}
-      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${KEYSTONE_INTERFACE:-}}
-      LUMEN_ENCRYPTION_KEY: ${LUMEN_ENCRYPTION_KEY:-${K3S_KUBECONFIG_ENCRYPTION_KEY:-}}
+      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${OS_AUTH_URL:-}}
+      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${OS_USERNAME:-}}
+      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${OS_PASSWORD:-}}
+      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${OS_PROJECT_NAME:-}}
+      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${OS_USER_DOMAIN_NAME:-Default}}
+      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${OS_REGION_NAME:-RegionOne}}
+      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${OS_INTERFACE:-internal}}
+      LUMEN_ENCRYPTION_KEY: ${LUMEN_ENCRYPTION_KEY:-}
       MCP_CONTROL_PLANE_URL: ${MCP_CONTROL_PLANE_URL:-http://backend:8000}
       LUMEN_MCP_SERVICE_TOKEN: ${LUMEN_MCP_SERVICE_TOKEN:-}
-      CHAT_CHECKPOINTER_POSTGRES_URL: ${CHAT_CHECKPOINTER_POSTGRES_URL:-}
-      CHAT_MEMORY_PGVECTOR_URL: ${CHAT_MEMORY_PGVECTOR_URL:-}
-      CHAT_ASSET_S3_ACCESS_KEY: ${CHAT_ASSET_S3_ACCESS_KEY:-}
-      CHAT_ASSET_S3_SECRET_KEY: ${CHAT_ASSET_S3_SECRET_KEY:-}
-      CHAT_SANDBOX_API_KEY: ${CHAT_SANDBOX_API_KEY:-}
-    volumes:
-      - ./afterglow.conf:/etc/afterglow/afterglow.conf:ro
     depends_on:
       lumen-migrate:
         condition: service_completed_successfully
@@ -375,22 +369,16 @@ services:
     environment:
       DATABASE_URL: ${LUMEN_DATABASE_URL:-mysql+aiomysql://lumen:dev@service-mariadb:3306/lumen}
       REDIS_URL: redis://redis:6379/8
-      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${KEYSTONE_AUTH_URL:-}}
-      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${KEYSTONE_ADMIN_USERNAME:-}}
-      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${KEYSTONE_ADMIN_PASSWORD:-}}
-      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${KEYSTONE_ADMIN_PROJECT:-}}
-      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${KEYSTONE_DOMAIN:-}}
-      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${KEYSTONE_REGION_NAME:-}}
-      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${KEYSTONE_INTERFACE:-}}
+      KEYSTONE_AUTH_URL: ${LUMEN_KEYSTONE_AUTH_URL:-${OS_AUTH_URL:-}}
+      KEYSTONE_ADMIN_USERNAME: ${LUMEN_KEYSTONE_ADMIN_USERNAME:-${OS_USERNAME:-}}
+      KEYSTONE_ADMIN_PASSWORD: ${LUMEN_KEYSTONE_ADMIN_PASSWORD:-${OS_PASSWORD:-}}
+      KEYSTONE_ADMIN_PROJECT: ${LUMEN_KEYSTONE_ADMIN_PROJECT:-${OS_PROJECT_NAME:-}}
+      KEYSTONE_DOMAIN: ${LUMEN_KEYSTONE_DOMAIN:-${OS_USER_DOMAIN_NAME:-Default}}
+      KEYSTONE_REGION_NAME: ${LUMEN_KEYSTONE_REGION_NAME:-${OS_REGION_NAME:-RegionOne}}
+      KEYSTONE_INTERFACE: ${LUMEN_KEYSTONE_INTERFACE:-${OS_INTERFACE:-internal}}
+      LUMEN_ENCRYPTION_KEY: ${LUMEN_ENCRYPTION_KEY:-}
       MCP_CONTROL_PLANE_URL: ${MCP_CONTROL_PLANE_URL:-http://backend:8000}
       LUMEN_MCP_SERVICE_TOKEN: ${LUMEN_MCP_SERVICE_TOKEN:-}
-      CHAT_CHECKPOINTER_POSTGRES_URL: ${CHAT_CHECKPOINTER_POSTGRES_URL:-}
-      CHAT_MEMORY_PGVECTOR_URL: ${CHAT_MEMORY_PGVECTOR_URL:-}
-      CHAT_ASSET_S3_ACCESS_KEY: ${CHAT_ASSET_S3_ACCESS_KEY:-}
-      CHAT_ASSET_S3_SECRET_KEY: ${CHAT_ASSET_S3_SECRET_KEY:-}
-      CHAT_SANDBOX_API_KEY: ${CHAT_SANDBOX_API_KEY:-}
-    volumes:
-      - ./afterglow.conf:/etc/afterglow/afterglow.conf:ro
     depends_on:
       lumen-migrate:
         condition: service_completed_successfully
@@ -562,26 +550,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ── 채팅 의미 메모리 테스트 프로필 (pgvector) ────────────────────────────
-  pgvector:
-    image: pgvector/pgvector:pg16
-    profiles: ["chat-memory"]
-    ports:
-      - "127.0.0.1:5432:5432"
-    environment:
-      POSTGRES_DB: afterglow_memory_test
-      POSTGRES_USER: afterglow
-      POSTGRES_PASSWORD: dev
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U afterglow -d afterglow_memory_test"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   # ── 프록시 프로필 (docker compose --profile proxy up) ──────────────────────
   # 80 → HTTPS 리다이렉트, 443 SSL termination

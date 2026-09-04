@@ -1,6 +1,6 @@
 # Service repository promotion
 
-Waygate, Drover, Lumen, and Palimpsest Hub are standalone service repositories. The duplicate in-tree service directories under `services/` and root Dockerfile build stages have been removed from Afterglow. Afterglow operates as a pure dashboard and BFF consumer, consuming extracted services via Keystone catalog discovery and immutable `#subdirectory=sdk` Git dependencies.
+Waygate, Drover, Lumen, and Palimpsest Hub are standalone service repositories. The duplicate in-tree service directories under `services/` and root Dockerfile build stages have been removed from Afterglow. Afterglow operates as a dashboard and BFF consumer: typed server-side integrations use immutable service-repository SDK dependencies, while the Lumen browser API uses the authenticated generic service proxy and does not install Lumen's AI runtime or SDK.
 
 ## Preconditions
 
@@ -28,31 +28,21 @@ For a hosted repository, replace the local bare-repository URL with the hosted G
 
 After the standalone service repository is published:
 
-1. Point each `waygate-sdk`, `drover-sdk`, or `lumen-sdk` dependency in `backend/pyproject.toml` to the released service repository's `sdk` subdirectory at an immutable commit.
+1. Point each SDK that Afterglow actually imports, currently `waygate-sdk` and `drover-sdk`, to the released service repository's `sdk` subdirectory at an immutable commit. Do not add `lumen-sdk` to Afterglow solely for BFF forwarding; direct Lumen clients consume it from the Lumen repository.
 2. Refresh `backend/uv.lock` through the normal dependency workflow.
-3. Point the Kolla role at the new image build pipeline:
-   - Waygate: `waygate_api_image`, `waygate_worker_image`, `waygate_image_tag`
-   - Drover: `drover_api_image`, `drover_worker_image`, `drover_image_tag`
-   - Lumen: `lumen_api_image`, `lumen_worker_image`, `lumen_image_tag`
-4. Run the catalog SDK round-trip, proxy, explicit-unavailability, migration-idempotency, health, and full monorepo gates before deployment.
+3. Point Kolla integration at immutable repository-owned role wheels and released image references.
+4. Run typed SDK contracts where applicable, generic BFF proxy and streaming contracts for Lumen, explicit-unavailability, health, and full monorepo gates before deployment.
 
 ## Retire standalone SDK repositories
 
-`drover-sdk`, `waygate-sdk`, and `lumen-sdk` are obsolete repositories. The
-published SDK source is `<service>/sdk` in the corresponding service
-repository; retain the package names (`drover-sdk`, `waygate-sdk`,
-`lumen-sdk`) and Python imports (`drover_sdk`, `waygate_sdk`, `lumen_sdk`),
-but do not retain a Git repository alias or publish a PyPI compatibility
-package.
+`drover-sdk`, `waygate-sdk`, and `lumen-sdk` are obsolete standalone repositories. Their published source lives under `<service>/sdk` in the corresponding service repository. Afterglow retains only the SDK packages it imports; the Lumen SDK remains available to direct Lumen clients but is intentionally absent from the Afterglow BFF runtime. Do not retain a legacy Git repository alias or publish a compatibility package.
 
 An organization administrator may delete each standalone SDK repository only
 after all of the following pass:
 
 1. Run `npm run test:target -- backend:tests/contracts/test_service_sdk_dependency_sources.py`.
-   It verifies both Afterglow dependency groups and `backend/uv.lock` resolve
-   every SDK from an immutable
-   `https://github.com/openstack-afterglow/<service>.git#subdirectory=sdk`
-   source.
+   It verifies Afterglow's required SDKs resolve from immutable service-repository
+   `#subdirectory=sdk` sources and that unused `lumen-sdk` is absent.
 2. Confirm the target revision remains reachable in the service repository and
    its service, SDK, and image-publish CI jobs are green.
 3. Search every first-party repository and deployment manifest for

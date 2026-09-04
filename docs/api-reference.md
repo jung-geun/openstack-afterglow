@@ -122,7 +122,7 @@ Prometheus SD(`/api/v1/sd/...`)와 VM 에이전트용 baked 경로는 별도의 
 |------|-----------|------|
 | [대시보드 (Dashboard)](api/dashboard.md) | `/api/v1/dashboard`, `/api/v1/libraries` | 프로젝트 리소스 요약, 쿼터, 라이브러리 카탈로그 |
 | [시스템 서비스](api/system-services.md) | `/api/v1/announcements`, `/api/v1/tutorials`, `/api/v1/sd`, `/api/v1/grafana`, `/api/v1/site-config`, `/api/v1/user-dashboard` | 공지, 튜토리얼, Prometheus SD, Grafana 임베드, 사이트 설정, 개인 대시보드 |
-| [채팅 (Chat)](api/chat.md) | `/api/v1/chat` | LLM 채팅 사용량/쿼터 — *선택* |
+| [채팅 (Chat)](api/chat.md) | `/api/v1/chat` | Lumen AI API 프록시 및 SSE 스트리밍 (BFF) — *선택* |
 | [메트릭 (Metrics)](api/metrics.md) | `/api/v1/metrics`, `/api/v1/health` | Prometheus 메트릭, 헬스 체크 (인증 불필요) |
 
 ---

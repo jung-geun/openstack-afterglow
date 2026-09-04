@@ -26,7 +26,6 @@ image:
 # -----------------------------------------------------------------------------
 replicaCount:
   backend: 2
-  chatWorker: 1
   frontend: 2
   worker: 1
   notionWorker: 1
@@ -714,13 +713,6 @@ resources:
     limits:
       memory: "2Gi"
       cpu: "4"
-  chatWorker:
-    requests:
-      memory: "512Mi"
-      cpu: "250m"
-    limits:
-      memory: "2Gi"
-      cpu: "2"
   frontend:
     requests:
       memory: "128Mi"

@@ -67,7 +67,7 @@ remove_symlink_safe() {
   log "$desc 심볼릭 링크 제거 확인 중: $link_path"
 
   if [[ ! -e "$link_path" && ! -L "$link_path" ]]; then
-    log "$link_path 존재하지 않음 (skip)"
+    log "대상 경로가 존재하지 않음 (skip): $link_path"
     return 0
   fi
 
@@ -103,17 +103,15 @@ GLOBALS_D="$KOLLA_CONFIG_DIR/globals.d"
 STOCK_SITE="$KOLLA_DIR/ansible/site.yml"
 
 [[ -f "$STOCK_SITE" ]] || die "Kolla stock site.yml을 찾을 수 없습니다: $STOCK_SITE"
-python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" remove "$STOCK_SITE" ||
+python3 "$REPO_DIR/deploy/kolla/patch_stock_site.py" remove "$STOCK_SITE" || \
   die "Afterglow stock site.yml import 제거 실패"
 
 # Remove aggregate playbook link after its stock import is gone.
 remove_symlink_safe "$REPO_DIR/deploy/kolla/site.yml" "$KOLLA_DIR/ansible/afterglow-site.yml" "aggregate afterglow-site.yml playbook"
 
-# Remove the five plugin role links.
+# Remove the three source role links (Drover and Lumen roles are package-installed via drover-kolla/lumen-kolla wheels).
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/afterglow" "$ROLES_DIR/afterglow" "afterglow role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/waygate" "$ROLES_DIR/waygate" "waygate role"
-remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/drover" "$ROLES_DIR/drover" "drover role"
-remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/lumen" "$ROLES_DIR/lumen" "lumen role"
 remove_symlink_safe "$REPO_DIR/deploy/kolla/ansible/roles/palimpsest" "$ROLES_DIR/palimpsest" "palimpsest role"
 
 remove_symlink_safe "$MULTINODE_INVENTORY" "$DEFAULT_INVENTORY" "Kolla default multinode inventory"
@@ -125,7 +123,8 @@ remove_symlink_safe "$PLUGIN_SECRETS" "$GLOBALS_D/91-openstack-afterglow-secrets
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Afterglow integration wiring removed."
-echo " The installer-owned stock site.yml import, default inventory link, and"
-echo " globals.d links were removed. Stock globals/passwords, the multinode"
-echo " inventory, plugin configuration, databases, containers, images, and source"
-echo " checkouts remain UNTOUCHED."
+echo " The installer-owned stock site.yml import, default inventory link, globals.d"
+echo " links, and source role links (afterglow, waygate, palimpsest) were"
+echo " removed. Package-installed roles (drover-kolla, lumen-kolla), stock globals/passwords,"
+echo " multinode inventory, plugin configuration, databases, containers, images,"
+echo " and source checkouts remain UNTOUCHED."
