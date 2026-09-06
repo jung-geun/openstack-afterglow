@@ -521,7 +521,7 @@ async def test_get_dashboard_quotas_gpu_drover_error_returns_empty_gpu(client):
             new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
         ),
         patch("app.api.common.dashboard.is_db_available", return_value=True),
-        patch("app.api.common.dashboard.register_drover", side_effect=Exception("lost")),
+        patch("app.services.gpu_quota.get_effective_gpu_quota_status", side_effect=Exception("lost")),
     ):
         resp = await client.get("/api/v1/dashboard/quotas")
 

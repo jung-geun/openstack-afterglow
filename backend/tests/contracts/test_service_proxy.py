@@ -87,6 +87,38 @@ def test_get_service_internal_endpoint_prefers_trusted_configured_override():
     mock_get_conn.assert_not_called()
 
 
+def test_get_internal_endpoint_lumen_override_precedence_and_catalog_fallback():
+    # 1. Non-empty Lumen override skips catalog lookup and returns override directly
+    override_settings = SimpleNamespace(
+        service_waygate_internal_url="",
+        service_drover_internal_url="",
+        service_lumen_internal_url="http://lumen-api:8012",
+        service_palimpsest_internal_url="",
+    )
+    with patch("app.services.service_proxy.get_settings", return_value=override_settings):
+        with patch("app.services.keystone.get_openstack_connection") as mock_get_conn:
+            endpoint = _get_internal_endpoint("token-123", "proj-456", "lumen")
+            assert endpoint == "http://lumen-api:8012"
+            mock_get_conn.assert_not_called()
+
+    # 2. Empty Lumen override falls through to the caller-scoped Keystone internal catalog
+    empty_settings = SimpleNamespace(
+        service_waygate_internal_url="",
+        service_drover_internal_url="",
+        service_lumen_internal_url="",
+        service_palimpsest_internal_url="",
+    )
+    mock_conn = MagicMock()
+    mock_conn.session.get_endpoint.return_value = "http://10.0.0.12:8012/"
+    with patch("app.services.service_proxy.get_settings", return_value=empty_settings):
+        with patch("app.services.keystone.get_openstack_connection", return_value=mock_conn) as mock_get_conn:
+            endpoint = _get_internal_endpoint("token-123", "proj-456", "lumen")
+            assert endpoint == "http://10.0.0.12:8012"
+            mock_get_conn.assert_called_once_with("token-123", "proj-456")
+            mock_conn.session.get_endpoint.assert_called_once_with(service_type="lumen", interface="internal")
+            mock_conn.close.assert_called_once()
+
+
 def test_get_internal_endpoint_none_and_exception_closes_conn():
     mock_conn = MagicMock()
     mock_conn.session.get_endpoint.side_effect = Exception("Catalog lookup failed")
@@ -128,7 +160,7 @@ async def test_proxy_forwarding():
 
     upstream_response = httpx.Response(
         201,
-        content=b'{"id": "srv-1", "status": "ACTIVE"}',
+        stream=httpx.ByteStream(b'{"id": "srv-1", "status": "ACTIVE"}'),
         headers={"Content-Type": "application/json"},
     )
 
@@ -269,6 +301,115 @@ async def test_lumen_get_json_separates_connection_and_logical_projects():
     assert headers["x-target-project-id"] == "logical-project"
 
 
+async def test_proxy_same_project_unchanged_behavior():
+    """Verify same-project requests pass connection_project_id as X-Project-Id with no X-Target-Project-Id header."""
+    req = _make_request(
+        token_info={
+            "token": "ks-token-home",
+            "project_id": "proj-home-123",
+            "connection_project_id": "proj-home-123",
+        },
+    )
+    upstream_response = httpx.Response(200, json={"status": "ok"})
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal:8000"
+    ) as mock_ep:
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
+            resp = await proxy("lumen", req, "/v1/chat/completions")
+            assert resp.status_code == 200
+            mock_ep.assert_called_once_with("ks-token-home", "proj-home-123", "lumen")
+            sent_req = mock_send.call_args[0][0]
+            assert sent_req.headers.get("x-auth-token") == "ks-token-home"
+            assert sent_req.headers.get("x-project-id") == "proj-home-123"
+            assert sent_req.headers.get("x-target-project-id") is None
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal:8000"
+    ) as mock_ep:
+        with patch.object(httpx.AsyncClient, "get", return_value=upstream_response) as mock_get:
+            res = await get_json("lumen", req, "/v1/models")
+            assert res == {"status": "ok"}
+            mock_ep.assert_called_once_with("ks-token-home", "proj-home-123", "lumen")
+            headers = mock_get.call_args[1]["headers"]
+            assert headers.get("x-auth-token") == "ks-token-home"
+            assert headers.get("x-project-id") == "proj-home-123"
+            assert headers.get("x-target-project-id") is None
+
+
+@pytest.mark.asyncio
+async def test_proxy_foreign_system_admin_header_split():
+    """System admin requesting foreign logical project sends connection project as X-Project-Id and target as X-Target-Project-Id."""
+    req = _make_request(
+        token_info={
+            "token": "admin-ks-token",
+            "project_id": "target-tenant-789",
+            "connection_project_id": "admin-home-456",
+            "is_system_admin": True,
+        },
+    )
+    upstream_response = httpx.Response(200, json={"status": "ok"})
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal:8000"
+    ) as mock_ep:
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
+            resp = await proxy("lumen", req, "/v1/chat/completions")
+            assert resp.status_code == 200
+            mock_ep.assert_called_once_with("admin-ks-token", "admin-home-456", "lumen")
+            sent_req = mock_send.call_args[0][0]
+            assert sent_req.headers.get("x-auth-token") == "admin-ks-token"
+            assert sent_req.headers.get("x-project-id") == "admin-home-456"
+            assert sent_req.headers.get("x-target-project-id") == "target-tenant-789"
+
+    with patch(
+        "app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal:8000"
+    ) as mock_ep:
+        with patch.object(httpx.AsyncClient, "get", return_value=upstream_response) as mock_get:
+            res = await get_json("lumen", req, "/v1/models")
+            assert res == {"status": "ok"}
+            mock_ep.assert_called_once_with("admin-ks-token", "admin-home-456", "lumen")
+            headers = mock_get.call_args[1]["headers"]
+            assert headers.get("x-auth-token") == "admin-ks-token"
+            assert headers.get("x-project-id") == "admin-home-456"
+            assert headers.get("x-target-project-id") == "target-tenant-789"
+
+
+@pytest.mark.asyncio
+async def test_proxy_drops_browser_supplied_target_headers():
+    """Malicious browser-supplied X-Target / X-Target-Project-Id / X-Project-Id headers are ignored and never forwarded."""
+    from app.services.service_proxy import FORWARDED_REQUEST_HEADERS
+
+    lowered_forwarded = {h.lower() for h in FORWARDED_REQUEST_HEADERS}
+    assert "x-target-project-id" not in lowered_forwarded
+    assert "x-target" not in lowered_forwarded
+    assert "x-project-id" not in lowered_forwarded
+
+    req = _make_request(
+        headers={
+            "X-Target-Project-Id": "attacker-target-proj",
+            "X-Target": "attacker-target",
+            "X-Project-Id": "attacker-proj",
+            "X-Auth-Token": "attacker-token",
+        },
+        token_info={
+            "token": "legit-ks-token",
+            "project_id": "home-proj",
+            "connection_project_id": "home-proj",
+        },
+    )
+    upstream_response = httpx.Response(200, json={"ok": True})
+
+    with patch("app.services.service_proxy._get_internal_endpoint", return_value="http://service.internal:8000"):
+        with patch.object(httpx.AsyncClient, "send", return_value=upstream_response) as mock_send:
+            await proxy("waygate", req, "/v1/servers")
+            sent_req = mock_send.call_args[0][0]
+            assert sent_req.headers.get("x-auth-token") == "legit-ks-token"
+            assert sent_req.headers.get("x-project-id") == "home-proj"
+            assert sent_req.headers.get("x-target-project-id") is None
+            assert "x-target" not in sent_req.headers
+
+
 @pytest.mark.asyncio
 async def test_machine_proxy_forwards_authorization_without_keystone_interpretation():
     req = _make_request(
@@ -315,7 +456,7 @@ async def test_proxy_streaming_response():
     sse_data = b"event: message\ndata: hello\n\nevent: done\ndata: ok\n\n"
     upstream_response = httpx.Response(
         200,
-        content=sse_data,
+        stream=httpx.ByteStream(sse_data),
         headers={"Content-Type": "text/event-stream"},
     )
 
@@ -341,7 +482,7 @@ async def test_proxy_upstream_error_verbatim():
 
     upstream_response = httpx.Response(
         404,
-        content=b'{"detail": "Cluster not found"}',
+        stream=httpx.ByteStream(b'{"detail": "Cluster not found"}'),
         headers={"Content-Type": "application/json"},
     )
 

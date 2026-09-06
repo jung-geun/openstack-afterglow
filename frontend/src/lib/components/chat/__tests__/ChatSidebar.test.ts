@@ -16,7 +16,7 @@ function renderSidebar(
 ) {
 	const onSelect = vi.fn();
 	const onNewInWorkspace = vi.fn();
-	render(ChatSidebar, {
+	const view = render(ChatSidebar, {
 		conversations: sidebarConversations,
 		workspaces,
 		activeConvId,
@@ -36,7 +36,7 @@ function renderSidebar(
 		onDeleteWorkspace: vi.fn(),
 		onSettings: vi.fn()
 	});
-	return { onSelect, onNewInWorkspace };
+	return { ...view, onSelect, onNewInWorkspace };
 }
 
 describe('ChatSidebar search palette', () => {
@@ -96,5 +96,33 @@ describe('ChatSidebar search palette', () => {
 		await fireEvent.mouseEnter(screen.getByText('dms cloud').closest('.group-row')!);
 		await fireEvent.click(screen.getByRole('button', { name: '이 프로젝트에서 새 채팅' }));
 		expect(onNewInWorkspace).toHaveBeenCalledWith(1);
+	});
+
+	it('reveals only the newly created workspace group and retains the five-row history limit', async () => {
+		const existing = Array.from({ length: 6 }, (_, index) => ({
+			...conversations[0], id: `old-${index}`, title: `과거 대화 ${index}`, workspace_id: 1
+		}));
+		const view = renderSidebar(new Set(), null, [
+			{ id: 1, name: '새 대화 프로젝트', description: null, instructions: null },
+			{ id: 2, name: '접힌 다른 프로젝트', description: null, instructions: null }
+		], existing);
+		const firstGroup = screen.getByRole('button', { name: /새 대화 프로젝트/ });
+		const secondGroup = screen.getByRole('button', { name: /접힌 다른 프로젝트/ });
+		await fireEvent.click(firstGroup);
+		await fireEvent.click(secondGroup);
+		expect(firstGroup.getAttribute('aria-expanded')).toBe('false');
+		const created = {
+			...existing[0], id: 'created', title: null, title_status: 'pending' as const
+		};
+		await view.rerender({
+			conversations: [created, ...existing],
+			newlyCreatedConversationId: 'created',
+			activeConvId: 'created'
+		});
+		expect(firstGroup.getAttribute('aria-expanded')).toBe('true');
+		expect(secondGroup.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: '제목 요약 중' }));
+		expect(view.onSelect).toHaveBeenCalledWith(created);
+		expect(screen.queryByText('과거 대화 4')).toBeNull();
 	});
 });

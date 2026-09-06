@@ -256,6 +256,39 @@ curl --fail --silent --show-error "${endpoint_url%/}/v1/health"
 
 저장된 URL이 `${PUBLIC_PROTOCOL}://${PUBLIC_FQDN}:8011`과 다르면 `ensure_endpoint drover public "${PUBLIC_PROTOCOL}://${PUBLIC_FQDN}:8011"`로 수정합니다. URL이 일치하는데 health probe가 실패하면 서비스 컨테이너, HAProxy bind, 외부 firewall, DNS, TLS 인증서를 점검합니다.
 
+## 로컬 direct 서비스 엔드포인트 오버라이드 (Direct Service Endpoint Overrides)
+
+Afterglow 백엔드는 기본적으로 Keystone 서비스 카탈로그(`interface="internal"`)를 통해 추출된 서비스(Lumen, Waygate, Drover, Palimpsest)의 내부 엔드포인트를 동적으로 탐색합니다. 그러나 로컬 개발 환경이나 고정 네트워크 토폴로지에서는 서비스 카탈로그 조회를 우회하고 direct 엔드포인트를 명시할 수 있습니다.
+
+> **보안 및 스코프 범위:**
+> - 엔드포인트 오버라이드는 Keystone **카탈로그 엔드포인트 탐색만 우회**하며, 사용자/서비스 요청의 Keystone 토큰 인증 및 인가를 면제하지 않습니다.
+> - 이 오버라이드는 Afterglow의 범용 BFF `service_proxy` 경로를 제어합니다. Afterglow의 모든 Lumen API 호출은 이 `service_proxy` 경로를 경유하므로 오버라이드가 즉시 적용됩니다. 단, 다른 서비스의 일부 고유 SDK 클라이언트 호출은 여전히 Keystone 카탈로그 탐색을 유지할 수 있습니다.
+
+### 토폴로지별 설정 값 (Topology-Specific Values)
+
+- **호스트 직접 실행 백엔드 → 호스트 서비스 (Host backend)**: `http://127.0.0.1:8012` (Lumen), `http://127.0.0.1:8010` (Waygate), `http://127.0.0.1:8011` (Drover)
+- **동일 Docker Compose 네트워크 (Same Compose network)**: `http://lumen-api:8012`, `http://waygate-api:8010`, `http://drover-api:8011`
+- **백엔드 컨테이너 → 호스트 포트 바인드 서비스 (Backend container)**: `http://host.docker.internal:8012`
+
+### 설정 우선순위 (Precedence Order)
+
+Afterglow 백엔드가 서비스 엔드포인트를 결정하는 최종 우선순위는 다음과 같습니다:
+
+1. **환경 변수 (Environment variables)**: `SERVICE_LUMEN_INTERNAL_URL` (`SERVICE_WAYGATE_INTERNAL_URL`, `SERVICE_DROVER_INTERNAL_URL`, `SERVICE_PALIMPSEST_INTERNAL_URL`)
+2. **알파벳순 병합 TOML 오버라이드 (Alphabetically merged TOML overrides)**: `afterglow.*.conf` 파일들의 `[services]` 섹션 (`afterglow.frontend.conf`, `afterglow.kolla.conf`, `afterglow.operator.conf` 등 알파벳 순서대로 덮어씀)
+3. **주 설정파일 (Primary TOML config)**: `afterglow.conf` 파일 내 `[services]` 섹션의 `lumen_internal_url` (`waygate_internal_url` 등)
+4. **Keystone 서비스 카탈로그 / 기본값 (Keystone Catalog / Default)**: 위 오버라이드가 모두 빈 값(`""`)일 경우 `conn.session.get_endpoint(service_type=..., interface="internal")` 동적 탐색 수행
+
+### 주요 동작, 경고 및 규칙
+
+- **Docker Compose 환경변수 마스킹 경고 (Compose Present-but-Empty Env Caveat)**:
+  `docker-compose.prod.yml` 등의 `environment:` 항목에 `- SERVICE_LUMEN_INTERNAL_URL=${SERVICE_LUMEN_INTERNAL_URL:-}` 형태로 선언된 경우, host 셸에 해당 변수가 없으면 컨테이너 내부에 빈 문자열(`SERVICE_LUMEN_INTERNAL_URL=""`) 환경 변수가 주입됩니다.
+  환경 변수가 TOML 설정파일보다 상위 우선순위(1순위)를 가지므로, **컨테이너에 주입된 빈 환경 변수는 `afterglow.conf` 또는 `afterglow.*.conf` 파일에 정의된 TOML 오버라이드 설정을 마스킹(무시)**합니다.
+  따라서 Docker Compose 사용자가 오버라이드를 적용할 때는 TOML 수정 대신 셸 환경 변수, `.env` 파일, 또는 `--env-file` 옵션을 통해 `SERVICE_LUMEN_INTERNAL_URL`을 설정해야 합니다.
+
+- **프로덕션 HTTPS 규칙**: `AFTERGLOW_ENV=production` 설정 시 명시적인 서비스 오버라이드 URL은 반드시 `https://` 보안 프로토콜을 사용해야 합니다. HTTP URL 지정 시 부팅 검증에서 `ValueError`가 발생합니다. 빈 값(`""`)은 프로덕션에서도 카탈로그 조회를 안전하게 수행합니다.
+
+- **명시적 오버라이드 실패 시 폴백 없음 (No Fallback)**: 명시적 URL 오버라이드가 지정되었으나 해당 서비스에 연결할 수 없거나 오류가 발생하는 경우, Keystone 카탈로그로 자동 폴백하지 않고 **즉시 실패(fail-closed, 503 Service Unavailable)**합니다.
 ## 다음 단계
 
 - [Kolla-ansible 배포](deployment.md#kolla-ansible-배포)에서 이미지와 역할을 배포합니다.

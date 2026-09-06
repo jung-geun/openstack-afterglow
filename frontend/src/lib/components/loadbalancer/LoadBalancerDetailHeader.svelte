@@ -40,7 +40,7 @@
         onclick={() => s.deleteLb()}
         disabled={s.saving}
         class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-      >삭제</button>
+      >{s.isProtected ? '강제 삭제' : '삭제'}</button>
     {/snippet}
   </DetailHeader>
 {/if}

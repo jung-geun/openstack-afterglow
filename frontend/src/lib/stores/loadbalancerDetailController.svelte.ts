@@ -3,6 +3,7 @@ import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 import type { LoadBalancerDetail, Listener, Pool, Member, LbStatusNode } from '$lib/types/loadbalancer';
+import { isDroverLoadBalancer, loadBalancerDeleteConfirmation } from '$lib/utils/droverLoadBalancer';
 
 export function provisioningColor(status: string): string {
   return status === 'ERROR' ? 'text-red-400' : 'text-gray-400';
@@ -37,7 +38,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
   const isErrored = $derived(
     !!lb && (lb.status === 'ERROR' || lb.status?.includes('ERROR')),
   );
-
+  const isProtected = $derived(isDroverLoadBalancer(lb));
   // selectedPoolId 변화 시 멤버 fetch (token/projectId는 untrack)
   $effect(() => {
     const poolId = selectedPoolId;
@@ -217,7 +218,8 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
 
   async function deleteLb() {
     const id = opts.lbId();
-    if (!(await confirmDialog(`로드밸런서 "${lb?.name || id}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)))
+    const message = loadBalancerDeleteConfirmation(lb, id);
+    if (!(await confirmDialog(message)))
       return;
     saving = true;
     try {
@@ -252,7 +254,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     get memberForm() { return memberForm; },
     // Derived
     get isErrored() { return isErrored; },
-    // Handlers
+    get isProtected() { return isProtected; },
     fetchAll,
     createListener,
     deleteListener,

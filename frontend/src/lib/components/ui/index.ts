@@ -36,3 +36,4 @@ export { default as TextInput } from './TextInput.svelte';
 export { default as Toast } from './Toast.svelte';
 export { default as ToggleGroup } from './ToggleGroup.svelte';
 export { default as UsageBar } from './UsageBar.svelte';
+export { default as UsageRing } from './UsageRing.svelte';

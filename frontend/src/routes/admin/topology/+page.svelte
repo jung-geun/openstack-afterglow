@@ -135,7 +135,7 @@
 
 {#if ctrl.selectedInstanceId}
 	<SlidePanel onClose={() => ctrl.selectedInstanceId = null}>
-		<InstanceDetailPanel instanceId={ctrl.selectedInstanceId} onClose={() => ctrl.selectedInstanceId = null} />
+		<InstanceDetailPanel instanceId={ctrl.selectedInstanceId} onClose={() => ctrl.selectedInstanceId = null} showHost={true} />
 	</SlidePanel>
 {/if}
 

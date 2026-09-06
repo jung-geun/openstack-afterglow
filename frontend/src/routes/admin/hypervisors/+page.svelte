@@ -205,7 +205,7 @@
 
 {#if selectedInstanceId}
 	<SlidePanel onClose={closeInstanceDetail}>
-		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeInstanceDetail} />
+		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeInstanceDetail} showHost={true} />
 	</SlidePanel>
 {/if}
 

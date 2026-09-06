@@ -269,8 +269,10 @@ async def create_instance(
 
     flavors = await asyncio.to_thread(nova.list_flavors, conn)
     flavor = next((f for f in flavors if f.id == req.flavor_id), None)
+    if flavor is None:
+        raise HTTPException(status_code=400, detail="Invalid flavor ID")
     try:
-        gpu_available = await require_gpu_quota(conn, flavor) if flavor else False
+        gpu_available = await require_gpu_quota(conn, flavor)
     except GpuQuotaDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except GpuQuotaUnavailable as exc:
@@ -551,6 +553,19 @@ async def create_instance_async(
         settings,
     )
 
+    from app.services.gpu_inventory import GpuQuotaDenied, GpuQuotaUnavailable, require_gpu_quota
+
+    sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+    sse_flavor = next((flavor for flavor in sse_flavors if flavor.id == req.flavor_id), None)
+    if sse_flavor is None:
+        raise HTTPException(status_code=400, detail="Invalid flavor ID")
+    try:
+        gpu_available = await require_gpu_quota(conn, sse_flavor)
+    except GpuQuotaDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GpuQuotaUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     async def progress_generator():
         import time
 
@@ -571,25 +586,6 @@ async def create_instance_async(
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
-            from app.services.gpu_inventory import (
-                GpuQuotaDenied,
-                GpuQuotaUnavailable,
-                require_gpu_quota,
-            )
-
-            _sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
-            _sse_flavor = next((f for f in _sse_flavors if f.id == req.flavor_id), None)
-            try:
-                gpu_available = await require_gpu_quota(conn, _sse_flavor) if _sse_flavor else False
-            except GpuQuotaDenied as exc:
-                message = str(exc)
-                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {message}")
-                raise HTTPException(status_code=409, detail=message) from exc
-            except GpuQuotaUnavailable as exc:
-                message = str(exc)
-                yield send_progress(ProgressStep.MANILA_PREPARING, 0, f"GPU quota 조회 실패: {message}")
-                raise HTTPException(status_code=503, detail=message) from exc
-
             file_storages_info = []
             data_mounts_info: list[dict] = []
             userdata = None

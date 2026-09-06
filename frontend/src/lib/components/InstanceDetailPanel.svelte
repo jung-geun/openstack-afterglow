@@ -22,9 +22,10 @@
 		instanceId: string;
 		onClose?: () => void;
 		adminProjectId?: string | null;
+		showHost?: boolean;
 	}
 
-	let { instanceId, onClose, adminProjectId = null }: Props = $props();
+	let { instanceId, onClose, adminProjectId = null, showHost = false }: Props = $props();
 
 	const s = createInstanceDetailController({
 		instanceId: () => instanceId,
@@ -161,7 +162,7 @@
 			</div>
 		{/if}
 
-		<InfoSection />
+		<InfoSection {showHost} />
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="text-white text-[15px] font-semibold mb-4">성능 모니터링</div>
 			<MetricsPanel

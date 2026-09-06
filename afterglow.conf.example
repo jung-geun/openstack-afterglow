@@ -189,7 +189,10 @@ callback_base_url = ""         # e.g. http://10.0.0.1:8000
 # Shared legacy AES-256-GCM key for existing encrypted Afterglow records.
 # Drover uses its own [drover] kubeconfig_encryption_key.
 kubeconfig_encryption_key = "" # 32-byte hex; generate: openssl rand -hex 32
-
+# Shared token for internal K3s GPU admission endpoint (/api/v1/internal/k3s/gpu-admission).
+gpu_admission_token = ""
+# Dedicated token for Drover Stampede provisioning intents (secret.yaml/environment only).
+provisioning_token = ""
 [worker_runtime]
 # Background worker runtime manager.
 # Default static mode preserves the current fixed Compose/Kubernetes/Kolla worker manifests
@@ -225,7 +228,7 @@ gpu_config_mount = "/app/config.gpu.toml"
 gpu_config_host_path = ""         # optional host path for config.gpu.toml
 logs_mount = "/app/logs"
 logs_host_path = ""               # optional host path for worker logs
-env_allowlist = "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+env_allowlist = "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,K3S_GPU_ADMISSION_TOKEN,K3S_PROVISIONING_TOKEN,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
 
 [worker_runtime.kubernetes]
 namespace = "afterglow"
@@ -288,14 +291,10 @@ kvm_state_dir = "/var/lib/palimpsest/domains"
 
 
 [logging]
-# 파일 로그 설정 (미설정 시 stdout 전용 출력)
-# log_file_path = ""            # 로그 파일 경로 (예: "/var/log/afterglow/app.log")
+# 파일 로그 설정
+# log_directory = "logs"        # 로그 디렉터리 경로 (기본값: "logs")
 # log_level = "INFO"            # 로그 레벨: DEBUG, INFO, WARNING, ERROR, CRITICAL
-# max_bytes = 10485760          # 파일 최대 크기 (바이트, rotation_type = "size"일 때)
-# backup_count = 5              # 보관할 로그 파일 수
-# rotation_type = "size"        # "size" (크기 기반) 또는 "time" (시간 기반)
-# rotation_when = "midnight"    # time rotation 기준: midnight, H, D, W0-W6
-# rotation_interval = 1         # time rotation 간격
+# max_bytes = 52428800          # 단일 로그 파일 최대 크기 (바이트, 기본값: 50MB)
 
 
 [gpu]

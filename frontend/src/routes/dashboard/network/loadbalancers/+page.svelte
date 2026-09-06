@@ -17,6 +17,7 @@
   import { createResourceSelection } from '$lib/utils/resourceSelection.svelte';
   import { executeBulkMutations } from '$lib/utils/bulkActions';
   import { toast } from '$lib/stores/toast';
+  import { isDroverLoadBalancer } from '$lib/utils/droverLoadBalancer';
 
 
   let selectedLbId = $state<string | null>(null);
@@ -35,13 +36,13 @@
   let error = $state('');
   let selection = createResourceSelection();
   let busy = $state(false);
-  let selectableIds = $derived(new Set(loadbalancers.map((lb) => lb.id)));
+  let selectableIds = $derived(new Set(loadbalancers.filter((lb) => !isDroverLoadBalancer(lb)).map((lb) => lb.id)));
   const selectedCount = $derived([...selectableIds].filter((id) => selection.ids.has(id)).length);
   const allSelected = $derived(selectableIds.size > 0 && selectedCount === selectableIds.size);
   const indeterminate = $derived(selectedCount > 0 && !allSelected);
 
   async function bulkDelete() {
-    const ids = [...selection.ids];
+    const ids = [...selection.ids].filter((id) => selectableIds.has(id));
     if (ids.length === 0) return;
     const warning = '리스너·풀·멤버가 함께 삭제될 수 있습니다.';
     if (!await confirmDialog(`${ids.length}개 로드밸런서를 삭제하시겠습니까?\n${warning}`)) return;
@@ -64,7 +65,10 @@
   async function fetchLoadbalancers(opts?: { refresh?: boolean }) {
     try {
       loadbalancers = await api.get<LoadBalancer[]>('/api/v1/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
-      if (selection.count > 0) selection.retain(loadbalancers.map((lb) => lb.id));
+      if (selection.count > 0) {
+        selection.retain(loadbalancers.filter((lb) => !isDroverLoadBalancer(lb)).map((lb) => lb.id));
+      }
+      error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
@@ -141,11 +145,14 @@
       />
     </div>
       {#each loadbalancers as lb (lb.id)}
+        {@const isProtected = isDroverLoadBalancer(lb)}
         <div class="resource-selection-surface bg-gray-900 border border-gray-800 rounded-2xl p-5" data-selected={selection.has(lb.id)}>
           <div class="flex items-center gap-4">
             <SelectionCheckbox
               checked={selection.has(lb.id)}
-              disabled={busy}
+              disabled={busy || isProtected}
+              unavailable={isProtected}
+              title={isProtected ? 'Drover가 관리하는 로드밸런서입니다. (일괄 삭제 불가)' : undefined}
               ariaLabel={`${lb.name || lb.id.slice(0, 12)} 선택`}
               onclick={() => selection.toggle(lb.id)}
             />
@@ -179,7 +186,7 @@
   {/if}
 </div>
 <BulkSelectionOverlay
-  count={selection.count}
+  count={selectedCount}
   ariaLabel="선택한 로드밸런서 일괄 작업"
   actions={[{ key: 'delete', label: '삭제', tone: 'danger', onAction: bulkDelete }]}
   {busy}

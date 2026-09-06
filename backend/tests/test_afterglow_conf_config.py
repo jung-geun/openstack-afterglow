@@ -188,6 +188,25 @@ oauth_consent_url = "https://app.example.test/oauth/mcp/authorize"
     assert settings.mcp_oauth_consent_url == "https://app.example.test/oauth/mcp/authorize"
 
 
+def test_app_config_loads_logging_log_directory_from_afterglow_conf(isolated_config_dir):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[logging]
+log_directory = "/var/log/kolla/afterglow_api"
+max_bytes = 10485760
+""".strip(),
+        encoding="utf-8",
+    )
+
+    flat = app_config._load_toml()
+    settings = app_config.Settings(**flat)
+
+    assert flat["log_directory"] == "/var/log/kolla/afterglow_api"
+    assert settings.log_directory == "/var/log/kolla/afterglow_api"
+    assert flat["log_max_bytes"] == 10485760
+    assert settings.log_max_bytes == 10485760
+
+
 def test_empty_gitlab_oidc_secret_env_does_not_mask_toml(isolated_config_dir, monkeypatch):
     (isolated_config_dir / "afterglow.conf").write_text(
         """
@@ -428,6 +447,18 @@ def test_docker_compose_python_services_share_local_dev_secret_wiring():
         assert "SECRET_KEY" not in names
 
 
+def test_production_compose_leaves_service_endpoint_overrides_empty():
+    compose = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8"))
+    backend_environment = {
+        str(entry).partition("=")[0]: str(entry).partition("=")[2]
+        for entry in compose["services"]["backend"]["environment"]
+    }
+
+    for service in ("WAYGATE", "DROVER", "LUMEN", "PALIMPSEST"):
+        name = f"SERVICE_{service}_INTERNAL_URL"
+        assert backend_environment[name] == f"${{{name}:-}}"
+
+
 def test_compose_uses_standalone_palimpsest_services():
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     services = compose["services"]
@@ -509,3 +540,67 @@ def test_helm_python_templates_use_production_secret_contract():
         assert "name: afterglow-secrets" in text
         assert "key: SECRET_KEY" in text
         assert "AFTERGLOW_ALLOW_INSECURE" not in text
+
+
+def test_k8s_app_deployments_use_writable_ephemeral_log_mounts():
+    """Backend and frontend K8s static deployments must mount pod-local writable emptyDir log volumes."""
+    paths = [
+        ROOT / "deploy/k8s-template/base/backend/deployment.yaml",
+        ROOT / "deploy/k8s-template/base/frontend/deployment.yaml",
+    ]
+    for path in paths:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        spec = doc["spec"]["template"]["spec"]
+
+        # Security context for non-root fsGroup writable volume access
+        assert spec.get("securityContext", {}).get("fsGroup") == 1000
+
+        # Writable emptyDir volume
+        volumes = {v["name"]: v for v in spec.get("volumes", [])}
+        assert "app-logs" in volumes
+        assert volumes["app-logs"] == {"name": "app-logs", "emptyDir": {}}
+        assert "hostPath" not in str(volumes["app-logs"])
+        assert "persistentVolumeClaim" not in str(volumes["app-logs"])
+
+        # Container volumeMount
+        container = spec["containers"][0]
+        mounts = {m["name"]: m for m in container.get("volumeMounts", [])}
+        assert "app-logs" in mounts
+        assert mounts["app-logs"] == {"name": "app-logs", "mountPath": "/app/logs"}
+
+
+def test_k8s_static_config_uses_portable_log_rotation_settings():
+    configmap = (ROOT / "deploy/k8s-template/configmap.yaml").read_text(encoding="utf-8")
+
+    assert 'log_directory = "/app/logs"' in configmap
+    assert "max_bytes = 52428800" in configmap
+    assert "rotation_type" not in configmap
+    assert "rotation_when" not in configmap
+    assert "backup_count" not in configmap
+
+
+def test_helm_app_templates_use_writable_ephemeral_log_mounts():
+    """Backend and frontend Helm templates must declare pod-local writable emptyDir log mounts without PVC/hostPath."""
+    paths = [
+        ROOT / "helm/afterglow/templates/backend/deployment.yaml",
+        ROOT / "helm/afterglow/templates/frontend/deployment.yaml",
+    ]
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+
+        # Must include securityContext with fsGroup 1000
+        assert "securityContext:" in text
+        assert "fsGroup: 1000" in text
+
+        # Must include app-logs volumeMount at /app/logs
+        assert "- name: app-logs\n              mountPath: /app/logs" in text
+
+        # Must include app-logs emptyDir volume definition
+        assert "- name: app-logs\n          emptyDir: {}" in text
+
+        # Must preserve ConfigMap volume mount
+        assert "afterglow-config-volume" in text
+
+        # Must not introduce hostPath or PVC for log storage
+        assert "persistentVolumeClaim" not in text
+        assert "hostPath" not in text

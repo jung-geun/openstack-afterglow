@@ -71,6 +71,9 @@ callback_base_url = "{{ afterglow_instance_health_callback_base_url }}"
 [k3s]
 # Shared legacy AES-256-GCM key; Drover owns its own kubeconfig encryption key.
 kubeconfig_encryption_key = "{{ afterglow_kubeconfig_encryption_key | default('') }}"
+# GPU admission and provisioning credentials are injected through the container environment.
+gpu_admission_token = "{{ afterglow_k3s_gpu_admission_token | default('') }}"
+# provisioning_token is injected as K3S_PROVISIONING_TOKEN from the secret environment.
 
 [builder]
 image_id = ""
@@ -102,8 +105,6 @@ redirect_uri = "{{ afterglow_public_endpoint_url }}/auth/gitlab/callback"
 scopes = "openid email profile read_user"
 
 [logging]
-log_file_path = "/var/log/kolla/afterglow/app.log"
+log_directory = "/var/log/kolla/afterglow_api"
 log_level = "INFO"
 max_bytes = 52428800
-backup_count = 5
-rotation_type = "size"

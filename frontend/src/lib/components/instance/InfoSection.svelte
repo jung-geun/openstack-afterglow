@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
+	interface Props {
+		showHost?: boolean;
+	}
+
+	let { showHost = false }: Props = $props();
+
 	const s = useInstanceDetailController();
 </script>
 
@@ -27,7 +33,7 @@
 			<dt class="text-xs text-gray-500 mb-0.5">키페어</dt>
 			<dd class="text-sm text-gray-300 font-mono">{s.instance!.key_name ?? '-'}</dd>
 		</div>
-		{#if s.instance!.host}
+		{#if showHost && s.instance!.host}
 			<div>
 				<dt class="text-xs text-gray-500 mb-0.5">호스트</dt>
 				<dd class="text-sm text-gray-300 font-mono">{s.instance!.host}</dd>

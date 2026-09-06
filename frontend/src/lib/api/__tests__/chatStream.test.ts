@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { __test__, ChatProtocolError, parseChatRunDescriptor } from '../chatStream';
+import { describe, expect, it, vi } from 'vitest';
+import { __test__, ChatHttpError, ChatProtocolError, createChatRun, parseChatRunDescriptor } from '../chatStream';
 
 describe('durable chat SSE framing', () => {
 	it('preserves multiline data and ignores keepalive comments', () => {
@@ -37,6 +37,7 @@ describe('durable chat SSE framing', () => {
 					conversation_id: 'conversation-1',
 					temp_thread_id: null,
 					status,
+					run_kind: 'completion',
 					events_url: '/v1/runs/run-1/events',
 					cancel_url: '/v1/runs/run-1/cancel'
 				})
@@ -55,6 +56,7 @@ describe('durable chat SSE framing', () => {
 				conversation_id: 'conv-1',
 				temp_thread_id: null,
 				status: 'running',
+				run_kind: 'completion',
 				events_url: 'http://evil.com/v1/runs/run-1/events',
 				cancel_url: '/v1/runs/run-1/cancel'
 			})
@@ -64,11 +66,42 @@ describe('durable chat SSE framing', () => {
 			parseChatRunDescriptor({
 				run_id: 'run-1',
 				conversation_id: 'conv-1',
-				temp_thread_id: null,
 				status: 'running',
+				run_kind: 'completion',
 				events_url: '//evil.com/v1/runs/run-1/events',
 				cancel_url: '/v1/runs/run-1/cancel'
 			})
 		).toThrow(ChatProtocolError);
+	});
+
+	it('requires run_kind and preserves compaction descriptors', () => {
+		const descriptor = {
+			run_id: 'run-compaction',
+			conversation_id: 'conv-1',
+			temp_thread_id: null,
+			status: 'running',
+			run_kind: 'compaction',
+			events_url: '/v1/runs/run-compaction/events',
+			cancel_url: '/v1/runs/run-compaction/cancel'
+		};
+		expect(parseChatRunDescriptor(descriptor)).toMatchObject({ run_kind: 'compaction' });
+		const { run_kind: _runKind, ...legacyDescriptor } = descriptor;
+		expect(() => parseChatRunDescriptor(legacyDescriptor)).toThrow(ChatProtocolError);
+	});
+	it('preserves HTTP status on durable run admission errors', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(JSON.stringify({ detail: 'context revision changed' }), {
+				status: 409,
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		try {
+			await expect(createChatRun('/api/v1/chat/conversations/c1/compactions', {})).rejects.toMatchObject({
+				status: 409
+			});
+			await expect(createChatRun('/api/v1/chat/conversations/c1/compactions', {})).rejects.toBeInstanceOf(ChatHttpError);
+		} finally {
+			fetchMock.mockRestore();
+		}
 	});
 });

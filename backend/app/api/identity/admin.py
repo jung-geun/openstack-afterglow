@@ -2388,57 +2388,50 @@ async def get_gpu_aliases():
 @router.get("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
 async def get_default_gpu_quotas(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 조회."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
-
     try:
-        return await asyncio.to_thread(register_drover(conn).default_gpu_quotas)
+        from app.services.gpu_quota import DEFAULT_PROJECT_ID, get_project_gpu_quotas
+
+        return await get_project_gpu_quotas(conn, DEFAULT_PROJECT_ID)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 @router.put("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
 async def set_default_gpu_quota(req: GpuQuotaRequest, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 설정 (upsert)."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
-
     try:
-        return await asyncio.to_thread(register_drover(conn).set_default_gpu_quota, req.gpu_type, req.limit)
+        from app.services.gpu_quota import DEFAULT_PROJECT_ID, set_project_gpu_quota
+
+        quota = await set_project_gpu_quota(conn, DEFAULT_PROJECT_ID, req.gpu_type, req.limit)
+        await invalidate("afterglow:nova:*:flavors")
+        return quota
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 @router.delete("/gpu-quotas/defaults/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
 async def delete_default_gpu_quota(gpu_type: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트 기본 GPU quota 삭제 (기본값 0으로 복귀)."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
-
     try:
-        await asyncio.to_thread(register_drover(conn).delete_default_gpu_quota, gpu_type)
+        from app.services.gpu_quota import DEFAULT_PROJECT_ID, delete_project_gpu_quota
+
+        await delete_project_gpu_quota(conn, DEFAULT_PROJECT_ID, gpu_type)
+        await invalidate("afterglow:nova:*:flavors")
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 @router.get("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
 async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """프로젝트의 GPU quota 목록 + 현재 사용량 조회."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
-
     try:
-        return await asyncio.to_thread(register_drover(conn).project_gpu_quotas, project_id)
+        from app.services.gpu_quota import get_effective_gpu_quota_status
+
+        return await get_effective_gpu_quota_status(conn, project_id)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 @router.put("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
@@ -2446,15 +2439,16 @@ async def set_gpu_quota(
     project_id: str, req: GpuQuotaRequest, conn: openstack.connection.Connection = Depends(get_os_conn)
 ):
     """프로젝트의 GPU quota 설정 (upsert)."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
-
     try:
-        return await asyncio.to_thread(register_drover(conn).set_project_gpu_quota, project_id, req.gpu_type, req.limit)
+        from app.services.gpu_quota import set_project_gpu_quota
+
+        quota = await set_project_gpu_quota(conn, project_id, req.gpu_type, req.limit)
+        await invalidate(f"afterglow:nova:{project_id}:flavors")
+        return quota
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 @router.delete("/gpu-quotas/{project_id}/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
@@ -2462,15 +2456,13 @@ async def delete_gpu_quota(
     project_id: str, gpu_type: str, conn: openstack.connection.Connection = Depends(get_os_conn)
 ):
     """프로젝트의 특정 GPU quota 삭제 (기본값으로 폴백)."""
-    from app.database import is_db_available
-
-    if not is_db_available():
-        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
-
     try:
-        await asyncio.to_thread(register_drover(conn).delete_project_gpu_quota, project_id, gpu_type)
+        from app.services.gpu_quota import delete_project_gpu_quota
+
+        await delete_project_gpu_quota(conn, project_id, gpu_type)
+        await invalidate(f"afterglow:nova:{project_id}:flavors")
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="drover 서비스를 사용할 수 없습니다") from exc
+        raise HTTPException(status_code=503, detail="GPU quota 서비스를 사용할 수 없습니다") from exc
 
 
 # ===========================================================================

@@ -12,11 +12,13 @@
 		model_name: string | null;
 		workspace_id: number | null;
 		updated_at: string | null;
+		title_status?: 'idle' | 'pending' | 'ready' | 'failed' | 'unavailable';
 	}
 	interface Props {
 		conversations: Conversation[];
 		workspaces: Workspace[];
 		activeConvId: string | null;
+		newlyCreatedConversationId?: string | null;
 		tempMode?: boolean;
 		runningConversationIds?: ReadonlySet<string>;
 		busy?: boolean;
@@ -41,6 +43,7 @@
 		conversations,
 		workspaces,
 		activeConvId,
+		newlyCreatedConversationId = null,
 		tempMode = false,
 		runningConversationIds = new Set<string>(),
 		busy = false,
@@ -79,6 +82,19 @@
 	let collapsed = $state<Record<string, boolean>>({});
 	function toggle(key: string) {
 		collapsed[key] = !collapsed[key];
+	}
+
+	let revealedConversationId: string | null = null;
+	$effect(() => {
+		if (!newlyCreatedConversationId || newlyCreatedConversationId === revealedConversationId) return;
+		const conversation = conversations.find((item) => item.id === newlyCreatedConversationId);
+		if (!conversation) return;
+		revealedConversationId = conversation.id;
+		if (conversation.workspace_id !== null) collapsed[`ws-${conversation.workspace_id}`] = false;
+	});
+
+	function conversationLabel(conversation: Conversation): string {
+		return conversation.title || (conversation.title_status === 'pending' ? '제목 요약 중' : '새 대화');
 	}
 
 	// 제목 드래그앤드롭으로 프로젝트 이동 (Codex식). 드래그 중인 대화 id + drop 대상.
@@ -273,7 +289,7 @@
 			{:else}
 				{#each searchResults as conversation (conversation.id)}
 					<button type="button" role="option" aria-selected={conversation.id === activeConvId} onclick={() => selectSearchResult(conversation)}>
-						<span class="truncate">{conversation.title ?? '새 대화'}</span>
+						<span class="truncate">{conversationLabel(conversation)}</span>
 						{#if conversation.model_name}
 							<small>{conversation.model_name}</small>
 						{/if}
@@ -346,7 +362,7 @@
 		}}
 	>
 		<button type="button" class="item" onclick={() => onSelect(conv)}>
-			<span class="item-title">{conv.title || '새 대화'}</span>
+			<span class="item-title">{conversationLabel(conv)}</span>
 			{#if runningConversationIds.has(conv.id)}
 				<span class="run-indicator" title="응답 생성 중" aria-label="응답 생성 중">
 					<span class="run-spinner" aria-hidden="true"></span>
@@ -385,7 +401,7 @@
 		margin-left: -16rem;
 	}
 	/* 모바일: 오버레이 드로어 — 흐름에서 빼내 본문은 항상 전체 폭, 열릴 때만 위에 겹침 */
-	@media (max-width: 768px) {
+	@media (width < 768px) {
 		.sidebar {
 			position: absolute;
 			top: 0;

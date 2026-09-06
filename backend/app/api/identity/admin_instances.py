@@ -140,6 +140,24 @@ async def admin_create_instance_async(
         await asyncio.to_thread(conn.close)
         raise
 
+    from app.services.gpu_inventory import GpuQuotaDenied, GpuQuotaUnavailable, require_gpu_quota
+
+    try:
+        sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+        sse_flavor = next((flavor for flavor in sse_flavors if flavor.id == req.flavor_id), None)
+        if sse_flavor is None:
+            raise HTTPException(status_code=400, detail="Invalid flavor ID")
+        gpu_available = await require_gpu_quota(conn, sse_flavor)
+    except GpuQuotaDenied as exc:
+        await asyncio.to_thread(conn.close)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GpuQuotaUnavailable as exc:
+        await asyncio.to_thread(conn.close)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        await asyncio.to_thread(conn.close)
+        raise
+
     async def progress_generator():
         import time
 
@@ -159,25 +177,6 @@ async def admin_create_instance_async(
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
-            from app.services.gpu_inventory import (
-                GpuQuotaDenied,
-                GpuQuotaUnavailable,
-                require_gpu_quota,
-            )
-
-            _sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
-            _sse_flavor = next((f for f in _sse_flavors if f.id == req.flavor_id), None)
-            try:
-                gpu_available = await require_gpu_quota(conn, _sse_flavor) if _sse_flavor else False
-            except GpuQuotaDenied as exc:
-                message = str(exc)
-                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {message}")
-                raise HTTPException(status_code=409, detail=message) from exc
-            except GpuQuotaUnavailable as exc:
-                message = str(exc)
-                yield send_progress(ProgressStep.MANILA_PREPARING, 0, f"GPU quota 조회 실패: {message}")
-                raise HTTPException(status_code=503, detail=message) from exc
-
             file_storages_info = []
             _sse_health_id = ""
             _sse_health_token = ""

@@ -71,6 +71,8 @@ Compose forms with `Field` plus `TextInput`, `SelectInput`, or `TextareaInput`; 
 
 Use `Alert`, `Toast`, and `EmptyState` for feedback; `StatusChip` + `getStatusStyle` and `Pill` for status; `TableShell` for tabular data. Modal is the scrim/dismissal shell and `Card surface="modal"` is the panel surface. Table density is normal `0.75rem × 1rem` or compact `0.5rem × 0.75rem`. UsageBar default thresholds are warning 80 and danger 95; it accepts `percent` or `value`/`max`, clamps invalid or out-of-range percentages to `0–100`, and for `max={-1}` labels the quota `무제한` without a percentage or fill. Use `UsageBar`, `QuotaBar`, or `CapacityBar` instead of route-specific bars.
 
+`UsageRing` is the compact inline counterpart to `UsageBar`: use it only where a quantitative meter must share a narrow control row, such as the chat composer. It uses the same threshold contract, remains a `role="meter"` with an explicit text equivalent, and never replaces the full UsageBar on settings, quota, or detail surfaces.
+
 ## Status & data visualization
 
 Operational status uses exact, case-sensitive `getStatusStyle(status: string | null | undefined)` and its five tones; unknown or falsy status is neutral. Status conveys label plus tone and, where applicable, transition dot; color alone is never state. Charts use the six ordinal `CHART_COLORS`; topology preserves its domain colors.

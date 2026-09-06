@@ -37,10 +37,10 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - AFTERGLOW_ENV=production
       - LUMEN_MCP_SERVICE_TOKEN=${LUMEN_MCP_SERVICE_TOKEN:-}
-      - SERVICE_WAYGATE_INTERNAL_URL=${SERVICE_WAYGATE_INTERNAL_URL:-http://waygate-api:8010}
-      - SERVICE_DROVER_INTERNAL_URL=${SERVICE_DROVER_INTERNAL_URL:-http://drover-api:8011}
-      - SERVICE_LUMEN_INTERNAL_URL=${SERVICE_LUMEN_INTERNAL_URL:-http://lumen-api:8012}
-      - SERVICE_PALIMPSEST_INTERNAL_URL=${SERVICE_PALIMPSEST_INTERNAL_URL:-http://palimpsest-api:8020}
+      - SERVICE_WAYGATE_INTERNAL_URL=${SERVICE_WAYGATE_INTERNAL_URL:-}
+      - SERVICE_DROVER_INTERNAL_URL=${SERVICE_DROVER_INTERNAL_URL:-}
+      - SERVICE_LUMEN_INTERNAL_URL=${SERVICE_LUMEN_INTERNAL_URL:-}
+      - SERVICE_PALIMPSEST_INTERNAL_URL=${SERVICE_PALIMPSEST_INTERNAL_URL:-}
     depends_on:
       - redis
     restart: always
@@ -121,6 +121,8 @@ services:
     pull_policy: always
     ports:
       - "127.0.0.1:3080:3080"
+    volumes:
+      - ./logs:/app/logs
     environment:
       - ORIGIN=${ORIGIN:-http://localhost:3080}
       - PUBLIC_API_BASE=${PUBLIC_API_BASE:-http://localhost:8000}

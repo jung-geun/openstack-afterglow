@@ -27,39 +27,36 @@ async def list_flavors(
     key = keys.project_key("nova", pid, "flavors")
 
     async def _load() -> list[FlavorInfo]:
-        all_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+        return await asyncio.to_thread(nova.list_flavors, conn)
 
-        # GPU 쿼터 기반 필터링: 프로젝트에 쿼터가 없는(0) GPU flavor 제외
-        try:
-            from drover_sdk import register as register_drover
+    all_flavors = await cache.cached_call(key, cache.ttl_static(), _load, enabled=cm.enabled, refresh=cm.refresh)
+    try:
+        from app.services.gpu_inventory import is_gpu_flavor, normalize_gpu_alias
+        from app.services.gpu_quota import get_effective_gpu_quotas
 
-            from app.services.gpu_inventory import is_gpu_flavor, normalize_gpu_alias
+        quotas = await get_effective_gpu_quotas(conn, pid)
+        if not isinstance(quotas, dict):
+            raise ValueError("get_effective_gpu_quotas response is not a dict")
 
-            quotas = await asyncio.to_thread(register_drover(conn).effective_gpu_quotas)
-            if not isinstance(quotas, dict):
-                raise ValueError("effective_gpu_quotas response is not a dict")
-
-            def _has_gpu_access(f: FlavorInfo) -> bool:
-                if not is_gpu_flavor(f):
-                    return True
-                alias_str = f.extra_specs.get("pci_passthrough:alias", "")
-                if not alias_str:
-                    return quotas.get("gpu", 0) > 0 or quotas.get("default", 0) > 0
-                for entry in alias_str.split(","):
-                    entry = entry.strip()
-                    if not entry or not is_gpu_flavor(extra_specs={"pci_passthrough:alias": entry}):
-                        continue
-                    alias = entry.rpartition(":")[0].strip() if ":" in entry else entry
-                    canonical = normalize_gpu_alias(alias)
-                    if quotas.get(canonical, 0) == 0:
-                        return False
+        def _has_gpu_access(f: FlavorInfo) -> bool:
+            if not is_gpu_flavor(f):
                 return True
+            alias_str = f.extra_specs.get("pci_passthrough:alias", "")
+            if not alias_str:
+                return any(limit != 0 for limit in quotas.values())
+            for entry in alias_str.split(","):
+                entry = entry.strip()
+                if not entry or not is_gpu_flavor(extra_specs={"pci_passthrough:alias": entry}):
+                    continue
+                alias = entry.rpartition(":")[0].strip() if ":" in entry else entry
+                canonical = normalize_gpu_alias(alias)
+                if quotas.get(canonical, 0) == 0:
+                    return False
+            return True
 
-            return [f for f in all_flavors if _has_gpu_access(f)]
-        except Exception:
-            _logger.warning("GPU 쿼터 기반 flavor 필터링 실패 — non-GPU 목록만 반환", exc_info=True)
-            from app.services.gpu_inventory import is_gpu_flavor
+        return [f for f in all_flavors if _has_gpu_access(f)]
+    except Exception:
+        _logger.warning("GPU 쿼터 기반 flavor 필터링 실패 — non-GPU 목록만 반환", exc_info=True)
+        from app.services.gpu_inventory import is_gpu_flavor
 
-            return [f for f in all_flavors if not is_gpu_flavor(f)]
-
-    return await cache.cached_call(key, cache.ttl_static(), _load, enabled=cm.enabled, refresh=cm.refresh)
+        return [f for f in all_flavors if not is_gpu_flavor(f)]

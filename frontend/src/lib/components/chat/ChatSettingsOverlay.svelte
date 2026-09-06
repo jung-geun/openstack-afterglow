@@ -13,6 +13,12 @@
 
 	type Section = 'usage' | 'apikeys' | 'memory' | 'mcp' | 'tools' | 'skills';
 
+	interface MemoryDocument {
+		filename: 'memory.md';
+		content_type: 'text/markdown';
+		content: string;
+	}
+
 	interface Props {
 		open: boolean;
 		onClose: () => void;
@@ -56,6 +62,7 @@
 
 	// --- 메모리 CRUD (설정 전용, 단일 사용) ---
 	let memories = $state<Memory[]>([]);
+	let memoryDocument = $state<MemoryDocument | null>(null);
 	let memLoading = $state(true);
 	let editingId = $state<number | null>(null);
 	let draft = $state('');
@@ -67,12 +74,36 @@
 		if (!token) return;
 		memLoading = true;
 		try {
-			memories = await api.get<Memory[]>('/api/v1/chat/memories', token, projectId);
+			[memories, memoryDocument] = await Promise.all([
+				api.get<Memory[]>('/api/v1/chat/memories', token, projectId),
+				api.get<MemoryDocument>('/api/v1/chat/memories/document', token, projectId)
+			]);
 		} catch {
 			toast.error('메모리를 불러오지 못했습니다');
 		} finally {
 			memLoading = false;
 		}
+	}
+
+	async function copyMemoryDocument() {
+		if (!memoryDocument) return;
+		try {
+			await navigator.clipboard.writeText(memoryDocument.content);
+			toast.success('memory.md를 복사했습니다');
+		} catch {
+			toast.error('memory.md를 복사하지 못했습니다');
+		}
+	}
+
+	function downloadMemoryDocument() {
+		if (!memoryDocument) return;
+		const blob = new Blob([memoryDocument.content], { type: `${memoryDocument.content_type};charset=utf-8` });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = memoryDocument.filename;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
 
 	// 메모리 섹션을 처음 열 때 한 번 로드한다(오버레이가 열려 있는 동안 캐시).
@@ -202,8 +233,27 @@
 					</section>
 				{:else if section === 'memory'}
 					<section class="sec">
-						<h3 class="sec-title">메모리</h3>
-						<p class="sec-desc">AI 가 나에 대해 기억할 내용을 관리합니다.</p>
+						<h3 class="sec-title">memory.md</h3>
+						<p class="sec-desc">
+							완료된 대화에서 안정적인 선호와 작업 맥락을 자동으로 추출해 갱신합니다. 원본 메모리는 암호화해 저장합니다.
+						</p>
+						{#if memLoading}
+							<div class="memory-document skeleton" aria-label="memory.md 불러오는 중"></div>
+						{:else if memoryDocument}
+							<div class="memory-document">
+								<div class="memory-document-head">
+									<code>{memoryDocument.filename}</code>
+									<div class="memory-document-actions">
+										<Button variant="ghost" size="sm" type="button" onclick={copyMemoryDocument}>복사</Button>
+										<Button variant="ghost" size="sm" type="button" onclick={downloadMemoryDocument}>다운로드</Button>
+									</div>
+								</div>
+								<pre aria-label="memory.md 내용">{memoryDocument.content}</pre>
+							</div>
+						{/if}
+						<div class="divider"></div>
+						<h4 class="memory-manage-title">메모리 항목 직접 관리</h4>
+						<p class="sec-desc">자동으로 정리된 항목을 추가하거나 수정하고, 필요 없는 항목을 비활성화할 수 있습니다.</p>
 						<form
 							class="composer"
 							onsubmit={(e) => {
@@ -416,6 +466,49 @@
 		margin-top: 0.5rem;
 		font-variant-numeric: tabular-nums;
 	}
+	.memory-document {
+		margin-top: 0.45rem;
+		overflow: hidden;
+		border: 1px solid var(--color-line);
+		border-radius: 0.65rem;
+		background: var(--color-surface-base);
+	}
+	.memory-document.skeleton {
+		min-height: 10rem;
+		background: var(--color-surface-sunken);
+	}
+	.memory-document-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.45rem 0.65rem;
+		border-bottom: 1px solid var(--color-line);
+		color: var(--color-ink-2);
+	}
+	.memory-document-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	.memory-document pre {
+		max-height: 16rem;
+		margin: 0;
+		overflow: auto;
+		padding: 0.75rem;
+		color: var(--color-ink-1);
+		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+		font-size: 0.75rem;
+		line-height: 1.55;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.memory-manage-title {
+		margin: 0;
+		color: var(--color-ink-1);
+		font-size: 0.8rem;
+		font-weight: 650;
+	}
 	.composer {
 		display: flex;
 		flex-direction: column;
@@ -516,5 +609,24 @@
 	.act.danger:hover {
 		color: var(--color-state-danger);
 		background: color-mix(in oklab, var(--color-state-danger) 12%, transparent);
+	}
+	@media (max-width: 767px) {
+		.split {
+			flex-direction: column;
+		}
+		.nav {
+			width: 100%;
+			flex-direction: row;
+			overflow-x: auto;
+			border-right: none;
+			border-bottom: 1px solid var(--color-line);
+		}
+		.nav-item {
+			flex-shrink: 0;
+			white-space: nowrap;
+		}
+		.content {
+			padding: 1rem;
+		}
 	}
 </style>

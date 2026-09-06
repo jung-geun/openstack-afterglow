@@ -62,6 +62,82 @@ describe('chatContracts', () => {
 		).toThrow(ChatContractError);
 	});
 
+	it('requires run kind and strictly validates context.updated fields', () => {
+		const state = {
+			model_name: 'gpt-test',
+			context_limit: 16000,
+			output_reserve: 4096,
+			safety_reserve: 2048,
+			input_budget: 9856,
+			input_tokens: 9856,
+			utilization: 1.25,
+			measurement: 'estimated',
+			recommendation: 'required',
+			can_compact: true,
+			reason_code: null,
+			revision: 'rev-1',
+			checkpoint_id: null,
+			active_compaction_run_id: null
+		};
+		expect(
+			parseChatRunEvent({
+				event_id: 'run-context:1',
+				run_id: 'run-context',
+				seq: 1,
+				type: 'run.started',
+				created_at: '2026-07-21T00:00:00Z',
+				payload: {
+					conversation_id: 'conv-1',
+					temp_thread_id: null,
+					model_name: 'gpt-test',
+					effective_features: {},
+					run_kind: 'compaction'
+				}
+			})
+		).toMatchObject({ type: 'run.started', payload: { run_kind: 'compaction' } });
+		expect(
+			parseChatRunEvent({
+				event_id: 'run-context:2',
+				run_id: 'run-context',
+				seq: 2,
+				type: 'context.updated',
+				created_at: '2026-07-21T00:00:01Z',
+				payload: { state, phase: 'compacted', cause: 'manual', before_tokens: 12000, after_tokens: 7000 }
+			})
+		).toMatchObject({ type: 'context.updated', payload: { state: { utilization: 1.25 }, phase: 'compacted' } });
+		expect(() =>
+			parseChatRunEvent({
+				event_id: 'run-context:2',
+				run_id: 'run-context',
+				seq: 2,
+				type: 'context.updated',
+				created_at: '2026-07-21T00:00:01Z',
+				payload: { state: { ...state, unsafe_prompt: 'secret' }, phase: 'compacted', cause: 'manual', before_tokens: 12000, after_tokens: 7000 }
+			})
+		).toThrow(ChatContractError);
+		expect(() => parseChatRunEvent({
+			event_id: 'run-context:1',
+			run_id: 'run-context',
+			seq: 1,
+			type: 'run.started',
+			created_at: '2026-07-21T00:00:00Z',
+			payload: {
+				conversation_id: 'conv-1',
+				temp_thread_id: null,
+				model_name: 'gpt-test',
+				effective_features: {}
+			}
+		})).toThrow(ChatContractError);
+		expect(() => parseChatRunEvent({
+			event_id: 'run-context:2',
+			run_id: 'run-context',
+			seq: 2,
+			type: 'context.updated',
+			created_at: '2026-07-21T00:00:01Z',
+			payload: { state: { ...state, utilization: -0.1 }, phase: 'compacted', cause: null, before_tokens: null, after_tokens: null }
+		})).toThrow(ChatContractError);
+	});
+
 	it('parses the backend awaiting-input approval stage without a tool name', () => {
 		expect(
 			parseChatRunEvent({

@@ -4,6 +4,7 @@
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { toast } from '$lib/stores/toast';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Alert from '$lib/components/ui/Alert.svelte';
 	import type { ApiKey } from '$lib/api/chatUsage';
 
 	const token = $derived($auth.token ?? undefined);
@@ -16,14 +17,81 @@
 	// 발급 직후 평문 키(1회만). 모달로 표시 후 목록 새로고침.
 	let issued = $state<{ key: string; key_prefix: string } | null>(null);
 
-	// 외부 API base URL — 채팅 API는 전용 서브도메인(api.<host>)에서만 열린다(기본 URL과 충돌 방지).
-	// 이미 api. 로 시작하면 그대로, 아니면 호스트 앞에 api. 를 붙여 제안한다.
-	const origin = $derived.by(() => {
-		if (typeof window === 'undefined') return 'https://api.<host>';
-		const { protocol, host } = window.location;
-		const apiHost = host.startsWith('api.') ? host : `api.${host}`;
-		return `${protocol}//${apiHost}`;
-	});
+	interface CompatDiscovery {
+		endpoints: {
+			openai: { sdk_base_url: string };
+			anthropic: { sdk_base_url: string };
+		};
+	}
+	let sdkBases = $state<{ openai: string; anthropic: string } | null>(null);
+	let guideLoading = $state(false);
+	let guideError = $state('');
+	let guideGeneration = 0;
+
+	function sdkBaseUrl(value: unknown): string {
+		if (typeof value !== 'string' || !value.trim()) throw new Error('Missing SDK URL');
+		const url = new URL(value);
+		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+			throw new Error('Invalid SDK URL');
+		}
+		return value;
+	}
+
+	async function loadConnectionGuide(requestToken = token, requestProjectId = projectId) {
+		const generation = ++guideGeneration;
+		sdkBases = null;
+		guideError = '';
+		guideLoading = Boolean(requestToken);
+		if (!requestToken) return;
+		try {
+			const discovery = await api.get<CompatDiscovery>('/api/v1/chat/compat', requestToken, requestProjectId);
+			if (generation !== guideGeneration) return;
+			sdkBases = {
+				openai: sdkBaseUrl(discovery.endpoints?.openai?.sdk_base_url),
+				anthropic: sdkBaseUrl(discovery.endpoints?.anthropic?.sdk_base_url)
+			};
+		} catch {
+			if (generation !== guideGeneration) return;
+			guideError = 'Lumen 연결 정보를 불러오지 못했습니다. 서비스 연결 및 공개 API 주소 설정을 확인해 주세요.';
+		} finally {
+			if (generation === guideGeneration) guideLoading = false;
+		}
+	}
+
+	const openaiExample = $derived(sdkBases ? `import os
+
+from openai import OpenAI
+
+with OpenAI(
+    base_url=${JSON.stringify(sdkBases.openai)},
+    api_key=os.environ["LUMEN_API_KEY"],
+) as client:
+    response = client.chat.completions.create(
+        model=os.environ["LUMEN_MODEL"],
+        messages=[
+            {"role": "user", "content": "Write a short poem about the ocean."}
+        ],
+    )
+    print(response.choices[0].message.content)` : '');
+
+	const anthropicExample = $derived(sdkBases ? `import os
+
+from anthropic import Anthropic
+
+with Anthropic(
+    base_url=${JSON.stringify(sdkBases.anthropic)},
+    api_key=os.environ["LUMEN_API_KEY"],
+) as client:
+    response = client.messages.create(
+        model=os.environ["LUMEN_MODEL"],
+        max_tokens=1024,
+        messages=[
+            {"role": "user", "content": "Write a short poem about the ocean."}
+        ],
+    )
+    for block in response.content:
+        if block.type == "text":
+            print(block.text)` : '');
 
 	async function load() {
 		if (!token) return;
@@ -66,18 +134,26 @@
 		}
 	}
 
-	async function copyKey() {
-		if (!issued) return;
+	async function copyText(value: string, successMessage = '복사되었습니다') {
 		try {
-			await navigator.clipboard.writeText(issued.key);
-			toast.success('복사되었습니다');
+			await navigator.clipboard.writeText(value);
+			toast.success(successMessage);
 		} catch {
 			toast.error('복사 실패 — 수동으로 선택해 복사하세요');
 		}
 	}
 
+	async function copyKey() {
+		if (issued) await copyText(issued.key);
+	}
+
 	$effect(() => {
 		if (token) void load();
+	});
+
+	$effect(() => {
+		void loadConnectionGuide(token, projectId);
+		return () => { guideGeneration += 1; };
 	});
 
 	const inputCls =
@@ -126,19 +202,42 @@
 	{/if}
 
 	<!-- SDK 사용 예시 -->
-	<div class="{cardCls} mt-5 p-5">
+	<div class="{cardCls} mt-5 min-w-0 p-5">
 		<h4 class="mb-2 text-xs font-semibold text-[var(--color-ink-1)]">연결 방법</h4>
-		<p class="mb-2 text-xs text-[var(--color-ink-3)]">
-			채팅 API는 전용 서브도메인(<span class="font-mono">{origin.replace(/^https?:\/\//, '')}</span>)에서만 열립니다. OpenAI/Anthropic SDK의 base_url을 아래처럼 설정하세요.
-		</p>
-		<p class="mb-1 text-xs text-[var(--color-ink-3)]">OpenAI SDK (Python)</p>
-		<code class={codeCls}>from openai import OpenAI
-client = OpenAI(base_url="{origin}/v1", api_key="sk-afgl-...")
-client.chat.completions.create(model="...", messages=[...])</code>
-		<p class="mb-1 mt-3 text-xs text-[var(--color-ink-3)]">Anthropic SDK (Python)</p>
-		<code class={codeCls}>from anthropic import Anthropic
-client = Anthropic(base_url="{origin}", api_key="sk-afgl-...")
-client.messages.create(model="...", max_tokens=1024, messages=[...])</code>
+		{#if guideLoading}
+			<p class="text-xs text-ink-2" role="status">Lumen 연결 정보를 불러오는 중입니다.</p>
+		{:else if guideError}
+			<Alert>{guideError}</Alert>
+			<Button variant="secondary" size="sm" class="mt-3" onclick={() => loadConnectionGuide()}>
+				연결 정보 다시 불러오기
+			</Button>
+		{:else if sdkBases}
+			<p class="mb-2 text-xs text-ink-2">
+				Lumen이 제공한 공개 API 주소입니다. 대시보드 주소와 다를 수 있으며, SDK별 base_url을 그대로 사용하세요.
+			</p>
+			<p class="mb-2 text-xs text-ink-2">
+				<code>LUMEN_API_KEY</code> 환경 변수에 발급한 키를,
+				<code>LUMEN_MODEL</code>에 모델 선택창의 <strong>ID 복사</strong>로 복사한 API ID를 설정하세요.
+				아래 예제는 실제 요청을 보내며 API 사용량이 차감됩니다.
+			</p>
+			<p class="mb-3 text-xs text-ink-2">패키지 설치: <code>python -m pip install openai anthropic</code></p>
+			<div class="mb-1 flex items-center justify-between gap-2">
+				<p class="text-xs text-ink-2">OpenAI SDK (Python)</p>
+				<Button variant="ghost" size="sm" onclick={() => copyText(openaiExample, 'OpenAI 예제를 복사했습니다')}>
+					예제 복사
+				</Button>
+			</div>
+			<pre class="{codeCls} max-w-full whitespace-pre" role="region" aria-label="OpenAI SDK Python 예제"><code>{openaiExample}</code></pre>
+			<div class="mb-1 mt-3 flex items-center justify-between gap-2">
+				<p class="text-xs text-ink-2">Anthropic SDK (Python)</p>
+				<Button variant="ghost" size="sm" onclick={() => copyText(anthropicExample, 'Anthropic 예제를 복사했습니다')}>
+					예제 복사
+				</Button>
+			</div>
+			<pre class="{codeCls} max-w-full whitespace-pre" role="region" aria-label="Anthropic SDK Python 예제"><code>{anthropicExample}</code></pre>
+		{:else}
+			<p class="text-xs text-ink-2">로그인 후 Lumen 연결 정보를 확인할 수 있습니다.</p>
+		{/if}
 	</div>
 </section>
 

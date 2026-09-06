@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-	import type { ModelCapabilities } from '$lib/api/chatContracts';
+	import { tick, type Snippet } from 'svelte';
+	import type { ContextState, ModelCapabilities } from '$lib/api/chatContracts';
 	import { effortLabel, effortOptionsFor } from '$lib/api/chatEffort';
 	import {
 		completeChatAttachment,
@@ -11,12 +11,32 @@
 	} from '$lib/api/chatAttachments';
 	import { toast } from '$lib/stores/toast';
 	import ModelCapabilityBadges from './ModelCapabilityBadges.svelte';
+	import UsageRing from '$lib/components/ui/UsageRing.svelte';
+
+	export type ComposerCommand = {
+		id: string;
+		name: string;
+		description: string;
+		disabled?: boolean;
+		disabledReason?: string;
+		onSelect: () => void;
+	};
 
 	interface Props {
 		value: string;
 		streaming?: boolean;
 		disabled?: boolean;
+		/** Block sending without disabling draft editing or attachment controls. */
+		sendDisabled?: boolean;
 		placeholder?: string;
+		contextState?: ContextState | null;
+		hasContextScope?: boolean;
+		contextLoading?: boolean;
+		contextPhase?: 'ready' | 'compacting' | 'compacted' | 'failed';
+		contextCause?: 'automatic' | 'manual' | null;
+		contextBeforeTokens?: number | null;
+		contextAfterTokens?: number | null;
+		contextError?: string | null;
 		/** 현재 모델 능력 — effort 선택기·배지·첨부 게이팅. */
 		modelCaps?: ModelCapabilities | null;
 	/** 선택된 thinking effort(auto=provider 기본, none=명시적 비활성). */
@@ -34,6 +54,7 @@
 		/** @ mention으로 바인딩할 수 있는 현재 프로젝트 에이전트. */
 		availableAgents?: { id: number; name: string }[];
 		onSelectAgent?: (agentId: number) => void;
+		composerCommands?: ComposerCommand[];
 		token?: string;
 		projectId?: string;
 		onSend: () => void;
@@ -44,6 +65,15 @@
 		value = $bindable(''),
 		streaming = false,
 		disabled = false,
+		sendDisabled = false,
+		contextState = null,
+		hasContextScope = false,
+		contextLoading = false,
+		contextPhase = 'ready',
+		contextCause = null,
+		contextBeforeTokens = null,
+		contextAfterTokens = null,
+		contextError = null,
 		placeholder = '메시지를 입력하세요  (Enter 전송 · Shift+Enter 줄바꿈)',
 		modelCaps = null,
 		effort = $bindable(null),
@@ -55,6 +85,7 @@
 		availableSkills = [],
 		selectedSkillIds = $bindable([]),
 		availableAgents = [],
+		composerCommands = [],
 		onSelectAgent,
 		token,
 		projectId,
@@ -85,33 +116,24 @@
 	const canUseSkills = $derived(availableSkills.length > 0);
 	const hasPlus = $derived(canAttach || canUseTools || canUseSkills);
 
-	type ComposerShortcut = { kind: 'agent' | 'skill'; id: number; name: string };
-	const composerShortcuts = $derived.by((): ComposerShortcut[] => {
-		const match = value.match(/(?:^|\s)([@/])([^\s]*)$/);
-		if (!match) return [];
-		const [, prefix, query] = match;
-		const normalized = query.toLocaleLowerCase();
-		if (prefix === '@') {
-			return availableAgents
-				.filter((agent) => agent.name.toLocaleLowerCase().startsWith(normalized))
-				.slice(0, 5)
-				.map((agent) => ({ kind: 'agent', id: agent.id, name: agent.name }));
-		}
-		return availableSkills
-			.filter((skill) => skill.name.toLocaleLowerCase().startsWith(normalized))
-			.slice(0, 5)
-			.map((skill) => ({ kind: 'skill', id: skill.id, name: skill.name }));
-	});
+	type ComposerQuickAction = {
+		kind: 'quick-action';
+		id: string;
+		name: string;
+		description: string;
+		disabled?: boolean;
+		disabledReason?: string;
+		onSelect: () => void;
+	};
+	type ComposerShortcut =
+		| { kind: 'agent' | 'skill'; id: number; name: string }
+		| ({ kind: 'command' } & ComposerCommand)
+		| ComposerQuickAction;
 
-	function applyShortcut(shortcut: ComposerShortcut) {
-		if (shortcut.kind === 'agent') {
-			onSelectAgent?.(shortcut.id);
-		} else if (!selectedSkillIds.includes(shortcut.id)) {
-			selectedSkillIds = [...selectedSkillIds, shortcut.id];
-		}
-		value = value.replace(/(^|\s)[@/][^\s]*$/, '$1');
-		ta?.focus();
-	}
+	let shortcutMenu = $state<HTMLDivElement | null>(null);
+	let activeShortcutIndex = $state(0);
+	let dismissedShortcutValue = $state<string | null>(null);
+
 	const attachmentUnavailableReason = $derived.by(() => {
 		if (!modelCaps) return '모델 기능을 확인하는 중입니다';
 		const imageGate = modelCaps.feature_gates?.image_input;
@@ -125,6 +147,134 @@
 		return '선택한 모델은 이미지 또는 PDF 입력을 지원하지 않습니다';
 	});
 	const plusTitle = $derived(hasPlus ? '첨부·도구' : attachmentUnavailableReason);
+	const quickActions = $derived.by((): ComposerQuickAction[] => [
+		{
+			kind: 'quick-action',
+			id: 'attach-file',
+			name: '파일 첨부',
+			description: canAttach ? '개인 프로젝트 기본 버킷에 이미지 또는 PDF를 자동 저장합니다' : attachmentUnavailableReason,
+			disabled: !canAttach,
+			disabledReason: canAttach ? undefined : attachmentUnavailableReason,
+			onSelect: () => fileInput?.click()
+		},
+		{
+			kind: 'quick-action',
+			id: 'features',
+			name: '도구 및 스킬',
+			description: '사용할 도구와 스킬을 선택합니다',
+			disabled: !canUseTools && !canUseSkills,
+			disabledReason: !canUseTools && !canUseSkills ? '현재 사용할 수 있는 도구나 스킬이 없습니다' : undefined,
+			onSelect: () => (plusOpen = true)
+		}
+	]);
+	const shortcutTrigger = $derived(value.match(/(?:^|\s)([@/])([^\n]*)$/));
+	const composerShortcuts = $derived.by((): ComposerShortcut[] => {
+		if (!shortcutTrigger || dismissedShortcutValue === value) return [];
+		const [, prefix, query] = shortcutTrigger;
+		const normalized = query.trim().toLocaleLowerCase();
+		if (prefix === '@') {
+			const actions = quickActions.filter((action) =>
+				`${action.name} ${action.description}`.toLocaleLowerCase().includes(normalized)
+			);
+			const agents = availableAgents
+				.filter((agent) => agent.name.toLocaleLowerCase().includes(normalized))
+				.map((agent) => ({ kind: 'agent' as const, id: agent.id, name: agent.name }));
+			return [...actions, ...agents].slice(0, 7);
+		}
+		const commandShortcuts = composerCommands
+			.filter((command) =>
+				`${command.id} ${command.name} ${command.description}`
+					.toLocaleLowerCase()
+					.includes(normalized)
+			)
+			.slice(0, 7)
+			.map((command) => ({ kind: 'command' as const, ...command }));
+		const skillShortcuts = availableSkills
+			.filter((skill) => skill.name.toLocaleLowerCase().includes(normalized))
+			.slice(0, 5)
+			.map((skill) => ({ kind: 'skill' as const, id: skill.id, name: skill.name }));
+		return [...commandShortcuts, ...skillShortcuts];
+	});
+	const shortcutMenuLabel = $derived(
+		shortcutTrigger?.[1] === '@' ? '채팅 추가 제안' : '채팅 명령 제안'
+	);
+	const shortcutSignature = $derived(
+		composerShortcuts.map((shortcut) => `${shortcut.kind}:${shortcut.id}`).join('|')
+	);
+	const shortcutsVisible = $derived(!streaming && composerShortcuts.length > 0);
+
+	function shortcutDisabled(shortcut: ComposerShortcut): boolean {
+		return (shortcut.kind === 'command' || shortcut.kind === 'quick-action') && Boolean(shortcut.disabled);
+	}
+	function firstEnabledShortcut(): number {
+		const index = composerShortcuts.findIndex((shortcut) => !shortcutDisabled(shortcut));
+		return index === -1 ? 0 : index;
+	}
+	$effect(() => {
+		void shortcutSignature;
+		activeShortcutIndex = firstEnabledShortcut();
+	});
+
+	async function scrollActiveShortcut() {
+		await tick();
+		const active = shortcutMenu?.querySelector<HTMLElement>(
+			`[data-shortcut-index="${activeShortcutIndex}"]`
+		);
+		active?.scrollIntoView?.({ block: 'nearest' });
+	}
+	function moveShortcut(direction: -1 | 1) {
+		const enabled = composerShortcuts
+			.map((shortcut, index) => ({ shortcut, index }))
+			.filter(({ shortcut }) => !shortcutDisabled(shortcut))
+			.map(({ index }) => index);
+		if (enabled.length === 0) return;
+		const position = enabled.indexOf(activeShortcutIndex);
+		const next = position === -1 ? 0 : (position + direction + enabled.length) % enabled.length;
+		activeShortcutIndex = enabled[next];
+		void scrollActiveShortcut();
+	}
+	function clearShortcutTrigger() {
+		value = value.replace(/(^|\s)[@/][^\n]*$/, '$1');
+	}
+	async function applyShortcut(shortcut: ComposerShortcut) {
+		if (shortcutDisabled(shortcut)) return;
+		if (shortcut.kind === 'command' || shortcut.kind === 'quick-action') {
+			clearShortcutTrigger();
+			ta?.focus();
+			await tick();
+			shortcut.onSelect();
+			return;
+		}
+		if (shortcut.kind === 'agent') {
+			onSelectAgent?.(shortcut.id);
+		} else if (!selectedSkillIds.includes(shortcut.id)) {
+			selectedSkillIds = [...selectedSkillIds, shortcut.id];
+		}
+		clearShortcutTrigger();
+		ta?.focus();
+	}
+	function autocompleteShortcut(shortcut: ComposerShortcut) {
+		if (shortcut.kind !== 'command' || shortcut.disabled) {
+			void applyShortcut(shortcut);
+			return;
+		}
+		value = value.replace(/(^|\s)\/[^\n]*$/, `$1/${shortcut.name} `);
+		ta?.focus();
+	}
+	async function executeTypedCommand(): Promise<boolean> {
+		const typed = value.trim().match(/^\/(.+)$/)?.[1]?.trim().toLocaleLowerCase();
+		if (!typed) return false;
+		const command = composerCommands.find(
+			(candidate) =>
+				candidate.name.toLocaleLowerCase() === typed || candidate.id.toLocaleLowerCase() === typed
+		);
+		if (!command) return false;
+		if (command.disabled) return true;
+		clearShortcutTrigger();
+		await tick();
+		command.onSelect();
+		return true;
+	}
 
 	function isOn(id: number, selected: number[] | null): boolean {
 		return selected === null ? true : selected.includes(id);
@@ -208,19 +358,71 @@
 		autoGrow();
 	});
 
-	function onKeydown(e: KeyboardEvent) {
+	async function onKeydown(e: KeyboardEvent) {
+		if (shortcutsVisible) {
+			if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+				e.preventDefault();
+				moveShortcut(e.key === 'ArrowDown' ? 1 : -1);
+				return;
+			}
+			if (e.key === 'Tab') {
+				e.preventDefault();
+				autocompleteShortcut(composerShortcuts[activeShortcutIndex] ?? composerShortcuts[0]);
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				dismissedShortcutValue = value;
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+				e.preventDefault();
+				await applyShortcut(composerShortcuts[activeShortcutIndex] ?? composerShortcuts[0]);
+				return;
+			}
+		}
 		if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 			e.preventDefault();
-			if (!streaming) onSend();
+			if (!streaming && (await executeTypedCommand())) return;
+			if (canSend) onSend();
 		}
 	}
-
 	function chooseEffort(v: string) {
 		effort = v;
 		effortOpen = false;
 	}
 
-	const canSend = $derived(!disabled && !streaming && value.trim().length > 0);
+	const canSend = $derived(!disabled && !sendDisabled && !streaming && value.trim().length > 0);
+
+	const format = new Intl.NumberFormat('ko-KR');
+	const knownContext = $derived(
+		hasContextScope &&
+			contextState !== null &&
+			contextState.measurement !== 'unknown' &&
+			contextState.input_budget !== null &&
+			contextState.input_tokens !== null &&
+			contextState.utilization !== null
+	);
+	const contextPercent = $derived(
+		Math.min(100, Math.round((contextState?.utilization ?? 0) * 100))
+	);
+	const contextValueText = $derived(
+		knownContext
+			? `약 ${format.format(contextState!.input_tokens!)} / ${format.format(contextState!.input_budget!)} 토큰 · ${Math.round((contextState!.utilization ?? 0) * 100)}%`
+			: '컨텍스트 한도를 확인할 수 없습니다'
+	);
+	const contextStatus = $derived.by(() => {
+		if (contextPhase === 'compacting') {
+			return contextCause === 'automatic' ? '컨텍스트 자동 압축 중' : '컨텍스트 압축 중';
+		}
+		if (contextPhase === 'compacted' && contextBeforeTokens !== null && contextAfterTokens !== null) {
+			return `압축 ${format.format(contextBeforeTokens)} → ${format.format(contextAfterTokens)}`;
+		}
+		if (contextError) return contextError;
+		if (knownContext) return `컨텍스트 ${contextPercent}%`;
+		if (contextLoading) return '컨텍스트 확인 중';
+		return '컨텍스트 확인 불가';
+	});
 </script>
 
 <div class="composer">
@@ -232,6 +434,46 @@
 		hidden
 		onchange={onFilePick}
 	/>
+	{#if shortcutsVisible}
+		<div
+			class="shortcut-menu"
+			id="chat-composer-shortcuts"
+			bind:this={shortcutMenu}
+			role="listbox"
+			aria-label={shortcutMenuLabel}
+		>
+			{#each composerShortcuts as shortcut, index (shortcut.kind + shortcut.id)}
+				<button
+					type="button"
+					id={`chat-composer-shortcut-${index}`}
+					data-shortcut-index={index}
+					role="option"
+					aria-selected={index === activeShortcutIndex}
+					class="shortcut-option"
+					class:active={index === activeShortcutIndex}
+					disabled={shortcutDisabled(shortcut)}
+					title={shortcut.kind === 'command' || shortcut.kind === 'quick-action' ? shortcut.disabledReason : undefined}
+					onpointerenter={() => (activeShortcutIndex = index)}
+					onclick={() => applyShortcut(shortcut)}
+				>
+					<span class="shortcut-prefix">{shortcut.kind === 'command' || shortcut.kind === 'skill' ? '/' : '@'}</span>
+					<span class="shortcut-copy">
+						<span class="shortcut-name">{shortcut.name}</span>
+						{#if shortcut.kind === 'command' || shortcut.kind === 'quick-action'}
+							<span class="shortcut-description">{shortcut.description}</span>
+						{/if}
+					</span>
+					<span class="shortcut-kind">
+						{#if shortcut.kind === 'command' || shortcut.kind === 'quick-action'}
+							{shortcut.disabled ? (shortcut.disabledReason ?? '사용 불가') : shortcut.kind === 'command' ? '명령' : '추가'}
+						{:else}
+							{shortcut.kind === 'agent' ? '에이전트' : '스킬'}
+						{/if}
+					</span>
+				</button>
+			{/each}
+		</div>
+	{/if}
 	<div
 		class="input-wrap"
 		class:drag-over={dragOver}
@@ -270,28 +512,15 @@
 			bind:value
 			{placeholder}
 			rows="1"
-
 			disabled={disabled && !streaming}
+			aria-controls={shortcutsVisible ? 'chat-composer-shortcuts' : undefined}
+			aria-activedescendant={shortcutsVisible ? `chat-composer-shortcut-${activeShortcutIndex}` : undefined}
 			onkeydown={onKeydown}
-			oninput={autoGrow}
+			oninput={() => {
+				dismissedShortcutValue = null;
+				autoGrow();
+			}}
 		></textarea>
-		{#if composerShortcuts.length && !streaming}
-			<div class="shortcut-menu" role="listbox" aria-label="채팅 명령 제안">
-				{#each composerShortcuts as shortcut (shortcut.kind + shortcut.id)}
-					<button
-						type="button"
-						role="option"
-						aria-selected={shortcut.kind === 'skill' && selectedSkillIds.includes(shortcut.id)}
-						class="shortcut-option"
-						onclick={() => applyShortcut(shortcut)}
-					>
-						<span class="shortcut-prefix">{shortcut.kind === 'agent' ? '@' : '/'}</span>
-						<span class="shortcut-name">{shortcut.name}</span>
-						<span class="shortcut-kind">{shortcut.kind === 'agent' ? '에이전트' : '스킬'}</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
 
 		<div class="toolbar">
 			<div class="tb-left">
@@ -314,7 +543,10 @@
 							{#if canAttach}
 								<button type="button" class="plus-opt" role="menuitem" onclick={() => fileInput?.click()}>
 									<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="2.6" /></svg>
-									이미지 추가
+									<span class="plus-opt-copy">
+										<span class="plus-opt-name">파일 첨부</span>
+										<span class="plus-opt-description">개인 프로젝트 기본 버킷에 자동 저장</span>
+									</span>
 								</button>
 							{/if}
 							{#if canUseTools}
@@ -357,6 +589,31 @@
 			</div>
 
 			<div class="tb-right">
+				{#if hasContextScope}
+					<div
+						class="context-status"
+						class:compacting={contextPhase === 'compacting'}
+						title={contextError ?? contextValueText}
+						role="status"
+						aria-live="polite"
+						aria-atomic="true"
+					>
+						{#if contextPhase === 'compacting' || (contextLoading && !knownContext)}
+							<span class="context-spinner" aria-hidden="true"></span>
+						{:else if knownContext}
+							<UsageRing
+								percent={contextPercent}
+								thresholds={{ warning: 70, danger: 80 }}
+								label="컨텍스트 입력 예산 사용률"
+								valueText={contextValueText}
+							/>
+						{:else}
+							<span class="context-unavailable" aria-hidden="true">?</span>
+						{/if}
+						<span class="context-status-text">{contextStatus}</span>
+					</div>
+				{/if}
+
 				{#if showEffort}
 					<div class="effort">
 						<button
@@ -416,6 +673,13 @@
 		transition: border-color 0.15s, box-shadow 0.15s;
 		box-shadow: 0 14px 32px color-mix(in oklab, var(--color-ink-0) 10%, transparent);
 	}
+	.toolbar {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
 	.input-wrap:focus-within {
 		border-color: var(--color-accent);
 		box-shadow: var(--focus-ring), 0 14px 32px color-mix(in oklab, var(--color-ink-0) 10%, transparent);
@@ -438,8 +702,9 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.1rem;
-		max-height: 12rem;
+		max-height: min(18rem, 42dvh);
 		overflow-y: auto;
+		margin: 0 0 0.4rem;
 		padding: 0.3rem;
 		border: 1px solid var(--color-line);
 		border-radius: 0.6rem;
@@ -461,7 +726,8 @@
 		text-align: left;
 	}
 	.shortcut-option:hover,
-	.shortcut-option:focus-visible {
+	.shortcut-option:focus-visible,
+	.shortcut-option.active {
 		background: var(--color-surface-raised);
 	}
 	.shortcut-prefix {
@@ -469,20 +735,76 @@
 		font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 		font-weight: 700;
 	}
+	.shortcut-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.08rem;
+	}
 	.shortcut-name {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.shortcut-kind {
+	.shortcut-description {
+		overflow: hidden;
 		color: var(--color-ink-3);
 		font-size: 0.68rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-	.toolbar {
-		display: flex;
+	.shortcut-kind {
+		max-width: 8rem;
+		overflow: hidden;
+		color: var(--color-ink-3);
+		font-size: 0.68rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.shortcut-option:disabled {
+		cursor: not-allowed;
+		opacity: 0.58;
+	}
+	.shortcut-option:disabled:hover,
+	.shortcut-option:disabled.active {
+		background: transparent;
+	}
+	.context-status {
+		display: inline-flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
+		gap: 0.32rem;
+		min-width: 0;
+		color: var(--color-ink-2);
+		font-size: 0.72rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.context-status.compacting { color: var(--color-accent); }
+	.context-status-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.context-spinner,
+	.context-unavailable {
+		display: inline-flex;
+		width: 1.125rem;
+		height: 1.125rem;
+		flex: 0 0 auto;
+		align-items: center;
+		justify-content: center;
+	}
+	.context-spinner {
+		border: 2px solid var(--color-line-2);
+		border-top-color: currentColor;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+	.context-unavailable {
+		border: 1px solid var(--color-line-2);
+		border-radius: 50%;
+		color: var(--color-ink-3);
+		font-size: 0.7rem;
+		font-weight: 700;
 	}
 	.tb-left {
 		display: flex;
@@ -594,7 +916,7 @@
 		bottom: calc(100% + 0.35rem);
 		left: 0;
 		z-index: 21;
-		min-width: 9rem;
+		min-width: min(18rem, calc(100vw - 2rem));
 		background: var(--color-surface-raised);
 		border: 1px solid var(--color-line);
 		border-radius: 0.6rem;
@@ -607,7 +929,7 @@
 	}
 	.plus-opt {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 0.5rem;
 		width: 100%;
 		padding: 0.45rem 0.55rem;
@@ -618,6 +940,26 @@
 		font-size: 0.82rem;
 		cursor: pointer;
 		text-align: left;
+	}
+	.plus-opt-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
+	.plus-opt-name {
+		font-weight: 600;
+	}
+	.plus-opt-description {
+		color: var(--color-ink-3);
+		font-size: 0.7rem;
+		line-height: 1.35;
+	}
+	@media (min-width: 768px) and (max-width: 1023px) {
+		.plus-menu {
+			right: 0;
+			left: auto;
+		}
 	}
 	.plus-opt:hover {
 		background: var(--color-surface-sunken);
@@ -769,5 +1111,11 @@
 		text-align: center;
 		font-size: 0.6875rem;
 		color: var(--color-ink-3);
+	}
+
+	@media (max-width: 47.9375rem) {
+		.context-status-text {
+			display: none;
+		}
 	}
 </style>

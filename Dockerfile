@@ -153,7 +153,7 @@ WORKDIR /app
 
 COPY --from=frontend-builder /app/build ./build
 COPY --from=frontend-builder /app/package.json ./
-
+COPY --from=frontend-builder /app/scripts ./scripts
 RUN npm install --omit=dev --ignore-scripts \
     && adduser -D appuser \
     && chown -R appuser:appuser /app
@@ -163,7 +163,7 @@ USER appuser
 # EXPOSE 3080
 ENV PORT=3080
 
-CMD ["node", "build"]
+CMD ["node", "scripts/run-with-file-log.mjs", "node", "build"]
 
 # ── Frontend 개발 스테이지 (docker-compose.override.yml에서 사용) ────────────
 # Frontend 개발 스테이지
@@ -180,4 +180,4 @@ COPY frontend/ .
 # EXPOSE 3080
 ENV PORT=3080
 
-CMD ["bun", "run", "dev", "--host", "0.0.0.0", "--port", "3080"]
+CMD ["bun", "scripts/run-with-file-log.mjs", "bun", "run", "dev:raw", "--host", "0.0.0.0", "--port", "3080"]

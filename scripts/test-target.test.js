@@ -34,8 +34,7 @@ function getStepLabel() {
 	}
 
 	if (lane === "frontend") {
-		const dashDashIndex = args.indexOf("--")
-		const selector = dashDashIndex === -1 ? "" : args[dashDashIndex + 1] || ""
+		const selector = args.find((arg) => arg.startsWith("src/")) || ""
 		if (selector === "src/lib/stores/__tests__/auth.test.ts") return "auth [frontend]"
 		if (selector === "src/lib/config/site.test.ts") return "config [frontend]"
 	}

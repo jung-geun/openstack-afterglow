@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { LoadBalancerDetail } from '$lib/types/loadbalancer';
+	import { isDroverLoadBalancer } from '$lib/utils/droverLoadBalancer';
 
 	let {
 		lb,
@@ -11,6 +12,8 @@
 		deleting: boolean;
 		onDelete: () => void;
 	} = $props();
+
+	const isProtected = $derived(isDroverLoadBalancer(lb));
 </script>
 
 <button onclick={() => goto('/dashboard')} class="text-sm text-gray-400 hover:text-gray-200 mb-6 inline-flex items-center gap-1">
@@ -31,5 +34,5 @@
 			{/if}
 		</div>
 	</div>
-	<button onclick={onDelete} disabled={deleting} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">삭제</button>
+	<button onclick={onDelete} disabled={deleting} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">{isProtected ? '강제 삭제' : '삭제'}</button>
 </div>

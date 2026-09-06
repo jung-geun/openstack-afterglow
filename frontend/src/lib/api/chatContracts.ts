@@ -119,12 +119,64 @@ export type ChatRunStatus =
 	| 'failed'
 	| 'canceled';
 
+export type ChatRunKind = 'completion' | 'compaction';
+
 export interface ChatRunDescriptor {
 	run_id: string;
-	temp_thread_id?: string | null;
+	conversation_id: string | null;
+	temp_thread_id: string | null;
 	status: ChatRunStatus;
+	run_kind: ChatRunKind;
 	events_url: string;
 	cancel_url: string;
+}
+
+export interface ChatRunResponse {
+	run_id: string;
+	status: ChatRunStatus;
+	conversation_id: string | null;
+	temp_thread_id: string | null;
+	run_kind: ChatRunKind;
+	effective_features: Record<string, unknown>;
+	public_history: unknown[] | null;
+	last_seq: number;
+	terminal: boolean;
+}
+
+export type ContextMeasurement = 'tokenizer' | 'estimated' | 'unknown';
+export type ContextRecommendation = 'none' | 'compact' | 'required' | 'unavailable';
+export type ContextPhase = 'ready' | 'compacting' | 'compacted' | 'failed';
+export type ContextCause = 'automatic' | 'manual' | null;
+
+export interface ContextState {
+	model_name: string;
+	context_limit: number | null;
+	output_reserve: number;
+	safety_reserve: number;
+	input_budget: number | null;
+	input_tokens: number | null;
+	utilization: number | null;
+	measurement: ContextMeasurement;
+	recommendation: ContextRecommendation;
+	can_compact: boolean;
+	reason_code: string | null;
+	revision: string;
+	checkpoint_id: string | null;
+	active_compaction_run_id: string | null;
+}
+
+export interface ContextUpdatedPayload {
+	state: ContextState;
+	phase: ContextPhase;
+	cause: ContextCause;
+	before_tokens: number | null;
+	after_tokens: number | null;
+}
+
+export interface ChatConversationTitleMetadata {
+	title_source: 'legacy' | 'auto' | 'explicit';
+	title_status: 'idle' | 'pending' | 'ready' | 'failed' | 'unavailable';
+	title_revision: number;
 }
 export interface UsageComponent {
 	segment_id: string;
@@ -154,9 +206,10 @@ export type ToolActivitySource = 'builtin' | 'managed' | 'custom_http' | 'mcp' |
 
 
 export type ChatRunEvent =
-	| EventBase<'run.started', { conversation_id: string | null; temp_thread_id: string | null; model_name: string; effective_features: Record<string, unknown> }>
+	| EventBase<'run.started', { conversation_id: string | null; temp_thread_id: string | null; model_name: string; effective_features: Record<string, unknown>; run_kind: ChatRunKind }>
 	| EventBase<'run.stage.changed', { stage: RunStage; tool_name: string | null }>
 	| EventBase<'run.warning', { code: string; safe_message: string }>
+	| EventBase<'context.updated', ContextUpdatedPayload>
 	| EventBase<'message.created', { message_id: string; role: 'assistant' | 'tool'; parent_id: string | null }>
 	| EventBase<'part.delta', { message_id: string; part_index: number; part_type: 'text' | 'reasoning'; delta: string }>
 	| EventBase<'part.completed', { message_id: string; part_index: number; part: ChatPart }>
@@ -299,6 +352,75 @@ function enumValue<T extends string>(value: unknown, choices: readonly T[], labe
 	if (typeof value !== 'string' || !choices.includes(value as T)) throw new ChatContractError(`invalid ${label}`);
 	return value as T;
 }
+function nonNegativeNumber(value: unknown, label: string): number {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+		throw new ChatContractError(`${label} must be a finite non-negative number`);
+	}
+	return value;
+}
+
+function nullableNonNegativeNumber(value: unknown, label: string): number | null {
+	if (value === null) return null;
+	return nonNegativeNumber(value, label);
+}
+
+
+function nullableNonNegativeInteger(value: unknown, label: string): number | null {
+	if (value === null) return null;
+	return integer(value, label);
+}
+
+export function parseContextState(value: unknown): ContextState {
+	const state = record(value, 'context state');
+	exact(
+		state,
+		[
+			'model_name',
+			'context_limit',
+			'output_reserve',
+			'safety_reserve',
+			'input_budget',
+			'input_tokens',
+			'utilization',
+			'measurement',
+			'recommendation',
+			'can_compact',
+			'reason_code',
+			'revision',
+			'checkpoint_id',
+			'active_compaction_run_id'
+		],
+		'context state'
+	);
+	return {
+		model_name: text(state.model_name, 'context model_name')!,
+		context_limit: nullableNonNegativeInteger(state.context_limit, 'context_limit'),
+		output_reserve: nonNegativeNumber(state.output_reserve, 'output_reserve'),
+		safety_reserve: nonNegativeNumber(state.safety_reserve, 'safety_reserve'),
+		input_budget: nullableNonNegativeInteger(state.input_budget, 'input_budget'),
+		input_tokens: nullableNonNegativeInteger(state.input_tokens, 'input_tokens'),
+		utilization: nullableNonNegativeNumber(state.utilization, 'utilization'),
+		measurement: enumValue(state.measurement, ['tokenizer', 'estimated', 'unknown'] as const, 'context measurement'),
+		recommendation: enumValue(state.recommendation, ['none', 'compact', 'required', 'unavailable'] as const, 'context recommendation'),
+		can_compact: bool(state.can_compact, 'can_compact'),
+		reason_code: nullableText(state.reason_code, 'reason_code'),
+		revision: text(state.revision, 'context revision')!,
+		checkpoint_id: nullableText(state.checkpoint_id, 'checkpoint_id'),
+		active_compaction_run_id: nullableText(state.active_compaction_run_id, 'active_compaction_run_id')
+	};
+}
+
+function parseContextUpdatedPayload(value: Record<string, unknown>): ContextUpdatedPayload {
+	exact(value, ['state', 'phase', 'cause', 'before_tokens', 'after_tokens'], 'context.updated payload');
+	return {
+		state: parseContextState(value.state),
+		phase: enumValue(value.phase, ['ready', 'compacting', 'compacted', 'failed'] as const, 'context phase'),
+		cause: value.cause === null ? null : enumValue(value.cause, ['automatic', 'manual'] as const, 'context cause'),
+		before_tokens: nullableNonNegativeInteger(value.before_tokens, 'before_tokens'),
+		after_tokens: nullableNonNegativeInteger(value.after_tokens, 'after_tokens')
+	};
+}
+
 
 function decimal(value: unknown, label: string, negative = false): string {
 	const raw = text(value, label)!;
@@ -344,8 +466,18 @@ export function parseChatRunEvent(value: unknown): ChatRunEvent {
 
 	switch (type) {
 		case 'run.started': {
-			exact(payload, ['conversation_id', 'temp_thread_id', 'model_name', 'effective_features'], 'run.started payload');
-			return { ...base, type, payload: { conversation_id: nullableText(payload.conversation_id, 'conversation_id'), temp_thread_id: nullableText(payload.temp_thread_id, 'temp_thread_id'), model_name: text(payload.model_name, 'model_name')!, effective_features: record(payload.effective_features, 'effective_features') } };
+			exact(payload, ['conversation_id', 'temp_thread_id', 'model_name', 'effective_features', 'run_kind'], 'run.started payload');
+			return {
+				...base,
+				type,
+				payload: {
+					conversation_id: nullableText(payload.conversation_id, 'conversation_id'),
+					temp_thread_id: nullableText(payload.temp_thread_id, 'temp_thread_id'),
+					model_name: text(payload.model_name, 'model_name')!,
+					effective_features: record(payload.effective_features, 'effective_features'),
+					run_kind: enumValue(payload.run_kind, ['completion', 'compaction'] as const, 'run kind')
+				}
+			};
 		}
 		case 'run.stage.changed': {
 			exact(payload, ['stage', 'tool_name'], 'run.stage.changed payload');
@@ -362,6 +494,8 @@ export function parseChatRunEvent(value: unknown): ChatRunEvent {
 			exact(payload, ['message_id', 'role', 'parent_id'], 'message.created payload');
 			return { ...base, type, payload: { message_id: text(payload.message_id, 'message_id')!, role: enumValue(payload.role, ['assistant', 'tool'] as const, 'message role'), parent_id: nullableText(payload.parent_id, 'parent_id') } };
 		}
+		case 'context.updated':
+			return { ...base, type, payload: parseContextUpdatedPayload(payload) };
 		case 'part.delta': {
 			exact(payload, ['message_id', 'part_index', 'part_type', 'delta'], 'part.delta payload');
 			return { ...base, type, payload: { message_id: text(payload.message_id, 'message_id')!, part_index: integer(payload.part_index, 'part_index'), part_type: enumValue(payload.part_type, ['text', 'reasoning'] as const, 'part_type'), delta: text(payload.delta, 'delta')! } };

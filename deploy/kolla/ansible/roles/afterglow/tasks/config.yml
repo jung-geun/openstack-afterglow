@@ -243,3 +243,21 @@
     ((afterglow_frontend_config_render.stdout | trim | default('{}', true) | from_json).changed
     | default(false) | bool)
   when: inventory_hostname in groups['afterglow']
+- name: Config | Ensure Afterglow log directories exist and are owned by log owner
+  become: true
+  community.docker.docker_container:
+    name: afterglow_log_dir_setup
+    image: "{{ afterglow_backend_image_ref }}"
+    user: "root"
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /var/log/kolla/afterglow_api /var/log/kolla/afterglow && \
+        chown -R {{ afterglow_log_owner_uid }}:{{ afterglow_log_owner_gid }} /var/log/kolla/afterglow_api /var/log/kolla/afterglow
+    state: started
+    detach: false
+    cleanup: true
+    volumes:
+      - "kolla_logs:/var/log/kolla/"
+  when: inventory_hostname in groups['afterglow']

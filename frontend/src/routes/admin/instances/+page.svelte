@@ -346,7 +346,7 @@
 
 {#if selectedInstanceId}
 	<SlidePanel onClose={closeDetail} dataTour="admin-compute-detail">
-		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
+		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} showHost={true} />
 	</SlidePanel>
 {/if}
 

@@ -28,6 +28,22 @@ describe('ChatWindow', () => {
 		expect(status.textContent).toContain('초');
 	});
 
+	it('shows manual context compaction as chat-window activity before other run activity', () => {
+		const { getByRole, queryByText } = render(ChatWindow, {
+			activePath: [],
+			models: [],
+			manualCompactionActivity: '컨텍스트 압축 중',
+			agentActivity: {
+				label: '응답을 작성 중',
+				startedAt: new Date().toISOString()
+			},
+			...callbacks
+		});
+
+		expect(getByRole('status').textContent).toContain('컨텍스트 압축 중');
+		expect(queryByText('응답을 작성 중')).toBeNull();
+	});
+
 
 	it('renders the mapped tool task instead of a backend identifier', () => {
 		const { getByRole, queryByText } = render(ChatWindow, {

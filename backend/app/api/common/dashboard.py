@@ -531,13 +531,16 @@ async def get_project_quotas(
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
-    # Drover owns GPU quota state independently of Afterglow's local database.
+    # Afterglow local GPU quota authority.
     gpu_quota: list[dict] = []
     gpu_quota_available = True
     try:
-        status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+        from app.services.gpu_quota import get_effective_gpu_quota_status
+
+        pid = conn._afterglow_project_id
+        status_list = await get_effective_gpu_quota_status(conn, pid)
         if not isinstance(status_list, list):
-            raise ValueError("gpu_quota_status response is not a list")
+            raise ValueError("get_effective_gpu_quota_status response is not a list")
         gpu_quota = status_list
     except Exception:
         gpu_quota_available = False
@@ -616,10 +619,12 @@ async def get_gpu_available(
     # 프로젝트 GPU 쿼터 기반 필터링 + 가용량을 쿼터 상한 기준으로 표시
     try:
         from app.api.identity.admin_gpu import build_device_name_to_alias_map
+        from app.services.gpu_quota import get_effective_gpu_quota_status
 
-        status_list = await asyncio.to_thread(register_drover(conn).gpu_quota_status)
+        pid = conn._afterglow_project_id
+        status_list = await get_effective_gpu_quota_status(conn, pid)
         if not isinstance(status_list, list):
-            raise ValueError("gpu_quota_status response is not a list")
+            raise ValueError("get_effective_gpu_quota_status response is not a list")
         quotas = {
             item["gpu_type"]: item["limit"]
             for item in status_list

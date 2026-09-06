@@ -1,12 +1,15 @@
 """Afterglow browser proxy contracts for the extracted Lumen service."""
 
 import asyncio
+import gzip
 import importlib.util
+import json
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import yaml
 from fastapi import FastAPI, Request
@@ -139,7 +142,7 @@ async def test_lumen_mcp_oauth_callback_proxies_unauthenticated_with_cookies():
         resp = MagicMock(spec=HttpxResponse)
         resp.status_code = 303
         resp.headers = resp_headers
-        resp.aiter_bytes = MagicMock()
+        resp.aiter_raw = MagicMock()
         resp.aclose = AsyncMock()
         return resp
 
@@ -176,7 +179,7 @@ async def test_lumen_proxy_sse_streaming_non_buffering():
 
     chunk2_released = asyncio.Event()
 
-    async def mock_aiter_bytes():
+    async def mock_aiter_raw():
         yield b"data: chunk 1\n\n"
         await chunk2_released.wait()
         yield b"data: chunk 2\n\n"
@@ -189,7 +192,7 @@ async def test_lumen_proxy_sse_streaming_non_buffering():
         resp = MagicMock(spec=HttpxResponse)
         resp.status_code = 200
         resp.headers = resp_headers
-        resp.aiter_bytes = mock_aiter_bytes
+        resp.aiter_raw = mock_aiter_raw
         resp.aclose = AsyncMock()
         return resp
 
@@ -217,6 +220,114 @@ async def test_lumen_proxy_sse_streaming_non_buffering():
     chunk2_released.set()
     chunk2 = await anext(iterator)
     assert chunk2 == b"data: chunk 2\n\n"
+
+
+@pytest.mark.asyncio
+async def test_lumen_proxy_streams_owned_asset_download_without_redirect():
+    req = _make_dummy_request(path="/api/v1/chat/assets/asset-1/download")
+    req.state.token_info = {"token": "caller-token", "project_id": "project-1"}
+
+    async def mock_aiter_raw():
+        yield b"name,value\n"
+        yield b"latency,12\n"
+
+    upstream_response = MagicMock(spec=HttpxResponse)
+    upstream_response.status_code = 200
+    upstream_response.headers = Headers(
+        {
+            "content-type": "text/csv",
+            "content-disposition": "attachment; filename=\"download\"; filename*=UTF-8''report.csv",
+            "cache-control": "private, no-store",
+        }
+    )
+    upstream_response.aiter_raw = mock_aiter_raw
+    upstream_response.aclose = AsyncMock()
+
+    mock_client = MagicMock()
+    mock_client.build_request.side_effect = lambda method, url, headers, content: HttpxRequest(
+        method, url, headers=headers, content=content
+    )
+    mock_client.send = AsyncMock(return_value=upstream_response)
+    mock_client.aclose = AsyncMock()
+
+    with patch("app.services.service_proxy._get_internal_endpoint", return_value="http://lumen.internal"):
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            response = await proxy("lumen", req, "/v1/assets/asset-1/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/csv"
+    assert response.headers["content-disposition"].endswith("filename*=UTF-8''report.csv")
+    assert "location" not in response.headers
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b"name,value\nlatency,12\n"
+    upstream_response.aclose.assert_awaited_once()
+    mock_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_lumen_proxy_preserves_compressed_stream_bytes():
+    original = b"data: compressed first delta\n\n"
+    encoded = gzip.compress(original)
+    req = _make_dummy_request(path="/api/v1/chat/runs/run-1/events")
+    req.state.token_info = {"token": "caller-token", "project_id": "project-1"}
+    upstream = AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: HttpxResponse(
+                200,
+                headers={"content-type": "text/event-stream", "content-encoding": "gzip"},
+                stream=httpx.ByteStream(encoded),
+            )
+        )
+    )
+    with (
+        patch("app.services.service_proxy._get_internal_endpoint", return_value="http://isolated.test"),
+        patch("app.services.service_proxy.httpx.AsyncClient", return_value=upstream),
+    ):
+        response = await proxy("lumen", req, "/v1/runs/run-1/events")
+        body = b"".join([chunk async for chunk in response.body_iterator])
+    assert dict(response.raw_headers)[b"content-encoding"] == b"gzip"
+    assert body == encoded
+    assert gzip.decompress(body) == original
+    assert upstream.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resource", ["conversations/42", "temp-threads/thread-1"])
+@pytest.mark.parametrize("operation", ["context-preview", "compactions"])
+async def test_context_routes_preserve_post_body_and_idempotency(api_client, resource, operation):
+    app.dependency_overrides[get_token_info] = _authenticated
+    request_body = {"model_id": "configured-model"}
+    if operation == "context-preview":
+        request_body["parts"] = [{"type": "text", "text": "unsent draft"}]
+    else:
+        request_body["expected_context_revision"] = "revision-1"
+    key = "29b9c011-b273-423c-9e8b-0848a36c052e"
+    expected_status = 200 if operation == "context-preview" else 202
+    received = []
+
+    async def handler(request):
+        received.append((request.method, request.url.path, json.loads(await request.aread()), request.headers))
+        return HttpxResponse(
+            expected_status,
+            headers={"content-type": "application/json"},
+            stream=httpx.ByteStream(b'{"state":"accepted"}'),
+        )
+
+    upstream = AsyncClient(transport=httpx.MockTransport(handler))
+    with (
+        patch("app.services.service_proxy._get_internal_endpoint", return_value="http://isolated.test/v1"),
+        patch("app.services.service_proxy.httpx.AsyncClient", return_value=upstream),
+    ):
+        response = await api_client.post(
+            f"/api/v1/chat/{resource}/{operation}",
+            json=request_body,
+            headers={"Idempotency-Key": key},
+        )
+    assert response.status_code == expected_status
+    assert response.json() == {"state": "accepted"}
+    method, path, body, headers = received.pop()
+    assert (method, path, body) == ("POST", f"/v1/{resource}/{operation}", request_body)
+    assert headers["idempotency-key"] == key
+    assert headers["x-auth-token"] == "caller-token"
 
 
 @pytest.mark.asyncio

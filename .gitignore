@@ -235,7 +235,8 @@ deploy/k8s/argocd-application-*.yaml
 deploy/k8s-test/
 
 # 로그 파일
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 
 # OS 파일

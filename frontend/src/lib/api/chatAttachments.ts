@@ -60,6 +60,12 @@ interface UploadOptions {
 	signal?: AbortSignal;
 }
 
+interface DownloadOptions {
+	token?: string;
+	projectId?: string;
+	signal?: AbortSignal;
+}
+
 /** Upload a supported image or PDF through the scanned asset pipeline. */
 export async function uploadChatAttachment(
 	file: File,
@@ -91,4 +97,21 @@ export async function uploadChatAttachment(
 
 	const payload = (await res.json()) as AttachmentRef;
 	return { id: payload.id, mime_type: payload.mime_type, name: payload.name };
+}
+
+
+/** Stream an owned asset through the authenticated same-origin BFF. */
+export async function downloadChatAsset(
+	assetId: string,
+	{ token, projectId, signal }: DownloadOptions = {}
+): Promise<Blob> {
+	const headers: Record<string, string> = {};
+	if (token) headers['Authorization'] = `Bearer ${token}`;
+	if (projectId) headers['X-Project-Id'] = projectId;
+	const res = await fetch(
+		`${getBaseUrl()}/api/v1/chat/assets/${encodeURIComponent(assetId)}/download`,
+		{ headers, signal }
+	);
+	if (!res.ok) throw new Error(`파일 다운로드 실패 (${res.status})`);
+	return res.blob();
 }

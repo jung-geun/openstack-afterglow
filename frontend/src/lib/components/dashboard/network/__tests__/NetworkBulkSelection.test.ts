@@ -1,7 +1,10 @@
 vi.mock('$lib/api/client', () => ({
   api: {
     get: vi.fn(async (path: string) => path === '/api/v1/loadbalancers'
-      ? [{ id: 'lb-1', name: 'edge', status: 'ACTIVE', operating_status: 'ONLINE', vip_address: '192.0.2.10', vip_subnet_id: null }]
+      ? [
+          { id: 'lb-1', name: 'edge', status: 'ACTIVE', operating_status: 'ONLINE', vip_address: '192.0.2.10', vip_subnet_id: null, tags: [] },
+          { id: 'lb-2', name: 'drover-k3s', status: 'ACTIVE', operating_status: 'ONLINE', vip_address: '192.0.2.11', vip_subnet_id: null, tags: ['drover.managed=true', 'drover.resource_type=load_balancer'] },
+        ]
       : []),
     delete: vi.fn(async () => undefined),
   },
@@ -114,7 +117,7 @@ describe('network bulk selection controls', () => {
     expect((screen.getByRole('checkbox', { name: 'custom 선택' }) as HTMLInputElement).disabled).toBe(false);
   });
 
-  it('renders load balancer route selection controls', async () => {
+  it('renders load balancer route selection controls and excludes protected resources', async () => {
     auth.set({
       token: 'token',
       refreshToken: null,
@@ -129,8 +132,11 @@ describe('network bulk selection controls', () => {
       federated: false,
     });
     render(LoadBalancerPage);
-    const checkbox = await screen.findByRole('checkbox', { name: 'edge 선택' });
-    expect((checkbox as HTMLInputElement).disabled).toBe(false);
+    const ordinaryCheckbox = await screen.findByRole('checkbox', { name: 'edge 선택' });
+    expect((ordinaryCheckbox as HTMLInputElement).disabled).toBe(false);
+    const protectedCheckbox = screen.getByRole('checkbox', { name: 'drover-k3s 선택' });
+    expect((protectedCheckbox as HTMLInputElement).disabled).toBe(true);
+
     const selectAll = screen.getByRole('checkbox', { name: '전체 로드밸런서 선택' });
     selectAll.click();
     expect(await screen.findByRole('region', { name: '선택한 로드밸런서 일괄 작업' })).toBeTruthy();
