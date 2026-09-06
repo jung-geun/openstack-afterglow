@@ -8,7 +8,7 @@ The operator environment manages the dependencies required for running `kolla-an
 
 - **Kolla-Ansible**: pinned to git commit `34daacfbf2d5987f543787f57535b2bebe7dee19` (21.2.0).
 - **Drover Kolla Role**: pinned to wheel release `drover_kolla-0.2.19-py3-none-any.whl` (v0.2.19).
-- **Lumen Kolla Role**: pinned to wheel release `lumen_kolla-0.1.7-py3-none-any.whl` (v0.1.7).
+- **Lumen Kolla Role**: pinned to wheel release `lumen_kolla-0.1.8-py3-none-any.whl` (v0.1.8).
 
 ## Installation
 
