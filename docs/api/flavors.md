@@ -32,10 +32,11 @@ Nova 플레이버(인스턴스 스펙) 카탈로그를 조회합니다.
 
 ## GET /api/v1/flavors
 
-프로젝트에서 사용 가능한 Nova 플레이버 목록을 반환합니다. GPU 여부 및 GPU 수도 포함됩니다. 응답은 장기간 캐시됩니다(`?refresh=true`로 강제 갱신 가능).
+프로젝트에서 사용 가능한 Nova 플레이버 목록을 반환합니다. GPU 여부, GPU 수 및 현재 프로젝트 쿼터 기준 생성 적격성(`eligibility`)이 포함됩니다. 응답은 캐시됩니다(`?refresh=true`로 강제 갱신 가능).
 
-> GPU 쿼터 필터링: DB가 활성화된 경우, 프로젝트에 유효 GPU 쿼터가 없는(0) GPU 플레이버는 목록에서 제외됩니다. 오디오 alias는 필터 판단에서 제외됩니다.
-
+> **쿼터 판정 및 적용 범위 안내**:
+> - 각 플레이버에는 현재 프로젝트의 잔여 인스턴스, vCPU, RAM 및 GPU 쿼터에 기반한 `eligibility.selectable` 상태와 차단 사유(`blockers`)가 포함됩니다.
+> - Afterglow GPU 쿼터 및 단기 예약은 대시보드와 Afterglow 생성 요청을 보호합니다. 이미 Flavor 접근 권한(addTenantAccess)이 부여된 프로젝트의 CLI 또는 직접 Nova API 생성은 Nova 자체 쿼터 한계가 적용됩니다.
 ### 요청 헤더
 
 | 헤더 | 필수 | 설명 |
@@ -55,6 +56,12 @@ Nova 플레이버(인스턴스 스펙) 카탈로그를 조회합니다.
     "disk": 20,
     "is_public": true,
     "extra_specs": {},
+    "eligibility": {
+      "selectable": true,
+      "requirements": { "instances": 1, "cores": 2, "ram_mb": 2048, "gpus": {} },
+      "remaining": { "instances": 10, "cores": 18, "ram_mb": 30720, "gpus": {} },
+      "blockers": []
+    },
     "is_gpu": false,
     "gpu_count": 0
   }

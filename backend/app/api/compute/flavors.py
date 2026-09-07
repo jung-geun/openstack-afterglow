@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,7 +14,6 @@ from app.services import cache, nova
 from app.services.cache import keys
 
 router = APIRouter()
-_logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[FlavorInfo])
@@ -30,33 +28,18 @@ async def list_flavors(
         return await asyncio.to_thread(nova.list_flavors, conn)
 
     all_flavors = await cache.cached_call(key, cache.ttl_static(), _load, enabled=cm.enabled, refresh=cm.refresh)
+    from app.services.flavor_eligibility import evaluate_project_flavors
+    from app.services.gpu_inventory import is_gpu_flavor
+
     try:
-        from app.services.gpu_inventory import is_gpu_flavor, normalize_gpu_alias
-        from app.services.gpu_quota import get_effective_gpu_quotas
-
-        quotas = await get_effective_gpu_quotas(conn, pid)
-        if not isinstance(quotas, dict):
-            raise ValueError("get_effective_gpu_quotas response is not a dict")
-
-        def _has_gpu_access(f: FlavorInfo) -> bool:
-            if not is_gpu_flavor(f):
-                return True
-            alias_str = f.extra_specs.get("pci_passthrough:alias", "")
-            if not alias_str:
-                return any(limit != 0 for limit in quotas.values())
-            for entry in alias_str.split(","):
-                entry = entry.strip()
-                if not entry or not is_gpu_flavor(extra_specs={"pci_passthrough:alias": entry}):
-                    continue
-                alias = entry.rpartition(":")[0].strip() if ":" in entry else entry
-                canonical = normalize_gpu_alias(alias)
-                if quotas.get(canonical, 0) == 0:
-                    return False
-            return True
-
-        return [f for f in all_flavors if _has_gpu_access(f)]
+        evaluated = await evaluate_project_flavors(conn, pid, all_flavors)
+        has_gpu_authority_error = any(
+            any(b.code == "gpu_quota_unavailable" for b in (f.eligibility.blockers if f.eligibility else []))
+            for f in evaluated
+            if is_gpu_flavor(f)
+        )
+        if has_gpu_authority_error:
+            return [f for f in all_flavors if not is_gpu_flavor(f)]
+        return evaluated
     except Exception:
-        _logger.warning("GPU 쿼터 기반 flavor 필터링 실패 — non-GPU 목록만 반환", exc_info=True)
-        from app.services.gpu_inventory import is_gpu_flavor
-
         return [f for f in all_flavors if not is_gpu_flavor(f)]

@@ -265,18 +265,25 @@ async def create_instance(
         settings,
     )
 
-    from app.services.gpu_inventory import GpuQuotaDenied, GpuQuotaUnavailable, require_gpu_quota
+    from app.services.flavor_eligibility import (
+        FlavorEligibilityDenied,
+        FlavorEligibilityUnavailable,
+        admit_flavor,
+        release_admission,
+    )
+    from app.services.gpu_quota import GpuQuotaDenied, GpuQuotaUnavailable
 
     flavors = await asyncio.to_thread(nova.list_flavors, conn)
     flavor = next((f for f in flavors if f.id == req.flavor_id), None)
     if flavor is None:
         raise HTTPException(status_code=400, detail="Invalid flavor ID")
     try:
-        gpu_available = await require_gpu_quota(conn, flavor)
-    except GpuQuotaDenied as exc:
+        admission = await admit_flavor(conn, conn._afterglow_project_id, flavor)
+    except (FlavorEligibilityDenied, GpuQuotaDenied) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except GpuQuotaUnavailable as exc:
+    except (FlavorEligibilityUnavailable, GpuQuotaUnavailable) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    gpu_available = bool(admission.gpu_requested)
 
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
@@ -529,6 +536,11 @@ async def create_instance(
             error_message=error_detail[:500],
         )
         raise HTTPException(status_code=500, detail=detail)
+    finally:
+        try:
+            await release_admission(admission)
+        except Exception:
+            logger.warning("GPU quota reservation release failed", exc_info=True)
 
 
 @router.post("/async")
@@ -553,18 +565,25 @@ async def create_instance_async(
         settings,
     )
 
-    from app.services.gpu_inventory import GpuQuotaDenied, GpuQuotaUnavailable, require_gpu_quota
+    from app.services.flavor_eligibility import (
+        FlavorEligibilityDenied,
+        FlavorEligibilityUnavailable,
+        admit_flavor,
+        release_admission,
+    )
+    from app.services.gpu_quota import GpuQuotaDenied, GpuQuotaUnavailable
 
     sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
     sse_flavor = next((flavor for flavor in sse_flavors if flavor.id == req.flavor_id), None)
     if sse_flavor is None:
         raise HTTPException(status_code=400, detail="Invalid flavor ID")
     try:
-        gpu_available = await require_gpu_quota(conn, sse_flavor)
-    except GpuQuotaDenied as exc:
+        admission = await admit_flavor(conn, conn._afterglow_project_id, sse_flavor)
+    except (FlavorEligibilityDenied, GpuQuotaDenied) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except GpuQuotaUnavailable as exc:
+    except (FlavorEligibilityUnavailable, GpuQuotaUnavailable) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    gpu_available = bool(admission.gpu_requested)
 
     async def progress_generator():
         import time
@@ -865,6 +884,11 @@ async def create_instance_async(
                 created_access_ids,
                 floating_ip_id,
             )
+        finally:
+            try:
+                await release_admission(admission)
+            except Exception:
+                logger.warning("GPU quota reservation release failed", exc_info=True)
 
     return StreamingResponse(
         progress_generator(),

@@ -76,6 +76,8 @@
 		return map;
 	})());
 
+	type AvailabilityView = 'selectable' | 'blocked';
+	let availabilityView = $state<AvailabilityView>('selectable');
 	type FlavorCategory = 'all' | 'general' | 'cpu' | 'memory' | 'gpu';
 	let activeCategory = $state<FlavorCategory>('all');
 	let searchTerm = $state('');
@@ -95,17 +97,30 @@
 		return 'general';
 	}
 
+	function isSelectable(f: FlavorInfo): boolean {
+		return f.eligibility ? f.eligibility.selectable : true;
+	}
+
+	const selectableCount = $derived(flavors.filter(f => isSelectable(f)).length);
+	const blockedCount = $derived(flavors.filter(f => !isSelectable(f)).length);
+
+	const baseFlavors = $derived(
+		availabilityView === 'selectable'
+			? flavors.filter(f => isSelectable(f))
+			: flavors.filter(f => !isSelectable(f))
+	);
+
 	const counts = $derived({
-		general: flavors.filter(f => categorize(f) === 'general').length,
-		cpu: flavors.filter(f => categorize(f) === 'cpu').length,
-		memory: flavors.filter(f => categorize(f) === 'memory').length,
-		gpu: flavors.filter(f => categorize(f) === 'gpu').length,
+		general: baseFlavors.filter(f => categorize(f) === 'general').length,
+		cpu: baseFlavors.filter(f => categorize(f) === 'cpu').length,
+		memory: baseFlavors.filter(f => categorize(f) === 'memory').length,
+		gpu: baseFlavors.filter(f => categorize(f) === 'gpu').length,
 	});
 
 	const filteredFlavors = $derived(
 		activeCategory === 'all'
-			? flavors
-			: flavors.filter(f => categorize(f) === activeCategory)
+			? baseFlavors
+			: baseFlavors.filter(f => categorize(f) === activeCategory)
 	);
 
 	const searchedFlavors = $derived(
@@ -125,11 +140,42 @@
 	);
 
 	$effect(() => {
+		availabilityView;
 		activeCategory;
 		searchTerm;
 		currentPage = 1;
 	});
 
+	function handleFlavorClick(f: FlavorInfo) {
+		if (!isSelectable(f)) return;
+		onSelect(f.id, f.name);
+	}
+
+	function blockerLabel(blocker: { code: string; resource?: string | null; required?: number | null; remaining?: number | null }): string {
+		switch (blocker.code) {
+			case 'instances_insufficient':
+				return 'VM 쿼터 부족';
+			case 'cores_insufficient': {
+				const diff = blocker.required != null && blocker.remaining != null ? Math.max(0, blocker.required - blocker.remaining) : null;
+				return diff ? `vCPU ${diff}개 부족` : 'vCPU 쿼터 부족';
+			}
+			case 'ram_insufficient': {
+				const diff = blocker.required != null && blocker.remaining != null ? Math.max(0, blocker.required - blocker.remaining) : null;
+				return diff ? `RAM ${Math.round(diff / 1024)}GB 부족` : 'RAM 쿼터 부족';
+			}
+			case 'gpu_insufficient': {
+				const diff = blocker.required != null && blocker.remaining != null ? Math.max(0, blocker.required - blocker.remaining) : null;
+				const res = blocker.resource ?? 'GPU';
+				return diff ? `${res} ${diff}개 부족` : `${res} 쿼터 부족`;
+			}
+			case 'compute_quota_unavailable':
+				return 'Compute 쿼터 확인 불가';
+			case 'gpu_quota_unavailable':
+				return 'GPU 쿼터 확인 불가';
+			default:
+				return blocker.code;
+		}
+	}
 	function ramLabel(mb: number): string {
 		return mb >= 1024 ? `${Math.round(mb / 1024)} GB` : `${mb} MB`;
 	}
@@ -189,9 +235,31 @@
 </script>
 
 <div class="flex flex-col">
-<p class="order-2 mb-4 hidden text-sm text-gray-400 md:block">
-	현재 프로젝트 쿼터 내 생성 가능한 플레이버만 표시합니다. GPU 플레이버는 스케줄러가 가용 호스트를 자동 선택합니다.
-</p>
+<div class="order-2 mb-3 flex flex-wrap items-center justify-between gap-2">
+	<div class="flex items-center gap-1.5">
+		<button
+			type="button"
+			onclick={() => { availabilityView = 'selectable'; }}
+			class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors {availabilityView === 'selectable'
+				? 'bg-[var(--color-accent)] text-[var(--color-surface-canvas)] shadow-sm'
+				: 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
+		>
+			생성 가능 ({selectableCount})
+		</button>
+		<button
+			type="button"
+			onclick={() => { availabilityView = 'blocked'; }}
+			class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors {availabilityView === 'blocked'
+				? 'bg-[var(--color-surface-sunken)] text-[var(--color-state-danger-text)] border border-[var(--color-state-danger)]/50'
+				: 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-2)] hover:bg-[var(--color-surface-raised)]'}"
+		>
+			쿼터 제한됨 ({blockedCount})
+		</button>
+	</div>
+	<p class="text-xs text-[var(--color-ink-2)]">
+		{availabilityView === 'selectable' ? '현재 잔여 쿼터 내 즉시 생성 가능한 플레이버입니다.' : '현재 프로젝트 쿼터 잔여량이 부족한 플레이버입니다.'}
+	</p>
+</div>
 
 <!-- 카테고리 필터 탭 -->
 <div class="order-3 mb-4 flex flex-wrap gap-2">
@@ -231,7 +299,7 @@
 	{@const reqVm = selectedFlavor ? 1 : 0}
 	{@const reqCpu = selectedFlavor?.vcpus ?? 0}
 	{@const reqRamMb = selectedFlavor?.ram ?? 0}
-	{@const reqDiskGb = selectedFlavor?.disk ?? 0}
+	{@const reqDiskGb = 0}
 	{@const limVm = quota.instances?.limit ?? -1}
 	{@const limCpu = quota.cores?.limit ?? -1}
 	{@const limRamMb = quota.ram?.limit ?? -1}
@@ -382,12 +450,17 @@
 	{#each paginatedFlavors as flavor}
 		{@const badge = categoryBadge(flavor)}
 		{@const gpu = gpuSummary(flavor)}
+		{@const selectable = isSelectable(flavor)}
+		{@const blockers = flavor.eligibility?.blockers ?? []}
 		<button
-			onclick={() => onSelect(flavor.id, flavor.name)}
+			onclick={() => handleFlavorClick(flavor)}
 			aria-label={`${flavor.name} 플레이버 선택`}
+			disabled={!selectable}
 			class="w-full rounded-xl border p-3 text-left transition-colors {selectedId === flavor.id
 				? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30'
-				: 'border-[var(--color-line)] bg-[var(--color-surface-raised)] hover:border-[var(--color-line-2)]'}"
+				: selectable
+					? 'border-[var(--color-line)] bg-[var(--color-surface-raised)] hover:border-[var(--color-line-2)]'
+					: 'border-[var(--color-line)] bg-[var(--color-surface-sunken)]/60 opacity-60 cursor-not-allowed'}"
 		>
 			<div class="flex items-start gap-3">
 				<div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-sunken)]">
@@ -425,6 +498,15 @@
 			{#if gpu}
 				<div class="mt-2 text-xs text-[var(--color-accent-2)]">{gpu}</div>
 			{/if}
+			{#if blockers.length > 0}
+				<div class="mt-2 flex flex-wrap gap-1">
+					{#each blockers as b}
+						<span class="rounded border border-[var(--color-state-danger)]/40 bg-[var(--color-surface-sunken)] px-1.5 py-0.5 text-[10px] text-[var(--color-state-danger-text)] font-medium">
+							{blockerLabel(b)}
+						</span>
+					{/each}
+				</div>
+			{/if}
 		</button>
 	{/each}
 	{#if searchedFlavors.length === 0}
@@ -445,10 +527,14 @@
 	{#each paginatedFlavors as flavor}
 		{@const badge = categoryBadge(flavor)}
 		{@const gpu = gpuSummary(flavor)}
+		{@const selectable = isSelectable(flavor)}
+		{@const blockers = flavor.eligibility?.blockers ?? []}
 		<button
-			onclick={() => onSelect(flavor.id, flavor.name)}
-			class="grid w-full grid-cols-[2fr_80px_90px_100px_100px] border-b border-gray-800/60 px-4 py-3 text-sm transition-all hover:bg-gray-800/40
-				{selectedId === flavor.id ? 'border-l-2 border-l-blue-500 bg-blue-900/20' : ''}"
+			onclick={() => handleFlavorClick(flavor)}
+			disabled={!selectable}
+			class="grid w-full grid-cols-[2fr_80px_90px_100px_100px] border-b border-gray-800/60 px-4 py-3 text-sm transition-all
+				{selectedId === flavor.id ? 'border-l-2 border-l-blue-500 bg-blue-900/20' : ''}
+				{selectable ? 'hover:bg-gray-800/40' : 'opacity-60 cursor-not-allowed bg-[var(--color-surface-sunken)]/30'}"
 		>
 			<div class="flex min-w-0 items-center gap-3">
 				<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800">
@@ -470,6 +556,15 @@
 						<div class="mt-0.5 text-[11px] text-purple-400">{gpu}</div>
 					{/if}
 				</div>
+					{#if blockers.length > 0}
+						<div class="mt-1 flex flex-wrap gap-1">
+							{#each blockers as b}
+								<span class="rounded border border-[var(--color-state-danger)]/40 bg-[var(--color-surface-sunken)] px-1.5 py-0.5 text-[10px] text-[var(--color-state-danger-text)] font-medium">
+									{blockerLabel(b)}
+								</span>
+							{/each}
+						</div>
+					{/if}
 			</div>
 			<div class="self-center text-center text-gray-300">{flavor.vcpus}</div>
 			<div class="self-center text-center text-gray-300">{ramLabel(flavor.ram)}</div>

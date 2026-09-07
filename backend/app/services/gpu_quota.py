@@ -9,14 +9,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
-from app.models.db import GpuQuota
+from app.models.db import GpuQuota, GpuQuotaReservation
 
 _logger = logging.getLogger(__name__)
 
@@ -234,7 +235,19 @@ def _get_project_gpu_usage(conn: Any, project_id: str) -> dict[str, int]:
     except Exception as exc:
         raise GpuQuotaUnavailable("GPU quota usage inventory is unavailable") from exc
 
-    allowed_statuses = {"ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"}
+    allowed_statuses = {
+        "ACTIVE",
+        "BUILD",
+        "MIGRATING",
+        "PASSWORD",
+        "PAUSED",
+        "REBUILD",
+        "REVERT_RESIZE",
+        "RESIZE",
+        "SHUTOFF",
+        "SUSPENDED",
+        "VERIFY_RESIZE",
+    }
     flavor_cache: dict[str, dict[str, Any]] = {}
 
     for s in servers:
@@ -334,3 +347,112 @@ async def check_gpu_quota(
                 f"GPU quota exceeded for project {project_id} (gpu_type={gpu_type}): "
                 f"limit={limit}, in_use={in_use}, requested={req_count}"
             )
+
+
+async def reserve_gpu_quota(
+    conn: Any,
+    project_id: str,
+    requested_gpus: dict[str, int],
+    *,
+    ttl_seconds: int = 300,
+    session: AsyncSession | None = None,
+) -> str | None:
+    """Atomically claim limited GPU headroom for one Afterglow admission.
+
+    This coordinates Afterglow-controlled requests only. Direct Nova creates
+    do not participate in these reservations.
+    """
+    if conn is None:
+        raise GpuQuotaUnavailable("GPU quota usage inventory is unavailable")
+    if session is None and not is_db_available():
+        return None
+    normalized = {
+        gpu_type: int(amount)
+        for raw_alias, amount in requested_gpus.items()
+        if (gpu_type := normalize_gpu_alias(raw_alias)) and int(amount) > 0
+    }
+    if not normalized:
+        return None
+    usage = await get_project_gpu_usage(conn, project_id)
+    reservation_id = str(uuid.uuid4())
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(seconds=max(30, ttl_seconds))
+
+    async def _op(sess: AsyncSession) -> str | None:
+        await sess.execute(delete(GpuQuotaReservation).where(GpuQuotaReservation.expires_at <= now))
+        quota_result = await sess.execute(
+            select(GpuQuota)
+            .where(
+                GpuQuota.project_id.in_((DEFAULT_PROJECT_ID, project_id)),
+                GpuQuota.gpu_type.in_(tuple(normalized)),
+            )
+            .with_for_update()
+        )
+        defaults: dict[str, int] = {}
+        project_limits: dict[str, int] = {}
+        for quota in quota_result.scalars().all():
+            target = defaults if quota.project_id == DEFAULT_PROJECT_ID else project_limits
+            target[quota.gpu_type] = quota.limit
+
+        reservation_result = await sess.execute(
+            select(GpuQuotaReservation)
+            .where(
+                GpuQuotaReservation.project_id == project_id,
+                GpuQuotaReservation.gpu_type.in_(tuple(normalized)),
+                GpuQuotaReservation.status == "pending",
+                GpuQuotaReservation.expires_at > now,
+            )
+            .with_for_update()
+        )
+        reserved: dict[str, int] = {}
+        for row in reservation_result.scalars().all():
+            reserved[row.gpu_type] = reserved.get(row.gpu_type, 0) + row.amount
+
+        limited: dict[str, int] = {}
+        for gpu_type, requested in normalized.items():
+            limit = project_limits.get(gpu_type, defaults.get(gpu_type, 0))
+            if limit == -1:
+                continue
+            in_use = usage.get(gpu_type, 0)
+            held = reserved.get(gpu_type, 0)
+            if limit == 0 or in_use + held + requested > limit:
+                raise GpuQuotaDenied(
+                    f"GPU quota exceeded for project {project_id} (gpu_type={gpu_type}): "
+                    f"limit={limit}, in_use={in_use}, reserved={held}, requested={requested}"
+                )
+            limited[gpu_type] = requested
+
+        if not limited:
+            await sess.commit()
+            return None
+        for gpu_type, amount in limited.items():
+            sess.add(
+                GpuQuotaReservation(
+                    reservation_id=reservation_id,
+                    project_id=project_id,
+                    gpu_type=gpu_type,
+                    amount=amount,
+                    status="pending",
+                    expires_at=expires_at,
+                )
+            )
+        await sess.commit()
+        return reservation_id
+
+    return await _execute_db_op(_op, session_override=session)
+
+
+async def release_gpu_reservation(
+    reservation_id: str | None,
+    *,
+    session: AsyncSession | None = None,
+) -> None:
+    """Release a completed or failed Afterglow admission claim."""
+    if not reservation_id:
+        return
+
+    async def _op(sess: AsyncSession) -> None:
+        await sess.execute(delete(GpuQuotaReservation).where(GpuQuotaReservation.reservation_id == reservation_id))
+        await sess.commit()
+
+    await _execute_db_op(_op, session_override=session)

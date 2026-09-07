@@ -133,7 +133,9 @@
 				>
 					<option value="">선택 안 함</option>
 					{#each flavors as f}
-						<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB){flavorGpuCount(f) > 0 ? ` / GPU ${flavorGpuCount(f)}` : ''}</option>
+						<option value={f.id} disabled={f.eligibility ? !f.eligibility.selectable : false}>
+							{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB){flavorGpuCount(f) > 0 ? ` / GPU ${flavorGpuCount(f)}` : ''}{f.eligibility && !f.eligibility.selectable ? ' [쿼터 초과]' : ''}
+						</option>
 					{/each}
 				</select>
 			</label>

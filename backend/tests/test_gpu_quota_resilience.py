@@ -140,7 +140,16 @@ async def test_flavor_filter_enforces_no_count_gpu_alias_and_ignores_non_gpu_pci
         disk=100,
         extra_specs={"pci_passthrough:alias": "sriov_nic:1,H100"},
     )
-    quotas = {"RTX3090": 0, "H100": 1}
+
+    compute_quota = {
+        "instances": {"limit": 10, "in_use": 1},
+        "cores": {"limit": 20, "in_use": 2},
+        "ram": {"limit": 32768, "in_use": 4096},
+    }
+    gpu_statuses = [
+        {"project_id": "proj-123", "gpu_type": "RTX3090", "limit": 0, "in_use": 0, "available": 0},
+        {"project_id": "proj-123", "gpu_type": "H100", "limit": 1, "in_use": 0, "available": 1},
+    ]
 
     with (
         patch(
@@ -148,12 +157,19 @@ async def test_flavor_filter_enforces_no_count_gpu_alias_and_ignores_non_gpu_pci
             return_value=[cpu_flavor, denied_gpu, allowed_gpu],
         ),
         patch("app.api.compute.flavors.cache.cached_call", new=_load_without_cache),
-        patch("app.services.gpu_quota.get_effective_gpu_quotas", return_value=quotas),
+        patch("app.services.nova.get_project_quota", return_value=compute_quota),
+        patch("app.services.gpu_quota.get_effective_gpu_quota_status", return_value=gpu_statuses),
     ):
         response = await client.get("/api/v1/flavors")
 
     assert response.status_code == 200
-    assert [flavor["id"] for flavor in response.json()] == ["fl-cpu", "fl-allowed"]
+    items = response.json()
+    assert [f["id"] for f in items] == ["fl-cpu", "fl-denied", "fl-allowed"]
+    by_id = {f["id"]: f["eligibility"] for f in items}
+    assert by_id["fl-cpu"]["selectable"] is True
+    assert by_id["fl-allowed"]["selectable"] is True
+    assert by_id["fl-denied"]["selectable"] is False
+    assert by_id["fl-denied"]["blockers"][0]["code"] == "gpu_insufficient"
 
 
 @pytest.mark.asyncio

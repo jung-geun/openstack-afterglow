@@ -32,7 +32,8 @@
 	let addingId = $state<string | null>(null);
 	let projectSearch = $state('');
 	let allProjects = $state<{ id: string; name: string }[]>([]);
-
+	let accessMode = $state<'manual' | 'gpu_quota'>('manual');
+	let modeSaving = $state(false);
 	const accessedProjectIds = $derived(new Set(accessList.map((a) => a.project_id)));
 	const availableProjects = $derived(allProjects.filter((p) => !accessedProjectIds.has(p.id)));
 	const searchedProjects = $derived(
@@ -60,6 +61,7 @@
 					.catch(() => (allProjects = []));
 			}
 		}
+		accessMode = flavor.extra_specs?.['afterglow:access_mode'] === 'gpu_quota' ? 'gpu_quota' : 'manual';
 	});
 
 	async function loadAccess() {
@@ -112,6 +114,21 @@
 			accessError = '접근 권한 제거 실패';
 		}
 	}
+
+	async function setMode(nextMode: 'manual' | 'gpu_quota') {
+		if (accessMode === nextMode) return;
+		modeSaving = true;
+		try {
+			await api.put(`/api/v1/admin/flavors/${flavor.id}/access-mode`, { mode: nextMode }, token, projectId);
+			accessMode = nextMode;
+			flavor.extra_specs = { ...flavor.extra_specs, 'afterglow:access_mode': nextMode };
+			toast.success('접근 관리 모드가 변경되었습니다');
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '모드 변경 실패');
+		} finally {
+			modeSaving = false;
+		}
+	}
 </script>
 
 {#if flavor.is_public}
@@ -123,6 +140,38 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-3 py-2 text-xs mb-3">{accessError}</div>
 	{/if}
 
+	{#if flavor.is_gpu}
+		<div class="mb-4 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-sunken)] p-3">
+			<div class="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-1)] mb-1.5">접근 권한 관리 정책</div>
+			<div class="flex gap-2">
+				<button
+					type="button"
+					disabled={modeSaving}
+					onclick={() => setMode('manual')}
+					class="px-2.5 py-1 rounded text-xs transition-colors {accessMode === 'manual'
+						? 'bg-[var(--color-accent)] text-[var(--color-surface-canvas)]'
+						: 'bg-[var(--color-surface-base)] text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]'}"
+				>
+					수동 관리 (manual)
+				</button>
+				<button
+					type="button"
+					disabled={modeSaving}
+					onclick={() => setMode('gpu_quota')}
+					class="px-2.5 py-1 rounded text-xs transition-colors {accessMode === 'gpu_quota'
+						? 'bg-[var(--color-accent)] text-[var(--color-surface-canvas)]'
+						: 'bg-[var(--color-surface-base)] text-[var(--color-ink-2)] hover:text-[var(--color-ink-0)]'}"
+				>
+					GPU Quota 연동 (gpu_quota)
+				</button>
+			</div>
+			<p class="mt-2 text-[11px] text-[var(--color-ink-2)] leading-normal">
+				{accessMode === 'gpu_quota'
+					? '이 Flavor는 프로젝트의 GPU quota limit에 따라 접근 권한이 자동 조정됩니다. 아래 수동 추가는 예외 프로젝트에만 사용하세요.'
+					: '관리자가 프로젝트를 개별적으로 추가하거나 제거합니다.'}
+			</p>
+		</div>
+	{/if}
 	<div class="mb-4">
 		<div class="text-sm text-gray-400 mb-2">프로젝트 접근 추가</div>
 		<div class="relative">

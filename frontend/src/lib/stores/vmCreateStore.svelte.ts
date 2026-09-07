@@ -493,7 +493,11 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const adminMode = opts.adminMode();
 		switch (wizardState.step) {
 			case 1: return wizardState.bootSource === 'volume' ? !!wizardState.bootVolumeId : !!wizardState.imageId;
-			case 2: return !!wizardState.flavorId;
+			case 2: {
+				if (!wizardState.flavorId) return false;
+				const selected = flavors.find(f => f.id === wizardState.flavorId);
+				return selected?.eligibility ? selected.eligibility.selectable : true;
+			}
 			case 3: return squashfsSelectionReady;
 			case 4: {
 				if (!wizardState.scheduling) return false;
@@ -640,6 +644,24 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 
 	function loadFlavorOptions() {
 		const { token, projectId } = authScope();
+		if (opts.adminMode() && adminSelectedProjectId) {
+			const targetProjectId = adminSelectedProjectId;
+			const generation = loadGeneration;
+			return loadOption(
+				'flavors',
+				targetProjectId,
+				() =>
+					api.get<FlavorOption[]>(
+						`/api/v1/admin/instances/flavors-for-project?project_id=${encodeURIComponent(targetProjectId)}`,
+						token,
+						projectId,
+					),
+				value => {
+					flavors = value;
+				},
+				() => targetIsCurrent(targetProjectId, generation),
+			);
+		}
 		return loadOption(
 			'flavors',
 			'global',
@@ -960,8 +982,11 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		nextStep();
 	}
 	function selectFlavor(id: string, name: string) {
+		const selected = flavors.find(candidate => candidate.id === id);
+		if (selected?.eligibility && !selected.eligibility.selectable) {
+			return;
+		}
 		wizard.update(w => ({ ...w, flavorId: id, flavorName: name }));
-		// 선택 즉시 다음 단계로 자동 진행("다음" 버튼 클릭과 동일). 이전으로 돌아와도 핸들러가 재발화하지 않아 강제 진행되지 않는다.
 		nextStep();
 	}
 

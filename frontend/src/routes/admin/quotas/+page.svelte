@@ -59,6 +59,7 @@
 						hasAnyAlias={ctrl.allGpuTypes.length > 0}
 						onSetLimit={ctrl.setGpuQuota}
 						onClear={ctrl.deleteGpuQuota}
+						reconcilePreview={ctrl.reconcilePreview}
 					/>
 				{:else}
 					<div class="text-gray-600 text-sm">쿼터를 불러올 수 없습니다</div>

@@ -602,7 +602,10 @@ def is_gpu_flavor(flavor: Any = None, extra_specs: dict | None = None) -> bool:
         stored_is_gpu = getattr(flavor, "__dict__", {}).get("is_gpu")
         if isinstance(stored_is_gpu, bool):
             explicit_gpu = stored_is_gpu
-
+        elif not isinstance(getattr(type(flavor), "is_gpu", None), property) and isinstance(
+            getattr(flavor, "is_gpu", None), bool
+        ):
+            explicit_gpu = flavor.is_gpu
     for entry in str(specs.get("pci_passthrough:alias", "")).split(","):
         entry = entry.strip()
         if not entry:

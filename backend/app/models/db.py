@@ -607,6 +607,35 @@ class GpuQuota(Base):
     )
 
 
+class GpuQuotaReservation(Base):
+    """Short-lived GPU quota claim for an Afterglow-controlled admission."""
+
+    __tablename__ = "gpu_quota_reservations"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+
+    reservation_id: Mapped[str] = mapped_column(CHAR(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    gpu_type: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    amount: Mapped[int] = mapped_column(INT, nullable=False)
+    status: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="pending")
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        UniqueConstraint("reservation_id", "gpu_type", name="uq_gpu_quota_reservation_type"),
+        Index(
+            "idx_gpu_quota_reservations_project_active",
+            "project_id",
+            "gpu_type",
+            "status",
+            "expires_at",
+        ),
+    )
+
+
 class K3sProvisioningIntent(Base):
     """Durable, non-secret Stampede agent provisioning intent."""
 

@@ -21,8 +21,10 @@
 
 	async function handleResize() {
 		if (!resizeFlavorId || s.resizeLoading || resizeConfirming) return;
-
 		const selectedFlavor = s.resizeFlavors.find((f) => f.id === resizeFlavorId);
+		if (selectedFlavor?.eligibility && !selectedFlavor.eligibility.selectable) {
+			return;
+		}
 		const flavorLabel = selectedFlavor ? formatFlavorLabel(selectedFlavor) : resizeFlavorId;
 
 		resizeConfirming = true;
@@ -62,7 +64,9 @@
 				<select bind:value={resizeFlavorId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500">
 					<option value="">플레이버 선택</option>
 					{#each s.resizeFlavors as f}
-						<option value={f.id}>{formatFlavorLabel(f)}</option>
+						<option value={f.id} disabled={f.eligibility ? !f.eligibility.selectable : false}>
+							{formatFlavorLabel(f)}{f.eligibility && !f.eligibility.selectable ? ' [쿼터 초과]' : ''}
+						</option>
 					{/each}
 				</select>
 			</div>

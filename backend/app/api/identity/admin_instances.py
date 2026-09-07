@@ -46,6 +46,28 @@ def _make_admin_conn(project_id: str, user_id: str) -> openstack.connection.Conn
     return conn
 
 
+@router.get("/instances/flavors-for-project", dependencies=[Depends(require_admin)])
+async def list_project_flavors_for_admin(
+    project_id: str = Query(..., description="대상 프로젝트 ID"),
+    count: int = Query(1, ge=1, le=100, description="동일 flavor 생성 수량"),
+    token_info: dict = Depends(get_token_info),
+):
+    """Return target-project-visible flavors with target quota eligibility."""
+    from app.services.flavor_eligibility import evaluate_project_flavors
+
+    try:
+        conn = await asyncio.to_thread(_make_admin_conn, project_id, token_info.get("user_id", ""))
+        try:
+            flavors = await asyncio.to_thread(nova.list_flavors, conn)
+            return await evaluate_project_flavors(conn, project_id, flavors, count=count)
+        finally:
+            await asyncio.to_thread(conn.close)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="대상 프로젝트 Flavor 목록 조회 실패")
+
+
 @router.get("/instances/networks-for-project", dependencies=[Depends(require_admin)])
 async def list_project_networks_for_admin(
     project_id: str = Query(..., description="대상 프로젝트 ID"),
@@ -140,23 +162,30 @@ async def admin_create_instance_async(
         await asyncio.to_thread(conn.close)
         raise
 
-    from app.services.gpu_inventory import GpuQuotaDenied, GpuQuotaUnavailable, require_gpu_quota
+    from app.services.flavor_eligibility import (
+        FlavorEligibilityDenied,
+        FlavorEligibilityUnavailable,
+        admit_flavor,
+        release_admission,
+    )
+    from app.services.gpu_quota import GpuQuotaDenied, GpuQuotaUnavailable
 
     try:
         sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
         sse_flavor = next((flavor for flavor in sse_flavors if flavor.id == req.flavor_id), None)
         if sse_flavor is None:
             raise HTTPException(status_code=400, detail="Invalid flavor ID")
-        gpu_available = await require_gpu_quota(conn, sse_flavor)
-    except GpuQuotaDenied as exc:
+        admission = await admit_flavor(conn, req.project_id, sse_flavor)
+    except (FlavorEligibilityDenied, GpuQuotaDenied) as exc:
         await asyncio.to_thread(conn.close)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except GpuQuotaUnavailable as exc:
+    except (FlavorEligibilityUnavailable, GpuQuotaUnavailable) as exc:
         await asyncio.to_thread(conn.close)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except HTTPException:
         await asyncio.to_thread(conn.close)
         raise
+    gpu_available = bool(admission.gpu_requested)
 
     async def progress_generator():
         import time
@@ -432,6 +461,10 @@ async def admin_create_instance_async(
                 floating_ip_id,
             )
         finally:
+            try:
+                await release_admission(admission)
+            except Exception:
+                logger.warning("GPU quota reservation release failed", exc_info=True)
             try:
                 await asyncio.to_thread(conn.close)
             except Exception:

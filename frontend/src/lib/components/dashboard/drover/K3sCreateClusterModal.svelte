@@ -164,7 +164,9 @@
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
 							<option value="">기본값 사용</option>
 							{#each flavors as f}
-								<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram/1024)}GB)</option>
+								<option value={f.id} disabled={f.eligibility ? !f.eligibility.selectable : false}>
+									{f.name} ({f.vcpus}vCPU / {Math.round(f.ram/1024)}GB){f.eligibility && !f.eligibility.selectable ? ' [쿼터 초과]' : ''}
+								</option>
 							{/each}
 						</select>
 					</label>

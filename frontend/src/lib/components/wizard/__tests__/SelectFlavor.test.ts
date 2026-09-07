@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SelectFlavor from '../SelectFlavor.svelte';
 
@@ -36,5 +36,56 @@ describe('SelectFlavor', () => {
 
 		screen.getByRole('button', { name: 'cpu.1c_1g 플레이버 선택' }).click();
 		expect(onSelect).toHaveBeenCalledWith('cpu-1', 'cpu.1c_1g');
+	});
+
+	it('separates quota-blocked flavors, explains blockers, and disables selection', async () => {
+		const onSelect = vi.fn();
+		const testFlavors = [
+			{
+				id: 'cpu-ok',
+				name: 'cpu.2c_4g',
+				vcpus: 2,
+				ram: 4096,
+				disk: 20,
+				is_public: true,
+				eligibility: {
+					selectable: true,
+					requirements: { instances: 1, cores: 2, ram_mb: 4096, gpus: {} },
+					remaining: { instances: 5, cores: 8, ram_mb: 16384, gpus: {} },
+					blockers: [],
+				},
+			},
+			{
+				id: 'gpu-blocked',
+				name: 'gpu.8c_16g',
+				vcpus: 8,
+				ram: 16384,
+				disk: 40,
+				is_public: false,
+				extra_specs: { 'pci_passthrough:alias': 'RTX-3090:2' },
+				eligibility: {
+					selectable: false,
+					requirements: { instances: 1, cores: 8, ram_mb: 16384, gpus: { RTX3090: 2 } },
+					remaining: { instances: 5, cores: 8, ram_mb: 16384, gpus: { RTX3090: 1 } },
+					blockers: [
+						{ code: 'gpu_insufficient', resource: 'RTX3090', required: 2, remaining: 1 },
+					],
+				},
+			},
+		];
+
+		render(SelectFlavor, { flavors: testFlavors, selectedId: null, onSelect, quota });
+
+		expect(screen.getByText('생성 가능 (1)')).toBeTruthy();
+		expect(screen.getByText('쿼터 제한됨 (1)')).toBeTruthy();
+		expect(screen.queryByText('RTX3090 1개 부족')).toBeNull();
+
+		await fireEvent.click(screen.getByText('쿼터 제한됨 (1)'));
+		expect(screen.getAllByText('RTX3090 1개 부족').length).toBeGreaterThanOrEqual(1);
+
+		const blockedBtn = screen.getByRole('button', { name: 'gpu.8c_16g 플레이버 선택' });
+		expect(blockedBtn.hasAttribute('disabled')).toBe(true);
+		await fireEvent.click(blockedBtn);
+		expect(onSelect).not.toHaveBeenCalled();
 	});
 });
