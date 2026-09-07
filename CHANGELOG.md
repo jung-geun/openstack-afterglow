@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-09-07
+
+### Added
+
+- **Lumen 구독 프로바이더 관리** — 관리자가 실험적 ChatGPT device authorization과 Claude subscription token 연결을 설정·해제하고 재인증 상태를 확인할 수 있다. 브라우저에는 provider credential을 반환하지 않으며 공유 계정 사용 경고와 반응형 인증 흐름을 제공한다.
+
+### Fixed
+
+- **Lumen 로컬 Compose Keystone 인증 전달** — 명시적 Lumen Keystone 환경변수와 공통 OpenStack fallback을 migrate/API/worker에 일관되게 전달하고 문서화된 dual env-file 실행 계약을 검증한다.
+
 ## [1.18.1] - 2026-09-04
 
 ### Added
