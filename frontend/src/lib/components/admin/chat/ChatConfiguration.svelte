@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
@@ -10,6 +11,8 @@
 	import Pill from '$lib/components/ui/Pill.svelte';
 	import Alert from '$lib/components/ui/Alert.svelte';
 	import TextInput from '$lib/components/ui/TextInput.svelte';
+	import Field from '$lib/components/ui/Field.svelte';
+	import SelectInput from '$lib/components/ui/SelectInput.svelte';
 
 	let { section = 'providers' }: { section?: 'providers' | 'models' | 'tools' } = $props();
 
@@ -18,30 +21,42 @@
 		name: string;
 		provider_type: string;
 		api_base: string | null;
+		auth_mode?: 'api_key' | 'chatgpt_device' | 'anthropic_subscription';
+		has_credentials?: boolean;
+		auth_status?: 'disconnected' | 'configured' | 'reauth_required';
+		auth_expires_at?: string | null;
 		has_api_key: boolean;
 		models_dev_provider_id: string | null;
 		is_active: boolean;
 		margin_multiplier: number;
 	}
 
-	// litellm custom_llm_provider — 내부에서 litellm 이 각 API 형식으로 중계한다.
-	// OpenAI 호환 엔드포인트는 'openai' + API Base 로 연결. 그 외는 각 provider 타입 선택.
-	const PROVIDER_TYPES: { value: string; label: string }[] = [
-		{ value: 'openai', label: 'OpenAI (및 OpenAI 호환 API)' },
-		{ value: 'anthropic', label: 'Anthropic (Claude)' },
-		{ value: 'gemini', label: 'Google Gemini (AI Studio)' },
-		{ value: 'vertex_ai', label: 'Google Vertex AI (GCP)' },
-		{ value: 'azure', label: 'Azure OpenAI' },
-		{ value: 'bedrock', label: 'AWS Bedrock' },
-		{ value: 'ollama', label: 'Ollama (로컬)' },
-		{ value: 'mistral', label: 'Mistral' },
-		{ value: 'cohere', label: 'Cohere' },
-		{ value: 'groq', label: 'Groq' },
-		{ value: 'deepseek', label: 'DeepSeek' },
-		{ value: 'together_ai', label: 'Together AI' },
-		{ value: 'openrouter', label: 'OpenRouter' },
-		{ value: 'perplexity', label: 'Perplexity (Sonar)' },
-		{ value: 'xai', label: 'xAI (Grok)' }
+	interface ProviderChoice {
+		value: string;
+		label: string;
+		providerType: string;
+		authMode: 'api_key' | 'chatgpt_device' | 'anthropic_subscription';
+	}
+
+	// Form selection values are UI-only. Provider type and authentication mode are sent explicitly.
+	const PROVIDER_TYPES: ProviderChoice[] = [
+		{ value: 'openai', label: 'OpenAI API (및 OpenAI 호환 API)', providerType: 'openai', authMode: 'api_key' },
+		{ value: 'anthropic', label: 'Claude API', providerType: 'anthropic', authMode: 'api_key' },
+		{ value: 'chatgpt-subscription', label: 'ChatGPT 구독 (실험)', providerType: 'chatgpt', authMode: 'chatgpt_device' },
+		{ value: 'claude-subscription', label: 'Claude 구독 (실험)', providerType: 'anthropic', authMode: 'anthropic_subscription' },
+		{ value: 'gemini', label: 'Google Gemini (AI Studio)', providerType: 'gemini', authMode: 'api_key' },
+		{ value: 'vertex_ai', label: 'Google Vertex AI (GCP)', providerType: 'vertex_ai', authMode: 'api_key' },
+		{ value: 'azure', label: 'Azure OpenAI', providerType: 'azure', authMode: 'api_key' },
+		{ value: 'bedrock', label: 'AWS Bedrock', providerType: 'bedrock', authMode: 'api_key' },
+		{ value: 'ollama', label: 'Ollama (로컬)', providerType: 'ollama', authMode: 'api_key' },
+		{ value: 'mistral', label: 'Mistral', providerType: 'mistral', authMode: 'api_key' },
+		{ value: 'cohere', label: 'Cohere', providerType: 'cohere', authMode: 'api_key' },
+		{ value: 'groq', label: 'Groq', providerType: 'groq', authMode: 'api_key' },
+		{ value: 'deepseek', label: 'DeepSeek', providerType: 'deepseek', authMode: 'api_key' },
+		{ value: 'together_ai', label: 'Together AI', providerType: 'together_ai', authMode: 'api_key' },
+		{ value: 'openrouter', label: 'OpenRouter', providerType: 'openrouter', authMode: 'api_key' },
+		{ value: 'perplexity', label: 'Perplexity (Sonar)', providerType: 'perplexity', authMode: 'api_key' },
+		{ value: 'xai', label: 'xAI (Grok)', providerType: 'xai', authMode: 'api_key' }
 	];
 	interface Model {
 		id: number;
@@ -72,6 +87,29 @@
 	let pApiBase = $state('');
 	let pApiKey = $state('');
 	let addingProvider = $state(false);
+	const selectedProviderChoice = $derived(PROVIDER_TYPES.find((choice) => choice.value === pType) ?? PROVIDER_TYPES[0]!);
+	const isSubscriptionChoice = $derived(selectedProviderChoice.authMode !== 'api_key');
+
+	interface DeviceAuthAttempt {
+		attempt_id: string;
+		status: 'pending' | 'connected' | 'cancelled' | 'expired' | 'error';
+		verification_uri?: string;
+		user_code?: string;
+		expires_at: string;
+		interval_seconds: number;
+	}
+
+	let authModalOpen = $state(false);
+	let authProvider = $state<Provider | null>(null);
+	let deviceAttempt = $state<DeviceAuthAttempt | null>(null);
+	let authError = $state('');
+	let authBusy = $state(false);
+	let claudeToken = $state('');
+	let claudeExpiry = $state('');
+	let authSessionGeneration = $state(0);
+	let authPollTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+	let authScopeToken = $state<string | undefined>();
+	let authScopeProjectId = $state<string | undefined>();
 
 	let mProviderId = $state<number | ''>('');
 	let mName = $state('');
@@ -160,16 +198,21 @@
 			toast.error('프로바이더 이름을 입력하세요');
 			return;
 		}
+		const choice = selectedProviderChoice;
 		addingProvider = true;
 		try {
-			await api.post(
+			const body: Record<string, unknown> = {
+				name: pName.trim(),
+				provider_type: choice.providerType,
+				auth_mode: choice.authMode
+			};
+			if (choice.authMode === 'api_key') {
+				body.api_base = pApiBase.trim() || null;
+				body.api_key = pApiKey.trim() || null;
+			}
+			const created = await api.post<Provider>(
 				'/api/v1/chat/admin/providers',
-				{
-					name: pName.trim(),
-					provider_type: pType,
-					api_base: pApiBase.trim() || null,
-					api_key: pApiKey.trim() || null
-				},
+				body,
 				token,
 				projectId
 			);
@@ -179,6 +222,7 @@
 			pApiKey = '';
 			await load();
 			toast.success('프로바이더가 추가되었습니다');
+			if (choice.authMode !== 'api_key') openSubscriptionAuth(created);
 		} catch (e) {
 			toast.error(e instanceof ApiError ? e.message : '추가 실패');
 		} finally {
@@ -214,6 +258,266 @@
 			toast.success('API 키가 갱신되었습니다');
 		} catch {
 			toast.error('갱신 실패');
+		}
+	}
+
+	function subscriptionStatusLabel(provider: Provider): string {
+		if (provider.auth_status === 'configured' && provider.has_credentials) return '인증 설정됨';
+		if (provider.auth_status === 'reauth_required') return '재연결 필요';
+		return '인증 미연결';
+	}
+
+	function subscriptionStatusTone(provider: Provider): 'success' | 'warning' | 'neutral' {
+		if (provider.auth_status === 'configured' && provider.has_credentials) return 'success';
+		if (provider.auth_status === 'reauth_required') return 'warning';
+		return 'neutral';
+	}
+
+	function providerAuthMode(provider: Provider): 'api_key' | 'chatgpt_device' | 'anthropic_subscription' {
+		return provider.auth_mode ?? 'api_key';
+	}
+
+	function isSubscriptionProviderId(providerId: number | ''): boolean {
+		if (!providerId) return false;
+		const provider = providers.find((candidate) => candidate.id === providerId);
+		return provider ? providerAuthMode(provider) !== 'api_key' : false;
+	}
+
+	function clearProviderSecrets() {
+		pApiBase = '';
+		pApiKey = '';
+	}
+
+	function handleProviderChoiceChange() {
+		clearProviderSecrets();
+	}
+
+	function subscriptionErrorMessage(error: unknown): string {
+		if (!(error instanceof ApiError)) return '구독 인증 요청에 실패했습니다. 다시 시도하세요.';
+		if (error.status === 409) return '진행 중인 채팅 실행 또는 다른 관리자의 인증을 완료하거나 취소한 뒤 다시 시도하세요.';
+		if (error.status === 429) return '인증 요청이 제한되었습니다. 잠시 후 수동으로 다시 확인하세요.';
+		if (error.status === 503) return '구독 인증 공급자 또는 저장소에 연결할 수 없습니다. 상태를 확인한 뒤 다시 시도하세요.';
+		try {
+			const detail = JSON.parse(error.message) as { message?: unknown };
+			if (typeof detail.message === 'string') return detail.message;
+		} catch {
+			// The shared API client can also provide an already-safe plain message.
+		}
+		return error.message || '구독 인증 요청에 실패했습니다.';
+	}
+
+	function stopAuthPolling() {
+		if (authPollTimer !== null) {
+			clearTimeout(authPollTimer);
+			authPollTimer = null;
+		}
+	}
+
+	function invalidateAuthSession() {
+		stopAuthPolling();
+		authSessionGeneration += 1;
+		authScopeToken = token;
+		authScopeProjectId = projectId;
+		authBusy = false;
+	}
+
+	function openSubscriptionAuth(provider: Provider) {
+		invalidateAuthSession();
+		authProvider = provider;
+		deviceAttempt = null;
+		authError = '';
+		claudeToken = '';
+		claudeExpiry = '';
+		authModalOpen = true;
+	}
+
+	function scheduleDevicePoll(attempt: DeviceAuthAttempt, generation: number) {
+		stopAuthPolling();
+		const remainingMs = new Date(attempt.expires_at).getTime() - Date.now();
+		if (remainingMs <= 0) {
+			deviceAttempt = { ...attempt, status: 'expired' };
+			return;
+		}
+		const delayMs = Math.min(remainingMs, Math.max(1, attempt.interval_seconds) * 1000);
+		authPollTimer = setTimeout(() => void pollDeviceAuth(attempt.attempt_id, generation), delayMs);
+	}
+
+	async function startDeviceAuth() {
+		if (!authProvider || providerAuthMode(authProvider) !== 'chatgpt_device' || authBusy) return;
+		invalidateAuthSession();
+		const generation = authSessionGeneration;
+		const providerId = authProvider.id;
+		authBusy = true;
+		authError = '';
+		deviceAttempt = null;
+		try {
+			const attempt = await api.post<DeviceAuthAttempt>(
+				`/api/v1/chat/admin/providers/${providerId}/auth/device`,
+				{},
+				token,
+				projectId
+			);
+			if (generation !== authSessionGeneration || authProvider?.id !== providerId || !authModalOpen) return;
+			deviceAttempt = attempt;
+			scheduleDevicePoll(attempt, generation);
+		} catch (e) {
+			if (generation === authSessionGeneration) authError = subscriptionErrorMessage(e);
+		} finally {
+			if (generation === authSessionGeneration) authBusy = false;
+		}
+	}
+
+	async function pollDeviceAuth(attemptId: string, generation: number) {
+		if (
+			authBusy ||
+			generation !== authSessionGeneration ||
+			!authProvider ||
+			!authModalOpen ||
+			deviceAttempt?.attempt_id !== attemptId
+		) return;
+		const providerId = authProvider.id;
+		authBusy = true;
+		authPollTimer = null;
+		try {
+			const status = await api.post<DeviceAuthAttempt>(
+				`/api/v1/chat/admin/providers/${providerId}/auth/device/${encodeURIComponent(attemptId)}/poll`,
+				{},
+				token,
+				projectId
+			);
+			if (
+
+				generation !== authSessionGeneration ||
+				authProvider?.id !== providerId ||
+				deviceAttempt?.attempt_id !== attemptId ||
+				!authModalOpen
+			) return;
+			deviceAttempt = { ...deviceAttempt, ...status };
+			authError = '';
+			if (status.status === 'pending') {
+				scheduleDevicePoll(deviceAttempt, generation);
+			} else if (status.status === 'connected') {
+				await load();
+				toast.success('ChatGPT 구독이 연결되었습니다');
+			}
+		} catch (e) {
+			if (generation === authSessionGeneration) {
+				stopAuthPolling();
+				authError = subscriptionErrorMessage(e);
+			}
+		} finally {
+			if (generation === authSessionGeneration) authBusy = false;
+		}
+	}
+	function pollCurrentDeviceAuth() {
+		if (!deviceAttempt) return;
+		void pollDeviceAuth(deviceAttempt.attempt_id, authSessionGeneration);
+	}
+
+	async function cancelDeviceAuth() {
+		if (!authProvider || !deviceAttempt || deviceAttempt.status !== 'pending') return;
+		const providerId = authProvider.id;
+		const attemptId = deviceAttempt.attempt_id;
+		invalidateAuthSession();
+		authBusy = true;
+		authError = '';
+		try {
+			await api.delete(
+				`/api/v1/chat/admin/providers/${providerId}/auth/device/${encodeURIComponent(attemptId)}`,
+				token,
+				projectId
+			);
+			if (authProvider?.id === providerId && deviceAttempt?.attempt_id === attemptId) {
+				deviceAttempt = { ...deviceAttempt, status: 'cancelled' };
+			}
+		} catch (e) {
+			authError = `${subscriptionErrorMessage(e)} 서버의 인증 요청은 만료될 때까지 유지될 수 있습니다.`;
+		} finally {
+			authBusy = false;
+		}
+	}
+
+	function closeSubscriptionAuth() {
+		const providerId = authProvider?.id;
+		const attemptId = deviceAttempt?.status === 'pending' ? deviceAttempt.attempt_id : null;
+		invalidateAuthSession();
+		authModalOpen = false;
+		authProvider = null;
+		deviceAttempt = null;
+		authError = '';
+		claudeToken = '';
+		claudeExpiry = '';
+		if (providerId && attemptId) {
+			void api
+				.delete(
+					`/api/v1/chat/admin/providers/${providerId}/auth/device/${encodeURIComponent(attemptId)}`,
+					token,
+					projectId
+				)
+				.catch(() => toast.error('인증 취소를 확인하지 못했습니다. 서버 만료 상태를 확인하세요.'));
+		}
+	}
+
+	async function saveClaudeSubscription() {
+		if (!authProvider || providerAuthMode(authProvider) !== 'anthropic_subscription' || authBusy) return;
+		if (!claudeToken.trim()) {
+			authError = 'Claude setup-token을 입력하세요.';
+			return;
+		}
+		const generation = authSessionGeneration;
+		const providerId = authProvider.id;
+		authBusy = true;
+		authError = '';
+		try {
+			const updated = await api.put<Provider>(
+				`/api/v1/chat/admin/providers/${providerId}/auth/token`,
+				{
+					token: claudeToken.trim(),
+					expires_at: claudeExpiry ? new Date(claudeExpiry).toISOString() : null
+				},
+				token,
+				projectId
+			);
+			if (generation !== authSessionGeneration || authProvider?.id !== providerId || !authModalOpen) return;
+			authProvider = updated;
+			claudeToken = '';
+			await load();
+			toast.success('Claude 구독 토큰이 등록되었습니다');
+		} catch (e) {
+			if (generation === authSessionGeneration) authError = subscriptionErrorMessage(e);
+		} finally {
+			if (generation === authSessionGeneration) authBusy = false;
+		}
+	}
+
+	async function disconnectSubscription(provider: Provider) {
+		if (!(await confirmDialog(`“${provider.name}”의 구독 연결을 해제하시겠습니까? 등록된 모델은 유지됩니다.`))) return;
+		try {
+			await api.delete(`/api/v1/chat/admin/providers/${provider.id}/auth`, token, projectId);
+			await load();
+			toast.success('구독 연결이 해제되었습니다');
+		} catch (e) {
+			toast.error(subscriptionErrorMessage(e));
+		}
+	}
+
+	function isAllowedVerificationUri(value: string | undefined): boolean {
+		if (!value) return false;
+		try {
+			const url = new URL(value);
+			return url.protocol === 'https:' && (url.hostname === 'openai.com' || url.hostname.endsWith('.openai.com') || url.hostname === 'chatgpt.com' || url.hostname.endsWith('.chatgpt.com'));
+		} catch {
+			return false;
+		}
+	}
+
+	async function copyDeviceCode() {
+		if (!deviceAttempt?.user_code) return;
+		try {
+			await navigator.clipboard.writeText(deviceAttempt.user_code);
+			toast.success('인증 코드를 복사했습니다');
+		} catch {
+			toast.error('인증 코드를 복사하지 못했습니다');
 		}
 	}
 
@@ -511,6 +815,10 @@
 		}
 	}
 
+	function providerName(id: number): string {
+		return providers.find((provider) => provider.id === id)?.name ?? String(id);
+	}
+
 	// 제목 요약 모델 지정/해제 — 최대 1개만 지정(백엔드가 단일 보장). 요약 호출은 시스템 부담.
 	async function setTitleModel(m: Model) {
 		try {
@@ -523,12 +831,31 @@
 		}
 	}
 
-	function providerName(id: number): string {
-		return providers.find((p) => p.id === id)?.name ?? String(id);
-	}
-
 	$effect(() => {
 		if (token) void load();
+	});
+
+
+	const unsubscribeAuthScope = auth.subscribe((state) => {
+		const nextToken = state.token ?? undefined;
+		const nextProjectId = state.projectId ?? undefined;
+		if (
+			authModalOpen &&
+			(authScopeToken !== nextToken || authScopeProjectId !== nextProjectId)
+		) {
+			invalidateAuthSession();
+			authModalOpen = false;
+			authProvider = null;
+			deviceAttempt = null;
+			authError = '';
+			claudeToken = '';
+			claudeExpiry = '';
+		}
+	});
+
+	onDestroy(() => {
+		unsubscribeAuthScope();
+		invalidateAuthSession();
 	});
 
 	const inputCls =
@@ -562,18 +889,35 @@
 		<h3 class="mb-3 text-sm font-semibold text-[var(--color-ink-1)]">LLM 프로바이더</h3>
 		<div class="{cardCls} mb-4 p-5">
 			<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-				<input class={inputCls} placeholder="이름 (예: openai-prod)" bind:value={pName} />
-				<select class={inputCls} bind:value={pType}>
-					{#each PROVIDER_TYPES as pt (pt.value)}
-						<option value={pt.value}>{pt.label}</option>
-					{/each}
-				</select>
-				<input class={inputCls} placeholder="API Base (OpenAI 호환/커스텀 엔드포인트, 선택)" bind:value={pApiBase} />
-				<input class={inputCls} type="password" placeholder="API 키" bind:value={pApiKey} />
+				<Field label="이름" for="provider-name" required>
+					<TextInput id="provider-name" placeholder="예: openai-prod" bind:value={pName} required />
+				</Field>
+				<Field label="연결 방식" for="provider-type" required>
+					<SelectInput id="provider-type" bind:value={pType} onchange={handleProviderChoiceChange}>
+						{#each PROVIDER_TYPES as pt (pt.value)}
+							<option value={pt.value}>{pt.label}</option>
+						{/each}
+					</SelectInput>
+				</Field>
+				{#if !isSubscriptionChoice}
+					<Field label="API Base" for="provider-api-base" help="OpenAI 호환 또는 커스텀 엔드포인트에서만 입력합니다.">
+						<TextInput id="provider-api-base" type="url" placeholder="https://api.example.com/v1" bind:value={pApiBase} />
+					</Field>
+					<Field label="API 키" for="provider-api-key">
+						<TextInput id="provider-api-key" type="password" placeholder="API 키" bind:value={pApiKey} />
+					</Field>
+				{/if}
 			</div>
-			<p class="mt-2 text-xs text-[var(--color-ink-3)]">
-				타입은 내부 litellm 중계 형식입니다. OpenAI 호환 엔드포인트(vLLM·LM Studio 등)는 'OpenAI 호환' + API Base 로 연결하세요.
-			</p>
+			{#if isSubscriptionChoice}
+				<Alert tone="warning" title="실험 기능 · 전체 사용자 공용" class="mt-4">
+					이 개인 구독 연결은 이 Afterglow의 모든 사용자 요청에 공용으로 사용됩니다. 공급자 이용 약관과 조직 정책을 확인하고 전용 계정을 사용하세요.
+					<a class="underline" href={selectedProviderChoice.authMode === 'chatgpt_device' ? 'https://help.openai.com/en/articles/11369540-codex-in-chatgpt' : 'https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan'} target="_blank" rel="noreferrer">공식 안내</a>
+				</Alert>
+			{:else}
+				<p class="mt-2 text-xs text-[var(--color-ink-3)]">
+					타입은 내부 LiteLLM 중계 형식입니다. OpenAI 호환 엔드포인트(vLLM·LM Studio 등)는 OpenAI API + API Base로 연결하세요.
+				</p>
+			{/if}
 			<div class="mt-3 flex justify-end">
 				<Button onclick={addProvider} disabled={addingProvider}>
 					{addingProvider ? '추가 중…' : '+ 프로바이더 추가'}
@@ -588,43 +932,156 @@
 		{:else}
 			<div class="space-y-2">
 				{#each providers as p (p.id)}
-					<div class="space-y-0">
-						<div class="{cardCls} flex items-center justify-between gap-3 px-4 py-3">
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<span class="truncate text-sm font-medium text-[var(--color-ink-1)]">{p.name}</span>
-									<span
-										class="rounded px-1.5 py-0.5 text-xs {p.is_active
-											? 'bg-[var(--color-state-success)]/15 text-[var(--color-state-success)]'
-											: 'bg-[var(--color-line)] text-[var(--color-ink-3)]'}"
-									>
-										{p.is_active ? '활성' : '비활성'}
-									</span>
-									<span
-										class="rounded px-1.5 py-0.5 text-xs {p.has_api_key
-											? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-											: 'bg-[var(--color-state-warning)]/15 text-[var(--color-state-warning)]'}"
-									>
-										{p.has_api_key ? '키 설정됨' : '키 없음'}
-									</span>
-									<span class="rounded bg-[var(--color-line)] px-1.5 py-0.5 text-xs text-[var(--color-ink-2)]">{p.provider_type}</span>
-								</div>
-								{#if p.api_base}
-									<div class="mt-0.5 truncate text-xs text-[var(--color-ink-3)]">{p.api_base}</div>
+					<div class="{cardCls} flex flex-col items-start justify-between gap-3 px-4 py-3 sm:flex-row sm:items-center">
+						<div class="min-w-0">
+							<div class="flex flex-wrap items-center gap-2">
+								<span class="truncate text-sm font-medium text-[var(--color-ink-1)]">{p.name}</span>
+								<Pill tone={p.is_active ? 'success' : 'neutral'} size="xs">{p.is_active ? '활성' : '비활성'}</Pill>
+								{#if providerAuthMode(p) === 'api_key'}
+									<Pill tone={p.has_api_key ? 'accent' : 'warning'} size="xs">{p.has_api_key ? '키 설정됨' : '키 없음'}</Pill>
+								{:else}
+									<Pill tone="warning" size="xs">실험</Pill>
+									<Pill tone="info" size="xs">전체 공용</Pill>
+									<Pill tone={subscriptionStatusTone(p)} size="xs">{subscriptionStatusLabel(p)}</Pill>
 								{/if}
+								<Pill tone="neutral" size="xs">{p.provider_type}</Pill>
 							</div>
-							<div class="flex shrink-0 items-center gap-3 text-xs">
-								<button class={rowActionCls} onclick={() => updateKey(p)}>키 변경</button>
-								<button class={rowActionCls} onclick={() => toggleProvider(p)}>{p.is_active ? '비활성화' : '활성화'}</button>
-								<button class="text-[var(--color-state-danger)] transition-opacity hover:opacity-80" onclick={() => deleteProvider(p.id)}>삭제</button>
-							</div>
+							{#if p.api_base}
+								<div class="mt-1 truncate text-xs text-[var(--color-ink-3)]">{p.api_base}</div>
+							{:else if providerAuthMode(p) !== 'api_key' && p.auth_expires_at}
+								<div class="mt-1 text-xs text-[var(--color-ink-3)]">만료 {new Date(p.auth_expires_at).toLocaleString()}</div>
+							{/if}
 						</div>
-
+						<div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs sm:justify-end">
+							{#if providerAuthMode(p) === 'api_key'}
+								<button class={rowActionCls} onclick={() => updateKey(p)}>키 변경</button>
+							{:else}
+								<button class={rowActionCls} onclick={() => openSubscriptionAuth(p)}>
+									{providerAuthMode(p) === 'chatgpt_device'
+										? p.has_credentials ? '재연결' : '연결'
+										: p.has_credentials ? '토큰 교체' : '토큰 등록'}
+								</button>
+								{#if p.auth_status !== 'disconnected'}
+									<button class={rowActionCls} onclick={() => disconnectSubscription(p)}>연결 해제</button>
+								{/if}
+							{/if}
+							<button class={rowActionCls} onclick={() => toggleProvider(p)}>{p.is_active ? '비활성화' : '활성화'}</button>
+							<button class="text-[var(--color-state-danger)] transition-opacity hover:opacity-80" onclick={() => deleteProvider(p.id)}>삭제</button>
+						</div>
 					</div>
 				{/each}
 			</div>
 		{/if}
 	</section>
+	{/if}
+
+	{#if section === 'providers'}
+		<Modal bind:open={authModalOpen} onClose={closeSubscriptionAuth}>
+			<div class="max-h-[calc(100vh-2rem)] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-raised)] p-4 shadow-xl sm:p-5">
+				<div class="flex items-start justify-between gap-3">
+					<div>
+						<h3 class="text-base font-semibold text-[var(--color-ink-1)]">
+							{authProvider && providerAuthMode(authProvider) === 'chatgpt_device' ? 'ChatGPT 구독 연결' : 'Claude 구독 토큰 등록'}
+						</h3>
+						<p class="mt-1 text-sm text-[var(--color-ink-3)]">{authProvider?.name}</p>
+					</div>
+					<Button variant="ghost" size="sm" onclick={closeSubscriptionAuth}>닫기</Button>
+				</div>
+
+				<Alert tone="warning" title="실험 기능 · 전체 사용자 공용" class="mt-4">
+					이 연결은 Afterglow의 모든 사용자에게 공유됩니다. 개인 정보가 없는 전용 구독 계정과 공급자 정책을 확인하세요.
+				</Alert>
+
+				{#if authError}
+					<Alert tone="danger" title="인증을 계속할 수 없습니다" class="mt-3">{authError}</Alert>
+				{/if}
+
+				{#if authProvider && providerAuthMode(authProvider) === 'chatgpt_device'}
+					<div class="mt-5 space-y-4">
+						{#if !deviceAttempt}
+							<p class="text-sm leading-6 text-[var(--color-ink-2)]">
+								연결을 시작하면 OpenAI 인증 페이지와 일회용 코드가 표시됩니다. 관리자 브라우저에서 코드를 승인하세요.
+							</p>
+							<div class="flex flex-wrap justify-end gap-2">
+								<Button onclick={startDeviceAuth} disabled={authBusy}>{authBusy ? '시작 중…' : 'ChatGPT 연결'}</Button>
+							</div>
+						{:else}
+							<div class="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-sunken)] p-4">
+								<div class="flex flex-wrap items-center justify-between gap-2">
+									<Pill
+										tone={deviceAttempt.status === 'connected'
+											? 'success'
+											: deviceAttempt.status === 'pending'
+												? 'info'
+												: 'warning'}
+										dot
+									>
+										{deviceAttempt.status === 'pending'
+											? '인증 대기 중'
+											: deviceAttempt.status === 'connected'
+												? '연결 완료'
+												: deviceAttempt.status === 'expired'
+													? '인증 만료'
+													: deviceAttempt.status === 'cancelled'
+														? '인증 취소됨'
+														: '인증 오류'}
+									</Pill>
+									<span class="text-xs text-[var(--color-ink-3)]">만료 {new Date(deviceAttempt.expires_at).toLocaleString()}</span>
+								</div>
+								{#if deviceAttempt.user_code}
+									<div class="mt-4">
+										<p class="text-xs text-[var(--color-ink-3)]">일회용 인증 코드</p>
+										<div class="mt-1 flex flex-wrap items-center gap-2">
+											<code class="rounded bg-[var(--color-surface-base)] px-3 py-2 font-mono text-lg tracking-widest text-[var(--color-ink-0)]">{deviceAttempt.user_code}</code>
+											<Button variant="secondary" size="sm" onclick={copyDeviceCode}>코드 복사</Button>
+										</div>
+									</div>
+								{/if}
+								{#if deviceAttempt.verification_uri && isAllowedVerificationUri(deviceAttempt.verification_uri)}
+									<Button class="mt-4" href={deviceAttempt.verification_uri}>OpenAI 인증 페이지 열기</Button>
+								{:else if deviceAttempt.verification_uri}
+									<Alert tone="danger" class="mt-4">OpenAI 공식 도메인이 아닌 인증 주소는 열지 않았습니다.</Alert>
+								{/if}
+							</div>
+							<div class="flex flex-wrap justify-end gap-2">
+								{#if deviceAttempt.status === 'pending'}
+									<Button variant="secondary" onclick={pollCurrentDeviceAuth} disabled={authBusy}>
+										{authBusy ? '확인 중…' : '지금 확인'}
+									</Button>
+									<Button variant="danger-outline" onclick={cancelDeviceAuth} disabled={authBusy}>인증 취소</Button>
+								{:else if deviceAttempt.status !== 'connected'}
+									<Button onclick={startDeviceAuth} disabled={authBusy}>다시 연결</Button>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{:else if authProvider}
+					<div class="mt-5 space-y-4">
+						<p class="text-sm leading-6 text-[var(--color-ink-2)]">
+							Claude에서 <code class="font-mono">claude setup-token</code>을 실행해 발급한 setup-token을 등록하세요. 토큰은 저장 후 다시 표시되지 않습니다.
+						</p>
+						<Field label="Claude setup-token" for="claude-subscription-token" required>
+							<TextInput
+								id="claude-subscription-token"
+								type="password"
+								placeholder="setup-token"
+								bind:value={claudeToken}
+								required
+							/>
+						</Field>
+						<Field label="만료 시각" for="claude-subscription-expiry" help="공급자가 만료 시각을 안내한 경우에만 입력합니다.">
+							<input id="claude-subscription-expiry" class={inputCls} type="datetime-local" bind:value={claudeExpiry} />
+						</Field>
+						<div class="flex flex-wrap justify-end gap-2">
+							<Button variant="secondary" href="https://support.anthropic.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan">공식 안내</Button>
+							<Button onclick={saveClaudeSubscription} disabled={authBusy || !claudeToken.trim()}>
+								{authBusy ? '저장 중…' : authProvider.has_credentials ? '토큰 교체' : '구독 토큰 등록'}
+							</Button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</Modal>
 	{/if}
 
 	{#if section === 'models'}
@@ -681,6 +1138,9 @@
 								<button class={rowActionCls} onclick={() => toggleAllFiltered(false)}>선택 해제</button>
 							</div>
 						</div>
+						{#if isSubscriptionProviderId(mProviderId)}
+							<Alert tone="info" class="mb-3">정적 카탈로그 후보입니다. 현재 구독 등급에서 실제 사용할 수 있는 모델인지는 보장되지 않습니다.</Alert>
+						{/if}
 						<input class="{inputCls} mb-3" placeholder="모델 필터 (예: gpt-4)" bind:value={availFilter} />
 						<div class="max-h-64 space-y-1 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-surface-base)] p-2">
 							{#each filteredAvailable as mid (mid)}

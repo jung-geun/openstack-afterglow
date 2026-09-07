@@ -331,6 +331,145 @@ async def test_context_routes_preserve_post_body_and_idempotency(api_client, res
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path", "body", "status_code", "response_body"),
+    [
+        (
+            "POST",
+            "/api/v1/chat/admin/providers/7/auth/device",
+            {},
+            201,
+            {
+                "attempt_id": "opaque-attempt",
+                "status": "pending",
+                "verification_uri": "https://auth.openai.com/device",
+                "user_code": "ABCD-EFGH",
+                "expires_at": "2030-01-01T00:00:00Z",
+                "interval_seconds": 5,
+            },
+        ),
+        (
+            "POST",
+            "/api/v1/chat/admin/providers/7/auth/device/opaque-attempt/poll",
+            {},
+            200,
+            {
+                "attempt_id": "opaque-attempt",
+                "status": "connected",
+                "expires_at": "2030-01-01T00:00:00Z",
+                "interval_seconds": 5,
+            },
+        ),
+        (
+            "DELETE",
+            "/api/v1/chat/admin/providers/7/auth/device/opaque-attempt",
+            None,
+            204,
+            None,
+        ),
+        (
+            "PUT",
+            "/api/v1/chat/admin/providers/8/auth/token",
+            {"token": "sk-ant-oat01-contract-fixture-token", "expires_at": None},
+            200,
+            {
+                "id": 8,
+                "auth_mode": "anthropic_subscription",
+                "has_credentials": True,
+                "auth_status": "configured",
+            },
+        ),
+        (
+            "DELETE",
+            "/api/v1/chat/admin/providers/8/auth",
+            None,
+            204,
+            None,
+        ),
+    ],
+)
+async def test_subscription_auth_routes_preserve_method_body_response_and_no_store(
+    api_client,
+    method,
+    path,
+    body,
+    status_code,
+    response_body,
+):
+    app.dependency_overrides[get_token_info] = _authenticated
+    received = []
+
+    async def handler(request):
+        raw_body = await request.aread()
+        received.append(
+            (
+                request.method,
+                request.url.path,
+                json.loads(raw_body) if raw_body else None,
+                request.headers,
+            )
+        )
+        content = b"" if response_body is None else json.dumps(response_body).encode()
+        return HttpxResponse(
+            status_code,
+            headers={"content-type": "application/json", "cache-control": "no-store"},
+            stream=httpx.ByteStream(content),
+        )
+
+    upstream = AsyncClient(transport=httpx.MockTransport(handler))
+    with (
+        patch("app.services.service_proxy._get_internal_endpoint", return_value="http://isolated.test/v1"),
+        patch("app.services.service_proxy.httpx.AsyncClient", return_value=upstream),
+    ):
+        request_kwargs = {"json": body} if body is not None else {}
+        response = await api_client.request(method, path, **request_kwargs)
+
+    assert response.status_code == status_code
+    assert response.headers["cache-control"] == "no-store"
+    if response_body is not None:
+        assert response.json() == response_body
+    else:
+        assert response.content == b""
+    forwarded_method, forwarded_path, forwarded_body, forwarded_headers = received.pop()
+    assert forwarded_method == method
+    assert forwarded_path == f"/v1{path.removeprefix('/api/v1/chat')}"
+    assert forwarded_body == body
+    assert forwarded_headers["x-auth-token"] == "caller-token"
+    assert forwarded_headers["x-project-id"] == "project-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "code"),
+    [
+        (429, "subscription_rate_limited"),
+        (503, "subscription_upstream_unavailable"),
+    ],
+)
+async def test_subscription_auth_proxy_preserves_safe_error_and_no_store(api_client, status_code, code):
+    app.dependency_overrides[get_token_info] = _authenticated
+    error_body = {"detail": {"code": code, "message": "구독 인증 요청을 계속할 수 없습니다"}}
+
+    def handler(_request):
+        return HttpxResponse(
+            status_code,
+            headers={"content-type": "application/json", "cache-control": "no-store"},
+            stream=httpx.ByteStream(json.dumps(error_body).encode()),
+        )
+
+    upstream = AsyncClient(transport=httpx.MockTransport(handler))
+    with (
+        patch("app.services.service_proxy._get_internal_endpoint", return_value="http://isolated.test/v1"),
+        patch("app.services.service_proxy.httpx.AsyncClient", return_value=upstream),
+    ):
+        response = await api_client.post("/api/v1/chat/admin/providers/7/auth/device", json={})
+
+    assert response.status_code == status_code
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == error_body
+
+
+@pytest.mark.asyncio
 async def test_lumen_proxy_unavailable_catalog_503(api_client):
     app.dependency_overrides[get_token_info] = _authenticated
     with patch("app.services.service_proxy._get_internal_endpoint", return_value=None):
