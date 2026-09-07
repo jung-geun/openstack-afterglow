@@ -151,7 +151,7 @@ it('renders durable generated files as owned download actions', async () => {
 	expect(download.textContent).toContain('2.0 KB');
 
 	const fetchMock = vi.fn(async () => new Response('name,value\nlatency,12\n', { status: 200 }));
-	const createObjectURL = vi.fn(() => 'blob:report');
+	const createObjectURL = vi.fn((_blob: Blob) => 'blob:report');
 	const revokeObjectURL = vi.fn();
 	const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
 	const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
@@ -166,7 +166,8 @@ it('renders durable generated files as owned download actions', async () => {
 			expect.stringContaining('/api/v1/chat/assets/asset-1/download'),
 			expect.any(Object)
 		);
-		expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+		const generatedBlob = createObjectURL.mock.calls[0]?.[0];
+		expect(generatedBlob).toMatchObject({ size: 22, type: 'text/plain;charset=utf-8' });
 		expect(revokeObjectURL).toHaveBeenCalledWith('blob:report');
 	} finally {
 		vi.unstubAllGlobals();
